@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 use axum::Json;
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, Request, State};
 use axum::http::{StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use futures_util::StreamExt;
@@ -39,6 +40,8 @@ struct Edge {
     /// relay runs at a time; starting a channel stops the previous one.
     stream: Mutex<Option<tokio::task::AbortHandle>>,
     last_zap: Mutex<Option<Value>>,
+    /// Required from other devices; see `require_key`.
+    key: String,
 }
 
 type Shared = Arc<Edge>;
@@ -126,6 +129,7 @@ async fn main() {
         home: tokio::sync::Mutex::new(None),
         stream: Mutex::new(None),
         last_zap: Mutex::new(None),
+        key: env("OPENIPTV_EDGE_KEY").unwrap_or_else(random_key),
     });
 
     // Full guide in the background, then every few hours. Never on the
@@ -164,7 +168,8 @@ async fn main() {
             ServeDir::new(&web_dir).fallback(ServeFile::new(format!("{web_dir}/index.html"))),
         )
         .layer(CompressionLayer::new())
-        .with_state(edge);
+        .layer(middleware::from_fn_with_state(edge.clone(), require_key))
+        .with_state(edge.clone());
 
     let addr: SocketAddr = env("OPENIPTV_EDGE_ADDR")
         .unwrap_or_else(|| "127.0.0.1:8787".into())
@@ -174,7 +179,82 @@ async fn main() {
         .await
         .expect("bind address");
     eprintln!("listening on http://{addr}");
-    axum::serve(listener, app).await.expect("server");
+    if !addr.ip().is_loopback() {
+        let ip = lan_ip().map_or_else(|| "<this-mac-ip>".into(), |ip| ip.to_string());
+        eprintln!(
+            "on your phone (same Wi-Fi), open once: http://{ip}:{}/?key={}",
+            addr.port(),
+            edge.key
+        );
+    }
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("server");
+}
+
+/// Other devices (a phone on the same Wi-Fi) must present the access key,
+/// because this server holds the user's logins. Opening `/?key=…` once sets
+/// a cookie; this machine itself is always trusted.
+async fn require_key(
+    State(edge): State<Shared>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if peer.ip().is_loopback() {
+        return next.run(req).await;
+    }
+    let cookie = format!("openiptv_key={}", edge.key);
+    let offered = req
+        .uri()
+        .query()
+        .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("key=")));
+    if offered == Some(edge.key.as_str()) {
+        return Response::builder()
+            .status(StatusCode::SEE_OTHER)
+            .header(header::LOCATION, "/")
+            .header(
+                header::SET_COOKIE,
+                format!("{cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"),
+            )
+            .body(Body::empty())
+            .expect("valid response");
+    }
+    let has_cookie = req
+        .headers()
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .any(|c| c.trim() == cookie);
+    if has_cookie {
+        next.run(req).await
+    } else {
+        error(
+            StatusCode::UNAUTHORIZED,
+            "Open the link printed by openiptv-edge on this device first.",
+        )
+    }
+}
+
+fn random_key() -> String {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut bytes))
+        .expect("read /dev/urandom");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The address other devices on the LAN reach this machine at. Connecting a
+/// UDP socket sends nothing; it only selects the outgoing interface.
+fn lan_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("192.0.2.1:80").ok()?;
+    Some(socket.local_addr().ok()?.ip())
 }
 
 fn error(status: StatusCode, message: impl Into<String>) -> Response {

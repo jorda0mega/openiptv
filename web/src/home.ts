@@ -5,7 +5,9 @@
 import { api, cacheFirst, type Card, type Row } from "./api";
 import { h, setStatus } from "./ui";
 
-const CARD_WIDTH = { portrait: 150, square: 170, fourThree: 220, landscape: 280 } as const;
+const WIDE = { portrait: 150, square: 170, fourThree: 220, landscape: 280 } as const;
+const NARROW = { portrait: 112, square: 128, fourThree: 168, landscape: 220 } as const;
+const CARD_WIDTH = matchMedia("(max-width: 720px)").matches ? NARROW : WIDE;
 
 export async function showHome(view: HTMLElement): Promise<void> {
   const container = h("div", { class: "home" });

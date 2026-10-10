@@ -105,3 +105,21 @@ nav a[aria-current] { color: var(--text); background: var(--raised); }
 #osd-channel { font-weight: 700; }
 .timing { margin-left: auto; color: #b9f6ca; font-variant-numeric: tabular-nums; }
 .osd-shows { flex: 1; }
+
+/* Phones: categories become a compact strip above the channel list. */
+@media (max-width: 720px) {
+  .topbar { gap: 12px; padding: 0 12px; }
+  .status { display: none; }
+  .row h2 { margin: 0 12px 8px; }
+  .row-cards { gap: 10px; padding: 0 12px 8px; }
+  .live { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .categories { border-right: 0; border-bottom: 1px solid #1f242b; padding: 8px 12px; gap: 6px; }
+  .category-list { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; max-height: none; }
+  .category { width: auto; flex: none; white-space: nowrap; padding: 6px 10px; background: var(--panel); }
+  .channels > input { margin: 0 12px; }
+  .channel { grid-template-columns: 34px 44px minmax(0, 1fr); gap: 10px; padding: 0 12px; }
+  .channel-next { display: none; }
+  .channel-logo { width: 44px; }
+  .channel-logo img { max-width: 44px; }
+  .osd-top, .osd-bottom { padding: 10px 12px; gap: 10px; }
+}
