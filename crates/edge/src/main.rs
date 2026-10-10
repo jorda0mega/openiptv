@@ -367,9 +367,10 @@ fn advertise(port: u16) -> Option<mdns_sd::ServiceDaemon> {
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "openiptv".into());
+    let name = env("OPENIPTV_EDGE_NAME").unwrap_or_else(|| format!("OpenIPTV on {host}"));
     let info = mdns_sd::ServiceInfo::new(
         "_openiptv._tcp.local.",
-        &format!("OpenIPTV on {host}"),
+        &name,
         &format!("{host}.local."),
         ip.to_string(),
         port,
@@ -377,7 +378,7 @@ fn advertise(port: u16) -> Option<mdns_sd::ServiceDaemon> {
     )
     .ok()?;
     daemon.register(info).ok()?;
-    eprintln!("advertising OpenIPTV on {host} via Bonjour");
+    eprintln!("advertising \"{name}\" via Bonjour");
     Some(daemon)
 }
 

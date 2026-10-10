@@ -13,6 +13,8 @@ have something to find.
 
 import base64
 import json
+import struct
+import zlib
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -22,6 +24,16 @@ from urllib.parse import parse_qs, urlparse
 PANEL_TZ = timezone(timedelta(hours=1))
 CHANNELS = 40
 SLOT = 1800
+
+
+def png(seed, w=60, h=90):
+    """A small solid-colour PNG so covers visibly render in UI tests."""
+    r, g, b = (seed * 70) % 256, (seed * 130 + 80) % 256, (seed * 40 + 160) % 256
+    raw = b"".join(b"\x00" + bytes((r, g, b)) * w for _ in range(h))
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
 def b64(s):
@@ -183,7 +195,7 @@ class Handler(BaseHTTPRequestHandler):
             if q.get("tag", "").startswith("stale"):
                 return self.send({"error": "image not found"}, status=404)
             time.sleep(0.01)
-            return self.send(b"\xff\xd8" + b"\0" * 30000, "image/jpeg",
+            return self.send(png(sum(map(ord, path))), "image/png",
                              headers={"Cache-Control": "public, max-age=31536000"})
         self.send({"error": "not found"}, status=404)
 
