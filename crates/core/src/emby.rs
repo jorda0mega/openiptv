@@ -210,6 +210,19 @@ impl EmbyClient {
         Ok(session)
     }
 
+    /// End the session so the access token stops working server-side.
+    pub async fn logout(&mut self) -> Result<()> {
+        let Some(session) = self.session.take() else {
+            return Ok(());
+        };
+        let req = self
+            .http
+            .post(self.url("Sessions/Logout"))
+            .header("X-Emby-Authorization", self.authorization())
+            .header("X-Emby-Token", &session.access_token);
+        http::fetch(req, "logout").await.map(|_| ())
+    }
+
     async fn items(
         &self,
         path: &str,

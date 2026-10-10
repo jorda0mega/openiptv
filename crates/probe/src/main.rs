@@ -567,6 +567,23 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
     session?;
     println!("  login              {}", ms(t_login));
 
+    // Always end the session, even if a later step fails.
+    let result = probe_emby_home(http, &emby, out).await;
+    if emby.logout().await.is_ok() {
+        println!("  logged out         session closed on the server");
+    }
+    out.insert(
+        "server".into(),
+        json!({ "version": info.version, "info_ms": t_info.as_millis(), "login_ms": t_login.as_millis() }),
+    );
+    result
+}
+
+async fn probe_emby_home(
+    http: &reqwest::Client,
+    emby: &EmbyClient,
+    out: &mut Map<String, Value>,
+) -> AnyResult<()> {
     heading("Home screen");
     let (views, t_views) = timed(emby.views()).await;
     let views = views?;
@@ -663,10 +680,6 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
         );
     }
 
-    out.insert(
-        "server".into(),
-        json!({ "version": info.version, "info_ms": t_info.as_millis(), "login_ms": t_login.as_millis() }),
-    );
     out.insert(
         "home".into(),
         json!({

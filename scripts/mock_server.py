@@ -72,6 +72,8 @@ class Handler(BaseHTTPRequestHandler):
             body = {k: v[0] for k, v in parse_qs(raw).items()}
         else:
             body = json.loads(raw or "{}")
+        if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == "tok":
+            return self.send(b"", status=204)
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})
         self.send({"error": "unauthorized"}, status=401)
