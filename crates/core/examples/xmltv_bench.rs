@@ -47,7 +47,9 @@ fn main() {
     xml.push_str("</tv>\n");
 
     let start = Instant::now();
-    let guide = openiptv_core::xmltv::parse(xml.as_bytes(), |_| true).expect("valid");
+    let guide =
+        openiptv_core::xmltv::parse(xml.as_bytes(), openiptv_core::xmltv::Filter::default())
+            .expect("valid");
     let elapsed = start.elapsed();
     let mb = xml.len() as f64 / 1e6;
     println!(

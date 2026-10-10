@@ -399,7 +399,7 @@ async fn probe_xmltv(
     }
     let t_dl = start.elapsed();
     let parse_start = Instant::now();
-    let guide = xmltv::parse(&body, |_| true)?;
+    let guide = xmltv::parse(&body, xmltv::Filter::default())?;
     let t_parse = parse_start.elapsed();
     println!(
         "  download           {:.1} MB, first byte {}, total {}",

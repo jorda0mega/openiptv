@@ -2,3 +2,5 @@
 *.env
 .env*
 probe-report*.json
+/web/node_modules
+/web/dist
