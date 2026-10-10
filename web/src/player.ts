@@ -27,6 +27,7 @@ export async function play(list: Channel[], i: number): Promise<void> {
   index = i;
   wire();
   overlay().hidden = false;
+  document.body.classList.add("playing");
   text("osd-timing", "Starting…");
   mpegts ??= (await import("mpegts.js")).default;
   start();
@@ -75,12 +76,12 @@ function start(): void {
     try {
       const status = await api.status();
       if (status.lastZap?.channel === channel.id) {
-        detail = ` (provider ${status.lastZap.firstBytesMs} ms)`;
+        detail = ` · provider ${(status.lastZap.firstBytesMs / 1000).toFixed(1)} s`;
       }
     } catch {
       // Timing detail is optional.
     }
-    text("osd-timing", `Started in ${(ms / 1000).toFixed(1)} s${detail}`);
+    text("osd-timing", `${(ms / 1000).toFixed(1)} s${detail}`);
     v.dataset.startMs = String(ms);
   };
   v.addEventListener("playing", onPlaying, { once: true });
@@ -99,6 +100,7 @@ function stop(): void {
 function close(): void {
   stop();
   overlay().hidden = true;
+  document.body.classList.remove("playing");
 }
 
 function step(delta: number): void {
@@ -138,6 +140,18 @@ function wire(): void {
     if (e.key === "ArrowUp") step(-1);
     if (e.key === "ArrowDown") step(1);
   });
+  // Phones: swipe up for the next channel, down for the previous one.
+  let touchY: number | null = null;
+  overlay().addEventListener("touchstart", (e) => {
+    touchY = e.touches[0]?.clientY ?? null;
+  }, { passive: true });
+  overlay().addEventListener("touchend", (e) => {
+    const endY = e.changedTouches[0]?.clientY;
+    if (touchY == null || endY == null) return;
+    const dy = endY - touchY;
+    touchY = null;
+    if (Math.abs(dy) > 60) step(dy < 0 ? 1 : -1);
+  }, { passive: true });
   // Keep the overlay's titles right across programme boundaries.
   window.setInterval(() => {
     const channel = channels[index];
