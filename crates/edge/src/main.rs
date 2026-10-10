@@ -1,9 +1,9 @@
 //! openiptv-edge: serves the web app and relays what browsers can't fetch
 //! themselves (Xtream streams are plain HTTP without CORS).
 //!
-//! Logins come from the environment, the same variables as `openiptv-probe`.
-//! Run it under `op run` so they come straight from 1Password and only ever
-//! live in this process's memory.
+//! Logins come from the environment (the same variables as
+//! `openiptv-probe`) or from signing in in the web app, and only ever live in
+//! this process's memory.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -43,10 +43,6 @@ struct Edge {
     /// relay runs at a time; starting a channel stops the previous one.
     stream: Mutex<Option<tokio::task::AbortHandle>>,
     last_zap: Mutex<Option<Value>>,
-    /// Six digits shown on this Mac; typed into a TV or phone to pair.
-    pin: String,
-    /// Failed pairing attempts and when the last one happened.
-    pair_failures: Mutex<(u32, Option<Instant>)>,
     /// Required from other devices; see `require_key`.
     key: String,
 }
@@ -138,8 +134,6 @@ async fn main() {
         stream: Mutex::new(None),
         last_zap: Mutex::new(None),
         key: env("OPENIPTV_EDGE_KEY").unwrap_or_else(random_key),
-        pin: env("OPENIPTV_EDGE_PIN").unwrap_or_else(random_pin),
-        pair_failures: Mutex::new((0, None)),
     });
 
     if let Ok(live) = edge.live.read().expect("poisoned").clone() {
@@ -155,7 +149,6 @@ async fn main() {
         .route("/api/live/nownext", get(now_next))
         .route("/api/emby/play/{id}", get(emby_play))
         .route("/api/emby/progress", post(emby_progress))
-        .route("/api/pair", post(pair))
         .route("/api/signin/emby", post(signin_emby))
         .route("/api/signin/xtream", post(signin_xtream))
         .route("/api/signout", post(signout))
@@ -175,22 +168,13 @@ async fn main() {
         .await
         .expect("bind address");
     eprintln!("listening on http://{addr}");
-    // Kept alive for the life of the server; dropping it withdraws the advert.
-    let mut _bonjour = None;
     if !addr.ip().is_loopback() {
         let ip = lan_ip().map_or_else(|| "<this-mac-ip>".into(), |ip| ip.to_string());
-        let pin = &edge.pin;
-        eprintln!(
-            "pair the iPhone / Apple TV app with code {} {}",
-            &pin[..3],
-            &pin[3..]
-        );
         eprintln!(
             "web on your phone (same Wi-Fi), open once: http://{ip}:{}/?key={}",
             addr.port(),
             edge.key
         );
-        _bonjour = advertise(addr.port());
     }
     axum::serve(
         listener,
@@ -209,8 +193,7 @@ async fn require_key(
     req: Request,
     next: Next,
 ) -> Response {
-    // Pairing is how a device gets the key, so it can't require one.
-    if peer.ip().is_loopback() || req.uri().path() == "/api/pair" {
+    if peer.ip().is_loopback() {
         return next.run(req).await;
     }
     let cookie = format!("openiptv_key={}", edge.key);
@@ -244,54 +227,6 @@ async fn require_key(
             "Open the link printed by openiptv-edge on this device first.",
         )
     }
-}
-
-#[derive(Deserialize)]
-struct PairRequest {
-    pin: String,
-}
-
-/// Exchange the six-digit code for the access key. Five wrong codes lock
-/// pairing for a minute, which keeps guessing impractical on a home network.
-async fn pair(State(edge): State<Shared>, Json(req): Json<PairRequest>) -> Response {
-    {
-        let failures = edge.pair_failures.lock().expect("poisoned");
-        if failures.0 >= 5
-            && failures
-                .1
-                .is_some_and(|t| t.elapsed() < Duration::from_secs(60))
-        {
-            return error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "Too many wrong codes; wait a minute.",
-            );
-        }
-    }
-    let offered: String = req.pin.chars().filter(char::is_ascii_digit).collect();
-    if offered != edge.pin {
-        let mut failures = edge.pair_failures.lock().expect("poisoned");
-        if failures
-            .1
-            .is_some_and(|t| t.elapsed() >= Duration::from_secs(60))
-        {
-            failures.0 = 0;
-        }
-        failures.0 += 1;
-        failures.1 = Some(Instant::now());
-        return error(StatusCode::UNAUTHORIZED, "Wrong code.");
-    }
-    *edge.pair_failures.lock().expect("poisoned") = (0, None);
-    let mut res = Json(json!({ "key": edge.key })).into_response();
-    res.headers_mut().insert(
-        header::SET_COOKIE,
-        format!(
-            "openiptv_key={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000",
-            edge.key
-        )
-        .parse()
-        .expect("header"),
-    );
-    res
 }
 
 fn emby(edge: &Edge) -> Result<Arc<EmbyAccount>, Box<Response>> {
@@ -341,39 +276,6 @@ async fn emby_progress(State(edge): State<Shared>, Json(r): Json<ProgressReport>
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => error(StatusCode::BAD_GATEWAY, e.to_string()),
     }
-}
-
-/// Advertise `_openiptv._tcp` so the apps find this server without typing
-/// an address.
-fn advertise(port: u16) -> Option<mdns_sd::ServiceDaemon> {
-    let ip = lan_ip()?;
-    let daemon = mdns_sd::ServiceDaemon::new().ok()?;
-    let host = std::process::Command::new("scutil")
-        .args(["--get", "LocalHostName"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "openiptv".into());
-    let name = env("OPENIPTV_EDGE_NAME").unwrap_or_else(|| format!("OpenIPTV on {host}"));
-    let info = mdns_sd::ServiceInfo::new(
-        "_openiptv._tcp.local.",
-        &name,
-        &format!("{host}.local."),
-        ip.to_string(),
-        port,
-        &[("version", env!("CARGO_PKG_VERSION"))][..],
-    )
-    .ok()?;
-    daemon.register(info).ok()?;
-    eprintln!("advertising \"{name}\" via Bonjour");
-    Some(daemon)
-}
-
-fn random_pin() -> String {
-    let bytes = random_bytes::<4>();
-    format!("{:06}", u32::from_le_bytes(bytes) % 1_000_000)
 }
 
 fn random_bytes<const N: usize>() -> [u8; N] {
