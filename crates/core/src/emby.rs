@@ -144,7 +144,7 @@ impl EmbyClient {
         server: &str,
         device: Device,
     ) -> std::result::Result<Self, url::ParseError> {
-        let mut base = Url::parse(server.trim())?;
+        let mut base = Url::parse(&with_scheme(server))?;
         let path = base.path().trim_end_matches('/').to_owned();
         let path = if path.ends_with("/emby") {
             format!("{path}/")
@@ -431,6 +431,16 @@ impl EmbyClient {
     }
 }
 
+/// People type `192.168.1.10:8096` or `emby.example.com`; assume http.
+pub(crate) fn with_scheme(address: &str) -> String {
+    let trimmed = address.trim();
+    if trimmed.contains("://") {
+        trimmed.to_owned()
+    } else {
+        format!("http://{trimmed}")
+    }
+}
+
 fn card_query<'a>(limit: &'a str, extra: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
     let mut q = vec![
         ("Limit", limit),
@@ -482,6 +492,15 @@ mod tests {
         assert_eq!(
             proxied.url("Users/x/Views").as_str(),
             "https://example.com/media/emby/Users/x/Views"
+        );
+    }
+
+    #[test]
+    fn accepts_addresses_without_scheme() {
+        let c = EmbyClient::new(reqwest::Client::new(), "192.168.1.10:8096", device()).unwrap();
+        assert_eq!(
+            c.url("System/Info/Public").as_str(),
+            "http://192.168.1.10:8096/emby/System/Info/Public"
         );
     }
 

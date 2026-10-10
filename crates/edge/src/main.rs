@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::Json;
@@ -33,8 +33,11 @@ const GUIDE_REFRESH: Duration = Duration::from_secs(6 * 3600);
 
 struct Edge {
     http: reqwest::Client,
-    emby: Result<EmbyAccount, String>,
-    live: Result<Arc<LiveTv>, String>,
+    device: Device,
+    /// Signed-in accounts, held only in memory. Set from the environment at
+    /// startup or by signing in from the web app; never written to disk.
+    emby: RwLock<Result<Arc<EmbyAccount>, String>>,
+    live: RwLock<Result<Arc<LiveTv>, String>>,
     home: tokio::sync::Mutex<Option<(Instant, Arc<Vec<Row>>)>>,
     /// The provider allows a limited number of connections, so only one
     /// relay runs at a time; starting a channel stops the previous one.
@@ -108,7 +111,7 @@ async fn main() {
     let (emby, live) = tokio::join!(
         async {
             match emby_login() {
-                Some(login) => EmbyAccount::sign_in(&http, device, login)
+                Some(login) => EmbyAccount::sign_in(&http, device.clone(), login)
                     .await
                     .map_err(|e| e.to_string()),
                 None => Err("not configured".to_string()),
@@ -128,8 +131,9 @@ async fn main() {
 
     let edge = Arc::new(Edge {
         http: http.clone(),
-        emby,
-        live: live.map(Arc::new),
+        device,
+        emby: RwLock::new(emby.map(Arc::new)),
+        live: RwLock::new(live.map(Arc::new)),
         home: tokio::sync::Mutex::new(None),
         stream: Mutex::new(None),
         last_zap: Mutex::new(None),
@@ -138,28 +142,8 @@ async fn main() {
         pair_failures: Mutex::new((0, None)),
     });
 
-    // Full guide in the background, then every few hours. Never on the
-    // request path: it can take a minute or more to download.
-    if let Ok(live) = &edge.live {
-        let (live, http) = (live.clone(), http.clone());
-        tokio::spawn(async move {
-            loop {
-                match live.refresh_guide(&http, 24, true).await {
-                    Ok(()) => {
-                        let s = live.guide_status();
-                        eprintln!(
-                            "guide: {} programmes for {} channels ({:.0} MB) in {:.0} s",
-                            s.programmes,
-                            s.channels,
-                            s.bytes as f64 / 1e6,
-                            s.seconds
-                        );
-                    }
-                    Err(e) => eprintln!("guide: {e}"),
-                }
-                tokio::time::sleep(GUIDE_REFRESH).await;
-            }
-        });
+    if let Ok(live) = edge.live.read().expect("poisoned").clone() {
+        spawn_guide(edge.clone(), live);
     }
 
     let web_dir = env("OPENIPTV_WEB_DIR").unwrap_or_else(|| "web/dist".into());
@@ -172,6 +156,9 @@ async fn main() {
         .route("/api/emby/play/{id}", get(emby_play))
         .route("/api/emby/progress", post(emby_progress))
         .route("/api/pair", post(pair))
+        .route("/api/signin/emby", post(signin_emby))
+        .route("/api/signin/xtream", post(signin_xtream))
+        .route("/api/signout", post(signout))
         .route("/live/{file}", get(relay))
         .fallback_service(
             ServeDir::new(&web_dir).fallback(ServeFile::new(format!("{web_dir}/index.html"))),
@@ -307,9 +294,11 @@ async fn pair(State(edge): State<Shared>, Json(req): Json<PairRequest>) -> Respo
     res
 }
 
-fn emby(edge: &Edge) -> Result<&EmbyAccount, Box<Response>> {
+fn emby(edge: &Edge) -> Result<Arc<EmbyAccount>, Box<Response>> {
     edge.emby
-        .as_ref()
+        .read()
+        .expect("poisoned")
+        .clone()
         .map_err(|e| Box::new(error(StatusCode::SERVICE_UNAVAILABLE, format!("Emby: {e}"))))
 }
 
@@ -415,8 +404,8 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
     (status, Json(json!({ "error": message.into() }))).into_response()
 }
 
-fn live(edge: &Edge) -> Result<&Arc<LiveTv>, Box<Response>> {
-    edge.live.as_ref().map_err(|e| {
+fn live(edge: &Edge) -> Result<Arc<LiveTv>, Box<Response>> {
+    edge.live.read().expect("poisoned").clone().map_err(|e| {
         Box::new(error(
             StatusCode::SERVICE_UNAVAILABLE,
             format!("live TV: {e}"),
@@ -425,11 +414,13 @@ fn live(edge: &Edge) -> Result<&Arc<LiveTv>, Box<Response>> {
 }
 
 async fn status(State(edge): State<Shared>) -> Json<Value> {
-    let emby = match &edge.emby {
+    let emby = match emby(&edge) {
         Ok(a) => json!({ "ok": true, "server": a.server_name }),
-        Err(e) => json!({ "ok": false, "error": e }),
+        Err(_) => {
+            json!({ "ok": false, "error": edge.emby.read().expect("poisoned").as_ref().err().cloned() })
+        }
     };
-    let live = match &edge.live {
+    let live = match edge.live.read().expect("poisoned").as_ref() {
         Ok(l) => json!({
             "ok": true,
             "channels": l.channels(None, None).len(),
@@ -449,9 +440,9 @@ struct HomeQuery {
 }
 
 async fn home(State(edge): State<Shared>, Query(q): Query<HomeQuery>) -> Response {
-    let account = match &edge.emby {
+    let account = match emby(&edge) {
         Ok(a) => a,
-        Err(e) => return error(StatusCode::SERVICE_UNAVAILABLE, format!("Emby: {e}")),
+        Err(r) => return *r,
     };
     let mut cache = edge.home.lock().await;
     if let Some((at, rows)) = cache.as_ref()
@@ -601,4 +592,117 @@ async fn relay(State(edge): State<Shared>, Path(file): Path<String>) -> Response
             tokio_stream::wrappers::ReceiverStream::new(rx),
         ))
         .expect("valid response")
+}
+
+/// Keeps the full guide fresh for as long as this live TV account is the
+/// current one; stops when the user signs out or signs in elsewhere.
+fn spawn_guide(edge: Shared, live: Arc<LiveTv>) {
+    tokio::spawn(async move {
+        loop {
+            let current = edge.live.read().expect("poisoned").as_ref().ok().cloned();
+            if !current.is_some_and(|c| Arc::ptr_eq(&c, &live)) {
+                break;
+            }
+            match live.refresh_guide(&edge.http, 24, true).await {
+                Ok(()) => {
+                    let s = live.guide_status();
+                    eprintln!(
+                        "guide: {} programmes for {} channels ({:.0} MB) in {:.0} s",
+                        s.programmes,
+                        s.channels,
+                        s.bytes as f64 / 1e6,
+                        s.seconds
+                    );
+                }
+                Err(e) => eprintln!("guide: {e}"),
+            }
+            tokio::time::sleep(GUIDE_REFRESH).await;
+        }
+    });
+}
+
+#[derive(Deserialize)]
+struct EmbySignIn {
+    /// "server" (address + login) or "connect" (Emby Connect account).
+    mode: String,
+    url: Option<String>,
+    username: String,
+    password: String,
+    server: Option<String>,
+}
+
+/// Sign in to Emby from the web app. The password is used once and dropped;
+/// the session lives only in this process's memory.
+async fn signin_emby(State(edge): State<Shared>, Json(req): Json<EmbySignIn>) -> Response {
+    let login = if req.mode == "connect" {
+        EmbyLogin::Connect {
+            user: req.username,
+            password: req.password,
+            server: req.server.filter(|s| !s.trim().is_empty()),
+        }
+    } else {
+        let Some(url) = req.url.filter(|u| !u.trim().is_empty()) else {
+            return error(StatusCode::BAD_REQUEST, "Enter the server address.");
+        };
+        EmbyLogin::Direct {
+            url,
+            user: req.username,
+            password: req.password,
+        }
+    };
+    match EmbyAccount::sign_in(&edge.http, edge.device.clone(), login).await {
+        Ok(account) => {
+            let server = account.server_name.clone();
+            *edge.emby.write().expect("poisoned") = Ok(Arc::new(account));
+            *edge.home.lock().await = None;
+            Json(json!({ "ok": true, "server": server })).into_response()
+        }
+        Err(e) => error(StatusCode::UNAUTHORIZED, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct XtreamSignIn {
+    url: String,
+    username: String,
+    password: String,
+}
+
+/// Sign in to an Xtream Codes subscription from the web app; held in memory.
+async fn signin_xtream(State(edge): State<Shared>, Json(req): Json<XtreamSignIn>) -> Response {
+    let creds = match openiptv_core::app::xtream_credentials(&req.url, &req.username, &req.password)
+    {
+        Ok(c) => c,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "That server address isn't valid."),
+    };
+    match LiveTv::sign_in(&edge.http, creds).await {
+        Ok(live) => {
+            let live = Arc::new(live);
+            let channels = live.channels(None, None).len();
+            *edge.live.write().expect("poisoned") = Ok(live.clone());
+            spawn_guide(edge.clone(), live);
+            Json(json!({ "ok": true, "channels": channels })).into_response()
+        }
+        Err(e) => error(StatusCode::UNAUTHORIZED, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct SignOut {
+    /// "emby", "live" or "all".
+    what: String,
+}
+
+async fn signout(State(edge): State<Shared>, Json(req): Json<SignOut>) -> Response {
+    if req.what == "emby" || req.what == "all" {
+        *edge.emby.write().expect("poisoned") = Err("signed out".into());
+        *edge.home.lock().await = None;
+    }
+    if req.what == "live" || req.what == "all" {
+        if let Some(stream) = edge.stream.lock().expect("poisoned").take() {
+            stream.abort();
+        }
+        *edge.live.write().expect("poisoned") = Err("signed out".into());
+    }
+    StatusCode::NO_CONTENT.into_response()
 }

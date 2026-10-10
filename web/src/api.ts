@@ -60,6 +60,19 @@ export interface Status {
   lastZap: { channel: number; headersMs: number; firstBytesMs: number } | null;
 }
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
+  return (res.status === 204 ? {} : await res.json()) as T;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) {
@@ -81,6 +94,11 @@ export const api = {
   },
   nowNext: (ids: number[]) =>
     get<Record<string, NowNext>>(`/api/live/nownext?ids=${ids.join(",")}`),
+  signinEmby: (body: { mode: string; url: string; username: string; password: string }) =>
+    post<{ ok: boolean; server: string }>("/api/signin/emby", body),
+  signinXtream: (body: { url: string; username: string; password: string }) =>
+    post<{ ok: boolean; channels: number }>("/api/signin/xtream", body),
+  signout: (what: "emby" | "live" | "all") => post<Record<string, never>>("/api/signout", { what }),
 };
 
 /** Calls `render` with the cached value (if any) right away, then again with

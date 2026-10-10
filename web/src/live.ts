@@ -98,8 +98,9 @@ export async function showLive(view: HTMLElement): Promise<void> {
       }
       renderCategories();
     });
-  } catch (e) {
-    setStatus(`Live TV: ${(e as Error).message}`);
+  } catch {
+    categoryList.replaceChildren();
+    rowsEl.replaceChildren(h("p", { class: "empty" }, "Live TV isn't connected. ", h("a", { href: "#/accounts" }, "Sign in")));
     return;
   }
   const selected = localStorage.getItem("category");

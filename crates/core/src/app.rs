@@ -91,8 +91,8 @@ impl EmbyAccount {
                 user,
                 password,
             } => {
-                let mut client =
-                    EmbyClient::new(http.clone(), &url, device).map_err(|_| Error::Auth)?;
+                let mut client = EmbyClient::new(http.clone(), &url, device)
+                    .map_err(|_| Error::InvalidAddress)?;
                 let info = client.public_info().await?;
                 client.login(&user, &password).await?;
                 Ok(EmbyAccount {
@@ -649,7 +649,7 @@ fn info(nn: NowNext, source: &'static str) -> NowNextInfo {
 
 /// Convenience for clients that read the same environment as the probe.
 pub fn xtream_credentials(url: &str, user: &str, password: &str) -> Result<Credentials> {
-    xtream::Credentials::new(url, user, password).map_err(|_| Error::Auth)
+    xtream::Credentials::new(url, user, password).map_err(|_| Error::InvalidAddress)
 }
 
 #[cfg(test)]

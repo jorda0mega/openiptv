@@ -134,3 +134,16 @@ body.playing { overflow: hidden; }
   .channel-logo img { max-width: 44px; }
   .osd-top, .osd-bottom { padding: 10px 12px; gap: 10px; }
 }
+
+/* Accounts */
+.accounts { max-width: 560px; margin: 0 auto; padding: 24px 20px 60px; display: flex; flex-direction: column; gap: 18px; }
+.accounts h1 { margin: 0; font-size: 24px; }
+.account-card { display: flex; flex-direction: column; gap: 12px; padding: 18px; border-radius: 14px; background: var(--panel); border: 1px solid #222832; }
+.account-card h2 { margin: 0; font-size: 17px; }
+.account-card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.account-card select { font: inherit; font-size: 16px; color: inherit; background: var(--raised); border: 1px solid #2a2f37; border-radius: var(--radius); padding: 8px 10px; }
+.account-card button { align-self: flex-start; padding: 9px 16px; border-radius: 999px; background: var(--accent); color: white; font-weight: 600; }
+.account-card button.secondary { background: var(--raised); color: var(--text); }
+.account-card button[disabled] { opacity: 0.6; }
+.error { color: #ff8a80; margin: 0; min-height: 1em; font-size: 14px; }
+.empty a { color: var(--accent); }

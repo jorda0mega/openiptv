@@ -25,7 +25,7 @@ export async function showHome(view: HTMLElement): Promise<void> {
     );
   } catch (e) {
     if (!container.childElementCount) {
-      container.append(h("p", { class: "empty" }, `Couldn't load Emby: ${(e as Error).message}`));
+      container.append(h("p", { class: "empty" }, "Emby isn't connected. ", h("a", { href: "#/accounts" }, "Sign in")));
     }
     setStatus(`Emby: ${(e as Error).message}`);
   }

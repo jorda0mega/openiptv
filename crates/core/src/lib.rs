@@ -29,6 +29,8 @@ pub enum Error {
     },
     #[error("credentials were rejected")]
     Auth,
+    #[error("that server address isn't valid")]
+    InvalidAddress,
     #[error("not logged in")]
     NoSession,
     #[error("invalid XMLTV: {0}")]

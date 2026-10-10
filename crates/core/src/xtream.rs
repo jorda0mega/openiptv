@@ -36,7 +36,7 @@ impl Credentials {
         username: &str,
         password: &str,
     ) -> std::result::Result<Self, url::ParseError> {
-        let mut server = Url::parse(server.trim())?;
+        let mut server = Url::parse(&crate::emby::with_scheme(server))?;
         if !server.path().ends_with('/') {
             let path = format!("{}/", server.path());
             server.set_path(&path);

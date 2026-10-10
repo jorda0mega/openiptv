@@ -1,3 +1,4 @@
+import { showAccounts } from "./accounts";
 import { api } from "./api";
 import { showHome } from "./home";
 import { leaveLive, showLive } from "./live";
@@ -12,6 +13,7 @@ function route(): void {
   });
   leaveLive();
   if (name === "live") void showLive(view);
+  else if (name === "accounts") void showAccounts(view);
   else void showHome(view);
 }
 
