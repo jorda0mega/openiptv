@@ -36,8 +36,12 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_openiptv._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenIPTV connects to your OpenIPTV server on this network.</string>
+	<string>OpenIPTV finds and connects to your OpenIPTV server on this network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

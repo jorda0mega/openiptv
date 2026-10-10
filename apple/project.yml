@@ -3,22 +3,26 @@ options:
   bundleIdPrefix: com.jorda0mega
   deploymentTarget:
     iOS: "26.0"
+    tvOS: "26.0"
   createIntermediateGroups: true
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
-    # Set your team in Xcode → Signing & Capabilities to run on your iPhone.
+    # Set your team in Xcode → Signing & Capabilities to run on your devices.
     DEVELOPMENT_TEAM: ""
-targets:
-  OpenIPTV:
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    OTHER_LDFLAGS: ["-ObjC"]
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+
+# Shared by both apps. MPVKit's LGPL static libraries come from
+# scripts/fetch-mpvkit.sh (run automatically before the first build).
+targetTemplates:
+  OpenIPTVApp:
     type: application
-    platform: iOS
-    sources:
-      - OpenIPTV
-    # MPVKit's LGPL static libraries; fetch with scripts/fetch-mpvkit.sh.
     preBuildScripts:
       - name: Fetch MPVKit
         script: '[ -d "$SRCROOT/Vendor/Libmpv.xcframework" ] || "$SRCROOT/scripts/fetch-mpvkit.sh"'
@@ -97,6 +101,13 @@ targets:
       - sdk: libxml2.tbd
       - sdk: libz.tbd
       - sdk: libc++.tbd
+
+targets:
+  OpenIPTV:
+    templates: [OpenIPTVApp]
+    platform: iOS
+    sources:
+      - OpenIPTV
     info:
       path: OpenIPTV/Info.plist
       properties:
@@ -114,21 +125,43 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        UIBackgroundModes:
-          - audio
+        UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: OpenIPTV connects to your OpenIPTV server on this network.
+        NSLocalNetworkUsageDescription: OpenIPTV finds and connects to your OpenIPTV server on this network.
+        NSBonjourServices: [_openiptv._tcp]
         CFBundleURLTypes:
           - CFBundleURLName: OpenIPTV pairing
-            CFBundleURLSchemes:
-              - openiptv
+            CFBundleURLSchemes: [openiptv]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1,2"
-        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
-        ENABLE_USER_SCRIPT_SANDBOXING: NO
-        OTHER_LDFLAGS: ["-ObjC"]
+
+  OpenIPTV TV:
+    templates: [OpenIPTVApp]
+    platform: tvOS
+    sources:
+      - path: OpenIPTV
+        excludes:
+          - "Resources/**"
+          - "Info.plist"
+      - OpenIPTV-tvOS
+    info:
+      path: OpenIPTV-tvOS/Info.plist
+      properties:
+        CFBundleDisplayName: OpenIPTV
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIBackgroundModes: [audio]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: OpenIPTV finds and connects to your OpenIPTV server on this network.
+        NSBonjourServices: [_openiptv._tcp]
+    settings:
+      base:
+        PRODUCT_NAME: OpenIPTV
+        PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv.tv
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+        TARGETED_DEVICE_FAMILY: "3"

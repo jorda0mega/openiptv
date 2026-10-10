@@ -14,6 +14,25 @@ struct Card: Codable, Hashable, Identifiable {
     let subtitle: String?
     let images: [CardImage]
     let progress: Double?
+    let playable: Bool?
+}
+
+/// What the server resolved an Emby item to (series → next episode).
+struct EmbyPlayback: Codable, Hashable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let title: String
+    let subtitle: String?
+    let url: String
+    let startSeconds: Double?
+    let durationSeconds: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case title, subtitle, url
+        case itemId = "item_id"
+        case startSeconds = "start_seconds"
+        case durationSeconds = "duration_seconds"
+    }
 }
 
 struct HomeRow: Codable, Hashable, Identifiable {
@@ -176,5 +195,34 @@ final class APIClient: @unchecked Sendable {
 
     func streamURL(for channel: Channel) -> URL {
         server.url.appending(path: "live/\(channel.id).ts")
+    }
+
+    func embyPlayback(id: String) async throws -> EmbyPlayback {
+        try await get("api/emby/play/\(id)")
+    }
+
+    func reportProgress(itemId: String, seconds: Double, event: String) async {
+        var request = URLRequest(url: server.url.appending(path: "api/emby/progress"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let cookie = server.cookie { request.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "item_id": itemId, "position_seconds": seconds, "event": event,
+        ])
+        _ = try? await session.data(for: request)
+    }
+
+    /// Exchange the six-digit code shown on the Mac for the access key.
+    static func pair(serverURL: URL, pin: String) async throws -> String {
+        var request = URLRequest(url: serverURL.appending(path: "api/pair"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["pin": pin])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let body = (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+        guard code == 200, let key = body["key"] else { throw APIError.status(code, body["error"]) }
+        return key
     }
 }

@@ -13,15 +13,18 @@ final class MPVMetalLayer: CAMetalLayer {
     }
 }
 
-/// libmpv playing MPEG-TS live streams directly (AVPlayer can't), rendered
-/// with Vulkan-on-Metal and decoded in hardware by VideoToolbox. One instance
-/// is reused across channel changes so zapping only swaps the stream.
+/// libmpv: plays MPEG-TS live streams (which AVPlayer can't) and any file
+/// Emby has, rendered with Vulkan-on-Metal and decoded by VideoToolbox. One
+/// instance is reused across channel changes so zapping only swaps streams.
 final class MPVPlayer: @unchecked Sendable {
     enum Event {
         /// First frame is on screen; seconds since `load`.
         case started(Double)
         case buffering(Bool)
         case failed(String)
+        case time(position: Double, duration: Double?)
+        case paused(Bool)
+        case ended
     }
 
     let layer = MPVMetalLayer()
@@ -31,8 +34,9 @@ final class MPVPlayer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "openiptv.mpv", qos: .userInitiated)
     private var loadStarted = CFAbsoluteTimeGetCurrent()
     private var reportedStart = false
+    private var duration: Double?
 
-    init(httpHeaders: [String]) {
+    init(httpHeaders: [String], options: [(String, String)], hardwareDecoding: Bool) {
         layer.framebufferOnly = true
         layer.backgroundColor = UIColor.black.cgColor
 
@@ -43,39 +47,50 @@ final class MPVPlayer: @unchecked Sendable {
         set("vo", "gpu-next")
         set("gpu-api", "vulkan")
         set("gpu-context", "moltenvk")
-        set("hwdec", "videotoolbox")
+        set("hwdec", hardwareDecoding ? "videotoolbox" : "no")
         set("video-rotate", "no")
         set("idle", "yes")
         set("terminal", "no")
-        // Live TV: start on the first decodable frame instead of filling a
-        // cache, and probe less of the stream before starting.
+        set("keep-open", "no")
         set("cache", "yes")
-        set("cache-pause-initial", "no")
-        set("demuxer-readahead-secs", "8")
-        set("demuxer-lavf-probesize", "524288")
-        set("demuxer-lavf-analyzeduration", "1")
+        for (name, value) in options { set(name, value) }
         if !httpHeaders.isEmpty { set("http-header-fields", httpHeaders.joined(separator: ",")) }
         mpv_initialize(mpv)
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
+        mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
+        mpv_observe_property(mpv, 0, "duration", MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)
         mpv_set_wakeup_callback(mpv, { context in
             guard let context else { return }
             Unmanaged<MPVPlayer>.fromOpaque(context).takeUnretainedValue().drainEvents()
         }, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    func load(_ url: URL) {
+    /// Start a stream; `start` resumes a file at that many seconds.
+    func load(_ url: URL, start: Double? = nil) {
         queue.async { [self] in
+            guard let mpv else { return }
             loadStarted = CFAbsoluteTimeGetCurrent()
             reportedStart = false
+            duration = nil
+            mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
             command(["loadfile", url.absoluteString, "replace"])
         }
     }
 
-    func stop() {
-        queue.async { [self] in command(["stop"]) }
+    func togglePause() {
+        queue.async { [self] in command(["cycle", "pause"]) }
     }
 
-    /// Stops playback and frees libmpv; the provider connection closes with it.
+    func seek(by seconds: Double) {
+        queue.async { [self] in command(["seek", String(seconds), "relative"]) }
+    }
+
+    func seek(to seconds: Double) {
+        queue.async { [self] in command(["seek", String(seconds), "absolute"]) }
+    }
+
+    /// Stops playback and frees libmpv; the network connection closes with it.
     func shutdown() {
         queue.sync {
             guard let mpv else { return }
@@ -115,13 +130,24 @@ final class MPVPlayer: @unchecked Sendable {
             let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
             if end.reason == MPV_END_FILE_REASON_ERROR {
                 emit(.failed(String(cString: mpv_error_string(end.error))))
+            } else if end.reason == MPV_END_FILE_REASON_EOF {
+                emit(.ended)
             }
         case MPV_EVENT_PROPERTY_CHANGE:
             guard let data = event.data else { return }
             let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
-            if String(cString: property.name) == "paused-for-cache", property.format == MPV_FORMAT_FLAG,
-               let value = property.data {
+            guard let value = property.data else { return }
+            switch String(cString: property.name) {
+            case "paused-for-cache" where property.format == MPV_FORMAT_FLAG:
                 emit(.buffering(value.assumingMemoryBound(to: Int32.self).pointee != 0))
+            case "pause" where property.format == MPV_FORMAT_FLAG:
+                emit(.paused(value.assumingMemoryBound(to: Int32.self).pointee != 0))
+            case "duration" where property.format == MPV_FORMAT_DOUBLE:
+                duration = value.assumingMemoryBound(to: Double.self).pointee
+            case "time-pos" where property.format == MPV_FORMAT_DOUBLE:
+                emit(.time(position: value.assumingMemoryBound(to: Double.self).pointee, duration: duration))
+            default:
+                break
             }
         default:
             break
@@ -134,9 +160,10 @@ final class MPVPlayer: @unchecked Sendable {
     }
 }
 
-/// Hosts the player's Metal layer and keeps it sized to the view.
+/// Hosts the player's Metal layer and keeps it sized to the view, including
+/// its drawable size so rotation re-creates mpv's swapchain at full size.
 final class MPVHostView: UIView {
-    private let metalLayer: CALayer
+    private let metalLayer: CAMetalLayer
 
     init(player: MPVPlayer) {
         metalLayer = player.layer
@@ -152,8 +179,10 @@ final class MPVHostView: UIView {
         super.layoutSubviews()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        let scale = traitCollection.displayScale
         metalLayer.frame = bounds
-        metalLayer.contentsScale = traitCollection.displayScale
+        metalLayer.contentsScale = scale
+        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         CATransaction.commit()
     }
 }

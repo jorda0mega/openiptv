@@ -2,7 +2,8 @@ import SwiftUI
 
 struct SearchView: View {
     @Environment(AppModel.self) private var model
-    @Binding var playback: PlaybackRequest?
+    @Environment(Preferences.self) private var prefs
+    @Binding var playing: PlayerItem?
     @State private var query = ""
     @State private var results: [Channel] = []
 
@@ -11,11 +12,17 @@ struct SearchView: View {
             List {
                 ForEach(Array(results.enumerated()), id: \.element.id) { index, channel in
                     Button {
-                        playback = PlaybackRequest(channels: results, index: index)
+                        playing = .live(results, index)
                     } label: {
-                        ChannelRow(channel: channel, info: model.nowNext[channel.id])
+                        ChannelRow(channel: channel, info: model.nowNext[channel.id], favorite: prefs.isFavorite(channel))
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(prefs.isFavorite(channel) ? "Remove from Favourites" : "Add to Favourites",
+                               systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
+                            prefs.toggleFavorite(channel)
+                        }
+                    }
                     .onAppear { model.appeared(channel.id) }
                     .onDisappear { model.disappeared(channel.id) }
                 }

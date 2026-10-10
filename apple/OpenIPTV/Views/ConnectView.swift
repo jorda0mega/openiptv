@@ -1,106 +1,198 @@
 import SwiftUI
 
-/// Pair with the OpenIPTV server running on your Mac. The server holds your
-/// Emby and IPTV logins (read from 1Password); this device only stores the
-/// server address and its access key (in the Keychain).
+/// Pair with the OpenIPTV server on your Mac: pick it from the servers found
+/// on your network (or type its address), then enter the six-digit code it
+/// shows. The server holds your Emby and IPTV logins; this device only keeps
+/// the server's address and access key (in the Keychain).
 struct ConnectView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     var isSheet = false
 
-    @State private var link = ""
-    @State private var connecting = false
-    @FocusState private var focused: Bool
+    @State private var browser = ServerBrowser()
+    @State private var chosen: URL?
+    @State private var chosenName = ""
+    @State private var manualAddress = ""
+    @State private var pin = ""
+    @State private var pairing = false
+    @State private var error: String?
+    @FocusState private var pinFocused: Bool
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    Image("Logo")
-                        .resizable()
-                        .frame(width: 96, height: 96)
-                        .accessibilityHidden(true)
+                VStack(spacing: 28) {
+                    Image("Logo").resizable().frame(width: 96, height: 96).accessibilityHidden(true)
                     VStack(spacing: 8) {
-                        Text("Connect to your server").font(.title2.weight(.bold))
-                        Text("On your Mac run `scripts/serve.sh … --lan`, then paste the link it prints (it looks like http://192.168.x.x:8787/?key=…).")
+                        Text("Connect to OpenIPTV").font(.title2.weight(.bold))
+                        Text("On your Mac run scripts/serve.sh with --lan. It shows a six-digit pairing code.")
                             .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
-                    VStack(spacing: 12) {
-                        TextField("http://192.168.1.10:8787/?key=…", text: $link)
-                            .textContentType(.URL)
-                            .keyboardType(.URL)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .focused($focused)
-                            .padding(14)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                        HStack(spacing: 12) {
-                            Button {
-                                if let pasted = UIPasteboard.general.string { link = pasted }
-                            } label: {
-                                Label("Paste", systemImage: "doc.on.clipboard").frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.glass)
-                            Button {
-                                connect()
-                            } label: {
-                                Group {
-                                    if connecting { ProgressView() } else { Text("Connect") }
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.glassProminent)
-                            .disabled(Server(link: link) == nil || connecting)
-                        }
-                        .controlSize(.large)
+                    if let chosen {
+                        pinEntry(for: chosen)
+                    } else {
+                        serverChoice
                     }
-                    if let status = model.status, model.server != nil {
-                        statusCard(status)
-                    }
-                    if let error = model.connectionError {
+                    if let error {
                         Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
                     }
                 }
                 .padding(24)
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
             }
-            .navigationTitle(isSheet ? "Server" : "")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(isSheet ? "Pair" : "")
+            .inlineTitle()
             .toolbar {
                 if isSheet {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 }
             }
-            .onAppear { link = model.server.map(linkString) ?? "" }
+        }
+        .task { browser.start() }
+        .onDisappear { browser.stop() }
+    }
+
+    private var serverChoice: some View {
+        VStack(spacing: 14) {
+            Text("On your network").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+            if browser.servers.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Looking for servers…").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            }
+            GlassEffectContainer(spacing: 10) {
+                VStack(spacing: 10) {
+                    ForEach(browser.servers) { server in
+                        Button {
+                            choose(server.url, name: server.name)
+                        } label: {
+                            HStack {
+                                Image(systemName: "desktopcomputer")
+                                VStack(alignment: .leading) {
+                                    Text(server.name).font(.body.weight(.semibold))
+                                    Text(server.url.host() ?? "").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
+                    }
+                }
+            }
+            Text("Or enter its address").font(.headline).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+            TextField("192.168.1.10:8787", text: $manualAddress)
+                .keyboardType(.URL)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .padding(14)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .onSubmit { chooseManual() }
+            HStack(spacing: 12) {
+                #if os(iOS)
+                Button {
+                    // The web pairing link carries the key itself.
+                    if let pasted = UIPasteboard.general.string, let server = Server(link: pasted), server.key != nil {
+                        Task {
+                            await model.connect(to: server)
+                            if model.connectionError == nil, isSheet { dismiss() }
+                        }
+                    } else {
+                        error = "Copy the link the server prints (it contains ?key=)."
+                    }
+                } label: {
+                    Label("Paste link", systemImage: "doc.on.clipboard").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                #endif
+                Button { chooseManual() } label: {
+                    Text("Continue").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(Server(link: manualAddress) == nil)
+            }
+            .controlSize(.large)
         }
     }
 
-    private func statusCard(_ status: ServerStatus) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(status.emby.ok ? "Emby: \(status.emby.server ?? "connected")" : "Emby: \(status.emby.error ?? "unavailable")",
-                  systemImage: status.emby.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-            Label(status.live.ok ? "Live TV: \(status.live.channels ?? 0) channels" : "Live TV: \(status.live.error ?? "unavailable")",
-                  systemImage: status.live.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+    private func pinEntry(for url: URL) -> some View {
+        VStack(spacing: 16) {
+            Text(chosenName.isEmpty ? (url.host() ?? "") : chosenName).font(.headline)
+            TextField("Pairing code", text: $pin)
+                .keyboardType(.numberPad)
+                .font(.title.monospacedDigit())
+                .multilineTextAlignment(.center)
+                .focused($pinFocused)
+                .padding(16)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                .onSubmit { pair(url) }
+                .onChange(of: pin) { _, value in
+                    let digits = value.filter(\.isNumber)
+                    if digits != value { pin = digits }
+                    if digits.count == 6 { pair(url) }
+                }
+            HStack(spacing: 12) {
+                Button {
+                    chosen = nil
+                    pin = ""
+                    error = nil
+                } label: {
+                    Text("Back").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                Button { pair(url) } label: {
+                    Group {
+                        if pairing { ProgressView() } else { Text("Pair") }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(pin.count != 6 || pairing)
+            }
+            .controlSize(.large)
         }
-        .font(.subheadline)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .onAppear { pinFocused = true }
     }
 
-    private func linkString(_ server: Server) -> String {
-        var parts = URLComponents(url: server.url, resolvingAgainstBaseURL: false)
-        if let key = server.key { parts?.queryItems = [URLQueryItem(name: "key", value: key)] }
-        return parts?.string ?? server.url.absoluteString
+    private func choose(_ url: URL, name: String) {
+        error = nil
+        chosenName = name
+        // This Mac's own server trusts loopback, so the simulator needs no code.
+        if url.host() == "127.0.0.1" || url.host() == "localhost" {
+            Task { await model.connect(to: Server(url: url, key: nil)) }
+            return
+        }
+        chosen = url
     }
 
-    private func connect() {
-        guard let server = Server(link: link) else { return }
-        connecting = true
-        focused = false
+    private func chooseManual() {
+        guard let server = Server(link: manualAddress) else { return }
+        if let key = server.key {
+            Task { await model.connect(to: Server(url: server.url, key: key)) }
+        } else {
+            choose(server.url, name: "")
+        }
+    }
+
+    private func pair(_ url: URL) {
+        guard pin.count == 6, !pairing else { return }
+        pairing = true
+        error = nil
         Task {
-            await model.connect(to: server)
-            connecting = false
-            if model.connectionError == nil, isSheet { dismiss() }
+            defer { pairing = false }
+            do {
+                try await model.pair(serverURL: url, pin: pin)
+                if isSheet { dismiss() }
+            } catch {
+                self.error = error.localizedDescription
+                pin = ""
+            }
         }
     }
 }

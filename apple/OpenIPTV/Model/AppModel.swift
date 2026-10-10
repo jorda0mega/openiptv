@@ -63,7 +63,10 @@ final class AppModel {
 
     // MARK: Home
 
+    private var lastCardWidth = 360
+
     func loadHome(cardWidth: Int) async {
+        lastCardWidth = cardWidth
         guard let client else { return }
         let started = Date()
         do {
@@ -85,7 +88,8 @@ final class AppModel {
             let fresh = try await client.categories()
             if fresh != categories { categories = fresh }
             Self.writeCache("categories.json", fresh)
-            if selectedCategory == nil || !fresh.contains(where: { $0.id == selectedCategory }) {
+            if selectedCategory == nil
+                || (selectedCategory != Self.favoritesID && !fresh.contains(where: { $0.id == selectedCategory })) {
                 selectedCategory = fresh.first?.id
             }
             if let selectedCategory { await select(category: selectedCategory) }
@@ -94,8 +98,12 @@ final class AppModel {
         }
     }
 
+    /// Pseudo-category for the user's favourite channels (kept on device).
+    static let favoritesID = "__favorites"
+
     func select(category: String) async {
         selectedCategory = category
+        guard category != Self.favoritesID else { return }
         if let cached = channelCache[category] { channels = cached }
         guard let client else { return }
         do {
@@ -114,6 +122,24 @@ final class AppModel {
     }
 
     func streamURL(for channel: Channel) -> URL? { client?.streamURL(for: channel) }
+
+    // MARK: Emby playback
+
+    func playback(for card: Card) async throws -> EmbyPlayback {
+        guard let client else { throw APIError.status(0, "Not connected") }
+        return try await client.embyPlayback(id: card.id)
+    }
+
+    func report(_ playback: EmbyPlayback, seconds: Double, event: String) async {
+        await client?.reportProgress(itemId: playback.itemId, seconds: seconds, event: event)
+        if event == "stop" { await loadHome(cardWidth: lastCardWidth) }
+    }
+
+    /// Pair with a server using the code shown on the Mac.
+    func pair(serverURL: URL, pin: String) async throws {
+        let key = try await APIClient.pair(serverURL: serverURL, pin: pin)
+        await connect(to: Server(url: serverURL, key: key))
+    }
 
     // MARK: Now / next
 

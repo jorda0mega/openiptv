@@ -3,11 +3,13 @@ import SwiftUI
 @main
 struct OpenIPTVApp: App {
     @State private var model = AppModel()
+    @State private var prefs = Preferences()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(prefs)
                 .preferredColorScheme(.dark)
                 // openiptv://pair?link=<the link the server prints>
                 .onOpenURL { url in
@@ -24,7 +26,7 @@ struct OpenIPTVApp: App {
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @State private var playback: PlaybackRequest?
+    @State private var playing: PlayerItem?
 
     var body: some View {
         Group {
@@ -33,20 +35,25 @@ struct RootView: View {
             } else {
                 TabView {
                     Tab("Home", systemImage: "house.fill") {
-                        HomeView()
+                        HomeView(playing: $playing)
                     }
                     Tab("Live TV", systemImage: "dot.radiowaves.left.and.right") {
-                        LiveView(playback: $playback)
+                        LiveView(playing: $playing)
+                    }
+                    Tab("Settings", systemImage: "gearshape") {
+                        SettingsView()
                     }
                     Tab(role: .search) {
-                        SearchView(playback: $playback)
+                        SearchView(playing: $playing)
                     }
                 }
+                #if os(iOS)
                 .tabBarMinimizeBehavior(.onScrollDown)
+                #endif
             }
         }
-        .fullScreenCover(item: $playback) { request in
-            PlayerView(channels: request.channels, index: request.index)
+        .fullScreenCover(item: $playing) { item in
+            PlayerScreen(item: item)
         }
         .task { await model.refreshStatus() }
     }
