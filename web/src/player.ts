@@ -49,7 +49,9 @@ function start(): void {
   }
   startedAt = performance.now();
   const p = m.createPlayer(
-    { type: "mpegts", isLive: true, url: `/live/${channel.id}.ts` },
+    // Absolute URL: mpegts.js fetches from a worker, which can't resolve
+    // page-relative paths.
+    { type: "mpegts", isLive: true, url: new URL(`/live/${channel.id}.ts`, location.href).href },
     {
       enableWorker: true,
       enableStashBuffer: false,

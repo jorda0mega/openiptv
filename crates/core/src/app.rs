@@ -310,7 +310,10 @@ impl LiveTv {
             client.live_categories(),
             client.live_channels(None)
         );
-        let (account, categories, channels) = (account?, categories?, channels?);
+        let (account, categories, mut channels) = (account?, categories?, channels?);
+        // Drop "Account Info"-style channels that spell out the login.
+        channels
+            .retain(|c| !client.mentions_credentials(&c.name) && !looks_like_account_info(&c.name));
         let by_id = channels
             .iter()
             .enumerate()
@@ -493,6 +496,26 @@ impl LiveTv {
     }
 }
 
+/// Panels often list account details (login, expiry, connections) as fake
+/// channels; they are useless to watch and can leak the login.
+fn looks_like_account_info(name: &str) -> bool {
+    let name = name.to_lowercase();
+    [
+        "username",
+        "user name",
+        "user:",
+        "password",
+        "pass:",
+        "expire",
+        "expiry",
+        "max conn",
+        "active conn",
+        "account info",
+    ]
+    .iter()
+    .any(|marker| name.contains(marker))
+}
+
 fn info(nn: NowNext, source: &'static str) -> NowNextInfo {
     let show = |p: Programme| ShowInfo {
         title: p.title,
@@ -510,4 +533,25 @@ fn info(nn: NowNext, source: &'static str) -> NowNextInfo {
 /// Convenience for clients that read the same environment as the probe.
 pub fn xtream_credentials(url: &str, user: &str, password: &str) -> Result<Credentials> {
     xtream::Credentials::new(url, user, password).map_err(|_| Error::Auth)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_account_info;
+
+    #[test]
+    fn hides_account_info_channels() {
+        for name in [
+            "Username: abc",
+            "PASSWORD - x",
+            "Expire Date: 2027-01-01",
+            "Max Connections: 1",
+            "Account Info",
+        ] {
+            assert!(looks_like_account_info(name), "{name}");
+        }
+        for name in ["BBC One HD", "The Expanse 24/7", "USA Network", "Info Wars"] {
+            assert!(!looks_like_account_info(name), "{name}");
+        }
+    }
 }

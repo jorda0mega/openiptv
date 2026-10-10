@@ -112,9 +112,11 @@ nav a[aria-current] { color: var(--text); background: var(--raised); }
   .status { display: none; }
   .row h2 { margin: 0 12px 8px; }
   .row-cards { gap: 10px; padding: 0 12px 8px; }
-  .live { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .categories { border-right: 0; border-bottom: 1px solid #1f242b; padding: 8px 12px; gap: 6px; }
-  .category-list { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; max-height: none; }
+  /* minmax(0, …) and min-width: 0 stop the strip's content from widening the page. */
+  .live { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .categories { min-width: 0; border-right: 0; border-bottom: 1px solid #1f242b; padding: 8px 12px; gap: 6px; }
+  .category-list { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; max-height: none; min-width: 0; }
+  .channels { min-width: 0; }
   .category { width: auto; flex: none; white-space: nowrap; padding: 6px 10px; background: var(--panel); }
   .channels > input { margin: 0 12px; }
   .channel { grid-template-columns: 34px 44px minmax(0, 1fr); gap: 10px; padding: 0 12px; }

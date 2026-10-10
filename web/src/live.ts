@@ -91,7 +91,9 @@ export async function showLive(view: HTMLElement): Promise<void> {
   try {
     await cacheFirst("categories", api.categories, (value) => {
       categories = value;
-      if (!localStorage.getItem("category") && value[0]) {
+      // Pick the first category if none is chosen or the saved one vanished.
+      const saved = localStorage.getItem("category");
+      if (value[0] && !value.some((c) => c.id === saved)) {
         localStorage.setItem("category", value[0].id);
       }
       renderCategories();

@@ -343,6 +343,18 @@ impl XtreamClient {
         url
     }
 
+    /// True when `text` contains this account's username or password.
+    /// Many panels ship an "Account Info" category whose channel names are
+    /// the login details; those must never reach a screen.
+    pub fn mentions_credentials(&self, text: &str) -> bool {
+        let text = text.to_lowercase();
+        [&self.creds.username, &self.creds.password]
+            .iter()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| s.chars().count() >= 4)
+            .any(|s| text.contains(&s))
+    }
+
     pub fn live_url(&self, stream_id: i64, format: StreamFormat) -> Url {
         let mut url = self.creds.server.clone();
         url.path_segments_mut()
@@ -396,6 +408,21 @@ mod tests {
         assert_eq!(
             x.xmltv_url().as_str(),
             "https://cdn.example.com/panel/xmltv.php?username=me&password=pw"
+        );
+    }
+
+    #[test]
+    fn spots_credentials_in_channel_names() {
+        let creds = Credentials::new("http://tv.example.com", "jdoe2026", "Pa55word").unwrap();
+        let x = XtreamClient::new(reqwest::Client::new(), creds);
+        assert!(x.mentions_credentials("Username: JDOE2026"));
+        assert!(x.mentions_credentials("pass pa55word"));
+        assert!(!x.mentions_credentials("BBC One HD"));
+        let short = Credentials::new("http://tv.example.com", "abc", "xy").unwrap();
+        let x = XtreamClient::new(reqwest::Client::new(), short);
+        assert!(
+            !x.mentions_credentials("abc news"),
+            "too short to match safely"
         );
     }
 
