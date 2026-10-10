@@ -803,7 +803,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv.tv;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv;
 				PRODUCT_NAME = OpenIPTV;
 				SDKROOT = appletvos;
 				TARGETED_DEVICE_FAMILY = 3;
@@ -824,7 +824,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv.tv;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv;
 				PRODUCT_NAME = OpenIPTV;
 				SDKROOT = appletvos;
 				TARGETED_DEVICE_FAMILY = 3;

@@ -42,6 +42,20 @@ the MPEG-TS streams AVPlayer can't.
    (or Wi-Fi pair) your iPhone and press Run. In the app, paste the pairing
    link. A free Apple ID works; the install then lasts 7 days.
 
+## TestFlight (iPhone, iPad and Apple TV)
+
+Needs a paid Apple Developer Program membership.
+
+1. Xcode → Settings → Apple Accounts: sign in with your developer Apple ID.
+2. App Store Connect → Apps → **+** → New App: platforms iOS and tvOS,
+   bundle ID `com.jorda0mega.openiptv` (or change it in `apple/project.yml`;
+   run `apple/scripts/testflight.sh` once first if the ID isn't listed yet,
+   which registers it).
+3. `apple/scripts/testflight.sh <TEAM_ID>` archives both apps and uploads
+   them. After processing, install from the TestFlight app on your iPhone
+   and Apple TV (you're an internal tester as the account holder; external
+   testers need a public link and Beta App Review).
+
 ## Measure your servers
 
 ```sh
