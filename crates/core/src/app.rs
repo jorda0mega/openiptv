@@ -311,9 +311,20 @@ impl LiveTv {
             client.live_channels(None)
         );
         let (account, categories, mut channels) = (account?, categories?, channels?);
-        // Drop "Account Info"-style channels that spell out the login.
-        channels
-            .retain(|c| !client.mentions_credentials(&c.name) && !looks_like_account_info(&c.name));
+        // Drop "Account Info"-style categories and any channel that spells
+        // out the login; they can leak credentials and aren't watchable.
+        let hidden: std::collections::HashSet<&str> = categories
+            .iter()
+            .filter(|c| looks_like_account_info(&c.category_name))
+            .map(|c| c.category_id.as_str())
+            .collect();
+        channels.retain(|c| {
+            !client.mentions_credentials(&c.name)
+                && !looks_like_account_info(&c.name)
+                && c.category_id
+                    .as_deref()
+                    .is_none_or(|id| !hidden.contains(id))
+        });
         let by_id = channels
             .iter()
             .enumerate()
