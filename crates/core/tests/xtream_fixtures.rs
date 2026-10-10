@@ -5,7 +5,11 @@ use openiptv_core::xtream::{self, Account, StreamFormat};
 fn channel_list_survives_mixed_types_and_bad_rows() {
     let channels = xtream::parse_channels(include_bytes!("fixtures/live_streams.json")).unwrap();
     let ids: Vec<i64> = channels.iter().map(|c| c.stream_id).collect();
-    assert_eq!(ids, [101, 102, 104, 105], "row without id and non-object row dropped");
+    assert_eq!(
+        ids,
+        [101, 102, 104, 105],
+        "row without id and non-object row dropped"
+    );
 
     let bbc = &channels[0];
     assert_eq!(bbc.epg_id.as_deref(), Some("BBCOne.uk"));
@@ -31,21 +35,32 @@ fn channel_list_survives_mixed_types_and_bad_rows() {
 #[test]
 fn short_epg_prefers_timestamps_and_reports_panel_skew() {
     // Panel in UTC+1: wall clock 14:00 is 13:00 UTC = 1791637200.
-    let listings = xtream::parse_short_epg(include_bytes!("fixtures/short_epg.json"), Some(3600)).unwrap();
+    let listings =
+        xtream::parse_short_epg(include_bytes!("fixtures/short_epg.json"), Some(3600)).unwrap();
     assert_eq!(listings.len(), 3);
 
     let first = &listings[0];
     assert_eq!(first.programme.title, "News at One");
-    assert_eq!(first.programme.description.as_deref(), Some("The latest news."));
+    assert_eq!(
+        first.programme.description.as_deref(),
+        Some("The latest news.")
+    );
     assert_eq!(first.programme.start, 1_791_637_200);
-    assert_eq!(first.wall_clock_skew, Some(0), "strings agree with timestamps");
+    assert_eq!(
+        first.wall_clock_skew,
+        Some(0),
+        "strings agree with timestamps"
+    );
 
     assert_eq!(listings[1].programme.title, "Plain Title");
     assert_eq!(listings[1].programme.description, None);
 
     let fallback = &listings[2];
     assert_eq!(fallback.programme.title, "No timestamps");
-    assert_eq!(fallback.programme.start, 1_791_640_800, "wall clock shifted by panel offset");
+    assert_eq!(
+        fallback.programme.start, 1_791_640_800,
+        "wall clock shifted by panel offset"
+    );
     assert_eq!(fallback.wall_clock_skew, None);
 
     let programmes: Vec<_> = listings.into_iter().map(|l| l.programme).collect();
@@ -67,8 +82,10 @@ fn account_formats_and_panel_offset() {
     assert!(account.supports(StreamFormat::Hls));
     assert_eq!(account.panel_utc_offset(), Some(3600));
 
-    let ts_only: Account =
-        serde_json::from_str(r#"{"user_info":{"auth":"1","allowed_output_formats":["ts"]},"server_info":{}}"#).unwrap();
+    let ts_only: Account = serde_json::from_str(
+        r#"{"user_info":{"auth":"1","allowed_output_formats":["ts"]},"server_info":{}}"#,
+    )
+    .unwrap();
     assert!(!ts_only.supports(StreamFormat::Hls));
     assert_eq!(ts_only.panel_utc_offset(), None);
 }

@@ -122,10 +122,18 @@ pub struct EmbyClient {
 
 impl EmbyClient {
     /// `server` may be given with or without the `/emby` prefix.
-    pub fn new(http: reqwest::Client, server: &str, device: Device) -> std::result::Result<Self, url::ParseError> {
+    pub fn new(
+        http: reqwest::Client,
+        server: &str,
+        device: Device,
+    ) -> std::result::Result<Self, url::ParseError> {
         let mut base = Url::parse(server.trim())?;
         let path = base.path().trim_end_matches('/').to_owned();
-        let path = if path.ends_with("/emby") { format!("{path}/") } else { format!("{path}/emby/") };
+        let path = if path.ends_with("/emby") {
+            format!("{path}/")
+        } else {
+            format!("{path}/emby/")
+        };
         base.set_path(&path);
         base.set_query(None);
         Ok(EmbyClient {
@@ -171,7 +179,10 @@ impl EmbyClient {
     }
 
     fn user_id(&self) -> Result<&str> {
-        self.session.as_ref().map(|s| s.user_id.as_str()).ok_or(Error::NoSession)
+        self.session
+            .as_ref()
+            .map(|s| s.user_id.as_str())
+            .ok_or(Error::NoSession)
     }
 
     pub async fn public_info(&self) -> Result<PublicInfo> {
@@ -195,7 +206,12 @@ impl EmbyClient {
         Ok(session)
     }
 
-    async fn items(&self, path: &str, query: &[(&str, &str)], what: &'static str) -> Result<Vec<Item>> {
+    async fn items(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+        what: &'static str,
+    ) -> Result<Vec<Item>> {
         let mut url = self.url(path);
         url.query_pairs_mut().extend_pairs(query);
         let body = http::fetch(self.get(url), what).await?;
@@ -216,15 +232,23 @@ impl EmbyClient {
     pub async fn resume(&self, limit: u32) -> Result<Vec<Item>> {
         let path = format!("Users/{}/Items/Resume", self.user_id()?);
         let limit = limit.to_string();
-        self.items(&path, &card_query(&limit, &[("MediaTypes", "Video")]), "continue watching")
-            .await
+        self.items(
+            &path,
+            &card_query(&limit, &[("MediaTypes", "Video")]),
+            "continue watching",
+        )
+        .await
     }
 
     pub async fn next_up(&self, limit: u32) -> Result<Vec<Item>> {
         let user = self.user_id()?.to_owned();
         let limit = limit.to_string();
-        self.items("Shows/NextUp", &card_query(&limit, &[("UserId", &user)]), "next up")
-            .await
+        self.items(
+            "Shows/NextUp",
+            &card_query(&limit, &[("UserId", &user)]),
+            "next up",
+        )
+        .await
     }
 
     /// Recently added, optionally within one library.
@@ -232,7 +256,8 @@ impl EmbyClient {
         let path = format!("Users/{}/Items/Latest", self.user_id()?);
         let limit = limit.to_string();
         let extra: Vec<(&str, &str)> = parent_id.map(|p| ("ParentId", p)).into_iter().collect();
-        self.items(&path, &card_query(&limit, &extra), "latest").await
+        self.items(&path, &card_query(&limit, &extra), "latest")
+            .await
     }
 
     /// A sized image URL. Sizes should be the rendered size × screen scale so
@@ -278,12 +303,29 @@ mod tests {
 
     #[test]
     fn normalises_base_path() {
-        for server in ["http://nas:8096", "http://nas:8096/", "http://nas:8096/emby", "http://nas:8096/emby/"] {
+        for server in [
+            "http://nas:8096",
+            "http://nas:8096/",
+            "http://nas:8096/emby",
+            "http://nas:8096/emby/",
+        ] {
             let c = EmbyClient::new(reqwest::Client::new(), server, device()).unwrap();
-            assert_eq!(c.url("System/Info/Public").as_str(), "http://nas:8096/emby/System/Info/Public", "{server}");
+            assert_eq!(
+                c.url("System/Info/Public").as_str(),
+                "http://nas:8096/emby/System/Info/Public",
+                "{server}"
+            );
         }
-        let proxied = EmbyClient::new(reqwest::Client::new(), "https://example.com/media", device()).unwrap();
-        assert_eq!(proxied.url("Users/x/Views").as_str(), "https://example.com/media/emby/Users/x/Views");
+        let proxied = EmbyClient::new(
+            reqwest::Client::new(),
+            "https://example.com/media",
+            device(),
+        )
+        .unwrap();
+        assert_eq!(
+            proxied.url("Users/x/Views").as_str(),
+            "https://example.com/media/emby/Users/x/Views"
+        );
     }
 
     #[test]
@@ -309,6 +351,9 @@ mod tests {
         assert_eq!(item.kind, "Episode");
         assert_eq!(item.series_primary_image_tag.as_deref(), Some("s"));
         assert!(item.image_tags.is_empty());
-        assert_eq!(item.user_data.as_ref().unwrap().played_percentage, Some(42.5));
+        assert_eq!(
+            item.user_data.as_ref().unwrap().played_percentage,
+            Some(42.5)
+        );
     }
 }

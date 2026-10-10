@@ -61,9 +61,9 @@ pub fn parse(xml: &[u8], keep: impl Fn(&str) -> bool) -> crate::Result<Guide> {
     let mut programme: Option<Pending> = None;
 
     loop {
-        let event = reader
-            .read_event_into(&mut buf)
-            .map_err(|e| crate::Error::Xmltv(format!("at byte {}: {e}", reader.buffer_position())))?;
+        let event = reader.read_event_into(&mut buf).map_err(|e| {
+            crate::Error::Xmltv(format!("at byte {}: {e}", reader.buffer_position()))
+        })?;
         match event {
             Event::Start(e) => match e.local_name().as_ref() {
                 b"channel" => channel_id = attr(&e, b"id"),
@@ -175,12 +175,16 @@ fn finish_programme(p: Pending, guide: &mut Guide) {
     let (Some(start), Some(stop)) = (p.start, p.stop) else {
         return;
     };
-    guide.programmes.entry(p.channel).or_default().push(Programme {
-        start,
-        stop,
-        title: p.title.unwrap_or_default(),
-        description: p.desc,
-    });
+    guide
+        .programmes
+        .entry(p.channel)
+        .or_default()
+        .push(Programme {
+            start,
+            stop,
+            title: p.title.unwrap_or_default(),
+            description: p.desc,
+        });
 }
 
 #[cfg(test)]

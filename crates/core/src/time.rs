@@ -64,7 +64,11 @@ pub fn parse_wall_clock(s: &str) -> Option<Timestamp> {
     if b.len() < 16 || b[4] != b'-' || b[7] != b'-' || b[13] != b':' {
         return None;
     }
-    let sec = if b.len() >= 19 { digits(&b[17..19])? } else { 0 };
+    let sec = if b.len() >= 19 {
+        digits(&b[17..19])?
+    } else {
+        0
+    };
     civil_to_unix(
         digits(&b[0..4])?,
         digits(&b[5..7])?,

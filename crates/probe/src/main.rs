@@ -12,12 +12,12 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use serde_json::{Map, Value, json};
-use url::Url;
 use openiptv_core::emby::{Device, EmbyClient, Item};
 use openiptv_core::epg::{self, Programme};
 use openiptv_core::xtream::{self, Account, Channel, Credentials, StreamFormat, XtreamClient};
 use openiptv_core::{http, time, xmltv};
+use serde_json::{Map, Value, json};
+use url::Url;
 
 type AnyResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -133,7 +133,11 @@ async fn main() {
 
 // ---------------------------------------------------------------- Xtream ---
 
-async fn probe_xtream(http: &reqwest::Client, opts: &Options, out: &mut Map<String, Value>) -> AnyResult<()> {
+async fn probe_xtream(
+    http: &reqwest::Client,
+    opts: &Options,
+    out: &mut Map<String, Value>,
+) -> AnyResult<()> {
     let creds = Credentials::new(
         &env("OPENIPTV_XTREAM_URL").ok_or("OPENIPTV_XTREAM_URL missing")?,
         &env("OPENIPTV_XTREAM_USER").ok_or("OPENIPTV_XTREAM_USER missing")?,
@@ -156,9 +160,19 @@ async fn probe_xtream(http: &reqwest::Client, opts: &Options, out: &mut Map<Stri
     println!(
         "  connections        {} of {}",
         account.user_info.active_cons.unwrap_or(0),
-        account.user_info.max_connections.map_or("?".into(), |m| m.to_string())
+        account
+            .user_info
+            .max_connections
+            .map_or("?".into(), |m| m.to_string())
     );
-    println!("  output formats     {}", if formats.is_empty() { "(not listed)".into() } else { formats.join(", ") });
+    println!(
+        "  output formats     {}",
+        if formats.is_empty() {
+            "(not listed)".into()
+        } else {
+            formats.join(", ")
+        }
+    );
     println!(
         "  panel timezone     {} (UTC{:+.1}h)",
         account.server_info.timezone.as_deref().unwrap_or("?"),
@@ -180,7 +194,10 @@ async fn probe_xtream(http: &reqwest::Client, opts: &Options, out: &mut Map<Stri
     let (cats, t_cats) = timed(x.live_categories()).await;
     let cats = cats?;
     let (body, t_dl) = timed(async {
-        let res = http.get(x.api_url(&[("action", "get_live_streams")])).send().await?;
+        let res = http
+            .get(x.api_url(&[("action", "get_live_streams")]))
+            .send()
+            .await?;
         res.error_for_status()?.bytes().await
     })
     .await;
@@ -215,13 +232,15 @@ async fn probe_xtream(http: &reqwest::Client, opts: &Options, out: &mut Map<Stri
     let short = probe_short_epg(&x, &sample, offset, out).await;
 
     if opts.xmltv
-        && let Err(e) = probe_xmltv(http, &x, &sample, &short, out).await {
-            println!("  ✗ XMLTV failed: {e}");
-        }
+        && let Err(e) = probe_xmltv(http, &x, &sample, &short, out).await
+    {
+        println!("  ✗ XMLTV failed: {e}");
+    }
     if opts.streams
-        && let Some(ch) = sample.first() {
-            probe_streams(http, &x, &account, ch, out).await;
-        }
+        && let Some(ch) = sample.first()
+    {
+        probe_streams(http, &x, &account, ch, out).await;
+    }
     Ok(())
 }
 
@@ -229,7 +248,11 @@ async fn probe_xtream(http: &reqwest::Client, opts: &Options, out: &mut Map<Stri
 /// categories instead of being the first N entries of one country.
 fn pick_sample(channels: &[Channel], n: usize) -> Vec<Channel> {
     let candidates: Vec<&Channel> = channels.iter().filter(|c| c.epg_id.is_some()).collect();
-    let pool = if candidates.is_empty() { channels.iter().collect() } else { candidates };
+    let pool = if candidates.is_empty() {
+        channels.iter().collect()
+    } else {
+        candidates
+    };
     if pool.len() <= n {
         return pool.into_iter().cloned().collect();
     }
@@ -242,7 +265,10 @@ async fn probe_short_epg(
     offset: Option<i64>,
     out: &mut Map<String, Value>,
 ) -> HashMap<i64, Vec<Programme>> {
-    heading(&format!("Now playing via short EPG ({} channels)", sample.len()));
+    heading(&format!(
+        "Now playing via short EPG ({} channels)",
+        sample.len()
+    ));
     let mut latencies = Vec::new();
     let mut results = HashMap::new();
     let mut failures = 0;
@@ -272,7 +298,10 @@ async fn probe_short_epg(
         }
     }
     latencies.sort();
-    let with_now = results.values().filter(|p: &&Vec<Programme>| epg::now_next(p, now).now.is_some()).count();
+    let with_now = results
+        .values()
+        .filter(|p: &&Vec<Programme>| epg::now_next(p, now).now.is_some())
+        .count();
     let empty = results.values().filter(|p| p.is_empty()).count();
     println!(
         "  latency            p50 {} · p95 {} · max {}",
@@ -280,13 +309,18 @@ async fn probe_short_epg(
         ms(percentile(&latencies, 0.95)),
         ms(latencies.last().copied().unwrap_or_default())
     );
-    println!("  has a current show {} of channels", pct(with_now, sample.len()));
+    println!(
+        "  has a current show {} of channels",
+        pct(with_now, sample.len())
+    );
     println!("  empty guide        {empty} · failed calls {failures}");
     let inconsistent: Vec<_> = skews.iter().filter(|(s, _)| **s != 0).collect();
     if inconsistent.is_empty() {
         println!("  time strings       consistent with timestamps");
     } else {
-        println!("  time strings       ⚠ disagree with timestamps: {inconsistent:?} (skew s → count)");
+        println!(
+            "  time strings       ⚠ disagree with timestamps: {inconsistent:?} (skew s → count)"
+        );
     }
     for ch in sample.iter().take(5) {
         let title = results
@@ -316,7 +350,11 @@ async fn probe_xmltv(
     heading("Full guide via XMLTV");
     const CAP: usize = 800 * 1024 * 1024;
     let start = Instant::now();
-    let mut res = http.get(x.xmltv_url()).send().await.map_err(|e| e.without_url())?;
+    let mut res = http
+        .get(x.xmltv_url())
+        .send()
+        .await
+        .map_err(|e| e.without_url())?;
     let ttfb = start.elapsed();
     if !res.status().is_success() {
         return Err(format!("HTTP {}", res.status()).into());
@@ -353,19 +391,27 @@ async fn probe_xmltv(
     for ch in sample {
         let Some(epg_id) = &ch.epg_id else { continue };
         let from_xml = guide.now_next(epg_id, now).now.map(|p| p.title);
-        let from_short = short.get(&ch.stream_id).and_then(|p| epg::now_next(p, now).now).map(|p| p.title);
+        let from_short = short
+            .get(&ch.stream_id)
+            .and_then(|p| epg::now_next(p, now).now)
+            .map(|p| p.title);
         match (from_xml, from_short) {
             (Some(a), Some(b)) if a.trim().eq_ignore_ascii_case(b.trim()) => agree += 1,
             (Some(a), Some(b)) => {
                 disagree += 1;
                 if examples.len() < 5 {
-                    examples.push(format!("{}: XMLTV \"{a}\" vs short EPG \"{b}\"", truncate(&ch.name, 28)));
+                    examples.push(format!(
+                        "{}: XMLTV \"{a}\" vs short EPG \"{b}\"",
+                        truncate(&ch.name, 28)
+                    ));
                 }
             }
             _ => missing += 1,
         }
     }
-    println!("  now-title agrees   {agree} · disagrees {disagree} · missing in one source {missing}");
+    println!(
+        "  now-title agrees   {agree} · disagrees {disagree} · missing in one source {missing}"
+    );
     for e in &examples {
         println!("    ⚠ {e}");
     }
@@ -375,7 +421,10 @@ async fn probe_xmltv(
         .filter(|id| !guide.programmes.contains_key(*id))
         .collect();
     if !unmatched.is_empty() {
-        println!("  guide ids absent   {} of the sampled ids have no XMLTV entry", unmatched.len());
+        println!(
+            "  guide ids absent   {} of the sampled ids have no XMLTV entry",
+            unmatched.len()
+        );
     }
     out.insert(
         "xmltv".into(),
@@ -391,7 +440,13 @@ async fn probe_xmltv(
 
 /// Time until the first video bytes arrive: the floor for channel-switch speed.
 /// Each attempt opens one provider connection and closes it immediately.
-async fn probe_streams(http: &reqwest::Client, x: &XtreamClient, account: &Account, ch: &Channel, out: &mut Map<String, Value>) {
+async fn probe_streams(
+    http: &reqwest::Client,
+    x: &XtreamClient,
+    account: &Account,
+    ch: &Channel,
+    out: &mut Map<String, Value>,
+) {
     heading(&format!("Stream start ({})", truncate(&ch.name, 40)));
     let mut results = Map::new();
     for format in [StreamFormat::Hls, StreamFormat::Ts] {
@@ -444,13 +499,21 @@ async fn hls_first_segment(http: &reqwest::Client, url: Url) -> AnyResult<Durati
     let start = Instant::now();
     let mut playlist_url = url;
     for _ in 0..3 {
-        let res = http.get(playlist_url.clone()).send().await.map_err(|e| e.without_url())?;
+        let res = http
+            .get(playlist_url.clone())
+            .send()
+            .await
+            .map_err(|e| e.without_url())?;
         if !res.status().is_success() {
             return Err(format!("HTTP {}", res.status()).into());
         }
         let base = res.url().clone();
         let text = res.text().await.map_err(|e| e.without_url())?;
-        let uris: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+        let uris: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect();
         let Some(first) = uris.first() else {
             return Err("playlist has no entries".into());
         };
@@ -510,9 +573,15 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
         "  libraries          {} in {}: {}",
         views.len(),
         ms(t_views),
-        views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>().join(", ")
+        views
+            .iter()
+            .map(|v| v.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
-    let (rows, t_home) = timed(async { tokio::join!(emby.resume(12), emby.next_up(12), emby.latest(None, 16)) }).await;
+    let (rows, t_home) =
+        timed(async { tokio::join!(emby.resume(12), emby.next_up(12), emby.latest(None, 16)) })
+            .await;
     let (resume, next_up, latest) = (rows.0?, rows.1?, rows.2?);
     println!(
         "  rows in parallel   {} (continue {} · next up {} · latest {})",
@@ -534,9 +603,19 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
             || !i.parent_backdrop_image_tags.is_empty()
     });
     let with_ratio = has(&|i| i.primary_image_aspect_ratio.is_some());
-    println!("  own primary image  {} of {} items", pct(own_primary, items.len()), items.len());
-    println!("  some usable art    {} (own, series, thumb or backdrop)", pct(any_art, items.len()));
-    println!("  aspect ratio sent  {} (lets the grid lay out before images load)", pct(with_ratio, items.len()));
+    println!(
+        "  own primary image  {} of {} items",
+        pct(own_primary, items.len()),
+        items.len()
+    );
+    println!(
+        "  some usable art    {} (own, series, thumb or backdrop)",
+        pct(any_art, items.len())
+    );
+    println!(
+        "  aspect ratio sent  {} (lets the grid lay out before images load)",
+        pct(with_ratio, items.len())
+    );
     let kinds: HashMap<&str, usize> = items.iter().fold(HashMap::new(), |mut m, i| {
         *m.entry(i.kind.as_str()).or_default() += 1;
         m
@@ -546,7 +625,11 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
     let mut image_times = Vec::new();
     let mut image_bytes = 0usize;
     let mut cache_header = None;
-    for item in items.iter().filter(|i| i.image_tags.contains_key("Primary")).take(6) {
+    for item in items
+        .iter()
+        .filter(|i| i.image_tags.contains_key("Primary"))
+        .take(6)
+    {
         let img = openiptv_core::emby::ImageRef {
             item_id: item.id.clone(),
             image_type: "Primary",
@@ -554,7 +637,11 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
             index: None,
         };
         let start = Instant::now();
-        let res = http.get(emby.image_url(&img, 360)).send().await.map_err(|e| e.without_url())?;
+        let res = http
+            .get(emby.image_url(&img, 360))
+            .send()
+            .await
+            .map_err(|e| e.without_url())?;
         cache_header = cache_header.or_else(|| {
             res.headers()
                 .get(reqwest::header::CACHE_CONTROL)
@@ -572,7 +659,12 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
             ms(*image_times.last().unwrap()),
             image_bytes as f64 / image_times.len() as f64 / 1024.0
         );
-        println!("  cache-control      {}", cache_header.as_deref().unwrap_or("(none: client must cache by tag)"));
+        println!(
+            "  cache-control      {}",
+            cache_header
+                .as_deref()
+                .unwrap_or("(none: client must cache by tag)")
+        );
     }
 
     out.insert(

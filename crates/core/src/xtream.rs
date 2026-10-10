@@ -31,7 +31,11 @@ impl std::fmt::Debug for Credentials {
 
 impl Credentials {
     /// Accepts `http://host:port`, with or without a trailing slash or path.
-    pub fn new(server: &str, username: &str, password: &str) -> std::result::Result<Self, url::ParseError> {
+    pub fn new(
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> std::result::Result<Self, url::ParseError> {
         let mut server = Url::parse(server.trim())?;
         if !server.path().ends_with('/') {
             let path = format!("{}/", server.path());
@@ -84,7 +88,10 @@ impl Account {
     pub fn supports(&self, format: StreamFormat) -> bool {
         let allowed = &self.user_info.allowed_output_formats;
         // Panels that omit the list generally serve everything.
-        allowed.is_empty() || allowed.iter().any(|f| f.eq_ignore_ascii_case(format.extension()))
+        allowed.is_empty()
+            || allowed
+                .iter()
+                .any(|f| f.eq_ignore_ascii_case(format.extension()))
     }
 
     /// The panel's UTC offset in seconds, derived from its own clock
@@ -162,7 +169,10 @@ impl RawChannel {
             logo: self.stream_icon.filter(|u| u.starts_with("http")),
             epg_id: self.epg_channel_id.map(|s| s.trim().to_owned()),
             category_id: self.category_id,
-            catchup_days: self.tv_archive.then_some(self.tv_archive_duration).flatten(),
+            catchup_days: self
+                .tv_archive
+                .then_some(self.tv_archive_duration)
+                .flatten(),
         })
     }
 }
@@ -181,7 +191,11 @@ pub(crate) struct RawListing {
     description: Option<String>,
     #[serde(default, deserialize_with = "lenient::opt_i64")]
     start_timestamp: Option<i64>,
-    #[serde(default, alias = "end_timestamp", deserialize_with = "lenient::opt_i64")]
+    #[serde(
+        default,
+        alias = "end_timestamp",
+        deserialize_with = "lenient::opt_i64"
+    )]
     stop_timestamp: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_string")]
     start: Option<String>,
@@ -217,7 +231,11 @@ impl RawListing {
                 start,
                 stop,
                 title: decode_text(&self.title),
-                description: self.description.as_deref().map(decode_text).filter(|d| !d.is_empty()),
+                description: self
+                    .description
+                    .as_deref()
+                    .map(decode_text)
+                    .filter(|d| !d.is_empty()),
             },
             wall_clock_skew,
         })
@@ -254,7 +272,11 @@ impl XtreamClient {
     }
 
     pub fn api_url(&self, params: &[(&str, &str)]) -> Url {
-        let mut url = self.creds.server.join("player_api.php").expect("relative path");
+        let mut url = self
+            .creds
+            .server
+            .join("player_api.php")
+            .expect("relative path");
         url.query_pairs_mut()
             .append_pair("username", &self.creds.username)
             .append_pair("password", &self.creds.password)
@@ -275,7 +297,9 @@ impl XtreamClient {
     }
 
     pub async fn live_categories(&self) -> Result<Vec<Category>> {
-        let body = self.get(&[("action", "get_live_categories")], "live categories").await?;
+        let body = self
+            .get(&[("action", "get_live_categories")], "live categories")
+            .await?;
         lenient::seq_from_slice(&body, "live categories")
     }
 
@@ -291,10 +315,22 @@ impl XtreamClient {
 
     /// Current and upcoming programmes for one channel, straight from the
     /// panel. Fresher than XMLTV and cheap enough to call on focus/zap.
-    pub async fn short_epg(&self, stream_id: i64, limit: u32, panel_offset: Option<i64>) -> Result<Vec<Listing>> {
+    pub async fn short_epg(
+        &self,
+        stream_id: i64,
+        limit: u32,
+        panel_offset: Option<i64>,
+    ) -> Result<Vec<Listing>> {
         let (id, limit) = (stream_id.to_string(), limit.to_string());
         let body = self
-            .get(&[("action", "get_short_epg"), ("stream_id", &id), ("limit", &limit)], "short EPG")
+            .get(
+                &[
+                    ("action", "get_short_epg"),
+                    ("stream_id", &id),
+                    ("limit", &limit),
+                ],
+                "short EPG",
+            )
             .await?;
         parse_short_epg(&body, panel_offset)
     }
@@ -309,19 +345,25 @@ impl XtreamClient {
 
     pub fn live_url(&self, stream_id: i64, format: StreamFormat) -> Url {
         let mut url = self.creds.server.clone();
-        url.path_segments_mut().expect("http url").pop_if_empty().extend([
-            "live",
-            &self.creds.username,
-            &self.creds.password,
-            &format!("{stream_id}.{}", format.extension()),
-        ]);
+        url.path_segments_mut()
+            .expect("http url")
+            .pop_if_empty()
+            .extend([
+                "live",
+                &self.creds.username,
+                &self.creds.password,
+                &format!("{stream_id}.{}", format.extension()),
+            ]);
         url
     }
 }
 
 pub fn parse_channels(body: &[u8]) -> Result<Vec<Channel>> {
     let raw: Vec<RawChannel> = lenient::seq_from_slice(body, "live streams")?;
-    Ok(raw.into_iter().filter_map(RawChannel::into_channel).collect())
+    Ok(raw
+        .into_iter()
+        .filter_map(RawChannel::into_channel)
+        .collect())
 }
 
 pub fn parse_short_epg(body: &[u8], panel_offset: Option<i64>) -> Result<Vec<Listing>> {
@@ -351,7 +393,10 @@ mod tests {
         );
         let nested = Credentials::new("https://cdn.example.com/panel", "me", "pw").unwrap();
         let x = XtreamClient::new(reqwest::Client::new(), nested);
-        assert_eq!(x.xmltv_url().as_str(), "https://cdn.example.com/panel/xmltv.php?username=me&password=pw");
+        assert_eq!(
+            x.xmltv_url().as_str(),
+            "https://cdn.example.com/panel/xmltv.php?username=me&password=pw"
+        );
     }
 
     #[test]
