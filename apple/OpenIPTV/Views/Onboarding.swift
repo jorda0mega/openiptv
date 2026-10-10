@@ -81,7 +81,7 @@ struct AddEmbyView: View {
     @State private var connect: EmbyConnectSession?
 
     var body: some View {
-        NavigationStack {
+        FormSheet(title: "Emby") {
             Form {
                 Picker("Sign in with", selection: $method) {
                     ForEach(Method.allCases) { Text($0.rawValue).tag($0) }
@@ -99,7 +99,7 @@ struct AddEmbyView: View {
                     }
                 } else if method == .server {
                     Section {
-                        TextField("Server address", text: $address, prompt: Text("emby.example.com or 192.168.1.10:8096"))
+                        TextField("Server address", text: $address, prompt: Text(verbatim: "emby.example.com or 192.168.1.10:8096"))
                             .textContentType(.URL)
                             .keyboardType(.URL)
                             .autocorrectionDisabled()
@@ -141,11 +141,6 @@ struct AddEmbyView: View {
                     }
                     .disabled(busy || !canSubmit)
                 }
-            }
-            .navigationTitle("Emby")
-            .inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
             .onChange(of: method) { _, _ in
                 error = nil
@@ -223,7 +218,7 @@ struct AddIPTVView: View {
     @State private var note: String?
 
     var body: some View {
-        NavigationStack {
+        FormSheet(title: "IPTV subscription") {
             Form {
                 Picker("Format", selection: $format) {
                     ForEach(Format.allCases) { Text($0.rawValue).tag($0) }
@@ -233,26 +228,26 @@ struct AddIPTVView: View {
                 #endif
 
                 Section {
-                    TextField("Name (optional)", text: $name, prompt: Text("My IPTV"))
+                    TextField("Name (optional)", text: $name, prompt: Text(verbatim: "My IPTV"))
                     switch format {
                     case .xtream:
-                        TextField("Server", text: $server, prompt: Text("http://line.example.com:8080"))
+                        TextField("Server", text: $server, prompt: Text(verbatim: "http://line.example.com:8080"))
                             .urlField()
-                            .onChange(of: server) { _, value in absorbLink(value) }
+                            .onChange(of: server) { old, new in absorbLink(old, new) }
                         TextField("Username", text: $username)
                             .textContentType(.username)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                         SecureField("Password", text: $password).textContentType(.password)
                     case .m3u:
-                        TextField("Playlist URL", text: $playlist, prompt: Text("https://…/playlist.m3u"))
+                        TextField("Playlist URL", text: $playlist, prompt: Text(verbatim: "https://…/playlist.m3u"))
                             .urlField()
-                        TextField("Guide (XMLTV) URL — optional", text: $guide, prompt: Text("https://…/epg.xml.gz"))
+                        TextField("Guide (XMLTV) URL — optional", text: $guide, prompt: Text(verbatim: "https://…/epg.xml.gz"))
                             .urlField()
                     case .stalker:
-                        TextField("Portal URL", text: $portal, prompt: Text("http://portal.example.com/c/"))
+                        TextField("Portal URL", text: $portal, prompt: Text(verbatim: "http://portal.example.com/c/"))
                             .urlField()
-                        TextField("MAC address", text: $mac, prompt: Text("00:1A:79:XX:XX:XX"))
+                        TextField("MAC address", text: $mac, prompt: Text(verbatim: "00:1A:79:XX:XX:XX"))
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.characters)
                     }
@@ -276,11 +271,6 @@ struct AddIPTVView: View {
                 }
                 .disabled(busy || makeSource() == nil)
             }
-            .navigationTitle("IPTV subscription")
-            .inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            }
             .onChange(of: format) { _, _ in error = nil; note = nil }
         }
     }
@@ -293,19 +283,26 @@ struct AddIPTVView: View {
         }
     }
 
-    /// A pasted Xtream link carries the username and password too.
-    private func absorbLink(_ value: String) {
-        guard value.contains("username="), let parsed = XtreamProvider.parse(value) else { return }
+    /// A pasted Xtream link carries the username and password too. Only a
+    /// paste (several characters at once) is split up; while someone types a
+    /// link, the login is read from it when they submit.
+    private func absorbLink(_ old: String, _ new: String) {
+        guard new.count - old.count > 1, new.contains("username="), new.contains("password="),
+              let parsed = XtreamProvider.parse(new), let u = parsed.username, let p = parsed.password
+        else { return }
         server = parsed.server.absoluteString
-        if let u = parsed.username { username = u }
-        if let p = parsed.password { password = p }
+        username = u
+        password = p
     }
 
     private func makeSource() -> IPTVSource? {
         switch format {
         case .xtream:
-            guard let parsed = XtreamProvider.parse(server), !username.isEmpty, !password.isEmpty else { return nil }
-            return IPTVSource(name: label(parsed.server), kind: .xtream(server: parsed.server, username: username, password: password))
+            guard let parsed = XtreamProvider.parse(server) else { return nil }
+            let user = username.isEmpty ? parsed.username ?? "" : username
+            let pass = password.isEmpty ? parsed.password ?? "" : password
+            guard !user.isEmpty, !pass.isEmpty else { return nil }
+            return IPTVSource(name: label(parsed.server), kind: .xtream(server: parsed.server, username: user, password: pass))
         case .m3u:
             let trimmed = playlist.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let url = URL(string: trimmed), url.scheme?.hasPrefix("http") == true else { return nil }
@@ -348,6 +345,34 @@ struct AddIPTVView: View {
                 self.error = SourceError.wrap(error).localizedDescription
             }
         }
+    }
+}
+
+/// Sheet with a title and Cancel. Apple TV gets a plain heading instead of
+/// a navigation bar (which overlaps the form there); Menu closes the sheet.
+struct FormSheet<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        #if os(tvOS)
+        VStack(alignment: .leading, spacing: 20) {
+            Text(title).font(.title2.weight(.bold)).padding(.horizontal, 40)
+            // A Form has no height of its own outside a navigation stack.
+            content.frame(minHeight: 640)
+        }
+        .padding(.top, 40)
+        #else
+        NavigationStack {
+            content
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                }
+        }
+        #endif
     }
 }
 

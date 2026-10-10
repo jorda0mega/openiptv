@@ -24,6 +24,16 @@ struct IPTVSource: Codable, Hashable, Identifiable {
         }
     }
 
+    /// Same subscription, even if its password or name changed since.
+    func isSameSubscription(as other: IPTVSource) -> Bool {
+        switch (kind, other.kind) {
+        case let (.xtream(a, userA, _), .xtream(b, userB, _)): a == b && userA == userB
+        case let (.m3u(a, _), .m3u(b, _)): a == b
+        case let (.stalker(a, macA), .stalker(b, macB)): a == b && macA == macB
+        default: false
+        }
+    }
+
     /// Host only, for display. Never shows usernames, passwords or tokens.
     var safeDescription: String {
         switch kind {
@@ -72,8 +82,14 @@ final class SourceStore {
         Keychain.save(account, for: "emby")
     }
 
+    /// Adding a subscription that's already here updates it in place (new
+    /// password, say) and keeps its id, so favourites still point at it.
     func add(_ source: IPTVSource) {
-        iptv.append(source)
+        if let index = iptv.firstIndex(where: { $0.isSameSubscription(as: source) }) {
+            iptv[index].kind = source.kind
+        } else {
+            iptv.append(source)
+        }
         Keychain.save(iptv, for: "iptv")
     }
 

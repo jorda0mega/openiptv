@@ -34,6 +34,10 @@ extension View {
         #endif
     }
 
+    /// Readable text inside a list button on Apple TV, which otherwise tints
+    /// it with the accent colour: white, and black under the focus platter.
+    func rowForeground() -> some View { modifier(RowForeground()) }
+
     /// Posters lift and tilt under focus on Apple TV; plain taps on iPhone.
     @ViewBuilder func cardButtonStyle() -> some View {
         #if os(tvOS)
@@ -42,4 +46,13 @@ extension View {
         buttonStyle(.plain)
         #endif
     }
+}
+
+private struct RowForeground: ViewModifier {
+    #if os(tvOS)
+    @Environment(\.isFocused) private var focused
+    func body(content: Content) -> some View { content.foregroundStyle(focused ? Color.black : Color.white) }
+    #else
+    func body(content: Content) -> some View { content }
+    #endif
 }

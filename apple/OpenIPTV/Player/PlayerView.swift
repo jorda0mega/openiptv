@@ -63,7 +63,16 @@ struct LivePlayerView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let player { VideoSurface(player: player).ignoresSafeArea() }
+            if let player {
+                VideoSurface(player: player)
+                    .ignoresSafeArea()
+                    .accessibilityElement()
+                    .accessibilityLabel(channel.name)
+                    .accessibilityHint("Shows the player controls")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { showControls() }
+                    .accessibilityAction(.escape) { dismiss() }
+            }
             if (buffering || !started) && error == nil {
                 ProgressView().controlSize(.large).tint(.white)
             }
@@ -88,6 +97,7 @@ struct LivePlayerView: View {
             default: showControls()
             }
         }
+        .onPlayPauseCommand { if error != nil { play() } }
         .onExitCommand { dismiss() }
         #endif
         .persistentSystemOverlays(.hidden)
@@ -112,12 +122,17 @@ struct LivePlayerView: View {
                         Text(error ?? timing)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(error == nil ? .green : .red)
-                            .lineLimit(1)
+                            .lineLimit(error == nil ? 1 : 2)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .glassEffect(.regular, in: .capsule)
+                    #if os(iOS)
+                    if error != nil {
+                        GlassIconButton(systemName: "arrow.clockwise", label: "Try again") { play() }
+                    }
+                    #endif
                 }
             }
             Spacer()
@@ -155,7 +170,8 @@ struct LivePlayerView: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             #if os(tvOS)
-            Text("Swipe up or down to change channel").font(.caption2).foregroundStyle(.tertiary)
+            Text(error == nil ? "Swipe up or down to change channel" : "Press Play to try again · swipe up or down to change channel")
+                .font(.caption2).foregroundStyle(.tertiary)
             #endif
         }
     }
@@ -179,7 +195,7 @@ struct LivePlayerView: View {
                 guard !Task.isCancelled else { return }
                 player?.load(stream.url, headers: stream.headers)
             } catch {
-                self.error = SourceError.wrap(error).localizedDescription
+                fail(SourceError.wrap(error).localizedDescription)
             }
         }
         Task { await model.ensureNowNext([channel]) }
@@ -192,13 +208,20 @@ struct LivePlayerView: View {
             started = true
             buffering = false
             timing = String(format: "Started in %.1f s", seconds)
+            if controlsVisible { showControls() }
         case let .buffering(isBuffering):
             buffering = isBuffering
         case let .failed(message):
-            error = "Couldn't play: \(message)"
+            fail("Couldn't play: \(message)")
         default:
             break
         }
+    }
+
+    /// Nothing to watch, so the controls (and the way out) stay up.
+    private func fail(_ message: String) {
+        error = message
+        showControls()
     }
 
     private func step(_ delta: Int) {
@@ -215,12 +238,14 @@ struct LivePlayerView: View {
         }
     }
 
+    /// Shows the controls; they hide themselves only once video is playing.
     private func showControls() {
         hideTask?.cancel()
         withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true }
+        guard started, error == nil else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, started, error == nil else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
         }
     }
@@ -252,7 +277,16 @@ struct MoviePlayerView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let player { VideoSurface(player: player).ignoresSafeArea() }
+            if let player {
+                VideoSurface(player: player)
+                    .ignoresSafeArea()
+                    .accessibilityElement()
+                    .accessibilityLabel(playback.title)
+                    .accessibilityHint("Shows the player controls")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { showControls() }
+                    .accessibilityAction(.escape) { dismiss() }
+            }
             if (buffering || !started) && error == nil {
                 ProgressView().controlSize(.large).tint(.white)
             }
@@ -373,11 +407,13 @@ struct MoviePlayerView: View {
         case .started:
             started = true
             buffering = false
+            if controlsVisible { showControls() }
             Task { await model.report(playback, seconds: position, event: .started) }
         case let .buffering(isBuffering):
             buffering = isBuffering
         case let .failed(message):
             error = "Couldn't play: \(message)"
+            showControls(autoHide: false)
         case let .time(newPosition, newDuration):
             position = newPosition
             if let newDuration { duration = newDuration }
@@ -414,10 +450,10 @@ struct MoviePlayerView: View {
     private func showControls(autoHide: Bool = true) {
         hideTask?.cancel()
         withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true }
-        guard autoHide, !paused else { return }
+        guard autoHide, !paused, started, error == nil else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(4))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, error == nil else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
         }
     }

@@ -22,14 +22,14 @@ struct SettingsView: View {
 
                 Section {
                     ForEach(model.sources.iptv) { source in
-                        HStack {
+                        RowWithAction("Remove", role: .destructive, confirm: "Remove \(source.name)?") {
+                            Task { await model.remove(source) }
+                        } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(source.name)
                                 Text("\(source.formatName) · \(source.safeDescription)")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            Button("Remove", role: .destructive) { Task { await model.remove(source) } }
                         }
                     }
                     Button("Add IPTV subscription…") { adding = .iptv }
@@ -46,7 +46,7 @@ struct SettingsView: View {
                     Picker("Player", selection: $prefs.playerProfile) {
                         ForEach(PlayerProfile.allCases) { Text($0.title).tag($0) }
                     }
-                    Toggle("Hardware decoding", isOn: $prefs.hardwareDecoding)
+                    Toggle(isOn: $prefs.hardwareDecoding) { Text("Hardware decoding").rowForeground() }
                 } header: {
                     Text("Playback")
                 } footer: {
@@ -56,12 +56,12 @@ struct SettingsView: View {
                 if !model.rows.isEmpty {
                     Section("Home rows") {
                         ForEach(model.rows) { row in
-                            Toggle(row.title, isOn: Binding(
+                            Toggle(isOn: Binding(
                                 get: { !prefs.hiddenRows.contains(row.title) },
                                 set: { show in
                                     if show { prefs.hiddenRows.remove(row.title) } else { prefs.hiddenRows.insert(row.title) }
                                 }
-                            ))
+                            )) { Text(row.title).rowForeground() }
                         }
                     }
                 }
@@ -71,10 +71,8 @@ struct SettingsView: View {
                         Text("Press and hold a channel to add it.").foregroundStyle(.secondary)
                     }
                     ForEach(prefs.favorites) { channel in
-                        HStack {
+                        RowWithAction("Remove", role: .destructive) { prefs.toggleFavorite(channel) } label: {
                             Text(channel.name)
-                            Spacer()
-                            Button("Remove", role: .destructive) { prefs.toggleFavorite(channel) }
                         }
                     }
                     #if os(iOS)
@@ -85,10 +83,8 @@ struct SettingsView: View {
                 if !prefs.hiddenCategories.isEmpty {
                     Section("Hidden categories") {
                         ForEach(prefs.hiddenCategories.sorted(), id: \.self) { id in
-                            HStack {
+                            RowWithAction("Show") { prefs.hiddenCategories.remove(id) } label: {
                                 Text(model.categories.first(where: { $0.id == id })?.name ?? "Unavailable category")
-                                Spacer()
-                                Button("Show") { prefs.hiddenCategories.remove(id) }
                             }
                         }
                     }
@@ -140,5 +136,50 @@ struct SettingsView: View {
         case let .ready(count, at): "Programme guide: \(count.formatted()) programmes, updated \(at.formatted(.relative(presentation: .named)))."
         case let .failed(message): "Programme guide: \(message)"
         }
+    }
+}
+
+/// A row with one trailing action. iPhone: a button at the end of the row.
+/// Apple TV: the whole row is the button (a button nested in a row leaves the
+/// row's text white on the white focus platter), confirming first if asked.
+private struct RowWithAction<Label: View>: View {
+    let title: String
+    let role: ButtonRole?
+    let confirm: String?
+    let action: () -> Void
+    let label: Label
+    @State private var confirming = false
+
+    init(_ title: String, role: ButtonRole? = nil, confirm: String? = nil,
+         action: @escaping () -> Void, @ViewBuilder label: () -> Label) {
+        self.title = title
+        self.role = role
+        self.confirm = confirm
+        self.action = action
+        self.label = label()
+    }
+
+    var body: some View {
+        #if os(tvOS)
+        Button {
+            if confirm == nil { action() } else { confirming = true }
+        } label: {
+            HStack {
+                label
+                Spacer()
+                Text(title).foregroundStyle(role == .destructive ? Color.red : Color.accentColor)
+            }
+            .rowForeground()
+        }
+        .confirmationDialog(confirm ?? title, isPresented: $confirming, titleVisibility: .visible) {
+            Button(title, role: role, action: action)
+        }
+        #else
+        HStack {
+            label
+            Spacer()
+            Button(title, role: role, action: action)
+        }
+        #endif
     }
 }

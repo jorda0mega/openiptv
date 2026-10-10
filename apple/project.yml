@@ -16,7 +16,6 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     OTHER_LDFLAGS: ["-ObjC"]
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-    INFOPLIST_KEY_UIUserInterfaceStyle: Dark
 
 # Shared by both apps. MPVKit's LGPL static libraries come from
 # scripts/fetch-mpvkit.sh (run automatically before the first build).
@@ -128,12 +127,10 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: OpenIPTV finds and connects to your OpenIPTV server on this network.
-        NSBonjourServices: [_openiptv._tcp]
+        NSLocalNetworkUsageDescription: OpenIPTV connects to Emby servers and IPTV sources on your local network.
+        # Dark everywhere, including UIKit-backed fields in sheets.
+        UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
-        CFBundleURLTypes:
-          - CFBundleURLName: OpenIPTV pairing
-            CFBundleURLSchemes: [openiptv]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv
@@ -158,8 +155,9 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: OpenIPTV finds and connects to your OpenIPTV server on this network.
-        NSBonjourServices: [_openiptv._tcp]
+        NSLocalNetworkUsageDescription: OpenIPTV connects to Emby servers and IPTV sources on your local network.
+        # Dark everywhere, including UIKit-backed fields in sheets.
+        UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
     settings:
       base:

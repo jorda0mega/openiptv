@@ -27,12 +27,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_openiptv._tcp</string>
-	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenIPTV finds and connects to your OpenIPTV server on this network.</string>
+	<string>OpenIPTV connects to Emby servers and IPTV sources on your local network.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
@@ -42,5 +38,7 @@
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
 </dict>
 </plist>

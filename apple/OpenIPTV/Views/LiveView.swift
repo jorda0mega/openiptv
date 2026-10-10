@@ -55,7 +55,7 @@ struct LiveView: View {
             .navigationTitle(selectedName)
             .inlineTitle()
             // safeAreaBar (iOS/tvOS 26) keeps the chips in the bar area with the
-            // scroll edge effect; content in safeAreaInset rendered invisibly.
+            // scroll edge effect.
             .safeAreaBar(edge: .top, spacing: 0) {
                 if !model.sources.iptv.isEmpty { categoryChips }
             }
@@ -83,13 +83,17 @@ struct LiveView: View {
     private var categoryChips: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                // Each chip carries its own glass; a GlassEffectContainer around
-                // a lazy stack left the chips invisible.
-                LazyHStack(spacing: 8) {
+                // Not lazy: a LazyHStack in a bar never draws its children on
+                // iPhone (they exist and take taps, but render nothing).
+                HStack(spacing: 8) {
                     Button { showingAllCategories = true } label: {
                         Label("All", systemImage: "line.3.horizontal")
                     }
+                    #if os(tvOS)
+                    .buttonStyle(TVChipStyle(selected: false))
+                    #else
                     .buttonStyle(.glass)
+                    #endif
                     if !prefs.favorites.isEmpty {
                         chip(id: AppModel.favoritesID, title: "★ Favourites")
                     }
@@ -117,11 +121,16 @@ struct LiveView: View {
     }
 
     @ViewBuilder private func chip(id: String, title: String) -> some View {
+        #if os(tvOS)
+        Button(title) { model.selectedCategory = id }
+            .buttonStyle(TVChipStyle(selected: id == model.selectedCategory)).lineLimit(1).id(id)
+        #else
         if id == model.selectedCategory {
             Button(title) { model.selectedCategory = id }.buttonStyle(.glassProminent).lineLimit(1).id(id)
         } else {
             Button(title) { model.selectedCategory = id }.buttonStyle(.glass).lineLimit(1).id(id)
         }
+        #endif
     }
 
     private var categoryPicker: some View {
@@ -204,7 +213,7 @@ struct ChannelRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
-        .foregroundStyle(.primary)
+        .rowForeground()
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -231,3 +240,41 @@ struct ChannelLogo: View {
         }
     }
 }
+
+#if os(tvOS)
+/// Category chip for Apple TV: white text on glass, accent fill when
+/// selected, white and raised under focus.
+struct TVChipStyle: ButtonStyle {
+    let selected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Chip(label: configuration.label, selected: selected, pressed: configuration.isPressed)
+    }
+
+    private struct Chip: View {
+        let label: Configuration.Label
+        let selected: Bool
+        let pressed: Bool
+        @Environment(\.isFocused) private var focused
+
+        var body: some View {
+            label
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(focused ? Color.black : Color.white)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 14)
+                .background {
+                    if focused {
+                        Capsule().fill(.white)
+                    } else if selected {
+                        Capsule().fill(Color.accentColor)
+                    }
+                }
+                .glassEffect(focused || selected ? .identity : .regular, in: .capsule)
+                .scaleEffect(focused ? (pressed ? 1.02 : 1.08) : 1)
+                .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: 12, y: 8)
+                .animation(.snappy(duration: 0.18), value: focused)
+        }
+    }
+}
+#endif
