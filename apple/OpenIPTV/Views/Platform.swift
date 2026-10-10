@@ -7,10 +7,12 @@ enum Layout {
     static let posterWidth: CGFloat = 220
     static let rowSpacing: CGFloat = 40
     static let cardSpacing: CGFloat = 40
+    static let chipStripHeight: CGFloat = 110
     #else
     static let posterWidth: CGFloat = 118
     static let rowSpacing: CGFloat = 24
     static let cardSpacing: CGFloat = 12
+    static let chipStripHeight: CGFloat = 60
     #endif
 }
 

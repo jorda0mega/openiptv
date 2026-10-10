@@ -81,32 +81,30 @@ struct LiveView: View {
     private var categoryChips: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                GlassEffectContainer(spacing: 8) {
-                    LazyHStack(spacing: 8) {
-                        Button { showingAllCategories = true } label: {
-                            Label("All", systemImage: "line.3.horizontal")
-                        }
-                        .buttonStyle(.glass)
-                        if !prefs.favorites.isEmpty {
-                            chip(id: AppModel.favoritesID, title: "★ Favourites")
-                        }
-                        ForEach(visibleCategories) { category in
-                            chip(id: category.id, title: category.name)
-                                .contextMenu {
-                                    Button("Hide Category", systemImage: "eye.slash") {
-                                        prefs.hiddenCategories.insert(category.id)
-                                    }
-                                }
-                        }
+                // Each chip carries its own glass; a GlassEffectContainer around
+                // a lazy stack left the chips invisible.
+                LazyHStack(spacing: 8) {
+                    Button { showingAllCategories = true } label: {
+                        Label("All", systemImage: "line.3.horizontal")
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
+                    .buttonStyle(.glass)
+                    if !prefs.favorites.isEmpty {
+                        chip(id: AppModel.favoritesID, title: "★ Favourites")
+                    }
+                    ForEach(visibleCategories) { category in
+                        chip(id: category.id, title: category.name)
+                            .contextMenu {
+                                Button("Hide Category", systemImage: "eye.slash") {
+                                    prefs.hiddenCategories.insert(category.id)
+                                }
+                            }
+                    }
                 }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
             }
             .scrollIndicators(.hidden)
-            // A horizontal ScrollView would otherwise grow to fill the
-            // inset's height and push the channel list down.
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(height: Layout.chipStripHeight)
             #if os(tvOS)
             .scrollClipDisabled()
             #endif
@@ -141,6 +139,14 @@ struct LiveView: View {
                     }
                 }
                 .foregroundStyle(.primary)
+                #if os(iOS)
+                .swipeActions {
+                    Button("Hide", systemImage: "eye.slash") { prefs.hiddenCategories.insert(category.id) }
+                }
+                #endif
+                .contextMenu {
+                    Button("Hide Category", systemImage: "eye.slash") { prefs.hiddenCategories.insert(category.id) }
+                }
             }
             .searchable(text: $categoryFilter, prompt: "Filter categories")
             .navigationTitle("Categories")
@@ -196,6 +202,7 @@ struct ChannelRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
+        .foregroundStyle(.primary)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
