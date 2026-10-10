@@ -105,6 +105,13 @@ struct AuthUser {
     id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ExchangeResult {
+    local_user_id: String,
+    access_token: String,
+}
+
 /// Image tags change whenever the artwork changes, so a URL that includes
 /// the tag can be cached forever by the client.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,6 +211,24 @@ impl EmbyClient {
         let auth: AuthResult = http::decode(&body, "login")?;
         let session = Session {
             user_id: auth.user.id,
+            access_token: auth.access_token,
+        };
+        self.session = Some(session.clone());
+        Ok(session)
+    }
+
+    /// Trade an Emby Connect server access key for a normal session as the
+    /// Connect user's linked local account.
+    pub async fn exchange(&mut self, connect_user_id: &str, access_key: &str) -> Result<Session> {
+        let mut url = self.url("Connect/Exchange");
+        url.query_pairs_mut()
+            .append_pair("format", "json")
+            .append_pair("ConnectUserId", connect_user_id);
+        let req = self.get(url).header("X-Emby-Token", access_key);
+        let body = http::fetch(req, "Connect exchange").await?;
+        let auth: ExchangeResult = http::decode(&body, "Connect exchange")?;
+        let session = Session {
+            user_id: auth.local_user_id,
             access_token: auth.access_token,
         };
         self.session = Some(session.clone());

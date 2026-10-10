@@ -5,6 +5,7 @@
 
 pub mod artwork;
 pub mod emby;
+pub mod emby_connect;
 pub mod epg;
 pub mod http;
 mod lenient;

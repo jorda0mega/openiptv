@@ -13,11 +13,16 @@ ask() { # ask VAR "Prompt" [secret]
   export "${var?}"
 }
 
-echo "Leave a server blank to skip it."
-ask OPENIPTV_EMBY_URL "Emby server URL (e.g. https://emby.example.com)"
-if [[ -n "$OPENIPTV_EMBY_URL" ]]; then
-  ask OPENIPTV_EMBY_USER "Emby username"
-  ask OPENIPTV_EMBY_PASS "Emby password" secret
+echo "Leave a prompt blank to skip it."
+ask OPENIPTV_EMBY_CONNECT_USER "Emby Connect username or email (blank to enter a server URL instead)"
+if [[ -n "$OPENIPTV_EMBY_CONNECT_USER" ]]; then
+  ask OPENIPTV_EMBY_CONNECT_PASS "Emby Connect password" secret
+else
+  ask OPENIPTV_EMBY_URL "Emby server URL (e.g. https://emby.example.com)"
+  if [[ -n "$OPENIPTV_EMBY_URL" ]]; then
+    ask OPENIPTV_EMBY_USER "Emby username"
+    ask OPENIPTV_EMBY_PASS "Emby password" secret
+  fi
 fi
 ask OPENIPTV_XTREAM_URL "Xtream server URL (e.g. http://line.example.com:8080)"
 if [[ -n "$OPENIPTV_XTREAM_URL" ]]; then

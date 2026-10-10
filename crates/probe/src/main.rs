@@ -13,7 +13,8 @@ use std::future::Future;
 use std::time::{Duration, Instant};
 
 use openiptv_core::artwork::{self, Context, Shape};
-use openiptv_core::emby::{Device, EmbyClient};
+use openiptv_core::emby::{Device, EmbyClient, PublicInfo};
+use openiptv_core::emby_connect::ConnectClient;
 use openiptv_core::epg::{self, Programme};
 use openiptv_core::xtream::{self, Account, Channel, Credentials, StreamFormat, XtreamClient};
 use openiptv_core::{http, time, xmltv};
@@ -47,6 +48,7 @@ fn options() -> AnyResult<Options> {
                 println!(
                     "openiptv-probe [--samples N] [--json PATH] [--skip-xmltv] [--skip-streams]\n\n\
                      env: OPENIPTV_EMBY_URL OPENIPTV_EMBY_USER OPENIPTV_EMBY_PASS\n     \
+                     or OPENIPTV_EMBY_CONNECT_USER OPENIPTV_EMBY_CONNECT_PASS [OPENIPTV_EMBY_SERVER]\n     \
                      OPENIPTV_XTREAM_URL OPENIPTV_XTREAM_USER OPENIPTV_XTREAM_PASS"
                 );
                 std::process::exit(0);
@@ -112,7 +114,7 @@ async fn main() {
         println!("(skipping Xtream: OPENIPTV_XTREAM_URL not set)");
     }
 
-    if env("OPENIPTV_EMBY_URL").is_some() {
+    if env("OPENIPTV_EMBY_URL").is_some() || env("OPENIPTV_EMBY_CONNECT_USER").is_some() {
         let mut section = Map::new();
         if let Err(e) = probe_emby(&http, &mut section).await {
             println!("  ✗ stopped: {e}");
@@ -120,7 +122,7 @@ async fn main() {
         }
         report.insert("emby".into(), Value::Object(section));
     } else {
-        println!("(skipping Emby: OPENIPTV_EMBY_URL not set)");
+        println!("(skipping Emby: neither OPENIPTV_EMBY_URL nor OPENIPTV_EMBY_CONNECT_USER set)");
     }
 
     if let Some(path) = &opts.json {
@@ -540,32 +542,30 @@ fn truncate(s: &str, max: usize) -> String {
 
 // ------------------------------------------------------------------ Emby ---
 
+struct Connected {
+    emby: EmbyClient,
+    info: PublicInfo,
+    info_time: Duration,
+    /// Time from credentials to a usable server session.
+    login_time: Duration,
+}
+
 async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> AnyResult<()> {
-    let server = env("OPENIPTV_EMBY_URL").ok_or("OPENIPTV_EMBY_URL missing")?;
     let device = Device {
         client: "OpenIPTV Probe".into(),
         name: "openiptv-probe".into(),
         id: "openiptv-probe".into(),
         version: env!("CARGO_PKG_VERSION").into(),
     };
-    let mut emby = EmbyClient::new(http.clone(), &server, device)?;
-
-    heading("Emby server");
-    let (info, t_info) = timed(emby.public_info()).await;
-    let info = info?;
-    println!(
-        "  server             {} · Emby {} · {}",
-        info.server_name.as_deref().unwrap_or("?"),
-        info.version.as_deref().unwrap_or("?"),
-        ms(t_info)
-    );
-    let (session, t_login) = timed(emby.login(
-        &env("OPENIPTV_EMBY_USER").ok_or("OPENIPTV_EMBY_USER missing")?,
-        &env("OPENIPTV_EMBY_PASS").unwrap_or_default(),
-    ))
-    .await;
-    session?;
-    println!("  login              {}", ms(t_login));
+    let Connected {
+        mut emby,
+        info,
+        info_time,
+        login_time,
+    } = match env("OPENIPTV_EMBY_CONNECT_USER") {
+        Some(user) => connect_login(http, device, &user, out).await?,
+        None => direct_login(http, device).await?,
+    };
 
     // Always end the session, even if a later step fails.
     let result = probe_emby_home(http, &emby, out).await;
@@ -574,9 +574,111 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
     }
     out.insert(
         "server".into(),
-        json!({ "version": info.version, "info_ms": t_info.as_millis(), "login_ms": t_login.as_millis() }),
+        json!({ "version": info.version, "info_ms": info_time.as_millis(), "login_ms": login_time.as_millis() }),
     );
     result
+}
+
+fn print_server(info: &PublicInfo, t: Duration) {
+    println!(
+        "  server             {} · Emby {} · {}",
+        info.server_name.as_deref().unwrap_or("?"),
+        info.version.as_deref().unwrap_or("?"),
+        ms(t)
+    );
+}
+
+async fn direct_login(http: &reqwest::Client, device: Device) -> AnyResult<Connected> {
+    let server = env("OPENIPTV_EMBY_URL").ok_or("OPENIPTV_EMBY_URL missing")?;
+    let mut emby = EmbyClient::new(http.clone(), &server, device)?;
+    heading("Emby server");
+    let (info, info_time) = timed(emby.public_info()).await;
+    let info = info?;
+    print_server(&info, info_time);
+    let (session, login_time) = timed(emby.login(
+        &env("OPENIPTV_EMBY_USER").ok_or("OPENIPTV_EMBY_USER missing")?,
+        &env("OPENIPTV_EMBY_PASS").unwrap_or_default(),
+    ))
+    .await;
+    session?;
+    println!("  login              {}", ms(login_time));
+    Ok(Connected {
+        emby,
+        info,
+        info_time,
+        login_time,
+    })
+}
+
+/// Emby Connect account → linked server → server session, the same hops
+/// the apps make for a shared server.
+async fn connect_login(
+    http: &reqwest::Client,
+    device: Device,
+    user: &str,
+    out: &mut Map<String, Value>,
+) -> AnyResult<Connected> {
+    heading("Emby Connect");
+    let connect = ConnectClient::new(http.clone(), &device.client, &device.version);
+    let password = env("OPENIPTV_EMBY_CONNECT_PASS").unwrap_or_default();
+    let (session, t_login) = timed(connect.login(user, &password)).await;
+    let session = session?;
+    println!("  account login      {}", ms(t_login));
+    let (servers, t_servers) = timed(connect.servers(&session)).await;
+    let servers = servers?;
+    println!(
+        "  linked servers     {} in {}: {}",
+        servers.len(),
+        ms(t_servers),
+        servers
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let wanted = env("OPENIPTV_EMBY_SERVER");
+    let server = match &wanted {
+        Some(name) => servers.iter().find(|s| s.name.eq_ignore_ascii_case(name)),
+        None => servers.first(),
+    }
+    .ok_or("no matching linked server (set OPENIPTV_EMBY_SERVER to a name above)")?;
+    out.insert(
+        "connect".into(),
+        json!({ "login_ms": t_login.as_millis(), "servers": servers.len(), "servers_ms": t_servers.as_millis() }),
+    );
+
+    heading("Emby server");
+    let mut last_error: Option<Box<dyn std::error::Error>> = None;
+    for address in server.addresses() {
+        let kind = if Some(address) == server.remote_address.as_deref() {
+            "remote"
+        } else {
+            "local"
+        };
+        let mut emby = EmbyClient::new(http.clone(), address, device.clone())?;
+        let (info, info_time) = timed(emby.public_info()).await;
+        let info = match info {
+            Ok(info) => info,
+            Err(e) => {
+                println!("  {kind} address     unreachable ({e})");
+                last_error = Some(e.into());
+                continue;
+            }
+        };
+        print_server(&info, info_time);
+        println!("  address            {kind}");
+        let (exchanged, t_exchange) =
+            timed(emby.exchange(&session.user_id, &server.access_key)).await;
+        exchanged?;
+        println!("  connect exchange   {}", ms(t_exchange));
+        return Ok(Connected {
+            emby,
+            info,
+            info_time,
+            login_time: t_login + t_servers + t_exchange,
+        });
+    }
+    Err(last_error.unwrap_or_else(|| "linked server has no address".into()))
 }
 
 async fn probe_emby_home(
@@ -597,17 +699,64 @@ async fn probe_emby_home(
             .collect::<Vec<_>>()
             .join(", ")
     );
-    let (rows, t_home) =
-        timed(async { tokio::join!(emby.resume(12), emby.next_up(12), emby.latest(None, 16)) })
-            .await;
-    let (resume, next_up, latest) = (rows.0?, rows.1?, rows.2?);
+    let (rows, t_home) = timed(async {
+        tokio::join!(
+            timed(emby.resume(12)),
+            timed(emby.next_up(12)),
+            timed(emby.latest(None, 16))
+        )
+    })
+    .await;
+    let ((resume, t_resume), (next_up, t_next_up), (latest, t_latest)) = rows;
+    let (resume, next_up, latest) = (resume?, next_up?, latest?);
     println!(
-        "  rows in parallel   {} (continue {} · next up {} · latest {})",
-        ms(t_home),
-        resume.len(),
-        next_up.len(),
-        latest.len()
+        "  rows in parallel   {} until the slowest returned",
+        ms(t_home)
     );
+    println!(
+        "    continue         {} items in {}",
+        resume.len(),
+        ms(t_resume)
+    );
+    println!(
+        "    next up          {} items in {}",
+        next_up.len(),
+        ms(t_next_up)
+    );
+    println!(
+        "    latest (all)     {} items in {}",
+        latest.len(),
+        ms(t_latest)
+    );
+
+    // The app shows "Latest" per library, like Emby does; time those too.
+    let mut set = tokio::task::JoinSet::new();
+    for lib in views
+        .iter()
+        .filter(|v| matches!(v.collection_type.as_deref(), Some("movies" | "tvshows")))
+        .take(4)
+    {
+        let (emby, id, name) = (emby.clone(), lib.id.clone(), lib.name.clone());
+        set.spawn(async move {
+            let (items, t) = timed(emby.latest(Some(&id), 16)).await;
+            (name, items.map(|i| i.len()), t)
+        });
+    }
+    let mut per_library = Vec::new();
+    while let Some(Ok(row)) = set.join_next().await {
+        per_library.push(row);
+    }
+    per_library.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, items, t) in &per_library {
+        match items {
+            Ok(n) => println!(
+                "    latest in {:<17} {n} items in {}",
+                truncate(name, 17),
+                ms(*t)
+            ),
+            Err(e) => println!("    latest in {:<17} ✗ {e}", truncate(name, 17)),
+        }
+    }
 
     heading("Artwork (each row loaded the way the app will)");
     let rows = [
@@ -617,6 +766,7 @@ async fn probe_emby_home(
     ];
     let (mut total, mut first, mut fallback, mut placeholder, mut with_ratio) = (0, 0, 0, 0, 0);
     let (mut image_times, mut image_bytes, mut cache_header) = (Vec::new(), 0usize, None);
+    let (mut ttfbs, mut loaded_urls, mut http2) = (Vec::new(), Vec::new(), false);
     for (name, items, context) in rows {
         if items.is_empty() {
             continue;
@@ -640,8 +790,11 @@ async fn probe_emby_home(
             }
             if loaded.used.is_some() {
                 image_times.push(loaded.elapsed);
+                ttfbs.push(loaded.ttfb);
                 image_bytes += loaded.bytes;
+                http2 |= loaded.http2;
                 cache_header = cache_header.or(loaded.cache_control);
+                loaded_urls.extend(loaded.url);
             }
         }
         println!(
@@ -665,12 +818,35 @@ async fn probe_emby_home(
         pct(with_ratio, total)
     );
     image_times.sort();
+    ttfbs.sort();
+    // Same URLs again: the server has now resized and cached them, so the
+    // difference shows how much of the first load was server-side work.
+    let mut set = tokio::task::JoinSet::new();
+    for url in loaded_urls.iter().take(12).cloned() {
+        set.spawn(load_first(http.clone(), vec![url]));
+    }
+    let mut warm = Vec::new();
+    while let Some(Ok(loaded)) = set.join_next().await {
+        if loaded.used.is_some() {
+            warm.push(loaded.ttfb);
+        }
+    }
+    warm.sort();
     if !image_times.is_empty() {
         println!(
-            "  image load         p50 {} · max {} · avg {:.0} KB",
+            "  first load         p50 {} · max {} · avg {:.0} KB over {}",
             ms(percentile(&image_times, 0.5)),
             ms(*image_times.last().unwrap()),
-            image_bytes as f64 / image_times.len() as f64 / 1024.0
+            image_bytes as f64 / image_times.len() as f64 / 1024.0,
+            if http2 { "HTTP/2" } else { "HTTP/1.1" }
+        );
+        println!(
+            "  waiting on server  p50 {} before the first byte",
+            ms(percentile(&ttfbs, 0.5))
+        );
+        println!(
+            "  same images again  p50 {} before the first byte",
+            ms(percentile(&warm, 0.5))
         );
         println!(
             "  cache-control      {}",
@@ -684,6 +860,8 @@ async fn probe_emby_home(
         "home".into(),
         json!({
             "views_ms": t_views.as_millis(), "rows_parallel_ms": t_home.as_millis(),
+            "resume_ms": t_resume.as_millis(), "next_up_ms": t_next_up.as_millis(), "latest_ms": t_latest.as_millis(),
+            "latest_per_library_ms": per_library.iter().map(|(_, _, t)| t.as_millis()).collect::<Vec<_>>(),
             "resume": resume.len(), "next_up": next_up.len(), "latest": latest.len(),
         }),
     );
@@ -692,6 +870,8 @@ async fn probe_emby_home(
         json!({
             "cards": total, "first_try": first, "via_fallback": fallback, "placeholder": placeholder,
             "with_aspect_ratio": with_ratio, "image_p50_ms": percentile(&image_times, 0.5).as_millis(),
+            "image_ttfb_p50_ms": percentile(&ttfbs, 0.5).as_millis(), "image_warm_ttfb_p50_ms": percentile(&warm, 0.5).as_millis(),
+            "http2": http2,
             "cache_control": cache_header,
         }),
     );
@@ -700,7 +880,11 @@ async fn probe_emby_home(
 
 struct Loaded {
     used: Option<usize>,
+    url: Option<Url>,
     elapsed: Duration,
+    /// Request start to response headers for the image that loaded.
+    ttfb: Duration,
+    http2: bool,
     bytes: usize,
     cache_control: Option<String>,
 }
@@ -709,9 +893,12 @@ struct Loaded {
 async fn load_first(http: reqwest::Client, urls: Vec<Url>) -> Loaded {
     let start = Instant::now();
     for (i, url) in urls.into_iter().enumerate() {
-        let Ok(res) = http.get(url).send().await else {
+        let attempt = Instant::now();
+        let Ok(res) = http.get(url.clone()).send().await else {
             continue;
         };
+        let ttfb = attempt.elapsed();
+        let http2 = res.version() == reqwest::Version::HTTP_2;
         let header = |name| {
             res.headers()
                 .get(name)
@@ -728,7 +915,10 @@ async fn load_first(http: reqwest::Client, urls: Vec<Url>) -> Loaded {
             Ok(body) if !body.is_empty() => {
                 return Loaded {
                     used: Some(i),
+                    url: Some(url),
                     elapsed: start.elapsed(),
+                    ttfb,
+                    http2,
                     bytes: body.len(),
                     cache_control,
                 };
@@ -738,7 +928,10 @@ async fn load_first(http: reqwest::Client, urls: Vec<Url>) -> Loaded {
     }
     Loaded {
         used: None,
+        url: None,
         elapsed: start.elapsed(),
+        ttfb: Duration::ZERO,
+        http2: false,
         bytes: 0,
         cache_control: None,
     }
