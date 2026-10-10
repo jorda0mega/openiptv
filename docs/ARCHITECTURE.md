@@ -1,74 +1,77 @@
 # OpenIPTV architecture
 
-One app for an existing **Emby** library and an **Xtream Codes** live TV
-subscription, on iOS, Apple TV, Fire TV and the web. Priority order:
+One app for an existing **Emby** library and **IPTV** subscriptions, on
+iPhone, iPad and Apple TV, plus a self-hosted web version. Priority order:
 speed (instant UI, fast start, no buffering) → correct metadata (covers, live
-titles) → everything else.
+titles) → everything else. Users sign in inside the app; nothing depends on
+any particular password manager or on a server we run.
 
-## Decisions
+## Pieces
 
-| Decision | Choice | Why |
+| Piece | Language | Role |
 |---|---|---|
-| Shared logic | **Rust** crate `openiptv-core` | Fastest option that runs everywhere: compiled into the iOS/tvOS and Fire TV apps via UniFFI, and into the web relay. Parsing, EPG, caching and artwork rules are written once. |
-| Apple UI (iOS + tvOS) | **Swift**, one codebase, SwiftUI with UIKit for the big grids | Native focus engine and scrolling; no JS bridge. |
-| Fire TV UI | **Kotlin**, Compose for TV | Fire OS is Android; native is fastest on low-end sticks. |
-| Web UI | **TypeScript**, minimal framework (Solid) | Smallest runtime; the heavy lifting is server-side. |
-| Web relay (`openiptv-edge`) | **Rust** (axum) using `openiptv-core` | Browsers can't reach most Xtream panels directly (plain HTTP, no CORS). The relay proxies streams and serves a pre-digested guide. |
-| Cross-platform UI frameworks | Rejected | Flutter has no tvOS support; React Native puts a JS bridge between the UI and the data, and low-end Fire Sticks are where it shows. The cost is three thin UI layers, so they contain no logic. |
+| `apple/` | Swift / SwiftUI (iOS & tvOS 26) | Native apps with Liquid Glass. Talk to Emby and IPTV providers directly from the device. |
+| `crates/core` | Rust | Emby, Xtream and XMLTV logic for the web relay and the probe. The Swift data layer mirrors it. |
+| `crates/edge` | Rust (axum) | Self-hosted relay for the web app: browsers can't reach most IPTV servers (plain HTTP, no CORS). |
+| `web/` | TypeScript, no framework | Web app served by the relay; 5 KB gzipped before playback. |
+| `crates/probe`, `apple/Tools/smoke` | Rust, Swift | Measure real servers; run the apps' provider code outside the UI. |
 
-### Players
+The Apple apps use Swift rather than the Rust core because Rust's tvOS
+targets need the nightly toolchain; the logic is small and mirrored.
 
-| Platform | Live TV | Emby library |
-|---|---|---|
-| Apple | AVPlayer when the provider offers HLS (hardware decode, PiP, AirPlay); libmpv (MPVKit) for TS-only providers | libmpv: direct-plays MKV/HEVC/DTS without asking Emby to transcode |
-| Fire TV | Media3 ExoPlayer (HLS and TS) | ExoPlayer, direct play first |
-| Web | hls.js (native HLS on Safari); mpegts.js for TS via the relay | Direct play when the browser can, Emby HLS transcode otherwise |
+## Sources
 
-The probe tells us which live path applies: `output formats` and the
-`m3u8` vs `ts` start times.
+- **Emby:** server login or Emby Connect (pick a linked server, then trade
+  its access key for a session). Only the session token is kept.
+- **IPTV**, any number of subscriptions:
+  - **Xtream Codes** (`player_api.php`): lenient decoding (numbers as
+    strings, `false` for empty lists…), base64 EPG text, short EPG for
+    instant now/next, `xmltv.php` for the full guide.
+  - **M3U**: `#EXTINF` attributes (`tvg-id`, `tvg-logo`, `group-title`,
+    `tvg-chno`), `#EXTVLCOPT` user agent/referrer, guide from the header or
+    a user-entered XMLTV URL. `get.php` links are upgraded to Xtream.
+  - **Stalker/Ministra**: MAC-identified handshake → token → genres,
+    channels, per-play `create_link`, short EPG.
+- Channels named like account details (login, expiry, connections), or that
+  contain the login itself, are dropped; some panels list those as channels.
+
+## Privacy
+
+- Credentials: Keychain only, `AfterFirstUnlockThisDeviceOnly`, not
+  synchronizable (no iCloud, no backups). Emby passwords are never kept.
+- Caches hold display data only (home rows with tag-based image URLs, the
+  parsed guide); never credentials or stream URLs. Favourites drop playlist
+  stream URLs before saving and re-resolve them from the live lineup.
+- No logging: libmpv `msg-level=all=no`; user-facing errors come from
+  `SourceError`, which never includes URLs (IPTV URLs carry logins).
+- The web relay keeps logins in memory only; sign-out clears them.
 
 ## Speed tactics
 
-1. **Cache-first.** Every screen renders the last known data from local
-   storage immediately and refreshes in the background. Nothing waits on the
-   network to draw.
-2. **Live titles that are never stale.** Times are handled only as UTC unix
-   timestamps (`epg.rs`). Every now/next answer carries `refresh_at`, the
-   exact second it stops being true, so the UI updates on programme
-   boundaries with one timer rather than polling. The short EPG is re-fetched
-   on channel focus/zap; XMLTV fills the guide grid.
-3. **Guide only for channels you use.** A 250 MB / 1M-programme XMLTV parses
-   in ~0.4 s on an M-series Mac (`examples/xmltv_bench.rs`); a Fire TV Stick
-   is several times slower with a fraction of the memory. `xmltv::parse`
-   takes a channel filter, so devices keep only favourites/visible groups.
-4. **Fast zapping.** One warm HTTP connection pool; stream URLs are known
-   before the click; the player instance is reused. Preloading the next
-   channel is only possible if `max_connections` > 1.
-5. **Artwork.** Image URLs include Emby's image tag, so they never change for
-   the same picture and are cached forever on device. Images are requested at
-   rendered size × screen scale. Card shape comes from
-   `PrimaryImageAspectRatio` before the image loads, so grids don't jump.
-   `artwork.rs` returns every usable image for an item in Emby's own order
-   (series thumb/backdrop first on Continue Watching, posters elsewhere) and
-   the app moves to the next one if an image fails. Emby's web app has no
-   such fallback, which is one way covers end up blank. Details:
-   [emby-client-behavior.md](emby-client-behavior.md).
-6. **Small payloads.** Emby list calls request only the card fields
-   (`emby.rs::card_query`).
-
-## Milestones
-
-- **M0 — core + probe** (done): Xtream and Emby clients, EPG engine, XMLTV
-  parser, `openiptv-probe` against real servers.
-- **M1 — Apple TV vertical slice:** home (Continue Watching, Latest, Live
-  Now), channel list with now/next, player. Measure cold start and zap time.
-- **M2 — iOS** from the same Swift codebase.
-- **M3 — Fire TV.**
-- **M4 — Web + `openiptv-edge` relay.**
+1. **Cache-first.** Home rows render from the on-device cache, then refresh.
+2. **Live titles that are never stale.** Times are UTC unix seconds; every
+   now/next carries `refreshAt`, and one timer fires at the earliest
+   programme change among visible channels. Full guide first (placeholder
+   titles like "No Information Available" don't count), provider short EPG
+   as fallback. On one real provider the full guide covered 20 of 24 sampled
+   channels and the short EPG only 8.
+3. **Guide off the critical path.** The XMLTV file (195 MB on one provider)
+   downloads to a temporary file in the background, is gunzipped if needed,
+   stream-parsed keeping only the user's channels and the next 12 hours, and
+   cached; refreshed every 6 hours.
+4. **Faster Emby queries.** Continue Watching via `Items?Filters=IsResumable`
+   (0.8 s vs 2.1 s for `Items/Resume` on a real server); Latest per library
+   in parallel instead of one all-library query.
+5. **Artwork.** Every usable image in Emby's order (series art first on
+   Continue Watching), falling through on load errors; sized to the card;
+   tag-based URLs cached for good. Card shape from `PrimaryImageAspectRatio`
+   before images load.
+6. **Playback.** libmpv (MPVKit, LGPL) plays MPEG-TS that AVPlayer can't,
+   Vulkan-on-Metal rendering, VideoToolbox decoding, one player reused across
+   channel changes; profiles trade start-up speed against buffering.
 
 ## Reverse engineering (REA)
 
-REA is used to learn behaviour, not to copy code: Emby's own web client is
-traced to get artwork fallbacks and request shapes right. UHF/iSTB can be
-studied through their network traffic (HAR captures) for zapping and EPG
-tricks. No decompiled code goes into this repo.
+REA was used to learn Emby's web client behaviour (artwork fallbacks,
+request shapes, live TV refresh); see `emby-client-behavior.md`. No
+decompiled code is in this repository.

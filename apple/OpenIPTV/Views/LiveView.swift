@@ -54,7 +54,9 @@ struct LiveView: View {
             .listStyle(.plain)
             .navigationTitle(selectedName)
             .inlineTitle()
-            .safeAreaInset(edge: .top, spacing: 0) {
+            // safeAreaBar (iOS/tvOS 26) keeps the chips in the bar area with the
+            // scroll edge effect; content in safeAreaInset rendered invisibly.
+            .safeAreaBar(edge: .top, spacing: 0) {
                 if !model.sources.iptv.isEmpty { categoryChips }
             }
             .sheet(isPresented: $showingAllCategories) { categoryPicker }
