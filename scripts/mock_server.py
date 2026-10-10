@@ -74,6 +74,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw or "{}")
         if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == "tok":
             return self.send(b"", status=204)
+        if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == "tok":
+            return self.send(b"", status=204)
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})
         self.send({"error": "unauthorized"}, status=401)
@@ -159,12 +161,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Users/U1/Views":
             return self.send({"Items": [{"Id": "v1", "Name": "Movies", "Type": "CollectionFolder", "CollectionType": "movies"},
                                         {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"}]})
+        if path.startswith("/Users/U1/Items/") and path.count("/") == 4:
+            item_id = path.rsplit("/", 1)[1]
+            if item_id == "s1":
+                return self.send({"Id": "s1", "Name": "Show", "Type": "Series"})
+            if item_id.startswith("e"):
+                return self.send(episode(int(item_id[1:])) | {"RunTimeTicks": 18000000000})
+            return self.send(movie(int(item_id[1:])) | {"RunTimeTicks": 72000000000})
+        if path == "/Shows/NextUp":
+            items = [episode(3)] if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
+            return self.send({"Items": items, "TotalRecordCount": len(items)})
+        if path.startswith("/Videos/") and path.endswith("/stream"):
+            return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
         if path == "/Users/U1/Items" and q.get("Filters") == "IsResumable":
             return self.send({"Items": [episode(i) for i in range(3)]})
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
-        if path == "/Shows/NextUp":
-            return self.send({"Items": [episode(i) for i in range(3, 5)], "TotalRecordCount": 2})
         if path == "/Users/U1/Items/Latest":
             return self.send([movie(i) for i in range(int(q.get("Limit", 16)))])
         if path.startswith("/Items/") and "/Images/" in path:

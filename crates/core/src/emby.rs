@@ -112,6 +112,13 @@ struct ExchangeResult {
     access_token: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackEvent {
+    Started,
+    Progress,
+    Stopped,
+}
+
 /// Image tags change whenever the artwork changes, so a URL that includes
 /// the tag can be cached forever by the client.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,6 +306,90 @@ impl EmbyClient {
             "next up",
         )
         .await
+    }
+
+    /// One item with its user data (resume position, played state).
+    pub async fn item(&self, id: &str) -> Result<Item> {
+        let path = format!("Users/{}/Items/{id}", self.user_id()?);
+        let body = http::fetch(self.get(self.url(&path)), "item").await?;
+        http::decode(&body, "item")
+    }
+
+    /// The episode to play for a series or season: the user's next unwatched
+    /// episode, else the first one.
+    pub async fn episode_to_play(
+        &self,
+        series_id: &str,
+        season_id: Option<&str>,
+    ) -> Result<Option<Item>> {
+        let user = self.user_id()?.to_owned();
+        if season_id.is_none() {
+            let next = self
+                .query(
+                    "Shows/NextUp",
+                    &[("UserId", &user), ("SeriesId", series_id), ("Limit", "1")],
+                    "next episode",
+                )
+                .await?;
+            if let Some(item) = next.into_iter().next() {
+                return Ok(Some(item));
+            }
+        }
+        let path = format!("Shows/{series_id}/Episodes");
+        let mut query = vec![
+            ("UserId", user.as_str()),
+            ("Fields", "PrimaryImageAspectRatio"),
+        ];
+        if let Some(season) = season_id {
+            query.push(("SeasonId", season));
+        }
+        let episodes = self.query(&path, &query, "episodes").await?;
+        let unwatched = episodes
+            .iter()
+            .find(|e| !e.user_data.as_ref().is_some_and(|u| u.played))
+            .cloned();
+        Ok(unwatched.or_else(|| episodes.into_iter().next()))
+    }
+
+    /// Direct stream of the original file: no server transcoding, seeks via
+    /// HTTP ranges. libmpv plays any container/codec Emby has.
+    pub fn stream_url(&self, item_id: &str) -> Option<Url> {
+        let token = &self.session.as_ref()?.access_token;
+        let mut url = self.url(&format!("Videos/{item_id}/stream"));
+        url.query_pairs_mut()
+            .append_pair("static", "true")
+            .append_pair("MediaSourceId", item_id)
+            .append_pair("api_key", token);
+        Some(url)
+    }
+
+    /// Tell Emby what's playing so Continue Watching and played state stay
+    /// right on every device.
+    pub async fn report_playback(
+        &self,
+        event: PlaybackEvent,
+        item_id: &str,
+        position_ticks: i64,
+    ) -> Result<()> {
+        let path = match event {
+            PlaybackEvent::Started => "Sessions/Playing",
+            PlaybackEvent::Progress => "Sessions/Playing/Progress",
+            PlaybackEvent::Stopped => "Sessions/Playing/Stopped",
+        };
+        let mut req = self
+            .http
+            .post(self.url(path))
+            .header("X-Emby-Authorization", self.authorization())
+            .json(&serde_json::json!({
+                "ItemId": item_id,
+                "PositionTicks": position_ticks,
+                "PlayMethod": "DirectStream",
+                "CanSeek": true,
+            }));
+        if let Some(s) = &self.session {
+            req = req.header("X-Emby-Token", &s.access_token);
+        }
+        http::fetch(req, "playback report").await.map(|_| ())
     }
 
     /// Recently added, optionally within one library.

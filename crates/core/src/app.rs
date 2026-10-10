@@ -10,7 +10,7 @@ use serde::Serialize;
 use url::Url;
 
 use crate::artwork::{self, Context, Shape};
-use crate::emby::{Device, EmbyClient, Item};
+use crate::emby::{Device, EmbyClient, Item, PlaybackEvent};
 use crate::emby_connect::ConnectClient;
 use crate::epg::{self, NowNext, Programme};
 use crate::time::{self, Timestamp};
@@ -52,6 +52,21 @@ pub struct Card {
     pub images: Vec<CardImage>,
     /// 0–100 for partly watched items.
     pub progress: Option<f64>,
+    /// Movies, episodes, series and seasons can be played (series and
+    /// seasons start the next unwatched episode).
+    pub playable: bool,
+}
+
+/// What a client needs to play one Emby item.
+#[derive(Debug, Clone, Serialize)]
+pub struct Playback {
+    pub item_id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub url: String,
+    /// Resume point, if partly watched.
+    pub start_seconds: Option<f64>,
+    pub duration_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -232,7 +247,78 @@ impl EmbyAccount {
                 .as_ref()
                 .and_then(|u| u.played_percentage)
                 .filter(|p| *p > 0.0 && *p < 100.0),
+            playable: matches!(
+                item.kind.as_str(),
+                "Movie" | "Episode" | "Video" | "MusicVideo" | "Series" | "Season"
+            ),
         }
+    }
+
+    /// Resolve an item to something playable: series and seasons become the
+    /// next episode to watch; partly watched items resume.
+    pub async fn playback(&self, id: &str) -> Result<Playback> {
+        let c = &self.client;
+        let mut item = c.item(id).await?;
+        match item.kind.as_str() {
+            "Series" => {
+                item = c
+                    .episode_to_play(&item.id, None)
+                    .await?
+                    .ok_or(Error::NoSession)?;
+            }
+            "Season" => {
+                let series = item.series_id.clone().unwrap_or_default();
+                item = c
+                    .episode_to_play(&series, Some(&item.id))
+                    .await?
+                    .ok_or(Error::NoSession)?;
+            }
+            _ => {}
+        }
+        let url = c.stream_url(&item.id).ok_or(Error::NoSession)?;
+        let resume = item
+            .user_data
+            .as_ref()
+            .filter(|u| !u.played)
+            .and_then(|u| u.playback_position_ticks)
+            .filter(|t| *t > 0)
+            .map(|t| t as f64 / 1e7);
+        let (title, subtitle) = match item.kind.as_str() {
+            "Episode" => {
+                let code = match (item.parent_index_number, item.index_number) {
+                    (Some(s), Some(e)) => format!("S{s}:E{e} · "),
+                    _ => String::new(),
+                };
+                (
+                    item.series_name
+                        .clone()
+                        .unwrap_or_else(|| item.name.clone()),
+                    Some(format!("{code}{}", item.name)),
+                )
+            }
+            _ => (
+                item.name.clone(),
+                item.production_year.map(|y| y.to_string()),
+            ),
+        };
+        Ok(Playback {
+            item_id: item.id.clone(),
+            title,
+            subtitle,
+            url: url.into(),
+            start_seconds: resume,
+            duration_seconds: item.run_time_ticks.map(|t| t as f64 / 1e7),
+        })
+    }
+
+    pub async fn report(
+        &self,
+        event: PlaybackEvent,
+        item_id: &str,
+        position_seconds: f64,
+    ) -> Result<()> {
+        let ticks = (position_seconds.max(0.0) * 1e7) as i64;
+        self.client.report_playback(event, item_id, ticks).await
     }
 }
 

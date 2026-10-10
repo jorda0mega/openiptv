@@ -17,10 +17,10 @@ use axum::extract::{ConnectInfo, Path, Query, Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use futures_util::StreamExt;
 use openiptv_core::app::{EmbyAccount, EmbyLogin, LiveTv, Row};
-use openiptv_core::emby::Device;
+use openiptv_core::emby::{Device, PlaybackEvent};
 use openiptv_core::http;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -40,6 +40,10 @@ struct Edge {
     /// relay runs at a time; starting a channel stops the previous one.
     stream: Mutex<Option<tokio::task::AbortHandle>>,
     last_zap: Mutex<Option<Value>>,
+    /// Six digits shown on this Mac; typed into a TV or phone to pair.
+    pin: String,
+    /// Failed pairing attempts and when the last one happened.
+    pair_failures: Mutex<(u32, Option<Instant>)>,
     /// Required from other devices; see `require_key`.
     key: String,
 }
@@ -130,6 +134,8 @@ async fn main() {
         stream: Mutex::new(None),
         last_zap: Mutex::new(None),
         key: env("OPENIPTV_EDGE_KEY").unwrap_or_else(random_key),
+        pin: env("OPENIPTV_EDGE_PIN").unwrap_or_else(random_pin),
+        pair_failures: Mutex::new((0, None)),
     });
 
     // Full guide in the background, then every few hours. Never on the
@@ -163,6 +169,9 @@ async fn main() {
         .route("/api/live/categories", get(categories))
         .route("/api/live/channels", get(channels))
         .route("/api/live/nownext", get(now_next))
+        .route("/api/emby/play/{id}", get(emby_play))
+        .route("/api/emby/progress", post(emby_progress))
+        .route("/api/pair", post(pair))
         .route("/live/{file}", get(relay))
         .fallback_service(
             ServeDir::new(&web_dir).fallback(ServeFile::new(format!("{web_dir}/index.html"))),
@@ -179,13 +188,22 @@ async fn main() {
         .await
         .expect("bind address");
     eprintln!("listening on http://{addr}");
+    // Kept alive for the life of the server; dropping it withdraws the advert.
+    let mut _bonjour = None;
     if !addr.ip().is_loopback() {
         let ip = lan_ip().map_or_else(|| "<this-mac-ip>".into(), |ip| ip.to_string());
+        let pin = &edge.pin;
         eprintln!(
-            "on your phone (same Wi-Fi), open once: http://{ip}:{}/?key={}",
+            "pair the iPhone / Apple TV app with code {} {}",
+            &pin[..3],
+            &pin[3..]
+        );
+        eprintln!(
+            "web on your phone (same Wi-Fi), open once: http://{ip}:{}/?key={}",
             addr.port(),
             edge.key
         );
+        _bonjour = advertise(addr.port());
     }
     axum::serve(
         listener,
@@ -204,7 +222,8 @@ async fn require_key(
     req: Request,
     next: Next,
 ) -> Response {
-    if peer.ip().is_loopback() {
+    // Pairing is how a device gets the key, so it can't require one.
+    if peer.ip().is_loopback() || req.uri().path() == "/api/pair" {
         return next.run(req).await;
     }
     let cookie = format!("openiptv_key={}", edge.key);
@@ -240,13 +259,147 @@ async fn require_key(
     }
 }
 
-fn random_key() -> String {
+#[derive(Deserialize)]
+struct PairRequest {
+    pin: String,
+}
+
+/// Exchange the six-digit code for the access key. Five wrong codes lock
+/// pairing for a minute, which keeps guessing impractical on a home network.
+async fn pair(State(edge): State<Shared>, Json(req): Json<PairRequest>) -> Response {
+    {
+        let failures = edge.pair_failures.lock().expect("poisoned");
+        if failures.0 >= 5
+            && failures
+                .1
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(60))
+        {
+            return error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many wrong codes; wait a minute.",
+            );
+        }
+    }
+    let offered: String = req.pin.chars().filter(char::is_ascii_digit).collect();
+    if offered != edge.pin {
+        let mut failures = edge.pair_failures.lock().expect("poisoned");
+        if failures
+            .1
+            .is_some_and(|t| t.elapsed() >= Duration::from_secs(60))
+        {
+            failures.0 = 0;
+        }
+        failures.0 += 1;
+        failures.1 = Some(Instant::now());
+        return error(StatusCode::UNAUTHORIZED, "Wrong code.");
+    }
+    *edge.pair_failures.lock().expect("poisoned") = (0, None);
+    let mut res = Json(json!({ "key": edge.key })).into_response();
+    res.headers_mut().insert(
+        header::SET_COOKIE,
+        format!(
+            "openiptv_key={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000",
+            edge.key
+        )
+        .parse()
+        .expect("header"),
+    );
+    res
+}
+
+fn emby(edge: &Edge) -> Result<&EmbyAccount, Box<Response>> {
+    edge.emby
+        .as_ref()
+        .map_err(|e| Box::new(error(StatusCode::SERVICE_UNAVAILABLE, format!("Emby: {e}"))))
+}
+
+/// Where and from what position to play an Emby item (series and seasons
+/// resolve to the next episode). Paired devices then stream straight from
+/// Emby, so video never passes through this Mac.
+async fn emby_play(State(edge): State<Shared>, Path(id): Path<String>) -> Response {
+    let account = match emby(&edge) {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    match account.playback(&id).await {
+        Ok(p) => Json(p).into_response(),
+        Err(e) => error(StatusCode::BAD_GATEWAY, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct ProgressReport {
+    item_id: String,
+    position_seconds: f64,
+    event: String,
+}
+
+async fn emby_progress(State(edge): State<Shared>, Json(r): Json<ProgressReport>) -> Response {
+    let account = match emby(&edge) {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let event = match r.event.as_str() {
+        "start" => PlaybackEvent::Started,
+        "stop" => PlaybackEvent::Stopped,
+        _ => PlaybackEvent::Progress,
+    };
+    if event == PlaybackEvent::Stopped {
+        // Continue Watching changed; don't serve the cached rows.
+        *edge.home.lock().await = None;
+    }
+    match account.report(event, &r.item_id, r.position_seconds).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => error(StatusCode::BAD_GATEWAY, e.to_string()),
+    }
+}
+
+/// Advertise `_openiptv._tcp` so the apps find this server without typing
+/// an address.
+fn advertise(port: u16) -> Option<mdns_sd::ServiceDaemon> {
+    let ip = lan_ip()?;
+    let daemon = mdns_sd::ServiceDaemon::new().ok()?;
+    let host = std::process::Command::new("scutil")
+        .args(["--get", "LocalHostName"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "openiptv".into());
+    let info = mdns_sd::ServiceInfo::new(
+        "_openiptv._tcp.local.",
+        &format!("OpenIPTV on {host}"),
+        &format!("{host}.local."),
+        ip.to_string(),
+        port,
+        &[("version", env!("CARGO_PKG_VERSION"))][..],
+    )
+    .ok()?;
+    daemon.register(info).ok()?;
+    eprintln!("advertising OpenIPTV on {host} via Bonjour");
+    Some(daemon)
+}
+
+fn random_pin() -> String {
+    let bytes = random_bytes::<4>();
+    format!("{:06}", u32::from_le_bytes(bytes) % 1_000_000)
+}
+
+fn random_bytes<const N: usize>() -> [u8; N] {
     use std::io::Read;
-    let mut bytes = [0u8; 16];
+    let mut bytes = [0u8; N];
     std::fs::File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(&mut bytes))
         .expect("read /dev/urandom");
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    bytes
+}
+
+fn random_key() -> String {
+    random_bytes::<16>()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// The address other devices on the LAN reach this machine at. Connecting a
