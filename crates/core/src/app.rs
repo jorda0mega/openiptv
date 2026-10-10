@@ -451,7 +451,10 @@ impl LiveTv {
             let from_guide = guide.as_ref().and_then(|g| {
                 let epg_id = self.channel(id)?.epg_id.as_deref()?;
                 let nn = g.now_next(epg_id, now);
-                nn.now.is_some().then_some(nn)
+                nn.now
+                    .as_ref()
+                    .is_some_and(|p| !is_placeholder(&p.title))
+                    .then_some(nn)
             });
             match from_guide {
                 Some(nn) => {
@@ -496,6 +499,23 @@ impl LiveTv {
     }
 }
 
+/// Guide filler that says nothing about what's on; treat as missing data.
+fn is_placeholder(title: &str) -> bool {
+    let t = title.trim().to_lowercase();
+    // Short markers must be the whole title; phrases may appear anywhere.
+    t.is_empty()
+        || ["tba", "tbd", "n/a", "no info", "to be announced"].contains(&t.as_str())
+        || [
+            "no information",
+            "information available",
+            "no programme",
+            "no program",
+            "not available",
+        ]
+        .iter()
+        .any(|p| t.contains(p))
+}
+
 /// Panels often list account details (login, expiry, connections) as fake
 /// channels; they are useless to watch and can leak the login.
 fn looks_like_account_info(name: &str) -> bool {
@@ -537,7 +557,23 @@ pub fn xtream_credentials(url: &str, user: &str, password: &str) -> Result<Crede
 
 #[cfg(test)]
 mod tests {
-    use super::looks_like_account_info;
+    use super::{is_placeholder, looks_like_account_info};
+
+    #[test]
+    fn spots_placeholder_titles() {
+        for t in [
+            "No Information Available",
+            "TBA",
+            "To Be Announced",
+            "",
+            "No information available for this channel",
+        ] {
+            assert!(is_placeholder(t), "{t:?}");
+        }
+        for t in ["BBC News", "Taboo", "Tbaar's Kitchen", "Information Age"] {
+            assert!(!is_placeholder(t), "{t:?}");
+        }
+    }
 
     #[test]
     fn hides_account_info_channels() {
