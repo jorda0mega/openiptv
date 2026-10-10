@@ -6,8 +6,9 @@
     OPENIPTV_EMBY_URL=http://127.0.0.1:8765 OPENIPTV_EMBY_USER=u OPENIPTV_EMBY_PASS=p \
     cargo run -p openiptv-probe
 
-The panel runs at UTC+1 and channel 5's short EPG deliberately disagrees with
-XMLTV, so the probe's diagnostics have something to find.
+The panel runs at UTC+1, channel 5's short EPG deliberately disagrees with
+XMLTV, and some Emby image tags are stale (404), so the probe's diagnostics
+have something to find.
 """
 
 import base64
@@ -65,7 +66,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length).decode()
+        # Emby accepts both; its own web client sends a form.
+        if self.headers.get("Content-Type", "").startswith("application/x-www-form-urlencoded"):
+            body = {k: v[0] for k, v in parse_qs(raw).items()}
+        else:
+            body = json.loads(raw or "{}")
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})
         self.send({"error": "unauthorized"}, status=401)
@@ -141,11 +147,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("X-Emby-Token") != "tok" and not path.startswith("/Items/"):
             return self.send({"error": "unauthorized"}, status=401)
         movie = lambda i: {"Id": f"m{i}", "Name": f"Movie {i}", "Type": "Movie", "ProductionYear": 2020,
-                           "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{i}"},
+                           "PrimaryImageAspectRatio": 0.6667,
+                           "ImageTags": {"Primary": "stale-t15" if i == 15 else f"t{i}"},
                            "BackdropImageTags": [f"b{i}"]}
         episode = lambda i: {"Id": f"e{i}", "Name": f"Episode {i}", "Type": "Episode", "SeriesId": "s1",
                              "SeriesName": "Show", "SeriesPrimaryImageTag": "st", "ImageTags": {},
-                             "ParentBackdropItemId": "s1", "ParentBackdropImageTags": ["sb"],
+                             "ParentBackdropItemId": "s1", "ParentBackdropImageTags": ["stale-sb"],
                              "UserData": {"PlaybackPositionTicks": 6000000000, "PlayedPercentage": 40.0}}
         if path == "/Users/U1/Views":
             return self.send({"Items": [{"Id": "v1", "Name": "Movies", "Type": "CollectionFolder"},
@@ -157,12 +164,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Users/U1/Items/Latest":
             return self.send([movie(i) for i in range(int(q.get("Limit", 16)))])
         if path.startswith("/Items/") and "/Images/" in path:
+            if q.get("tag", "").startswith("stale"):
+                return self.send({"error": "image not found"}, status=404)
             time.sleep(0.01)
             return self.send(b"\xff\xd8" + b"\0" * 30000, "image/jpeg",
                              headers={"Cache-Control": "public, max-age=31536000"})
         self.send({"error": "not found"}, status=404)
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # Clients closing pooled keep-alive connections is normal.
+        if not isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)):
+            super().handle_error(request, client_address)
+
+
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    Server(("127.0.0.1", port), Handler).serve_forever()

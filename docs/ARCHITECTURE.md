@@ -48,7 +48,11 @@ The probe tells us which live path applies: `output formats` and the
    the same picture and are cached forever on device. Images are requested at
    rendered size × screen scale. Card shape comes from
    `PrimaryImageAspectRatio` before the image loads, so grids don't jump.
-   Fallback rules: see `emby-client-behavior.md`.
+   `artwork.rs` returns every usable image for an item in Emby's own order
+   (series thumb/backdrop first on Continue Watching, posters elsewhere) and
+   the app moves to the next one if an image fails. Emby's web app has no
+   such fallback, which is one way covers end up blank. Details:
+   [emby-client-behavior.md](emby-client-behavior.md).
 6. **Small payloads.** Emby list calls request only the card fields
    (`emby.rs::card_query`).
 

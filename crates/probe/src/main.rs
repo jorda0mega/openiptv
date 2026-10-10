@@ -12,7 +12,8 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use openiptv_core::emby::{Device, EmbyClient, Item};
+use openiptv_core::artwork::{self, Context, Shape};
+use openiptv_core::emby::{Device, EmbyClient};
 use openiptv_core::epg::{self, Programme};
 use openiptv_core::xtream::{self, Account, Channel, Credentials, StreamFormat, XtreamClient};
 use openiptv_core::{http, time, xmltv};
@@ -591,70 +592,65 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
         latest.len()
     );
 
-    heading("Artwork");
-    let items: Vec<&Item> = resume.iter().chain(&next_up).chain(&latest).collect();
-    let has = |f: &dyn Fn(&Item) -> bool| items.iter().filter(|i| f(i)).count();
-    let own_primary = has(&|i| i.image_tags.contains_key("Primary"));
-    let any_art = has(&|i| {
-        i.image_tags.contains_key("Primary")
-            || i.series_primary_image_tag.is_some()
-            || i.parent_thumb_image_tag.is_some()
-            || !i.backdrop_image_tags.is_empty()
-            || !i.parent_backdrop_image_tags.is_empty()
-    });
-    let with_ratio = has(&|i| i.primary_image_aspect_ratio.is_some());
+    heading("Artwork (each row loaded the way the app will)");
+    let rows = [
+        ("continue watching", &resume, Context::Landscape),
+        ("next up", &next_up, Context::Landscape),
+        ("latest", &latest, Context::Poster),
+    ];
+    let (mut total, mut first, mut fallback, mut placeholder, mut with_ratio) = (0, 0, 0, 0, 0);
+    let (mut image_times, mut image_bytes, mut cache_header) = (Vec::new(), 0usize, None);
+    for (name, items, context) in rows {
+        if items.is_empty() {
+            continue;
+        }
+        let shape = artwork::list_shape(items, context);
+        let width = if shape == Shape::Landscape { 480 } else { 360 };
+        let mut set = tokio::task::JoinSet::new();
+        for item in items.iter() {
+            let urls = artwork::candidates(item, context)
+                .iter()
+                .map(|c| emby.image_url(&c.image, width, Some(shape)))
+                .collect();
+            set.spawn(load_first(http.clone(), urls));
+        }
+        let (mut row_first, mut row_fallback, mut row_none) = (0, 0, 0);
+        while let Some(Ok(loaded)) = set.join_next().await {
+            match loaded.used {
+                Some(0) => row_first += 1,
+                Some(_) => row_fallback += 1,
+                None => row_none += 1,
+            }
+            if loaded.used.is_some() {
+                image_times.push(loaded.elapsed);
+                image_bytes += loaded.bytes;
+                cache_header = cache_header.or(loaded.cache_control);
+            }
+        }
+        println!(
+            "  {name:<18} {shape:?} cards: {row_first} first try · {row_fallback} via fallback · {row_none} placeholder"
+        );
+        total += items.len();
+        first += row_first;
+        fallback += row_fallback;
+        placeholder += row_none;
+        with_ratio += items
+            .iter()
+            .filter(|i| i.primary_image_aspect_ratio.is_some())
+            .count();
+    }
     println!(
-        "  own primary image  {} of {} items",
-        pct(own_primary, items.len()),
-        items.len()
-    );
-    println!(
-        "  some usable art    {} (own, series, thumb or backdrop)",
-        pct(any_art, items.len())
+        "  cover shown        {} of {total} cards ({fallback} only thanks to fallback, which Emby's web app lacks)",
+        pct(first + fallback, total)
     );
     println!(
         "  aspect ratio sent  {} (lets the grid lay out before images load)",
-        pct(with_ratio, items.len())
+        pct(with_ratio, total)
     );
-    let kinds: HashMap<&str, usize> = items.iter().fold(HashMap::new(), |mut m, i| {
-        *m.entry(i.kind.as_str()).or_default() += 1;
-        m
-    });
-    println!("  item types         {kinds:?}");
-
-    let mut image_times = Vec::new();
-    let mut image_bytes = 0usize;
-    let mut cache_header = None;
-    for item in items
-        .iter()
-        .filter(|i| i.image_tags.contains_key("Primary"))
-        .take(6)
-    {
-        let img = openiptv_core::emby::ImageRef {
-            item_id: item.id.clone(),
-            image_type: "Primary",
-            tag: item.image_tags["Primary"].clone(),
-            index: None,
-        };
-        let start = Instant::now();
-        let res = http
-            .get(emby.image_url(&img, 360))
-            .send()
-            .await
-            .map_err(|e| e.without_url())?;
-        cache_header = cache_header.or_else(|| {
-            res.headers()
-                .get(reqwest::header::CACHE_CONTROL)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned)
-        });
-        image_bytes += res.bytes().await.map_err(|e| e.without_url())?.len();
-        image_times.push(start.elapsed());
-    }
     image_times.sort();
     if !image_times.is_empty() {
         println!(
-            "  poster @360px      p50 {} · max {} · avg {:.0} KB",
+            "  image load         p50 {} · max {} · avg {:.0} KB",
             ms(percentile(&image_times, 0.5)),
             ms(*image_times.last().unwrap()),
             image_bytes as f64 / image_times.len() as f64 / 1024.0
@@ -681,9 +677,56 @@ async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> Any
     out.insert(
         "artwork".into(),
         json!({
-            "items": items.len(), "own_primary": own_primary, "any_art": any_art, "with_aspect_ratio": with_ratio,
-            "poster_p50_ms": percentile(&image_times, 0.5).as_millis(), "cache_control": cache_header,
+            "cards": total, "first_try": first, "via_fallback": fallback, "placeholder": placeholder,
+            "with_aspect_ratio": with_ratio, "image_p50_ms": percentile(&image_times, 0.5).as_millis(),
+            "cache_control": cache_header,
         }),
     );
     Ok(())
+}
+
+struct Loaded {
+    used: Option<usize>,
+    elapsed: Duration,
+    bytes: usize,
+    cache_control: Option<String>,
+}
+
+/// Try image candidates in order until one returns a real image, as the app does.
+async fn load_first(http: reqwest::Client, urls: Vec<Url>) -> Loaded {
+    let start = Instant::now();
+    for (i, url) in urls.into_iter().enumerate() {
+        let Ok(res) = http.get(url).send().await else {
+            continue;
+        };
+        let header = |name| {
+            res.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        let is_image =
+            header(reqwest::header::CONTENT_TYPE).is_some_and(|t| t.starts_with("image/"));
+        if !res.status().is_success() || !is_image {
+            continue;
+        }
+        let cache_control = header(reqwest::header::CACHE_CONTROL);
+        match res.bytes().await {
+            Ok(body) if !body.is_empty() => {
+                return Loaded {
+                    used: Some(i),
+                    elapsed: start.elapsed(),
+                    bytes: body.len(),
+                    cache_control,
+                };
+            }
+            _ => continue,
+        }
+    }
+    Loaded {
+        used: None,
+        elapsed: start.elapsed(),
+        bytes: 0,
+        cache_control: None,
+    }
 }

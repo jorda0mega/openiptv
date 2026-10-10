@@ -3,6 +3,7 @@
 //! Everything that is not UI or video decoding lives here so every platform
 //! gets the same parsing, EPG and artwork behaviour.
 
+pub mod artwork;
 pub mod emby;
 pub mod epg;
 pub mod http;

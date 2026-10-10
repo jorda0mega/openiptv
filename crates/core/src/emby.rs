@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::artwork::{self, Shape};
 use crate::{Error, Result, http};
 
 /// Fields every card needs: aspect ratio up front so the grid never reflows,
@@ -75,6 +76,8 @@ pub struct Item {
     pub parent_backdrop_image_tags: Vec<String>,
     pub parent_logo_item_id: Option<String>,
     pub parent_logo_image_tag: Option<String>,
+    pub parent_primary_image_item_id: Option<String>,
+    pub parent_primary_image_tag: Option<String>,
     pub album_id: Option<String>,
     pub album_primary_image_tag: Option<String>,
     pub channel_id: Option<String>,
@@ -195,7 +198,8 @@ impl EmbyClient {
             .http
             .post(self.url("Users/AuthenticateByName"))
             .header("X-Emby-Authorization", self.authorization())
-            .json(&serde_json::json!({ "Username": username, "Pw": password }));
+            .header(reqwest::header::ACCEPT, "application/json")
+            .form(&[("Username", username), ("Pw", password)]);
         let body = http::fetch(req, "login").await?;
         let auth: AuthResult = http::decode(&body, "login")?;
         let session = Session {
@@ -260,18 +264,32 @@ impl EmbyClient {
             .await
     }
 
-    /// A sized image URL. Sizes should be the rendered size × screen scale so
-    /// the server never sends more pixels than the card shows.
-    pub fn image_url(&self, image: &ImageRef, max_width: u32) -> Url {
+    /// A sized image URL. Pass the rendered width × screen scale; it is
+    /// snapped to a fixed ladder so nearby sizes share one cached image.
+    /// Primary images also get a height bound from the card shape so the
+    /// server returns art that fits the box. No token is needed.
+    pub fn image_url(&self, image: &ImageRef, width_px: u32, card: Option<Shape>) -> Url {
         let path = match image.index {
             Some(i) => format!("Items/{}/Images/{}/{i}", image.item_id, image.image_type),
             None => format!("Items/{}/Images/{}", image.item_id, image.image_type),
         };
+        let width = artwork::bucket_width(width_px);
         let mut url = self.url(&path);
-        url.query_pairs_mut()
-            .append_pair("tag", &image.tag)
-            .append_pair("maxWidth", &max_width.to_string())
-            .append_pair("quality", "90");
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("tag", &image.tag)
+                .append_pair("maxWidth", &width.to_string());
+            if let (Some(shape), "Primary") = (card, image.image_type) {
+                let height = (f64::from(width) / shape.aspect()).round() as u32;
+                q.append_pair("maxHeight", &height.to_string());
+            }
+            let quality = if image.image_type == "Backdrop" {
+                "70"
+            } else {
+                "90"
+            };
+            q.append_pair("quality", quality);
+        }
         url
     }
 }
@@ -338,8 +356,8 @@ mod tests {
             index: None,
         };
         assert_eq!(
-            c.image_url(&img, 400).as_str(),
-            "http://nas:8096/emby/Items/abc/Images/Primary?tag=t1&maxWidth=400&quality=90"
+            c.image_url(&img, 390, Some(Shape::Portrait)).as_str(),
+            "http://nas:8096/emby/Items/abc/Images/Primary?tag=t1&maxWidth=400&maxHeight=600&quality=90"
         );
     }
 
