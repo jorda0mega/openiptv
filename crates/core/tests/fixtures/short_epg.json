@@ -1,0 +1,5 @@
+{"epg_listings":[
+  {"id":"1","epg_id":"5","title":"TmV3cyBhdCBPbmU=","lang":"en","start":"2026-10-10 14:00:00","end":"2026-10-10 14:30:00","description":"VGhlIGxhdGVzdCBuZXdzLg==","channel_id":"BBCOne.uk","start_timestamp":"1791637200","stop_timestamp":"1791639000"},
+  {"id":"2","epg_id":"5","title":"Plain Title","lang":"en","start":"2026-10-10 14:30:00","end":"2026-10-10 15:00:00","description":"","channel_id":"BBCOne.uk","start_timestamp":1791639000,"stop_timestamp":1791640800},
+  {"id":"3","title":"Tm8gdGltZXN0YW1wcw==","start":"2026-10-10 15:00:00","end":"2026-10-10 16:00:00"}
+]}

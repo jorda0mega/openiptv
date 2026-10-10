@@ -1,0 +1,13 @@
+[package]
+name = "openiptv-probe"
+description = "Measures a real Emby server and Xtream provider: latency, EPG accuracy, artwork coverage."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+openiptv-core = { path = "../core" }
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+url.workspace = true
