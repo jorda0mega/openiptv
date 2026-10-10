@@ -27,6 +27,21 @@ memory. With `--lan`, the server prints a one-time link for your phone (same
 Wi-Fi); other devices are refused without it. Without 1Password, set the same
 `OPENIPTV_*` variables the probe uses and run `target/release/openiptv-edge`.
 
+## Run the iPhone app (native, Liquid Glass)
+
+The iOS app (`apple/`, SwiftUI, iOS 26) talks to the same server, so your
+logins stay on your Mac. Live TV plays through libmpv (MPVKit), which handles
+the MPEG-TS streams AVPlayer can't.
+
+1. Start the server with `--lan` (above). It prints a pairing link.
+2. Open `apple/OpenIPTV.xcodeproj` in Xcode 26. (After changing
+   `apple/project.yml`, regenerate it with `xcodegen` from `apple/`.)
+3. Simulator: just press Run; it connects to `127.0.0.1:8787` automatically.
+4. Your iPhone: Xcode → Settings → Apple Accounts → add your Apple ID; select
+   the OpenIPTV target → Signing & Capabilities → choose your team; plug in
+   (or Wi-Fi pair) your iPhone and press Run. In the app, paste the pairing
+   link. A free Apple ID works; the install then lasts 7 days.
+
 ## Measure your servers
 
 ```sh

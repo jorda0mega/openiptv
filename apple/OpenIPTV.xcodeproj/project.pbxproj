@@ -1,0 +1,631 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01D06C60589A4B9F94F5D1DF /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C868DE1356883E3FDC24AC23 /* AVFoundation.framework */; };
+		02F218C7FAB20DC50F729108 /* Libavutil.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */; };
+		05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00376995EF16ADF89BDF9B03 /* PlayerView.swift */; };
+		07533D7519AC4A6D0FA838C3 /* libexpat.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A9E566E295D6785A720DEA83 /* libexpat.tbd */; };
+		0A2ABB4B53D30EFF3AAD92F1 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A651DA02BA6A980C42B2EE28 /* CoreAudio.framework */; };
+		0C2EB465C9AB5093C0AA8603 /* libbz2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 7A1F2D0451F66503C9B600AF /* libbz2.tbd */; };
+		0CB6B5B6FB4155FCF4EEA746 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5EDE0462D2DCE22124164E8 /* Metal.framework */; };
+		0E87FB9A008BD21779D3A16E /* Libmpv.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */; };
+		0FB942BAE8072453D1B7CD43 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */; };
+		199695CF489DC54ED1DF885A /* lcms2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */; };
+		1B688B589825F83E58DA4E1B /* hogweed.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4962C0F389044958A1E2BE4 /* hogweed.xcframework */; };
+		240BD0211D4FCFCF292DBB40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA8AA4353609B682F3F99884 /* Assets.xcassets */; };
+		357A9F8A39BDB356513CDC50 /* Libavdevice.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C26407BD93F001EDE4CBAEDF /* Libavdevice.xcframework */; };
+		3812ABE7BE5B9ED6B758FD0C /* Libplacebo.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 17EBB6B2E9C237BA7C90687B /* Libplacebo.xcframework */; };
+		3BB4FDFD021DAA0FA5600914 /* Libuavs3d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */; };
+		3CF2A50D68BC65F97FF790C5 /* Libcrypto.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B41963718B2429F644A73CAD /* Libcrypto.xcframework */; };
+		4209B928261B700D9F0978FA /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */; };
+		4B7140CB6E5B116E80716522 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9272170531EC055784C91DD9 /* SearchView.swift */; };
+		4C9338B92D678D172D89E014 /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */; };
+		507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */; };
+		50DAEAA1396737D0E6EFAB52 /* Libswscale.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */; };
+		52C8BDC2785EBA32424F1CB1 /* Libavformat.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */; };
+		5DAD3128BF5196E7F19247AC /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 4B0770E7215519F6AED0BA2C /* libz.tbd */; };
+		6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
+		65E5DDEBE26E74B78CA34AB4 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DE7D9201148434BE2E8348A /* CoreVideo.framework */; };
+		675F87B1E11CC35003D7F57C /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
+		6D11C39A6F6455DAEC94AE5E /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BBE98FBA505A36A33CB129 /* libresolv.tbd */; };
+		6DE164025E84B5F4148BFE0C /* API.swift in Sources */ = {isa = PBXBuildFile; fileRef = 816ADE0DB11EB1B130D4C128 /* API.swift */; };
+		70CFBFACBD2EFCA866865C45 /* Libshaderc_combined.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CE629B229349145FBEDD02D /* Libshaderc_combined.xcframework */; };
+		7883F5821E1388ECFF8BAA77 /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
+		7FD76CBB8EC351891CEEA1B6 /* Libbluray.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5D24524038DF8138B881F54 /* Libbluray.xcframework */; };
+		82BF5BF74D0EF4665E841ACB /* libiconv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 4842B481085D3917305982E1 /* libiconv.tbd */; };
+		852D4AD4C29E764EA1AA93CE /* IOSurface.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4FF14463A6C22E095CC94044 /* IOSurface.framework */; };
+		8943A03A4AA4F1C805C227DC /* Libass.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5B1B94210411D81E015B0B6 /* Libass.xcframework */; };
+		8CFD892BCDF7775B3D0C8754 /* Libavcodec.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */; };
+		8F2742F08E2D8AAE9A1BC3AA /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
+		99DE67411BE1E03903160C2B /* Libswresample.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D7286B5ED1C79D8A2625EBC /* Libswresample.xcframework */; };
+		9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D066C9DD9FC2285C24EF35 /* LiveView.swift */; };
+		AE3EC24F82B97699B659A41B /* libxml2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 12D689360F95FEEBC85A1443 /* libxml2.tbd */; };
+		B641DA8A97E206CE72401932 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2DE48775D87FC33EDCE40F /* AppModel.swift */; };
+		B78D3D5C8A8713E76D63F3CA /* Libfreetype.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5183C151FC323F23D289CE6E /* Libfreetype.xcframework */; };
+		B8640E66EFE6670F23CE9788 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */; };
+		BE03B6B036990782A2E60BB6 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E6BB902BA3158069CE35BE75 /* QuartzCore.framework */; };
+		BEA7D82FFF28D87DD9B16601 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D277F32EC509804119BFFFC4 /* VideoToolbox.framework */; };
+		C1C8F5F69D4DC48190F37C1E /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 188FE6D60C2DA8B042E0772F /* libc++.tbd */; };
+		C7655AEC73FDEB4B56A49695 /* Libdav1d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */; };
+		CBE34968B8E97EBD13B63FB1 /* OpenIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */; };
+		D23BC078C762E09CCD49BD29 /* nettle.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57788799C7CF36103C03E61C /* nettle.xcframework */; };
+		D9ADA4B59CE9DE2921B38B77 /* Libuchardet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */; };
+		DB9631F047A88625F86A6031 /* Libssl.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00EF07025216C13B1F3C7908 /* Libssl.xcframework */; };
+		DCAA231004379BB6986D062E /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD2E5E071D113508500E70E /* ConnectView.swift */; };
+		EA8F7A63FFC991764504B776 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
+		FB9C9BFC1FA6EB481EC16886 /* Libfribidi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */; };
+		FC4A5B182411DC1D0A1EF669 /* Libavfilter.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8A0C07B0687D27055C5D787B /* Libavfilter.xcframework */; };
+		FCAB7326083D10A74B87FE46 /* gmp.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 363AD3E84AD3778E05926FBC /* gmp.xcframework */; };
+		FD553114A77FD230C89B7478 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 19C99105C77050902E084B3D /* CoreMedia.framework */; };
+		FFB2BF63F71C83887DFCC92F /* MPVPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4C4ECAD884618771521E44 /* MPVPlayer.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		00376995EF16ADF89BDF9B03 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
+		00EF07025216C13B1F3C7908 /* Libssl.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libssl.xcframework; path = Vendor/Libssl.xcframework; sourceTree = "<group>"; };
+		00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavcodec.xcframework; path = Vendor/Libavcodec.xcframework; sourceTree = "<group>"; };
+		04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePipeline.swift; sourceTree = "<group>"; };
+		074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = lcms2.xcframework; path = Vendor/lcms2.xcframework; sourceTree = "<group>"; };
+		0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK.xcframework; path = Vendor/MoltenVK.xcframework; sourceTree = "<group>"; };
+		12D689360F95FEEBC85A1443 /* libxml2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libxml2.tbd; path = usr/lib/libxml2.tbd; sourceTree = SDKROOT; };
+		17EBB6B2E9C237BA7C90687B /* Libplacebo.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libplacebo.xcframework; path = Vendor/Libplacebo.xcframework; sourceTree = "<group>"; };
+		188FE6D60C2DA8B042E0772F /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
+		19C99105C77050902E084B3D /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
+		1D7286B5ED1C79D8A2625EBC /* Libswresample.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libswresample.xcframework; path = Vendor/Libswresample.xcframework; sourceTree = "<group>"; };
+		1DE7D9201148434BE2E8348A /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
+		1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavutil.xcframework; path = Vendor/Libavutil.xcframework; sourceTree = "<group>"; };
+		2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenIPTVApp.swift; sourceTree = "<group>"; };
+		22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		363AD3E84AD3778E05926FBC /* gmp.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = gmp.xcframework; path = Vendor/gmp.xcframework; sourceTree = "<group>"; };
+		3CE629B229349145FBEDD02D /* Libshaderc_combined.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libshaderc_combined.xcframework; path = Vendor/Libshaderc_combined.xcframework; sourceTree = "<group>"; };
+		42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libunibreak.xcframework; path = Vendor/Libunibreak.xcframework; sourceTree = "<group>"; };
+		4842B481085D3917305982E1 /* libiconv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libiconv.tbd; path = usr/lib/libiconv.tbd; sourceTree = SDKROOT; };
+		4B0770E7215519F6AED0BA2C /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
+		4BD2E5E071D113508500E70E /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		4FF14463A6C22E095CC94044 /* IOSurface.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOSurface.framework; path = System/Library/Frameworks/IOSurface.framework; sourceTree = SDKROOT; };
+		5183C151FC323F23D289CE6E /* Libfreetype.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libfreetype.xcframework; path = Vendor/Libfreetype.xcframework; sourceTree = "<group>"; };
+		57788799C7CF36103C03E61C /* nettle.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = nettle.xcframework; path = Vendor/nettle.xcframework; sourceTree = "<group>"; };
+		58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libfribidi.xcframework; path = Vendor/Libfribidi.xcframework; sourceTree = "<group>"; };
+		5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavformat.xcframework; path = Vendor/Libavformat.xcframework; sourceTree = "<group>"; };
+		60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libuavs3d.xcframework; path = Vendor/Libuavs3d.xcframework; sourceTree = "<group>"; };
+		66D066C9DD9FC2285C24EF35 /* LiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveView.swift; sourceTree = "<group>"; };
+		7A1F2D0451F66503C9B600AF /* libbz2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libbz2.tbd; path = usr/lib/libbz2.tbd; sourceTree = SDKROOT; };
+		816ADE0DB11EB1B130D4C128 /* API.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>"; };
+		8A0C07B0687D27055C5D787B /* Libavfilter.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavfilter.xcframework; path = Vendor/Libavfilter.xcframework; sourceTree = "<group>"; };
+		8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libharfbuzz.xcframework; path = Vendor/Libharfbuzz.xcframework; sourceTree = "<group>"; };
+		9272170531EC055784C91DD9 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		9B28084FA0D3D9F051788F09 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		A4962C0F389044958A1E2BE4 /* hogweed.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = hogweed.xcframework; path = Vendor/hogweed.xcframework; sourceTree = "<group>"; };
+		A651DA02BA6A980C42B2EE28 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		A9E566E295D6785A720DEA83 /* libexpat.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libexpat.tbd; path = usr/lib/libexpat.tbd; sourceTree = SDKROOT; };
+		AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libdovi.xcframework; path = Vendor/Libdovi.xcframework; sourceTree = "<group>"; };
+		AA8AA4353609B682F3F99884 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libdav1d.xcframework; path = Vendor/Libdav1d.xcframework; sourceTree = "<group>"; };
+		B41963718B2429F644A73CAD /* Libcrypto.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libcrypto.xcframework; path = Vendor/Libcrypto.xcframework; sourceTree = "<group>"; };
+		BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
+		C26407BD93F001EDE4CBAEDF /* Libavdevice.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavdevice.xcframework; path = Vendor/Libavdevice.xcframework; sourceTree = "<group>"; };
+		C5EDE0462D2DCE22124164E8 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		C868DE1356883E3FDC24AC23 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = gnutls.xcframework; path = Vendor/gnutls.xcframework; sourceTree = "<group>"; };
+		C8BBE98FBA505A36A33CB129 /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
+		CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libswscale.xcframework; path = Vendor/Libswscale.xcframework; sourceTree = "<group>"; };
+		D277F32EC509804119BFFFC4 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
+		D5B1B94210411D81E015B0B6 /* Libass.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libass.xcframework; path = Vendor/Libass.xcframework; sourceTree = "<group>"; };
+		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
+		DB4C4ECAD884618771521E44 /* MPVPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MPVPlayer.swift; sourceTree = "<group>"; };
+		E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libmpv.xcframework; path = Vendor/Libmpv.xcframework; sourceTree = "<group>"; };
+		E6BB902BA3158069CE35BE75 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		EC69C2183749D6C420FF3721 /* OpenIPTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenIPTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF2BBFCF82049D6D6605B135 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EF2DE48775D87FC33EDCE40F /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libuchardet.xcframework; path = Vendor/Libuchardet.xcframework; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3B566CDEBAAB1438A4C58E84 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0E87FB9A008BD21779D3A16E /* Libmpv.xcframework in Frameworks */,
+				8CFD892BCDF7775B3D0C8754 /* Libavcodec.xcframework in Frameworks */,
+				357A9F8A39BDB356513CDC50 /* Libavdevice.xcframework in Frameworks */,
+				FC4A5B182411DC1D0A1EF669 /* Libavfilter.xcframework in Frameworks */,
+				52C8BDC2785EBA32424F1CB1 /* Libavformat.xcframework in Frameworks */,
+				02F218C7FAB20DC50F729108 /* Libavutil.xcframework in Frameworks */,
+				99DE67411BE1E03903160C2B /* Libswresample.xcframework in Frameworks */,
+				50DAEAA1396737D0E6EFAB52 /* Libswscale.xcframework in Frameworks */,
+				DB9631F047A88625F86A6031 /* Libssl.xcframework in Frameworks */,
+				3CF2A50D68BC65F97FF790C5 /* Libcrypto.xcframework in Frameworks */,
+				8943A03A4AA4F1C805C227DC /* Libass.xcframework in Frameworks */,
+				B78D3D5C8A8713E76D63F3CA /* Libfreetype.xcframework in Frameworks */,
+				FB9C9BFC1FA6EB481EC16886 /* Libfribidi.xcframework in Frameworks */,
+				7883F5821E1388ECFF8BAA77 /* Libharfbuzz.xcframework in Frameworks */,
+				4C9338B92D678D172D89E014 /* MoltenVK.xcframework in Frameworks */,
+				70CFBFACBD2EFCA866865C45 /* Libshaderc_combined.xcframework in Frameworks */,
+				199695CF489DC54ED1DF885A /* lcms2.xcframework in Frameworks */,
+				3812ABE7BE5B9ED6B758FD0C /* Libplacebo.xcframework in Frameworks */,
+				EA8F7A63FFC991764504B776 /* Libdovi.xcframework in Frameworks */,
+				8F2742F08E2D8AAE9A1BC3AA /* Libunibreak.xcframework in Frameworks */,
+				FCAB7326083D10A74B87FE46 /* gmp.xcframework in Frameworks */,
+				D23BC078C762E09CCD49BD29 /* nettle.xcframework in Frameworks */,
+				1B688B589825F83E58DA4E1B /* hogweed.xcframework in Frameworks */,
+				675F87B1E11CC35003D7F57C /* gnutls.xcframework in Frameworks */,
+				C7655AEC73FDEB4B56A49695 /* Libdav1d.xcframework in Frameworks */,
+				3BB4FDFD021DAA0FA5600914 /* Libuavs3d.xcframework in Frameworks */,
+				D9ADA4B59CE9DE2921B38B77 /* Libuchardet.xcframework in Frameworks */,
+				7FD76CBB8EC351891CEEA1B6 /* Libbluray.xcframework in Frameworks */,
+				01D06C60589A4B9F94F5D1DF /* AVFoundation.framework in Frameworks */,
+				0FB942BAE8072453D1B7CD43 /* AudioToolbox.framework in Frameworks */,
+				0A2ABB4B53D30EFF3AAD92F1 /* CoreAudio.framework in Frameworks */,
+				B8640E66EFE6670F23CE9788 /* CoreFoundation.framework in Frameworks */,
+				FD553114A77FD230C89B7478 /* CoreMedia.framework in Frameworks */,
+				65E5DDEBE26E74B78CA34AB4 /* CoreVideo.framework in Frameworks */,
+				0CB6B5B6FB4155FCF4EEA746 /* Metal.framework in Frameworks */,
+				BE03B6B036990782A2E60BB6 /* QuartzCore.framework in Frameworks */,
+				BEA7D82FFF28D87DD9B16601 /* VideoToolbox.framework in Frameworks */,
+				852D4AD4C29E764EA1AA93CE /* IOSurface.framework in Frameworks */,
+				0C2EB465C9AB5093C0AA8603 /* libbz2.tbd in Frameworks */,
+				82BF5BF74D0EF4665E841ACB /* libiconv.tbd in Frameworks */,
+				07533D7519AC4A6D0FA838C3 /* libexpat.tbd in Frameworks */,
+				6D11C39A6F6455DAEC94AE5E /* libresolv.tbd in Frameworks */,
+				AE3EC24F82B97699B659A41B /* libxml2.tbd in Frameworks */,
+				5DAD3128BF5196E7F19247AC /* libz.tbd in Frameworks */,
+				C1C8F5F69D4DC48190F37C1E /* libc++.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		03EBA60F67C7DE2879FBE5FA /* Player */ = {
+			isa = PBXGroup;
+			children = (
+				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
+				00376995EF16ADF89BDF9B03 /* PlayerView.swift */,
+			);
+			path = Player;
+			sourceTree = "<group>";
+		};
+		13FA51AC3215C6F8A8DAC42A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */,
+				C868DE1356883E3FDC24AC23 /* AVFoundation.framework */,
+				A651DA02BA6A980C42B2EE28 /* CoreAudio.framework */,
+				BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */,
+				19C99105C77050902E084B3D /* CoreMedia.framework */,
+				1DE7D9201148434BE2E8348A /* CoreVideo.framework */,
+				363AD3E84AD3778E05926FBC /* gmp.xcframework */,
+				C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */,
+				A4962C0F389044958A1E2BE4 /* hogweed.xcframework */,
+				4FF14463A6C22E095CC94044 /* IOSurface.framework */,
+				074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */,
+				D5B1B94210411D81E015B0B6 /* Libass.xcframework */,
+				00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */,
+				C26407BD93F001EDE4CBAEDF /* Libavdevice.xcframework */,
+				8A0C07B0687D27055C5D787B /* Libavfilter.xcframework */,
+				5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */,
+				1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */,
+				D5D24524038DF8138B881F54 /* Libbluray.xcframework */,
+				7A1F2D0451F66503C9B600AF /* libbz2.tbd */,
+				188FE6D60C2DA8B042E0772F /* libc++.tbd */,
+				B41963718B2429F644A73CAD /* Libcrypto.xcframework */,
+				B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */,
+				AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */,
+				A9E566E295D6785A720DEA83 /* libexpat.tbd */,
+				5183C151FC323F23D289CE6E /* Libfreetype.xcframework */,
+				58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */,
+				8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */,
+				4842B481085D3917305982E1 /* libiconv.tbd */,
+				E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */,
+				17EBB6B2E9C237BA7C90687B /* Libplacebo.xcframework */,
+				C8BBE98FBA505A36A33CB129 /* libresolv.tbd */,
+				3CE629B229349145FBEDD02D /* Libshaderc_combined.xcframework */,
+				00EF07025216C13B1F3C7908 /* Libssl.xcframework */,
+				1D7286B5ED1C79D8A2625EBC /* Libswresample.xcframework */,
+				CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */,
+				60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */,
+				FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */,
+				42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */,
+				12D689360F95FEEBC85A1443 /* libxml2.tbd */,
+				4B0770E7215519F6AED0BA2C /* libz.tbd */,
+				C5EDE0462D2DCE22124164E8 /* Metal.framework */,
+				0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */,
+				57788799C7CF36103C03E61C /* nettle.xcframework */,
+				E6BB902BA3158069CE35BE75 /* QuartzCore.framework */,
+				D277F32EC509804119BFFFC4 /* VideoToolbox.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		34F0E4783A9AFA4CC6A85ACB /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				AA8AA4353609B682F3F99884 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		476F05FBBF3EABD8C2C40D1B /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				4BD2E5E071D113508500E70E /* ConnectView.swift */,
+				9B28084FA0D3D9F051788F09 /* HomeView.swift */,
+				66D066C9DD9FC2285C24EF35 /* LiveView.swift */,
+				9272170531EC055784C91DD9 /* SearchView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		4C7506CFBE7F4CE9DCC7CFD1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				EC69C2183749D6C420FF3721 /* OpenIPTV.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		62350A47D68B597B15F396A1 /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				816ADE0DB11EB1B130D4C128 /* API.swift */,
+				EF2DE48775D87FC33EDCE40F /* AppModel.swift */,
+				04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */,
+				22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		935EEBEB764C84E9E048905E /* App */ = {
+			isa = PBXGroup;
+			children = (
+				2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		94C6387729AF3DEA71A714F2 = {
+			isa = PBXGroup;
+			children = (
+				F925FAF1D5D2D9A374D4166C /* OpenIPTV */,
+				13FA51AC3215C6F8A8DAC42A /* Frameworks */,
+				4C7506CFBE7F4CE9DCC7CFD1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F925FAF1D5D2D9A374D4166C /* OpenIPTV */ = {
+			isa = PBXGroup;
+			children = (
+				EF2BBFCF82049D6D6605B135 /* Info.plist */,
+				935EEBEB764C84E9E048905E /* App */,
+				62350A47D68B597B15F396A1 /* Model */,
+				03EBA60F67C7DE2879FBE5FA /* Player */,
+				34F0E4783A9AFA4CC6A85ACB /* Resources */,
+				476F05FBBF3EABD8C2C40D1B /* Views */,
+			);
+			path = OpenIPTV;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AD7F8BE51E1A0F04864E24B8 /* OpenIPTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 23E8576865EE388A07E56A56 /* Build configuration list for PBXNativeTarget "OpenIPTV" */;
+			buildPhases = (
+				854024C601CE88F55EBD7FE6 /* Fetch MPVKit */,
+				B4BD648488A21FD9D068E39B /* Sources */,
+				85C91BC4DCBA7FFF4EF7747C /* Resources */,
+				3B566CDEBAAB1438A4C58E84 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenIPTV;
+			packageProductDependencies = (
+			);
+			productName = OpenIPTV;
+			productReference = EC69C2183749D6C420FF3721 /* OpenIPTV.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		57A8340F1E61A940DE4F6434 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					AD7F8BE51E1A0F04864E24B8 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = FD7B47DAEB5496303084DD1D /* Build configuration list for PBXProject "OpenIPTV" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 94C6387729AF3DEA71A714F2;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4C7506CFBE7F4CE9DCC7CFD1 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AD7F8BE51E1A0F04864E24B8 /* OpenIPTV */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		85C91BC4DCBA7FFF4EF7747C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				240BD0211D4FCFCF292DBB40 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		854024C601CE88F55EBD7FE6 /* Fetch MPVKit */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Fetch MPVKit";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "[ -d \"$SRCROOT/Vendor/Libmpv.xcframework\" ] || \"$SRCROOT/scripts/fetch-mpvkit.sh\"";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B4BD648488A21FD9D068E39B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6DE164025E84B5F4148BFE0C /* API.swift in Sources */,
+				B641DA8A97E206CE72401932 /* AppModel.swift in Sources */,
+				DCAA231004379BB6986D062E /* ConnectView.swift in Sources */,
+				6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */,
+				507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */,
+				4209B928261B700D9F0978FA /* Keychain.swift in Sources */,
+				9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */,
+				FFB2BF63F71C83887DFCC92F /* MPVPlayer.swift in Sources */,
+				CBE34968B8E97EBD13B63FB1 /* OpenIPTVApp.swift in Sources */,
+				05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */,
+				4B7140CB6E5B116E80716522 /* SearchView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		06B0AAE07A4FD1C668D6C712 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		5EFCA792F58EE1688BB12A70 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9E17F5C6A64FE0208C28F97A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor\"",
+				);
+				INFOPLIST_FILE = OpenIPTV/Info.plist;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		EB7F5C4054FE4CE1BAA47DB2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor\"",
+				);
+				INFOPLIST_FILE = OpenIPTV/Info.plist;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		23E8576865EE388A07E56A56 /* Build configuration list for PBXNativeTarget "OpenIPTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EB7F5C4054FE4CE1BAA47DB2 /* Debug */,
+				9E17F5C6A64FE0208C28F97A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FD7B47DAEB5496303084DD1D /* Build configuration list for PBXProject "OpenIPTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5EFCA792F58EE1688BB12A70 /* Debug */,
+				06B0AAE07A4FD1C668D6C712 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 57A8340F1E61A940DE4F6434 /* Project object */;
+}

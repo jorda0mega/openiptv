@@ -1,0 +1,134 @@
+name: OpenIPTV
+options:
+  bundleIdPrefix: com.jorda0mega
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    # Set your team in Xcode → Signing & Capabilities to run on your iPhone.
+    DEVELOPMENT_TEAM: ""
+targets:
+  OpenIPTV:
+    type: application
+    platform: iOS
+    sources:
+      - OpenIPTV
+    # MPVKit's LGPL static libraries; fetch with scripts/fetch-mpvkit.sh.
+    preBuildScripts:
+      - name: Fetch MPVKit
+        script: '[ -d "$SRCROOT/Vendor/Libmpv.xcframework" ] || "$SRCROOT/scripts/fetch-mpvkit.sh"'
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - framework: Vendor/Libmpv.xcframework
+        embed: false
+      - framework: Vendor/Libavcodec.xcframework
+        embed: false
+      - framework: Vendor/Libavdevice.xcframework
+        embed: false
+      - framework: Vendor/Libavfilter.xcframework
+        embed: false
+      - framework: Vendor/Libavformat.xcframework
+        embed: false
+      - framework: Vendor/Libavutil.xcframework
+        embed: false
+      - framework: Vendor/Libswresample.xcframework
+        embed: false
+      - framework: Vendor/Libswscale.xcframework
+        embed: false
+      - framework: Vendor/Libssl.xcframework
+        embed: false
+      - framework: Vendor/Libcrypto.xcframework
+        embed: false
+      - framework: Vendor/Libass.xcframework
+        embed: false
+      - framework: Vendor/Libfreetype.xcframework
+        embed: false
+      - framework: Vendor/Libfribidi.xcframework
+        embed: false
+      - framework: Vendor/Libharfbuzz.xcframework
+        embed: false
+      - framework: Vendor/MoltenVK.xcframework
+        embed: false
+      - framework: Vendor/Libshaderc_combined.xcframework
+        embed: false
+      - framework: Vendor/lcms2.xcframework
+        embed: false
+      - framework: Vendor/Libplacebo.xcframework
+        embed: false
+      - framework: Vendor/Libdovi.xcframework
+        embed: false
+      - framework: Vendor/Libunibreak.xcframework
+        embed: false
+      - framework: Vendor/gmp.xcframework
+        embed: false
+      - framework: Vendor/nettle.xcframework
+        embed: false
+      - framework: Vendor/hogweed.xcframework
+        embed: false
+      - framework: Vendor/gnutls.xcframework
+        embed: false
+      - framework: Vendor/Libdav1d.xcframework
+        embed: false
+      - framework: Vendor/Libuavs3d.xcframework
+        embed: false
+      - framework: Vendor/Libuchardet.xcframework
+        embed: false
+      - framework: Vendor/Libbluray.xcframework
+        embed: false
+      - sdk: AVFoundation.framework
+      - sdk: AudioToolbox.framework
+      - sdk: CoreAudio.framework
+      - sdk: CoreFoundation.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: VideoToolbox.framework
+      - sdk: IOSurface.framework
+      - sdk: libbz2.tbd
+      - sdk: libiconv.tbd
+      - sdk: libexpat.tbd
+      - sdk: libresolv.tbd
+      - sdk: libxml2.tbd
+      - sdk: libz.tbd
+      - sdk: libc++.tbd
+    info:
+      path: OpenIPTV/Info.plist
+      properties:
+        CFBundleDisplayName: OpenIPTV
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - audio
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: OpenIPTV connects to your OpenIPTV server on this network.
+        CFBundleURLTypes:
+          - CFBundleURLName: OpenIPTV pairing
+            CFBundleURLSchemes:
+              - openiptv
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        OTHER_LDFLAGS: ["-ObjC"]
