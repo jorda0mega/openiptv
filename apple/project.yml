@@ -111,6 +111,8 @@ targets:
       path: OpenIPTV/Info.plist
       properties:
         CFBundleDisplayName: OpenIPTV
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIApplicationSceneManifest:
@@ -150,6 +152,8 @@ targets:
       path: OpenIPTV-tvOS/Info.plist
       properties:
         CFBundleDisplayName: OpenIPTV
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIBackgroundModes: [audio]
