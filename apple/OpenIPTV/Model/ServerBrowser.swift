@@ -59,12 +59,15 @@ final class ServerBrowser {
             guard case .ready = state,
                   case let .hostPort(host, port) = connection.currentPath?.remoteEndpoint
             else { return }
-            let hostString: String
+            // Resolved addresses carry an interface scope ("192.168.4.29%en1"),
+            // which isn't valid in a URL host; drop it.
+            let raw: String
             switch host {
-            case let .ipv4(address): hostString = "\(address)"
-            case let .name(value, _): hostString = value
+            case let .ipv4(address): raw = "\(address)"
+            case let .name(value, _): raw = value
             default: return
             }
+            let hostString = String(raw.split(separator: "%").first ?? Substring(raw))
             connection.cancel()
             Task { @MainActor in
                 guard let self, let url = URL(string: "http://\(hostString):\(port.rawValue)") else { return }
