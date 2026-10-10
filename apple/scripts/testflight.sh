@@ -13,12 +13,21 @@ build=$(date +%Y%m%d%H%M)   # unique, increasing build number
 [[ -d Vendor/Libmpv.xcframework ]] || scripts/fetch-mpvkit.sh
 command -v xcodegen >/dev/null && xcodegen generate --quiet
 
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+options="$tmp/ExportOptions.plist"
+cp ExportOptions.plist "$options"
+/usr/libexec/PlistBuddy -c "Add :teamID string $team" "$options"
+
+# Archive unsigned, then let export sign for App Store distribution: unlike
+# a development-signed archive, that needs no registered devices (an Apple
+# TV doesn't have to be in the developer account).
 ship() { # scheme destination name
   local archive="build/archives/$3-$build.xcarchive"
   xcodebuild archive -project OpenIPTV.xcodeproj -scheme "$1" -destination "$2" \
-    -archivePath "$archive" -allowProvisioningUpdates \
+    -archivePath "$archive" CODE_SIGNING_ALLOWED=NO \
     DEVELOPMENT_TEAM="$team" CURRENT_PROJECT_VERSION="$build" | tail -n 3
-  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist ExportOptions.plist \
+  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
     -exportPath "build/export/$3-$build" -allowProvisioningUpdates | tail -n 3
   echo "uploaded $3 build $build"
 }
