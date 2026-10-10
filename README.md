@@ -1,3 +1,5 @@
+<p align="center"><img src="favicon.svg" width="96" height="96" alt="OpenIPTV logo"></p>
+
 # OpenIPTV
 
 One fast app for your Emby library and your Xtream live TV, on iOS, Apple TV,

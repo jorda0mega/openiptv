@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OpenIPTV">
+  <title>OpenIPTV</title>
+  <defs>
+    <linearGradient id="openiptv-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset=".55" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#6D28D9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#openiptv-bg)"/>
+  <!-- back flap and the inside of the open box -->
+  <path d="M21 32 L43 32 L40.5 25.5 L23.5 25.5 Z" fill="#fff" opacity=".45"/>
+  <path d="M17 37 L47 37 L43 32 L21 32 Z" fill="#0A143C" opacity=".35"/>
+  <!-- play button popping out -->
+  <path d="M25.5 8.5 L43 19.5 L25.5 30.5 Z" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round" transform="rotate(-10 32 20)"/>
+  <!-- side flaps and front of the box -->
+  <g fill="#fff" stroke="#fff" stroke-width="1.2" stroke-linejoin="round" opacity=".72">
+    <path d="M17 37 L21 32 L11.5 26.5 L7 31.5 Z"/>
+    <path d="M47 37 L43 32 L52.5 26.5 L57 31.5 Z"/>
+  </g>
+  <path d="M17 37 H47 V50.5 a4 4 0 0 1 -4 4 H21 a4 4 0 0 1 -4 -4 Z" fill="#fff"/>
+</svg>
