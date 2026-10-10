@@ -159,6 +159,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Users/U1/Views":
             return self.send({"Items": [{"Id": "v1", "Name": "Movies", "Type": "CollectionFolder", "CollectionType": "movies"},
                                         {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"}]})
+        if path == "/Users/U1/Items" and q.get("Filters") == "IsResumable":
+            return self.send({"Items": [episode(i) for i in range(3)]})
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
         if path == "/Shows/NextUp":

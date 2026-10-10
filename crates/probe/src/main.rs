@@ -22,6 +22,7 @@ use serde_json::{Map, Value, json};
 use url::Url;
 
 type AnyResult<T> = Result<T, Box<dyn std::error::Error>>;
+type Query<'a> = Vec<(&'a str, &'a str)>;
 
 struct Options {
     samples: usize,
@@ -141,16 +142,35 @@ async fn probe_xtream(
     opts: &Options,
     out: &mut Map<String, Value>,
 ) -> AnyResult<()> {
-    let creds = Credentials::new(
-        &env("OPENIPTV_XTREAM_URL").ok_or("OPENIPTV_XTREAM_URL missing")?,
-        &env("OPENIPTV_XTREAM_USER").ok_or("OPENIPTV_XTREAM_USER missing")?,
-        &env("OPENIPTV_XTREAM_PASS").ok_or("OPENIPTV_XTREAM_PASS missing")?,
-    )?;
-    let x = XtreamClient::new(http.clone(), creds);
+    let servers = env("OPENIPTV_XTREAM_URL").ok_or("OPENIPTV_XTREAM_URL missing")?;
+    let user = env("OPENIPTV_XTREAM_USER").ok_or("OPENIPTV_XTREAM_USER missing")?;
+    let pass = env("OPENIPTV_XTREAM_PASS").ok_or("OPENIPTV_XTREAM_PASS missing")?;
 
     heading("Xtream account");
-    let (account, t) = timed(x.account()).await;
-    let account = account?;
+    // Several candidate addresses may be given (space-separated); use the
+    // first one that accepts the login.
+    let mut found = None;
+    for server in servers.split_whitespace() {
+        let host = Url::parse(server)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+            .unwrap_or_else(|| "?".into());
+        let Ok(creds) = Credentials::new(server, &user, &pass) else {
+            println!("  {host:<18} ✗ not a URL");
+            continue;
+        };
+        let x = XtreamClient::new(http.clone(), creds);
+        let (account, t) = timed(x.account()).await;
+        match account {
+            Ok(account) => {
+                println!("  server             {host}");
+                found = Some((x, account, t));
+                break;
+            }
+            Err(e) => println!("  {host:<18} ✗ {e}"),
+        }
+    }
+    let (x, account, t) = found.ok_or("no candidate server accepted the login")?;
     let local_now = time::now();
     let offset = account.panel_utc_offset();
     let clock_skew = account.server_info.timestamp_now.map(|ts| ts - local_now);
@@ -239,8 +259,16 @@ async fn probe_xtream(
     {
         println!("  ✗ XMLTV failed: {e}");
     }
+    // Event and music channels are often off-air; test one that has a
+    // programme on right now.
+    let now = time::now();
+    let on_air = sample.iter().find(|c| {
+        short
+            .get(&c.stream_id)
+            .is_some_and(|p| epg::now_next(p, now).now.is_some())
+    });
     if opts.streams
-        && let Some(ch) = sample.first()
+        && let Some(ch) = on_air.or(sample.first())
     {
         probe_streams(http, &x, &account, ch, out).await;
     }
@@ -389,7 +417,7 @@ async fn probe_xmltv(
     // Same channel, two sources: when they disagree on what is on now, at
     // least one of them is wrong, and that is what users see as stale titles.
     let now = time::now();
-    let (mut agree, mut disagree, mut missing) = (0, 0, 0);
+    let (mut agree, mut disagree, mut only_xml, mut only_short, mut neither) = (0, 0, 0, 0, 0);
     let mut examples = Vec::new();
     for ch in sample {
         let Some(epg_id) = &ch.epg_id else { continue };
@@ -409,11 +437,14 @@ async fn probe_xmltv(
                     ));
                 }
             }
-            _ => missing += 1,
+            (Some(_), None) => only_xml += 1,
+            (None, Some(_)) => only_short += 1,
+            (None, None) => neither += 1,
         }
     }
+    println!("  now-title          {agree} agree · {disagree} disagree");
     println!(
-        "  now-title agrees   {agree} · disagrees {disagree} · missing in one source {missing}"
+        "  current show from  XMLTV only {only_xml} · short EPG only {only_short} · neither {neither}"
     );
     for e in &examples {
         println!("    ⚠ {e}");
@@ -434,7 +465,8 @@ async fn probe_xmltv(
         json!({
             "bytes": body.len(), "ttfb_ms": ttfb.as_millis(), "download_ms": t_dl.as_millis(),
             "parse_ms": t_parse.as_millis(), "programmes": guide.programme_count(),
-            "now_agree": agree, "now_disagree": disagree, "now_missing": missing,
+            "now_agree": agree, "now_disagree": disagree, "now_only_xmltv": only_xml,
+            "now_only_short_epg": only_short, "now_neither": neither,
             "sample_ids_missing": unmatched.len(),
         }),
     );
@@ -728,6 +760,72 @@ async fn probe_emby_home(
         latest.len(),
         ms(t_latest)
     );
+
+    // Continue Watching is the slow row; time cheaper ways to ask for it,
+    // one after another so they don't compete.
+    let uid = emby
+        .session()
+        .map(|s| s.user_id.clone())
+        .unwrap_or_default();
+    let fields = "PrimaryImageAspectRatio,ProductionYear,BasicSyncInfo";
+    let card = [
+        ("Limit", "12"),
+        ("Fields", fields),
+        ("ImageTypeLimit", "1"),
+        ("EnableImageTypes", "Primary,Backdrop,Thumb"),
+    ];
+    let resume_path = format!("Users/{uid}/Items/Resume");
+    let items_path = format!("Users/{uid}/Items");
+    let variants: [(&str, &str, Query); 3] = [
+        (
+            "resume, no total count",
+            &resume_path,
+            [
+                &card[..],
+                &[("MediaTypes", "Video"), ("EnableTotalRecordCount", "false")],
+            ]
+            .concat(),
+        ),
+        (
+            "resume, no user data",
+            &resume_path,
+            [
+                &card[..],
+                &[
+                    ("MediaTypes", "Video"),
+                    ("EnableTotalRecordCount", "false"),
+                    ("EnableUserData", "false"),
+                ],
+            ]
+            .concat(),
+        ),
+        (
+            "items filtered resumable",
+            &items_path,
+            [
+                &card[..],
+                &[
+                    ("Filters", "IsResumable"),
+                    ("Recursive", "true"),
+                    ("SortBy", "DatePlayed"),
+                    ("SortOrder", "Descending"),
+                    ("IncludeItemTypes", "Movie,Episode"),
+                    ("EnableTotalRecordCount", "false"),
+                ],
+            ]
+            .concat(),
+        ),
+    ];
+    let mut variant_times = Map::new();
+    for (name, path, query) in variants {
+        let (items, t) = timed(emby.query(path, &query, "continue watching")).await;
+        match items {
+            Ok(items) => println!("    {name:<26} {} items in {}", items.len(), ms(t)),
+            Err(e) => println!("    {name:<26} ✗ {e}"),
+        }
+        variant_times.insert(name.into(), json!(t.as_millis()));
+    }
+    out.insert("resume_variants_ms".into(), Value::Object(variant_times));
 
     // The app shows "Latest" per library, like Emby does; time those too.
     let mut set = tokio::task::JoinSet::new();
