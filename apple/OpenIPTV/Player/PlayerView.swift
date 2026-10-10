@@ -3,7 +3,7 @@ import SwiftUI
 
 /// What the full-screen player shows.
 enum PlayerItem: Identifiable {
-    case live([Channel], Int)
+    case live([LiveChannel], Int)
     case vod(EmbyPlayback)
 
     var id: String {
@@ -32,11 +32,10 @@ struct VideoSurface: UIViewRepresentable {
 }
 
 @MainActor
-private func makePlayer(model: AppModel, prefs: Preferences) -> MPVPlayer {
+private func makePlayer(prefs: Preferences) -> MPVPlayer {
     try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
     try? AVAudioSession.sharedInstance().setActive(true)
-    let headers = model.server?.cookie.map { ["Cookie: \($0)"] } ?? []
-    return MPVPlayer(httpHeaders: headers, options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+    return MPVPlayer(options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
 }
 
 // MARK: - Live TV
@@ -48,8 +47,9 @@ struct LivePlayerView: View {
     @Environment(Preferences.self) private var prefs
     @Environment(\.dismiss) private var dismiss
 
-    let channels: [Channel]
+    let channels: [LiveChannel]
     @State var index: Int
+    @State private var loadTask: Task<Void, Never>?
     @State private var player: MPVPlayer?
     @State private var timing = "Starting…"
     @State private var started = false
@@ -58,7 +58,7 @@ struct LivePlayerView: View {
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
 
-    private var channel: Channel { channels[index] }
+    private var channel: LiveChannel { channels[index] }
 
     var body: some View {
         ZStack {
@@ -94,6 +94,7 @@ struct LivePlayerView: View {
         .task { start() }
         .onDisappear {
             hideTask?.cancel()
+            loadTask?.cancel()
             player?.shutdown()
             player = nil
         }
@@ -160,7 +161,7 @@ struct LivePlayerView: View {
     }
 
     private func start() {
-        let player = makePlayer(model: model, prefs: prefs)
+        let player = makePlayer(prefs: prefs)
         player.onEvent = { event in handle(event) }
         self.player = player
         play()
@@ -170,9 +171,18 @@ struct LivePlayerView: View {
         timing = "Starting…"
         started = false
         error = nil
-        guard let url = model.streamURL(for: channel) else { return }
-        player?.load(url)
-        Task { await model.ensureNowNext([channel.id]) }
+        let channel = channel
+        loadTask?.cancel()
+        loadTask = Task {
+            do {
+                let stream = try await model.playable(channel)
+                guard !Task.isCancelled else { return }
+                player?.load(stream.url, headers: stream.headers)
+            } catch {
+                self.error = SourceError.wrap(error).localizedDescription
+            }
+        }
+        Task { await model.ensureNowNext([channel]) }
         showControls()
     }
 
@@ -181,14 +191,7 @@ struct LivePlayerView: View {
         case let .started(seconds):
             started = true
             buffering = false
-            timing = String(format: "%.1f s", seconds)
-            let id = channel.id
-            Task {
-                await model.refreshStatus()
-                if let zap = model.status?.lastZap, zap.channel == id {
-                    timing = String(format: "%.1f s · provider %.1f s", seconds, Double(zap.firstBytesMs) / 1000)
-                }
-            }
+            timing = String(format: "Started in %.1f s", seconds)
         case let .buffering(isBuffering):
             buffering = isBuffering
         case let .failed(message):
@@ -357,14 +360,10 @@ struct MoviePlayerView: View {
     }
 
     private func start() {
-        let player = makePlayer(model: model, prefs: prefs)
+        let player = makePlayer(prefs: prefs)
         player.onEvent = { event in handle(event) }
         self.player = player
-        guard let url = URL(string: playback.url) else {
-            error = "Bad stream address"
-            return
-        }
-        player.load(url, start: playback.startSeconds)
+        player.load(playback.url, start: playback.startSeconds)
         position = playback.startSeconds ?? 0
         showControls()
     }
@@ -374,7 +373,7 @@ struct MoviePlayerView: View {
         case .started:
             started = true
             buffering = false
-            Task { await model.report(playback, seconds: position, event: "start") }
+            Task { await model.report(playback, seconds: position, event: .started) }
         case let .buffering(isBuffering):
             buffering = isBuffering
         case let .failed(message):
@@ -384,7 +383,7 @@ struct MoviePlayerView: View {
             if let newDuration { duration = newDuration }
             if abs(newPosition - lastReport) >= 10 {
                 lastReport = newPosition
-                Task { await model.report(playback, seconds: newPosition, event: "progress") }
+                Task { await model.report(playback, seconds: newPosition, event: .progress) }
             }
         case let .paused(isPaused):
             paused = isPaused
@@ -400,7 +399,7 @@ struct MoviePlayerView: View {
         let seconds = position
         player?.shutdown()
         player = nil
-        Task { await model.report(playback, seconds: seconds, event: "stop") }
+        Task { await model.report(playback, seconds: seconds, event: .stopped) }
     }
 
     private func toggleControls() {

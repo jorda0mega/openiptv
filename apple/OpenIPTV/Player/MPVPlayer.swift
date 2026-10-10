@@ -36,7 +36,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var reportedStart = false
     private var duration: Double?
 
-    init(httpHeaders: [String], options: [(String, String)], hardwareDecoding: Bool) {
+    init(options: [(String, String)], hardwareDecoding: Bool) {
         layer.framebufferOnly = true
         layer.backgroundColor = UIColor.black.cgColor
 
@@ -53,8 +53,9 @@ final class MPVPlayer: @unchecked Sendable {
         set("terminal", "no")
         set("keep-open", "no")
         set("cache", "yes")
+        // No log output at all: stream URLs carry credentials.
+        set("msg-level", "all=no")
         for (name, value) in options { set(name, value) }
-        if !httpHeaders.isEmpty { set("http-header-fields", httpHeaders.joined(separator: ",")) }
         mpv_initialize(mpv)
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
@@ -66,13 +67,15 @@ final class MPVPlayer: @unchecked Sendable {
         }, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    /// Start a stream; `start` resumes a file at that many seconds.
-    func load(_ url: URL, start: Double? = nil) {
+    /// Start a stream with any headers the provider requires; `start`
+    /// resumes a file at that many seconds.
+    func load(_ url: URL, headers: [String] = [], start: Double? = nil) {
         queue.async { [self] in
             guard let mpv else { return }
             loadStarted = CFAbsoluteTimeGetCurrent()
             reportedStart = false
             duration = nil
+            mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
             mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
             command(["loadfile", url.absoluteString, "replace"])
         }

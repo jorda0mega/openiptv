@@ -2,87 +2,80 @@
 
 # OpenIPTV
 
-One fast app for your Emby library and your Xtream live TV, on iOS, Apple TV,
-Fire TV and the web. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-**Status:** early. The shared Rust core (Emby + Xtream clients, EPG engine,
-streaming XMLTV parser), a diagnostic probe and the **web version** exist.
-Native iOS/tvOS/Fire TV apps are next.
+One fast app for your Emby library and your live TV, on iPhone, iPad and
+Apple TV (native SwiftUI, Liquid Glass), plus a self-hosted web version.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 OpenIPTV is a player only. It ships no channels, playlists or media: you
 bring your own Emby server and an IPTV subscription you're entitled to use.
 
-## Run the web version
+## What it connects to
 
-Needs Rust, Node.js and the [1Password CLI](https://developer.1password.com/docs/cli/)
-with your logins saved as 1Password items:
+Sign in inside the app, like TiviMate or Emby's own apps:
+
+- **Emby**: server address with username and password, or an Emby Connect
+  account (then pick a server shared with you).
+- **IPTV**, any common format, several at once:
+  - **Xtream Codes**: server, username, password (or paste a `get.php` link)
+  - **M3U playlist** URL, with an optional XMLTV guide URL (playlist links
+    that are really Xtream logins are upgraded automatically)
+  - **Stalker / Ministra portal**: portal URL and MAC address
+
+## Privacy
+
+- Logins are stored only on the device, encrypted in the Keychain as
+  "this device only": not synced to iCloud, not in backups.
+- For Emby only the session token is kept, never the password.
+- Nothing goes anywhere except to your own Emby server and IPTV providers.
+  OpenIPTV has no servers, no analytics, and logs nothing; error messages
+  never include URLs (IPTV URLs contain logins); the player's logging is off.
+- Settings → *Forget everything on this device* wipes it all.
+
+## iPhone, iPad and Apple TV
+
+`apple/` (SwiftUI, iOS/tvOS 26). Live TV plays through libmpv (MPVKit's LGPL
+build), which handles the MPEG-TS streams AVPlayer can't.
+
+- **Simulator:** open `apple/OpenIPTV.xcodeproj` in Xcode 26 and Run. The
+  first build fetches MPVKit (`apple/scripts/fetch-mpvkit.sh`, checksum
+  verified). After editing `apple/project.yml`, run `xcodegen` in `apple/`.
+- **Your devices:** add your Apple ID in Xcode → Settings → Apple Accounts,
+  pick your team under Signing & Capabilities, and Run on your iPhone or
+  Apple TV. A free Apple ID works; installs then last 7 days.
+- **TestFlight** (paid developer account): create the app in App Store
+  Connect (platforms iOS + tvOS, bundle ID `com.jorda0mega.openiptv` or your
+  own in `apple/project.yml`), then `apple/scripts/testflight.sh <TEAM_ID>`.
+
+## Web version (self-hosted)
+
+The browser can't reach most IPTV servers directly (plain HTTP, no CORS),
+so the web app runs behind a small relay, `openiptv-edge`, that you host.
+Give it your logins through environment variables (from wherever you keep
+them; nothing is written to disk):
 
 ```sh
-scripts/serve.sh --emby "Emby Connect" --xtream "My IPTV"         # http://127.0.0.1:8787
-scripts/serve.sh --emby "Emby Connect" --xtream "My IPTV" --lan   # also on your phone
+cargo build --release -p openiptv-edge && (cd web && npm ci && npm run build)
+OPENIPTV_EMBY_URL=… OPENIPTV_EMBY_USER=… OPENIPTV_EMBY_PASS=… \
+OPENIPTV_XTREAM_URL=… OPENIPTV_XTREAM_USER=… OPENIPTV_XTREAM_PASS=… \
+  target/release/openiptv-edge            # http://127.0.0.1:8787
 ```
 
-Logins are read from 1Password when the server starts and only live in its
-memory. With `--lan`, the server prints a one-time link for your phone (same
-Wi-Fi); other devices are refused without it. Without 1Password, set the same
-`OPENIPTV_*` variables the probe uses and run `target/release/openiptv-edge`.
+`OPENIPTV_EMBY_CONNECT_USER`/`_PASS` sign in with Emby Connect instead, and
+`OPENIPTV_EDGE_ADDR=0.0.0.0:8787` opens it to your network (other devices
+must open a one-time link it prints). An optional 1Password launcher lives
+in [contrib/1password](contrib/1password).
 
-## Run the iPhone app (native, Liquid Glass)
-
-The iOS app (`apple/`, SwiftUI, iOS 26) talks to the same server, so your
-logins stay on your Mac. Live TV plays through libmpv (MPVKit), which handles
-the MPEG-TS streams AVPlayer can't.
-
-1. Start the server with `--lan` (above). It prints a pairing link.
-2. Open `apple/OpenIPTV.xcodeproj` in Xcode 26. (After changing
-   `apple/project.yml`, regenerate it with `xcodegen` from `apple/`.)
-3. Simulator: just press Run; it connects to `127.0.0.1:8787` automatically.
-4. Your iPhone: Xcode → Settings → Apple Accounts → add your Apple ID; select
-   the OpenIPTV target → Signing & Capabilities → choose your team; plug in
-   (or Wi-Fi pair) your iPhone and press Run. In the app, paste the pairing
-   link. A free Apple ID works; the install then lasts 7 days.
-
-## TestFlight (iPhone, iPad and Apple TV)
-
-Needs a paid Apple Developer Program membership.
-
-1. Xcode → Settings → Apple Accounts: sign in with your developer Apple ID.
-2. App Store Connect → Apps → **+** → New App: platforms iOS and tvOS,
-   bundle ID `com.jorda0mega.openiptv` (or change it in `apple/project.yml`;
-   run `apple/scripts/testflight.sh` once first if the ID isn't listed yet,
-   which registers it).
-3. `apple/scripts/testflight.sh <TEAM_ID>` archives both apps and uploads
-   them. After processing, install from the TestFlight app on your iPhone
-   and Apple TV (you're an internal tester as the account holder; external
-   testers need a public link and Beta App Review).
-
-## Measure your servers
+## Developer tools
 
 ```sh
-scripts/probe.sh            # prompts for URLs and credentials (passwords hidden)
-scripts/probe.sh --json report.json --samples 40
-```
-
-Reports login and list latency, whether your provider offers HLS, how often
-"now playing" is right (short EPG vs XMLTV), stream start time, and Emby
-artwork coverage. Credentials are never written to disk; the JSON report
-contains no credentials or URLs.
-
-## Develop without real servers
-
-```sh
-python3 scripts/mock_server.py 8765 &
-OPENIPTV_XTREAM_URL=http://127.0.0.1:8765 OPENIPTV_XTREAM_USER=u OPENIPTV_XTREAM_PASS=p \
-OPENIPTV_EMBY_URL=http://127.0.0.1:8765 OPENIPTV_EMBY_USER=u OPENIPTV_EMBY_PASS=p \
-cargo run -p openiptv-probe
-```
-
-## Tests
-
-```sh
+apple/Tools/smoke/run.sh          # the apps' provider code against real or mock services
+scripts/probe.sh                  # latency, guide accuracy and artwork coverage of your servers
+python3 scripts/mock_server.py 8765   # fake Emby + Xtream + M3U + Stalker for development
 cargo test
-cargo run --release -p openiptv-core --example xmltv_bench -- 3000 7
 ```
+
+The smoke test and probe read logins from environment variables and print
+only counts, names, timings and hostnames.
 
 ## License
 

@@ -5,7 +5,7 @@ struct SearchView: View {
     @Environment(Preferences.self) private var prefs
     @Binding var playing: PlayerItem?
     @State private var query = ""
-    @State private var results: [Channel] = []
+    @State private var results: [LiveChannel] = []
 
     var body: some View {
         NavigationStack {
@@ -39,7 +39,7 @@ struct SearchView: View {
                 // Debounce typing.
                 try? await Task.sleep(for: .milliseconds(200))
                 guard !Task.isCancelled else { return }
-                results = await model.search(query)
+                results = model.search(query)
             }
         }
     }

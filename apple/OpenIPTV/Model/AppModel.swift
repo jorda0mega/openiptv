@@ -1,161 +1,244 @@
 import Foundation
 import Observation
 
-/// App state. Screens render from what's cached first and refresh behind it;
-/// live titles refresh at the exact second a programme ends.
+/// App state. Everything runs on the device, talking straight to the user's
+/// Emby server and IPTV providers. Screens render from what's cached first
+/// and refresh behind it; live titles refresh the second a programme ends.
 @Observable
 @MainActor
 final class AppModel {
-    private(set) var client: APIClient?
-    var server: Server? {
-        didSet { saveServer() }
-    }
-    var status: ServerStatus?
-    var connectionError: String?
+    let sources = SourceStore()
+    let guide = GuideStore()
+
+    // MARK: Home (Emby)
 
     var rows: [HomeRow] = []
     var homeError: String?
-    var homeLoadMs: Int?
+    private var lastCardWidth = 360
 
-    var categories: [Category] = []
+    // MARK: Live TV
+
+    private(set) var categories: [LiveCategory] = []
+    private(set) var allChannels: [LiveChannel] = []
+    private(set) var liveLoading = false
+    var liveErrors: [String] = []
     var selectedCategory: String? {
         didSet { UserDefaults.standard.set(selectedCategory, forKey: "category") }
     }
-    var channels: [Channel] = []
-    var channelsError: String?
-    private(set) var nowNext: [Int64: NowNext] = [:]
+    private(set) var nowNext: [String: NowNext] = [:]
+    private(set) var guideState: GuideStore.State = .idle
 
-    private var channelCache: [String: [Channel]] = [:]
-    private var visible: Set<Int64> = []
+    static let favoritesID = "__favorites"
+
+    private var providers: [UUID: any LiveProvider] = [:]
+    private var channelsByCategory: [String: [LiveChannel]] = [:]
+    private var channelById: [String: LiveChannel] = [:]
+    private var visible: Set<String> = []
     private var nowNextTask: Task<Void, Never>?
     private var boundaryTask: Task<Void, Never>?
+    private var providerEPG: [String: (until: Int64, list: [Programme])] = [:]
 
     init() {
-        server = Self.loadServer()
-        #if targetEnvironment(simulator)
-        // The simulator shares this Mac's network; the server trusts loopback.
-        if server == nil { server = Server(url: URL(string: "http://127.0.0.1:8787")!, key: nil) }
-        #endif
         selectedCategory = UserDefaults.standard.string(forKey: "category")
         rows = Self.readCache("home.json") ?? []
-        categories = Self.readCache("categories.json") ?? []
-        if let server { client = APIClient(server: server) }
+        Task { await guide.loadCache(); guideState = await guide.state }
     }
 
-    // MARK: Connection
-
-    func connect(to server: Server) async {
-        self.server = server
-        client = APIClient(server: server)
-        rows = []
-        await refreshStatus()
-    }
-
-    func refreshStatus() async {
-        guard let client else { return }
-        do {
-            status = try await client.status()
-            connectionError = nil
-        } catch {
-            connectionError = error.localizedDescription
-        }
+    var emby: EmbyClient? {
+        sources.emby.map { EmbyClient(account: $0, deviceId: sources.deviceId) }
     }
 
     // MARK: Home
 
-    private var lastCardWidth = 360
-
     func loadHome(cardWidth: Int) async {
         lastCardWidth = cardWidth
-        guard let client else { return }
-        let started = Date()
+        guard let emby else {
+            rows = []
+            return
+        }
         do {
-            let fresh = try await client.home(width: cardWidth)
-            homeLoadMs = Int(Date().timeIntervalSince(started) * 1000)
+            let fresh = try await emby.home(cardWidth: cardWidth)
             if fresh != rows { rows = fresh }
             homeError = nil
             Self.writeCache("home.json", fresh)
         } catch {
-            homeError = error.localizedDescription
+            homeError = SourceError.wrap(error).localizedDescription
         }
+    }
+
+    func playback(for card: Card) async throws -> EmbyPlayback {
+        guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
+        return try await emby.playback(itemId: card.id)
+    }
+
+    func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
+        await emby?.report(event, itemId: playback.itemId, seconds: seconds)
+        if event == .stopped { await loadHome(cardWidth: lastCardWidth) }
+    }
+
+    // MARK: Accounts
+
+    func signedInToEmby(_ account: EmbyAccount) async {
+        sources.setEmby(account)
+        await loadHome(cardWidth: lastCardWidth)
+    }
+
+    func signOutOfEmby() async {
+        await emby?.logout()
+        sources.setEmby(nil)
+        rows = []
+        Self.removeCache("home.json")
+    }
+
+    func add(_ source: IPTVSource) async {
+        sources.add(source)
+        await loadLive(force: true)
+    }
+
+    func remove(_ source: IPTVSource) async {
+        sources.remove(source)
+        await loadLive(force: true)
+    }
+
+    func forgetEverything() async {
+        await emby?.logout()
+        sources.forgetEverything()
+        await guide.clear()
+        rows = []
+        categories = []
+        allChannels = []
+        channelsByCategory = [:]
+        channelById = [:]
+        nowNext = [:]
+        providers = [:]
+        providerEPG = [:]
+        selectedCategory = nil
+        guideState = .idle
     }
 
     // MARK: Live TV
 
-    func loadCategories() async {
-        guard let client else { return }
-        do {
-            let fresh = try await client.categories()
-            if fresh != categories { categories = fresh }
-            Self.writeCache("categories.json", fresh)
-            if selectedCategory == nil
-                || (selectedCategory != Self.favoritesID && !fresh.contains(where: { $0.id == selectedCategory })) {
-                selectedCategory = fresh.first?.id
+    /// Loads every source's lineup in parallel, then refreshes the full
+    /// guide in the background if it's stale.
+    func loadLive(force: Bool = false) async {
+        guard force || allChannels.isEmpty, !liveLoading else { return }
+        let iptv = sources.iptv
+        guard !iptv.isEmpty else {
+            categories = []
+            allChannels = []
+            channelsByCategory = [:]
+            liveErrors = []
+            return
+        }
+        liveLoading = true
+        defer { liveLoading = false }
+        providers = Dictionary(uniqueKeysWithValues: iptv.map { ($0.id, Providers.make($0)) })
+        let multiple = iptv.count > 1
+        var lineups: [(IPTVSource, Result<LiveLineup, Error>)] = []
+        await withTaskGroup(of: (IPTVSource, Result<LiveLineup, Error>).self) { group in
+            for source in iptv {
+                let provider = providers[source.id]!
+                group.addTask {
+                    do { return (source, .success(try await provider.load())) } catch { return (source, .failure(error)) }
+                }
             }
-            if let selectedCategory { await select(category: selectedCategory) }
-        } catch {
-            channelsError = error.localizedDescription
+            for await result in group { lineups.append(result) }
+        }
+        let order = Dictionary(uniqueKeysWithValues: iptv.enumerated().map { ($1.id, $0) })
+        lineups.sort { (order[$0.0.id] ?? 0) < (order[$1.0.id] ?? 0) }
+
+        var cats: [LiveCategory] = []
+        var channels: [LiveChannel] = []
+        var errors: [String] = []
+        var guideURLs: [URL] = []
+        for (source, result) in lineups {
+            switch result {
+            case let .success(lineup):
+                cats += lineup.categories.map {
+                    LiveCategory(id: $0.id, name: multiple ? "\(source.name) · \($0.name)" : $0.name, channels: $0.channels)
+                }
+                channels += lineup.channels
+                guideURLs += lineup.guideURLs
+            case let .failure(error):
+                errors.append("\(source.name): \(SourceError.wrap(error).localizedDescription)")
+            }
+        }
+        categories = cats
+        allChannels = channels
+        channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
+        channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        liveErrors = errors
+        if selectedCategory == nil
+            || (selectedCategory != Self.favoritesID && !cats.contains { $0.id == selectedCategory }) {
+            selectedCategory = cats.first?.id
+        }
+
+        let keep = Set(channels.compactMap(\.epgId))
+        let stale = await guide.isStale()
+        if !guideURLs.isEmpty, force || stale {
+            guideState = .loading
+            let guide = guide
+            Task.detached {
+                await guide.refresh(from: guideURLs, keep: keep)
+                await self.guideDidUpdate()
+            }
         }
     }
 
-    /// Pseudo-category for the user's favourite channels (kept on device).
-    static let favoritesID = "__favorites"
+    private func guideDidUpdate() async {
+        guideState = await guide.state
+        // Re-evaluate visible rows against the new guide.
+        nowNext = [:]
+        providerEPG = [:]
+        scheduleNowNext()
+    }
 
-    func select(category: String) async {
-        selectedCategory = category
-        guard category != Self.favoritesID else { return }
-        if let cached = channelCache[category] { channels = cached }
-        guard let client else { return }
+    func channels(in category: String?, favorites: [LiveChannel]) -> [LiveChannel] {
+        if category == Self.favoritesID { return resolved(favorites) }
+        return channelsByCategory[category ?? ""] ?? []
+    }
+
+    /// Swap saved channels for their current lineup entries (fresh stream
+    /// references, names and logos) where the lineup has them.
+    func resolved(_ channels: [LiveChannel]) -> [LiveChannel] {
+        channels.map { channelById[$0.id] ?? $0 }
+    }
+
+    /// Case-insensitive search across every source, on the device.
+    func search(_ query: String) -> [LiveChannel] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 2 else { return [] }
+        return Array(allChannels.lazy.filter { $0.name.localizedCaseInsensitiveContains(q) }.prefix(300))
+    }
+
+    func playable(_ channel: LiveChannel) async throws -> PlayableStream {
+        let channel = channelById[channel.id] ?? channel
+        if case let .url(url, _, _) = channel.stream, url.scheme == "about" {
+            throw SourceError.unexpected("Channels are still loading; try again in a moment.")
+        }
+        let provider = providers[channel.sourceId]
+            ?? sources.iptv.first(where: { $0.id == channel.sourceId }).map(Providers.make)
+        guard let provider else { throw SourceError.unexpected("This channel's source was removed.") }
         do {
-            let fresh = try await client.channels(category: category)
-            channelCache[category] = fresh
-            if selectedCategory == category { channels = fresh }
-            channelsError = nil
+            return try await provider.playable(channel)
         } catch {
-            channelsError = error.localizedDescription
+            throw SourceError.wrap(error)
         }
-    }
-
-    func search(_ query: String) async -> [Channel] {
-        guard let client, query.count >= 2 else { return [] }
-        return (try? await client.channels(query: query)) ?? []
-    }
-
-    func streamURL(for channel: Channel) -> URL? { client?.streamURL(for: channel) }
-
-    // MARK: Emby playback
-
-    func playback(for card: Card) async throws -> EmbyPlayback {
-        guard let client else { throw APIError.status(0, "Not connected") }
-        return try await client.embyPlayback(id: card.id)
-    }
-
-    func report(_ playback: EmbyPlayback, seconds: Double, event: String) async {
-        await client?.reportProgress(itemId: playback.itemId, seconds: seconds, event: event)
-        if event == "stop" { await loadHome(cardWidth: lastCardWidth) }
-    }
-
-    /// Pair with a server using the code shown on the Mac.
-    func pair(serverURL: URL, pin: String) async throws {
-        let key = try await APIClient.pair(serverURL: serverURL, pin: pin)
-        await connect(to: Server(url: serverURL, key: key))
     }
 
     // MARK: Now / next
 
-    func appeared(_ id: Int64) {
+    func appeared(_ id: String) {
         visible.insert(id)
         scheduleNowNext()
     }
 
-    func disappeared(_ id: Int64) {
+    func disappeared(_ id: String) {
         visible.remove(id)
     }
 
-    /// Fetch now/next for the given channels right away (player overlay).
-    func ensureNowNext(_ ids: [Int64]) async {
-        let stale = ids.filter { nowNext[$0].map(\.isStale) ?? true }
-        await fetchNowNext(stale)
+    func ensureNowNext(_ channels: [LiveChannel]) async {
+        await resolveNowNext(channels.filter { nowNext[$0.id].map(\.isStale) ?? true })
     }
 
     private func scheduleNowNext() {
@@ -163,18 +246,42 @@ final class AppModel {
         nowNextTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard let self, !Task.isCancelled else { return }
-            let stale = self.visible.filter { self.nowNext[$0].map(\.isStale) ?? true }
-            await self.fetchNowNext(Array(stale))
+            let stale = self.visible.compactMap { self.channelById[$0] }.filter { self.nowNext[$0.id].map(\.isStale) ?? true }
+            await self.resolveNowNext(stale)
             self.scheduleBoundary()
         }
     }
 
-    private func fetchNowNext(_ ids: [Int64]) async {
-        guard let client, !ids.isEmpty else { return }
-        for start in stride(from: 0, to: ids.count, by: 50) {
-            let batch = Array(ids[start..<min(start + 50, ids.count)])
-            if let fresh = try? await client.nowNext(ids: batch) {
-                nowNext.merge(fresh) { _, new in new }
+    /// Full guide first (placeholder titles don't count), then the
+    /// provider's own short EPG, cached until it expires.
+    private func resolveNowNext(_ channels: [LiveChannel]) async {
+        guard !channels.isEmpty else { return }
+        let now = Int64(Date().timeIntervalSince1970)
+        var needProvider: [LiveChannel] = []
+        for channel in channels {
+            if let id = channel.epgId, let fromGuide = await guide.nowNext(id, at: now),
+               let title = fromGuide.now?.title, !NowNext.isPlaceholder(title) {
+                nowNext[channel.id] = fromGuide
+            } else {
+                needProvider.append(channel)
+            }
+        }
+        var fetch: [(LiveChannel, any LiveProvider)] = []
+        for channel in needProvider {
+            if let cached = providerEPG[channel.id], now < cached.until {
+                nowNext[channel.id] = .from(cached.list, at: now, source: .provider)
+            } else if let provider = providers[channel.sourceId] {
+                fetch.append((channel, provider))
+            }
+        }
+        await withTaskGroup(of: (String, [Programme]).self) { group in
+            for (channel, provider) in fetch {
+                group.addTask { (channel.id, await provider.shortEPG(for: channel)) }
+            }
+            for await (id, list) in group {
+                let value = NowNext.from(list, at: now, source: .provider)
+                providerEPG[id] = (value.refreshAt ?? now + 300, list)
+                nowNext[id] = value
             }
         }
     }
@@ -182,9 +289,8 @@ final class AppModel {
     /// One timer for the earliest programme change among visible channels.
     private func scheduleBoundary() {
         boundaryTask?.cancel()
-        let next = visible.compactMap { nowNext[$0]?.refreshAt }.min()
-        guard let next else { return }
-        let delay = max(1, Double(next) - Date.now.timeIntervalSince1970 + 1.5)
+        guard let next = visible.compactMap({ nowNext[$0]?.refreshAt }).min() else { return }
+        let delay = max(1, Double(next) - Date().timeIntervalSince1970 + 1.5)
         boundaryTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled else { return }
@@ -192,7 +298,7 @@ final class AppModel {
         }
     }
 
-    // MARK: Persistence (no secrets here; the pairing key goes to the Keychain)
+    // MARK: Cache (display data only; never credentials or stream URLs)
 
     private static var cacheDir: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -205,18 +311,10 @@ final class AppModel {
 
     private static func writeCache<T: Encodable>(_ name: String, _ value: T) {
         guard let data = try? JSONEncoder().encode(value) else { return }
-        try? data.write(to: cacheDir.appending(path: name), options: .atomic)
+        try? data.write(to: cacheDir.appending(path: name), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
-    private func saveServer() {
-        UserDefaults.standard.set(server?.url.absoluteString, forKey: "serverURL")
-        Keychain.set(server?.key, for: "serverKey")
-    }
-
-    private static func loadServer() -> Server? {
-        guard let raw = UserDefaults.standard.string(forKey: "serverURL"), let url = URL(string: raw) else {
-            return nil
-        }
-        return Server(url: url, key: Keychain.get("serverKey"))
+    private static func removeCache(_ name: String) {
+        try? FileManager.default.removeItem(at: cacheDir.appending(path: name))
     }
 }

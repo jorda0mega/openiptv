@@ -100,6 +100,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.emby(path[len("/emby"):], q)
         if path == "/player_api.php":
             return self.xtream(q)
+        if path in ("/get.php", "/playlist.m3u"):
+            return self.m3u(path, q)
+        if path == "/portal.php":
+            return self.stalker(q)
         if path == "/xmltv.php":
             return self.xmltv()
         if path.startswith("/live/u/p/"):
@@ -145,6 +149,48 @@ class Handler(BaseHTTPRequestHandler):
             ]})
         self.send([])
 
+    def m3u(self, path, q):
+        base = f"http://{self.headers.get('Host')}"
+        if path == "/get.php" and (q.get("username") != "u" or q.get("password") != "p"):
+            return self.send({"error": "unauthorized"}, status=401)
+        lines = [f'#EXTM3U url-tvg="{base}/xmltv.php?username=u&password=p"']
+        for i in range(1, CHANNELS + 1):
+            epg = f' tvg-id="ch{i}.uk"' if i % 10 else ""
+            group = "UK" if i <= 30 else "Sports"
+            lines.append(f'#EXTINF:-1 tvg-chno="{i}"{epg} tvg-logo="http://logo/{i}.png" group-title="{group}",UK: Channel {i}')
+            lines.append(f"{base}/live/u/p/{i}.ts")
+        lines.append('#EXTINF:-1 group-title="Account Info",Username: u')
+        lines.append(f"{base}/live/u/p/999.ts")
+        return self.send("\n".join(lines) + "\n", "audio/x-mpegurl")
+
+    def stalker(self, q):
+        base = f"http://{self.headers.get('Host')}"
+        action = q.get("action")
+        if "mac=00:1A:79:00:00:01" not in (self.headers.get("Cookie") or ""):
+            return self.send({"js": {"error": "bad mac"}})
+        if action == "handshake":
+            return self.send({"js": {"token": "T123"}})
+        if self.headers.get("Authorization") != "Bearer T123":
+            return self.send("Authorization failed.", "text/plain")
+        if action == "get_profile":
+            return self.send({"js": {"id": "1", "status": 0}})
+        if action == "get_genres":
+            return self.send({"js": [{"id": "*", "title": "All"}, {"id": "1", "title": "UK"}, {"id": "2", "title": "Sports"}]})
+        if action == "get_all_channels":
+            return self.send({"js": {"data": [
+                {"id": str(i), "name": f"UK: Channel {i}", "number": str(i), "logo": "",
+                 "cmd": f"ffmpeg http://localhost/ch/{i}", "tv_genre_id": "1" if i <= 30 else "2",
+                 "xmltv_id": f"ch{i}.uk"} for i in range(1, CHANNELS + 1)]}})
+        if action == "create_link":
+            ch = q.get("cmd", "").rsplit("/", 1)[-1]
+            return self.send({"js": {"cmd": f"ffmpeg {base}/live/u/p/{ch}.ts"}})
+        if action == "get_short_epg":
+            ch = int(q.get("ch_id", "1"))
+            now = int(time.time())
+            return self.send({"js": [{"name": title(ch, s), "start_timestamp": str(s), "stop_timestamp": str(e)}
+                                     for s, e in slots(now, 4)]})
+        return self.send({"js": []})
+
     def xmltv(self):
         now = int(time.time())
         parts = ['<?xml version="1.0" encoding="UTF-8"?>\n<tv>']
@@ -173,7 +219,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Users/U1/Views":
             return self.send({"Items": [{"Id": "v1", "Name": "Movies", "Type": "CollectionFolder", "CollectionType": "movies"},
                                         {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"}]})
-        if path.startswith("/Users/U1/Items/") and path.count("/") == 4:
+        if path.startswith("/Users/U1/Items/") and path.count("/") == 4 and not path.endswith(("/Latest", "/Resume")):
             item_id = path.rsplit("/", 1)[1]
             if item_id == "s1":
                 return self.send({"Id": "s1", "Name": "Show", "Type": "Series"})

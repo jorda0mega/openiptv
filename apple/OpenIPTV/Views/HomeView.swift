@@ -10,6 +10,7 @@ struct HomeView: View {
     @Binding var playing: PlayerItem?
     @State private var loadingCard: String?
     @State private var playError: String?
+    @State private var addingEmby = false
 
     var body: some View {
         NavigationStack {
@@ -25,6 +26,7 @@ struct HomeView: View {
             .navigationTitle("Home")
             .refreshableOnPhone { await model.loadHome(cardWidth: pixelWidth) }
             .task { await model.loadHome(cardWidth: pixelWidth) }
+            .sheet(isPresented: $addingEmby) { AddEmbyView() }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -40,7 +42,15 @@ struct HomeView: View {
     private var pixelWidth: Int { Int(Layout.posterWidth * displayScale) }
 
     @ViewBuilder private var emptyState: some View {
-        if let error = model.homeError {
+        if model.sources.emby == nil {
+            ContentUnavailableView {
+                Label("No Emby server", systemImage: "film.stack")
+            } description: {
+                Text("Add your Emby server to see your movies and shows here.")
+            } actions: {
+                Button("Add Emby server") { addingEmby = true }.buttonStyle(.glassProminent)
+            }
+        } else if let error = model.homeError {
             ContentUnavailableView("Couldn't load Emby", systemImage: "exclamationmark.triangle", description: Text(error))
         } else if model.rows.isEmpty {
             ProgressView().frame(maxWidth: .infinity).padding(.top, 80)
@@ -50,7 +60,7 @@ struct HomeView: View {
     }
 
     private func play(_ card: Card) {
-        guard card.playable ?? true, loadingCard == nil else { return }
+        guard card.playable, loadingCard == nil else { return }
         loadingCard = card.id
         Task {
             defer { loadingCard = nil }

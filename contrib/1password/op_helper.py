@@ -1,4 +1,4 @@
-"""1Password helpers for scripts/serve.sh. Reads `op` CLI JSON on stdin.
+"""1Password helpers for contrib/1password/serve.sh. Reads `op` CLI JSON on stdin.
 
   find TITLE           -> prints "<vault id> <item id>" of the one item whose
                           title matches (exact, else substring; case-insensitive)

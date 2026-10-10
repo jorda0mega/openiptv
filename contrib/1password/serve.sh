@@ -10,7 +10,7 @@
 # --xtream takes a login item whose website or a field holds the server URL
 # (or a full playlist link with username/password).
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 emby_item="" xtream_item="" emby_url="" lan=""
 while [[ $# -gt 0 ]]; do
@@ -34,9 +34,9 @@ list_items() { items=$(op item list --format json); }
 retry list_items
 
 if [[ -n "$xtream_item" ]]; then
-  read -r _ xid < <(python3 -I scripts/op_helper.py find "$xtream_item" <<<"$items")
+  read -r _ xid < <(python3 -I contrib/1password/op_helper.py find "$xtream_item" <<<"$items")
   exports=""
-  read_xtream() { exports=$(op item get "$xid" --format json | python3 -I scripts/op_helper.py xtream "$summary"); }
+  read_xtream() { exports=$(op item get "$xid" --format json | python3 -I contrib/1password/op_helper.py xtream "$summary"); }
   retry read_xtream
   eval "$exports"
   unset exports
@@ -44,7 +44,7 @@ if [[ -n "$xtream_item" ]]; then
 fi
 
 if [[ -n "$emby_item" ]]; then
-  read -r vault eid < <(python3 -I scripts/op_helper.py find "$emby_item" <<<"$items")
+  read -r vault eid < <(python3 -I contrib/1password/op_helper.py find "$emby_item" <<<"$items")
   if [[ -n "$emby_url" ]]; then
     export OPENIPTV_EMBY_URL="$emby_url"
     export OPENIPTV_EMBY_USER="op://$vault/$eid/username" OPENIPTV_EMBY_PASS="op://$vault/$eid/password"

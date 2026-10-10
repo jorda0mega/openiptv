@@ -11,15 +11,6 @@ struct OpenIPTVApp: App {
                 .environment(model)
                 .environment(prefs)
                 .preferredColorScheme(.dark)
-                // openiptv://pair?link=<the link the server prints>
-                .onOpenURL { url in
-                    guard url.scheme == "openiptv",
-                          let link = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                              .queryItems?.first(where: { $0.name == "link" })?.value,
-                          let server = Server(link: link)
-                    else { return }
-                    Task { await model.connect(to: server) }
-                }
         }
     }
 }
@@ -30,8 +21,8 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.server == nil {
-                ConnectView()
+            if model.sources.isEmpty {
+                WelcomeView()
             } else {
                 TabView {
                     Tab("Home", systemImage: "house.fill") {
@@ -55,6 +46,6 @@ struct RootView: View {
         .fullScreenCover(item: $playing) { item in
             PlayerScreen(item: item)
         }
-        .task { await model.refreshStatus() }
+        .task { await model.loadLive() }
     }
 }

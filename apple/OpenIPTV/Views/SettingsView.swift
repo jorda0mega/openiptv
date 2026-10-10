@@ -1,23 +1,45 @@
 import SwiftUI
 
-/// Everything the user can tune: playback behaviour, which Home rows show,
-/// favourites and hidden categories, and the server connection.
+/// Accounts, playback tuning, what shows where, and privacy controls.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
-    @State private var showingPairing = false
+    @State private var adding: AddSheet?
+    @State private var confirmForget = false
 
     var body: some View {
         @Bindable var prefs = prefs
         NavigationStack {
             Form {
-                Section("Server") {
-                    statusRow("Emby", ok: model.status?.emby.ok,
-                              detail: model.status?.emby.server ?? model.status?.emby.error)
-                    statusRow("Live TV", ok: model.status?.live.ok,
-                              detail: model.status?.live.channels.map { "\($0.formatted()) channels" } ?? model.status?.live.error)
-                    LabeledContent("Address", value: model.server?.url.host() ?? "—")
-                    Button("Pair with a server…") { showingPairing = true }
+                Section("Emby") {
+                    if let account = model.sources.emby {
+                        LabeledContent(account.serverName, value: account.userName)
+                        Button("Sign out", role: .destructive) { Task { await model.signOutOfEmby() } }
+                    } else {
+                        Button("Add Emby server…") { adding = .emby }
+                    }
+                }
+
+                Section {
+                    ForEach(model.sources.iptv) { source in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(source.name)
+                                Text("\(source.formatName) · \(source.safeDescription)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Remove", role: .destructive) { Task { await model.remove(source) } }
+                        }
+                    }
+                    Button("Add IPTV subscription…") { adding = .iptv }
+                    ForEach(model.liveErrors, id: \.self) { message in
+                        Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+                    }
+                } header: {
+                    Text("Live TV sources")
+                } footer: {
+                    Text(guideStatus)
                 }
 
                 Section {
@@ -28,7 +50,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Playback")
                 } footer: {
-                    Text(prefs.playerProfile.detail + " Changes apply to the next channel or video you open.")
+                    Text(prefs.playerProfile.detail + " Applies to the next channel or video you open.")
                 }
 
                 if !model.rows.isEmpty {
@@ -44,7 +66,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section {
+                Section("Favourite channels") {
                     if prefs.favorites.isEmpty {
                         Text("Press and hold a channel to add it.").foregroundStyle(.secondary)
                     }
@@ -58,15 +80,13 @@ struct SettingsView: View {
                     #if os(iOS)
                     .onMove { prefs.favorites.move(fromOffsets: $0, toOffset: $1) }
                     #endif
-                } header: {
-                    Text("Favourite channels")
                 }
 
                 if !prefs.hiddenCategories.isEmpty {
                     Section("Hidden categories") {
                         ForEach(prefs.hiddenCategories.sorted(), id: \.self) { id in
                             HStack {
-                                Text(model.categories.first(where: { $0.id == id })?.name ?? id)
+                                Text(model.categories.first(where: { $0.id == id })?.name ?? "Unavailable category")
                                 Spacer()
                                 Button("Show") { prefs.hiddenCategories.remove(id) }
                             }
@@ -74,8 +94,16 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    Button("Forget everything on this device", role: .destructive) { confirmForget = true }
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    Text("Logins live only in this device's Keychain (not iCloud, not backups). OpenIPTV has no servers, collects nothing and logs nothing.")
+                }
+
                 Section("About") {
-                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    LabeledContent("Version", value: HTTP.appVersion)
                     #if os(iOS)
                     Link("Source code on GitHub", destination: URL(string: "https://github.com/jorda0mega/openiptv")!)
                     #else
@@ -84,18 +112,33 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .task { await model.refreshStatus() }
-            .sheet(isPresented: $showingPairing) { ConnectView(isSheet: true) }
+            .sheet(item: $adding) { sheet in
+                switch sheet {
+                case .emby: AddEmbyView()
+                case .iptv: AddIPTVView()
+                }
+            }
+            .confirmationDialog("Forget everything?", isPresented: $confirmForget, titleVisibility: .visible) {
+                Button("Forget everything", role: .destructive) {
+                    Task {
+                        await model.forgetEverything()
+                        prefs.favorites = []
+                        prefs.hiddenCategories = []
+                        prefs.hiddenRows = []
+                    }
+                }
+            } message: {
+                Text("Signs out of Emby and removes every subscription, favourite, setting and cached guide from this device.")
+            }
         }
     }
 
-    private func statusRow(_ title: String, ok: Bool?, detail: String?) -> some View {
-        HStack {
-            Image(systemName: ok == true ? "checkmark.circle.fill" : ok == false ? "xmark.circle.fill" : "circle.dotted")
-                .foregroundStyle(ok == true ? .green : ok == false ? .red : .secondary)
-            Text(title)
-            Spacer()
-            Text(detail ?? "…").foregroundStyle(.secondary).lineLimit(1)
+    private var guideStatus: String {
+        switch model.guideState {
+        case .idle: "Programme guide: not loaded yet."
+        case .loading: "Programme guide: downloading in the background…"
+        case let .ready(count, at): "Programme guide: \(count.formatted()) programmes, updated \(at.formatted(.relative(presentation: .named)))."
+        case let .failed(message): "Programme guide: \(message)"
         }
     }
 }

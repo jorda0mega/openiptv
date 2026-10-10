@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Live TV: glass category chips (Favorites first) over a channel list.
+/// Live TV: glass category chips (Favourites first) over a channel list.
 /// Now/next is fetched for visible rows only and refreshed when a programme
 /// ends. Long-press a channel to favourite it, a category to hide it.
 struct LiveView: View {
@@ -9,19 +9,30 @@ struct LiveView: View {
     @Binding var playing: PlayerItem?
     @State private var categoryFilter = ""
     @State private var showingAllCategories = false
+    @State private var addingSource = false
 
     private var showingFavorites: Bool { model.selectedCategory == AppModel.favoritesID }
-    private var displayed: [Channel] { showingFavorites ? prefs.favorites : model.channels }
+    private var displayed: [LiveChannel] { model.channels(in: model.selectedCategory, favorites: prefs.favorites) }
 
     var body: some View {
         NavigationStack {
             List {
-                if showingFavorites, prefs.favorites.isEmpty {
+                if model.sources.iptv.isEmpty {
+                    ContentUnavailableView {
+                        Label("No IPTV subscription", systemImage: "dot.radiowaves.left.and.right")
+                    } description: {
+                        Text("Add an Xtream Codes login, an M3U playlist or a Stalker portal.")
+                    } actions: {
+                        Button("Add subscription") { addingSource = true }.buttonStyle(.glassProminent)
+                    }
+                } else if showingFavorites, prefs.favorites.isEmpty {
                     ContentUnavailableView("No favourites yet", systemImage: "star",
                                            description: Text("Press and hold a channel to add it."))
-                } else if let error = model.channelsError, displayed.isEmpty {
-                    ContentUnavailableView("Couldn't load channels", systemImage: "antenna.radiowaves.left.and.right.slash",
-                                           description: Text(error))
+                } else if displayed.isEmpty, model.liveLoading {
+                    HStack { Spacer(); ProgressView("Loading channels…"); Spacer() }.padding(.vertical, 40)
+                }
+                ForEach(model.liveErrors, id: \.self) { message in
+                    Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
                 }
                 ForEach(Array(displayed.enumerated()), id: \.element.id) { index, channel in
                     Button {
@@ -43,21 +54,22 @@ struct LiveView: View {
             .listStyle(.plain)
             .navigationTitle(selectedName)
             .inlineTitle()
-            .safeAreaInset(edge: .top, spacing: 0) { categoryChips }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !model.sources.iptv.isEmpty { categoryChips }
+            }
             .sheet(isPresented: $showingAllCategories) { categoryPicker }
+            .sheet(isPresented: $addingSource) { AddIPTVView() }
             .task {
                 if model.selectedCategory == nil, !prefs.favorites.isEmpty {
                     model.selectedCategory = AppModel.favoritesID
                 }
-                await model.loadCategories()
+                await model.loadLive()
             }
-            .refreshableOnPhone {
-                if let id = model.selectedCategory { await model.select(category: id) }
-            }
+            .refreshableOnPhone { await model.loadLive(force: true) }
         }
     }
 
-    private var visibleCategories: [Category] {
+    private var visibleCategories: [LiveCategory] {
         model.categories.filter { !prefs.hiddenCategories.contains($0.id) }
     }
 
@@ -106,9 +118,9 @@ struct LiveView: View {
 
     @ViewBuilder private func chip(id: String, title: String) -> some View {
         if id == model.selectedCategory {
-            Button(title) { choose(id) }.buttonStyle(.glassProminent).lineLimit(1).id(id)
+            Button(title) { model.selectedCategory = id }.buttonStyle(.glassProminent).lineLimit(1).id(id)
         } else {
-            Button(title) { choose(id) }.buttonStyle(.glass).lineLimit(1).id(id)
+            Button(title) { model.selectedCategory = id }.buttonStyle(.glass).lineLimit(1).id(id)
         }
     }
 
@@ -116,7 +128,7 @@ struct LiveView: View {
         NavigationStack {
             List(filteredCategories) { category in
                 Button {
-                    choose(category.id)
+                    model.selectedCategory = category.id
                     showingAllCategories = false
                 } label: {
                     HStack {
@@ -139,19 +151,15 @@ struct LiveView: View {
         #endif
     }
 
-    private var filteredCategories: [Category] {
+    private var filteredCategories: [LiveCategory] {
         categoryFilter.isEmpty
             ? visibleCategories
             : visibleCategories.filter { $0.name.localizedCaseInsensitiveContains(categoryFilter) }
     }
-
-    private func choose(_ id: String) {
-        Task { await model.select(category: id) }
-    }
 }
 
 struct ChannelRow: View {
-    let channel: Channel
+    let channel: LiveChannel
     let info: NowNext?
     var favorite = false
 
@@ -194,7 +202,7 @@ struct ChannelRow: View {
 }
 
 struct ChannelLogo: View {
-    let url: String?
+    let url: URL?
     let name: String
     @State private var image: UIImage?
 
@@ -209,8 +217,8 @@ struct ChannelLogo: View {
         }
         .frame(width: 56, height: 40)
         .task(id: url) {
-            guard let url, let parsed = URL(string: url) else { return }
-            image = try? await ImagePipeline.shared.image(for: parsed)
+            guard let url else { return }
+            image = try? await ImagePipeline.shared.image(for: url)
         }
     }
 }

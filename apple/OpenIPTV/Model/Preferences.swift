@@ -44,19 +44,22 @@ enum PlayerProfile: String, CaseIterable, Codable, Identifiable {
 final class Preferences {
     var playerProfile: PlayerProfile { didSet { save() } }
     var hardwareDecoding: Bool { didSet { save() } }
-    var favorites: [Channel] { didSet { save() } }
+    var favorites: [LiveChannel] { didSet { save() } }
     var hiddenCategories: Set<String> { didSet { save() } }
     var hiddenRows: Set<String> { didSet { save() } }
 
     private struct Stored: Codable {
         var playerProfile = PlayerProfile.fastStart
         var hardwareDecoding = true
-        var favorites: [Channel] = []
+        var favorites: [LiveChannel] = []
         var hiddenCategories: Set<String> = []
         var hiddenRows: Set<String> = []
     }
 
-    private static let key = "preferences"
+    // Favourites hold channel names, logos and stream references. Xtream and
+    // Stalker references carry no credentials; M3U stream URLs can, so those
+    // are stored without their URL and re-resolved from the live lineup.
+    private static let key = "preferences.v2"
 
     init() {
         let stored = UserDefaults.standard.data(forKey: Self.key)
@@ -68,9 +71,9 @@ final class Preferences {
         hiddenRows = stored.hiddenRows
     }
 
-    func isFavorite(_ channel: Channel) -> Bool { favorites.contains { $0.id == channel.id } }
+    func isFavorite(_ channel: LiveChannel) -> Bool { favorites.contains { $0.id == channel.id } }
 
-    func toggleFavorite(_ channel: Channel) {
+    func toggleFavorite(_ channel: LiveChannel) {
         if isFavorite(channel) {
             favorites.removeAll { $0.id == channel.id }
         } else {
@@ -82,12 +85,23 @@ final class Preferences {
         let stored = Stored(
             playerProfile: playerProfile,
             hardwareDecoding: hardwareDecoding,
-            favorites: favorites,
+            favorites: favorites.map(\.withoutSecrets),
             hiddenCategories: hiddenCategories,
             hiddenRows: hiddenRows
         )
         if let data = try? JSONEncoder().encode(stored) {
             UserDefaults.standard.set(data, forKey: Self.key)
         }
+    }
+}
+
+extension LiveChannel {
+    /// Playlist stream URLs can embed credentials, so they're never written
+    /// to preferences; the live lineup supplies them again when played.
+    var withoutSecrets: LiveChannel {
+        guard case .url = stream else { return self }
+        return LiveChannel(id: id, sourceId: sourceId, number: number, name: name, logo: logo,
+                           categoryId: categoryId, epgId: epgId, nativeId: nativeId,
+                           stream: .url(URL(string: "about:blank")!, userAgent: nil, referrer: nil))
     }
 }

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Build and run the provider smoke test (macOS). See main.swift for the
+# environment variables it reads.
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
+src=OpenIPTV
+swiftc -O -target arm64-apple-macos14 -o "$out/smoke" \
+  "$src/Model/Flex.swift" "$src/Model/Keychain.swift" "$src/Model/Sources.swift" \
+  "$src/Live/LiveModels.swift" "$src/Live/XtreamProvider.swift" "$src/Live/M3UProvider.swift" \
+  "$src/Live/StalkerProvider.swift" "$src/Live/Guide.swift" \
+  "$src/Emby/EmbyModels.swift" "$src/Emby/Artwork.swift" "$src/Emby/EmbyClient.swift" \
+  Tools/smoke/main.swift
+"$out/smoke"
