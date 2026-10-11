@@ -147,7 +147,11 @@ struct SearchView: View {
             }
             .listStyle(.plain)
             .overlay { emptyState }
+            #if os(iOS)
+            // Apple TV: no title; the keyboard row is the top of the page,
+            // as in Apple's TV app (a title there sits on the letters).
             .navigationTitle("Search")
+            #endif
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             #if os(iOS)
