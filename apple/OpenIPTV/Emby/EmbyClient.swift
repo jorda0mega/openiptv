@@ -518,12 +518,12 @@ struct EmbyClient {
                                         mediaSourceId: source.Id, playSessionId: info.PlaySessionId, method: "remote file",
                                         fallbacks: [directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId),
                                                     hlsURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId, start: resume)])
-            } else if source.SupportsDirectStream == false, let transcode = source.TranscodingUrl,
-                      let url = URL(string: Self.api(account.serverURL, "").absoluteString + transcode.drop(while: { $0 == "/" })) {
-                playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle, url: url,
-                                        startSeconds: nil, durationSeconds: playback.durationSeconds,
-                                        mediaSourceId: source.Id, playSessionId: info.PlaySessionId, method: "transcode")
             } else {
+                // The original file, even when the server would rather
+                // convert it (a remote bitrate limit, say): libmpv plays
+                // every common format, opens it in about a second and seeks
+                // in it freely, where a conversion takes 5-15 s to begin and
+                // restarts on every seek. Converting stays the fallback.
                 playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle,
                                         url: directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId,
                                                              container: source.Container),

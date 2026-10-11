@@ -292,6 +292,8 @@ struct MoviePlayerView: View {
     @State private var scrubOrigin: Double?
     /// Exact-frame seek once the finger rests.
     @State private var settleSeek: Task<Void, Never>?
+    /// Where the last exact-frame preview landed (its data is downloaded).
+    @State private var settledAt: Double?
     /// Picks original vs a server-converted lower bitrate to avoid stalls.
     @State private var governor: QualityGovernor?
     /// Shown briefly when the quality changes.
@@ -698,6 +700,7 @@ struct MoviePlayerView: View {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             player?.seek(to: max(0, target - offset), exact: true)
+            settledAt = target
         }
         // Moving: a few times a second so it keeps up; keyframes only when
         // sweeping at full speed, where a pixel is many seconds anyway.
@@ -709,7 +712,14 @@ struct MoviePlayerView: View {
     /// On release: land on the exact second and carry on playing.
     private func commitScrub(_ target: Double) {
         settleSeek?.cancel()
-        player?.seek(to: max(0, target - offset))
+        // The exact second when its data is likely here (a short jump, or
+        // one the finger rested on); otherwise the keyframe just before it,
+        // which plays without downloading and decoding up to the second
+        // (a 4K film's jump went from 1.3-2.5 s to well under a second).
+        let near = abs(target - (scrubOrigin ?? position)) < 30
+        let rested = settledAt.map { abs($0 - target) < 0.5 } ?? false
+        player?.seek(to: max(0, target - offset), exact: near || rested, report: true)
+        settledAt = nil
         position = target
         scrubbing = nil
         scrubOrigin = nil
@@ -730,7 +740,10 @@ struct MoviePlayerView: View {
         pendingSeek = Task {
             try? await Task.sleep(for: .milliseconds(700))
             guard !Task.isCancelled else { return }
-            player?.seek(to: max(0, target - offset))
+            // Far jumps land on the keyframe just before (no waiting to
+            // download and decode up to the second).
+            let near = abs(target - (scrubOrigin ?? position)) < 30
+            player?.seek(to: max(0, target - offset), exact: near, report: true)
             position = target
             scrubbing = nil
             scrubOrigin = nil

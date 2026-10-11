@@ -193,9 +193,11 @@ final class MPVPlayer: @unchecked Sendable {
 
     /// `exact: false` lands on the nearest keyframe: quick enough to follow
     /// a finger while scrubbing.
-    func seek(to seconds: Double, exact: Bool = true) {
+    /// `report`: time it and say how long it took (`.seeked`), for jumps
+    /// the viewer asked for rather than scrubbing previews.
+    func seek(to seconds: Double, exact: Bool = true, report: Bool = false) {
         queue.async { [self] in
-            seekStarted = exact ? CFAbsoluteTimeGetCurrent() : nil
+            seekStarted = report ? CFAbsoluteTimeGetCurrent() : nil
             command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
         }
     }

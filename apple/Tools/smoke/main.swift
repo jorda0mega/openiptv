@@ -200,6 +200,92 @@ if value("OPENIPTV_SMOKE_MODE") == "perf" {
     }
     exit(0)
 }
+// `survey`: what an Xtream provider's live lineup looks like, to design
+// grouping and source ranking: catch-up support, categories, name
+// prefixes and quality tags, duplicates, PPV and event naming. Prints
+// names and counts only, never the server, login or stream addresses.
+if value("OPENIPTV_SMOKE_MODE") == "survey" {
+    guard let server = value("OPENIPTV_XTREAM_URL").flatMap({ XtreamProvider.parse($0.split(separator: " ").first.map(String.init) ?? $0) }),
+          let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS") else { print("survey: no Xtream login"); exit(1) }
+    func api(_ action: String) async -> (Data?, Double) {
+        var parts = URLComponents(url: server.server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "username", value: user), .init(name: "password", value: pass), .init(name: "action", value: action)]
+        var request = URLRequest(url: parts.url!)
+        request.timeoutInterval = 120
+        let start = Date()
+        let data = try? await URLSession.shared.data(for: request).0
+        return (data, Date().timeIntervalSince(start))
+    }
+    let (categoryData, categoryTime) = await api("get_live_categories")
+    let (streamData, streamTime) = await api("get_live_streams")
+    let categories = (categoryData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? [])
+    let streams = (streamData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? [])
+    func str(_ any: Any?) -> String { any.map { "\($0)" } ?? "" }
+    let categoryName = Dictionary(categories.map { (str($0["category_id"]), str($0["category_name"])) }, uniquingKeysWith: { a, _ in a })
+    print("== Lineup")
+    print("  categories     \(categories.count) in \(String(format: "%.1f", categoryTime)) s")
+    print("  channels       \(streams.count) in \(String(format: "%.1f", streamTime)) s (\((streamData?.count ?? 0) / 1_000_000) MB)")
+    print("  with guide id  \(streams.filter { !str($0["epg_channel_id"]).isEmpty && str($0["epg_channel_id"]) != "<null>" }.count)")
+    let archived = streams.filter { str($0["tv_archive"]) == "1" }
+    var durations: [String: Int] = [:]
+    for s in archived { durations[str(s["tv_archive_duration"]), default: 0] += 1 }
+    print("\n== Catch-up")
+    print("  channels with archive \(archived.count)")
+    print("  days kept      \(durations.sorted { $0.value > $1.value }.prefix(8).map { "\($0.key) d: \($0.value)" }.joined(separator: ", "))")
+    var archivedByCategory: [String: Int] = [:]
+    for s in archived { archivedByCategory[categoryName[str(s["category_id"])] ?? "?", default: 0] += 1 }
+    print("  by category    \(archivedByCategory.sorted { $0.value > $1.value }.prefix(12).map { "\($0.key) (\($0.value))" }.joined(separator: "; "))")
+
+    var perCategory: [String: Int] = [:]
+    for s in streams { perCategory[categoryName[str(s["category_id"])] ?? "?", default: 0] += 1 }
+    print("\n== Categories (largest 70)")
+    for (name, count) in perCategory.sorted(by: { $0.value > $1.value }).prefix(70) { print("  \(count)\t\(name)") }
+
+    let names = streams.map { str($0["name"]) }
+    var prefixes: [String: Int] = [:]
+    for name in names {
+        if let cut = name.firstIndex(where: { $0 == ":" || $0 == "|" }), name.distance(from: name.startIndex, to: cut) <= 12 {
+            prefixes[name[..<cut].trimmingCharacters(in: .whitespaces), default: 0] += 1
+        }
+    }
+    print("\n== Name prefixes (before : or |)")
+    print("  " + prefixes.sorted { $0.value > $1.value }.prefix(40).map { "\($0.key) \($0.value)" }.joined(separator: ", "))
+    var tags: [String: Int] = [:]
+    let known = ["HD", "FHD", "UHD", "4K", "SD", "HEVC", "H265", "1080P", "720P", "60FPS", "BACKUP", "RAW", "VIP", "PLUS", "EAST", "WEST", "ᴴᴰ", "ᵁᴴᴰ", "ᶠᴴᴰ", "ʀᴀᴡ", "(S)", "(B)"]
+    for name in names {
+        let upper = name.uppercased()
+        for tag in known where upper.contains(tag) { tags[tag, default: 0] += 1 }
+    }
+    print("\n== Quality and variant tags")
+    print("  " + tags.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))
+
+    // Same channel under several names: strip prefix, tags and symbols.
+    func base(_ name: String) -> String {
+        var n = name
+        if let cut = n.firstIndex(where: { $0 == ":" || $0 == "|" }), n.distance(from: n.startIndex, to: cut) <= 12 { n = String(n[n.index(after: cut)...]) }
+        n = n.uppercased()
+        for tag in known { n = n.replacingOccurrences(of: tag, with: " ") }
+        n = n.replacingOccurrences(of: "[^A-Z0-9 ]", with: " ", options: .regularExpression)
+        return n.split(separator: " ").joined(separator: " ")
+    }
+    var groups: [String: Int] = [:]
+    for name in names { groups[base(name), default: 0] += 1 }
+    let dupes = groups.filter { $0.value > 1 && !$0.key.isEmpty }
+    print("\n== Duplicates after cleaning names")
+    print("  \(dupes.count) names appear more than once, covering \(dupes.values.reduce(0, +)) channels")
+    print("  " + dupes.sorted { $0.value > $1.value }.prefix(40).map { "\($0.key) ×\($0.value)" }.joined(separator: ", "))
+
+    print("\n== Event / PPV categories and samples")
+    let eventWords = ["PPV", "EVENT", "LIVE", "UFC", "BOX", "NFL", "NBA", "MLB", "NHL", "SPORT", "PEACOCK", "ESPN+", "DAZN", "FLO"]
+    let eventCategories = categoryName.filter { entry in eventWords.contains { entry.value.uppercased().contains($0) } }
+    for (id, name) in eventCategories.sorted(by: { $0.value < $1.value }).prefix(40) {
+        let inCategory = streams.filter { str($0["category_id"]) == id }.map { str($0["name"]) }
+        print("  [\(name)] \(inCategory.count) channels: " + inCategory.prefix(8).joined(separator: " · "))
+    }
+    print("\n== Separator / placeholder names")
+    print("  " + names.filter { $0.contains("---") || $0.contains("###") || $0.contains("===") || $0.uppercased().contains("NO EVENT") }.prefix(20).joined(separator: " · "))
+    exit(0)
+}
 if value("OPENIPTV_SMOKE_MODE") == "session" {
     guard let user = value("OPENIPTV_EMBY_CONNECT_USER"), let pass = value("OPENIPTV_EMBY_CONNECT_PASS"),
           let session = try? await EmbyClient.connectLogin(email: user, password: pass),
