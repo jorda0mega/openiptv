@@ -111,6 +111,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// seek don't each pay for a new HTTPS handshake. Live streams can't be
     /// range-requested, so they're read as one stream.
     func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, readahead: Readahead = .live) {
+        // Files go through the in-app relay, which keeps one warm HTTP/2
+        // connection to the server instead of a new one per seek.
+        var url = url, headers = headers
+        if file, url.scheme?.hasPrefix("http") == true, let local = StreamRelay.shared.localURL(for: url, headers: headers) {
+            url = local
+            headers = []
+        }
         queue.async { [self] in
             guard let mpv else { return }
             apply(readahead, mpv)

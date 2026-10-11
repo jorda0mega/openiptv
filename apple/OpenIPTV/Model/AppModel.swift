@@ -57,6 +57,8 @@ final class AppModel {
         }
         #endif
         selectedCategory = UserDefaults.standard.string(forKey: "category")
+        // Ready before the first film opens.
+        DispatchQueue.global(qos: .userInitiated).async { StreamRelay.shared.start() }
         // v3: personal Home; older caches had a row per library.
         for old in ["home.json", "home.v2.json"] { AppCache.remove(old) }
         let home: HomeContent? = AppCache.read("home.v3.json")
