@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// Live TV: glass category chips (Favourites first) over a channel list.
-/// Now/next is fetched for visible rows only and refreshed when a programme
-/// ends. Long-press a channel to favourite it, a category to hide it.
+/// Live TV: category tabs (Favourites and Local first) over a channel list.
+/// The lineup saved on the device shows at once and refreshes in the
+/// background, so there's no pull to refresh (which also made the page
+/// jump while swiping the tabs). Now/next is fetched for visible rows only
+/// and refreshed when a programme ends. Long-press a channel to favourite
+/// it, a category to hide it.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
@@ -10,9 +13,13 @@ struct LiveView: View {
     @State private var categoryFilter = ""
     @State private var showingAllCategories = false
     @State private var addingSource = false
+    @State private var choosingArea = false
 
     private var showingFavorites: Bool { model.selectedCategory == AppModel.favoritesID }
-    private var displayed: [LiveChannel] { model.channels(in: model.selectedCategory, favorites: prefs.favorites) }
+    private var showingLocal: Bool { model.selectedCategory == AppModel.localID }
+    private var displayed: [LiveChannel] {
+        model.channels(in: model.selectedCategory, favorites: prefs.favorites, area: prefs.area)
+    }
 
     var body: some View {
         NavigationStack {
@@ -28,6 +35,17 @@ struct LiveView: View {
                 } else if showingFavorites, prefs.favorites.isEmpty {
                     ContentUnavailableView("No favourites yet", systemImage: "star",
                                            description: Text("Press and hold a channel to add it."))
+                } else if showingLocal, prefs.area == nil {
+                    ContentUnavailableView {
+                        Label("Where are you?", systemImage: "location")
+                    } description: {
+                        Text("Set your area to see your local ABC, NBC, CBS, FOX, CW and PBS stations.")
+                    } actions: {
+                        Button("Set your area") { choosingArea = true }.buttonStyle(.glassProminent)
+                    }
+                } else if showingLocal, displayed.isEmpty, !model.liveLoading, let area = prefs.area {
+                    ContentUnavailableView("No local channels for \(area.label)", systemImage: "antenna.radiowaves.left.and.right",
+                                           description: Text("Your subscription doesn't seem to carry stations for this area."))
                 } else if displayed.isEmpty, model.liveLoading {
                     HStack { Spacer(); ProgressView("Loading channels…"); Spacer() }.padding(.vertical, 40)
                 }
@@ -57,17 +75,23 @@ struct LiveView: View {
             // safeAreaBar (iOS/tvOS 26) keeps the chips in the bar area with the
             // scroll edge effect.
             .safeAreaBar(edge: .top, spacing: 0) {
-                if !model.sources.iptv.isEmpty { categoryChips }
+                if !model.sources.iptv.isEmpty {
+                    #if os(iOS)
+                    categoryTabs
+                    #else
+                    categoryChips
+                    #endif
+                }
             }
             .sheet(isPresented: $showingAllCategories) { categoryPicker }
             .sheet(isPresented: $addingSource) { AddIPTVView() }
+            .sheet(isPresented: $choosingArea) { NavigationStack { AreaPicker() } }
             .task {
                 if model.selectedCategory == nil, !prefs.favorites.isEmpty {
                     model.selectedCategory = AppModel.favoritesID
                 }
                 await model.loadLive()
             }
-            .refreshableOnPhone { await model.loadLive(force: true) }
         }
     }
 
@@ -77,8 +101,24 @@ struct LiveView: View {
 
     private var selectedName: String {
         if showingFavorites { return "Favourites" }
+        if showingLocal { return prefs.area.map { "Local · \($0.label)" } ?? "Local" }
         return model.categories.first(where: { $0.id == model.selectedCategory })?.name ?? "Live TV"
     }
+
+    #if os(iOS)
+    private var categoryTabs: some View {
+        let lead: [(id: String, title: String)] = (prefs.favorites.isEmpty ? [] : [(AppModel.favoritesID, "Favourites")])
+            + [(AppModel.localID, "Local")]
+        return TabStrip(items: lead + visibleCategories.map { ($0.id, $0.name) },
+                        selected: model.selectedCategory,
+                        leading: AnyView(Button { showingAllCategories = true } label: {
+                            Image(systemName: "list.bullet").font(.body.weight(.semibold)).frame(width: 36, height: 36)
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .accessibilityLabel("All categories"))) { model.selectedCategory = $0 }
+    }
+    #endif
 
     private var categoryChips: some View {
         ScrollViewReader { proxy in
@@ -97,6 +137,7 @@ struct LiveView: View {
                     if !prefs.favorites.isEmpty {
                         chip(id: AppModel.favoritesID, title: "★ Favourites")
                     }
+                    chip(id: AppModel.localID, title: "Local")
                     ForEach(visibleCategories) { category in
                         chip(id: category.id, title: category.name)
                             .contextMenu {

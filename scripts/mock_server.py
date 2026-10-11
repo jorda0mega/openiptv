@@ -188,14 +188,20 @@ class Handler(BaseHTTPRequestHandler):
                 "server_info": {"timezone": "Europe/London", "timestamp_now": now, "time_now": wall(now)},
             })
         if action == "get_live_categories":
-            return self.send([{"category_id": "1", "category_name": "UK", "parent_id": 0}])
+            return self.send([{"category_id": "1", "category_name": "UK", "parent_id": 0},
+                              {"category_id": "2", "category_name": "US | Local ABC", "parent_id": 0},
+                              {"category_id": "3", "category_name": "US | Local CBS", "parent_id": 0}])
         if action == "get_live_streams":
+            # A few local stations, named the way real providers name them.
+            local = [("TX: ABC 13 Houston (KTRK)", "2"), ("TX: ABC 8 Dallas (WFAA)", "2"), ("NY: ABC 7 New York (WABC)", "2"),
+                     ("TX: CBS 11 Dallas (KTVT)", "3"), ("TX: CBS 2 Houston (KHOU)", "3"), ("CA: CBS 2 Los Angeles (KCBS)", "3")]
             return self.send([
                 {"num": i, "name": f"UK: Channel {i}", "stream_id": str(i), "stream_icon": f"http://logo/{i}.png",
                  "epg_channel_id": f"ch{i}.uk" if i % 10 else None, "category_id": "1",
                  "tv_archive": i % 2, "tv_archive_duration": "7" if i % 2 else 0}
                 for i in range(1, CHANNELS + 1)
-            ])
+            ] + [{"num": 900 + n, "name": name, "stream_id": str(900 + n), "stream_icon": "", "epg_channel_id": None,
+                  "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0} for n, (name, cat) in enumerate(local)])
         if action == "get_short_epg":
             ch = int(q["stream_id"])
             time.sleep(0.02)

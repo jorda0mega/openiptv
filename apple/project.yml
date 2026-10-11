@@ -130,6 +130,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: Openreel connects to Emby servers and IPTV sources on your local network.
+        NSLocationWhenInUseUsageDescription: Openreel uses your approximate location once to show your local channels. It stays on this device.
         # Dark everywhere, including UIKit-backed fields in sheets.
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
@@ -160,6 +161,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: Openreel connects to Emby servers and IPTV sources on your local network.
+        NSLocationWhenInUseUsageDescription: Openreel uses your approximate location once to show your local channels. It stays on this device.
         # Dark everywhere, including UIKit-backed fields in sheets.
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false

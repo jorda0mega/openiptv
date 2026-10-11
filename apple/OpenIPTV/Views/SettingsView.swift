@@ -33,6 +33,11 @@ struct SettingsView: View {
                         }
                     }
                     Button("Add IPTV subscription…") { adding = .iptv }
+                    NavigationLink {
+                        AreaPicker()
+                    } label: {
+                        LabeledContent("Your area", value: prefs.area?.label ?? "Not set")
+                    }
                     ForEach(model.liveErrors, id: \.self) { message in
                         Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
                     }

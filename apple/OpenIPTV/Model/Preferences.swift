@@ -49,6 +49,9 @@ final class Preferences {
     var favorites: [LiveChannel] { didSet { save() } }
     var hiddenCategories: Set<String> { didSet { save() } }
     var hiddenRows: Set<String> { didSet { save() } }
+    /// Where local channels come from (set in Settings, or from the
+    /// iPhone's approximate location).
+    var area: LocalArea? { didSet { save() } }
 
     private struct Stored: Codable {
         var playerProfile = PlayerProfile.fastStart
@@ -57,6 +60,7 @@ final class Preferences {
         var favorites: [LiveChannel] = []
         var hiddenCategories: Set<String> = []
         var hiddenRows: Set<String> = []
+        var area: LocalArea?
     }
 
     // Favourites hold channel names, logos and stream references. Xtream and
@@ -73,6 +77,7 @@ final class Preferences {
         favorites = stored.favorites
         hiddenCategories = stored.hiddenCategories
         hiddenRows = stored.hiddenRows
+        area = stored.area
     }
 
     func isFavorite(_ channel: LiveChannel) -> Bool { favorites.contains { $0.id == channel.id } }
@@ -92,7 +97,8 @@ final class Preferences {
             adaptiveQuality: adaptiveQuality,
             favorites: favorites.map(\.withoutSecrets),
             hiddenCategories: hiddenCategories,
-            hiddenRows: hiddenRows
+            hiddenRows: hiddenRows,
+            area: area
         )
         if let data = try? JSONEncoder().encode(stored) {
             UserDefaults.standard.set(data, forKey: Self.key)

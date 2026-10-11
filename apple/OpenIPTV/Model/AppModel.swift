@@ -31,6 +31,8 @@ final class AppModel {
     private(set) var guideState: GuideStore.State = .idle
 
     static let favoritesID = "__favorites"
+    /// The channels of the area set in Settings.
+    static let localID = "__local"
 
     private var providers: [UUID: any LiveProvider] = [:]
     private var channelsByCategory: [String: [LiveChannel]] = [:]
@@ -346,6 +348,7 @@ final class AppModel {
         await emby?.logout()
         sources.forgetEverything()
         await guide.clear()
+        AppCache.remove(Self.lineupFile)
         library.clear()
         serverSearchCache = [:]
         channelCorpus = SearchCorpus(name: \.name)
@@ -367,8 +370,10 @@ final class AppModel {
 
     /// Loads every source's lineup in parallel, then refreshes the full
     /// guide in the background if it's stale.
+    /// The lineup saved on the device (names, logos, categories; never a
+    /// URL that could hold a login) shows at once, then the providers'
+    /// current one replaces it in the background.
     func loadLive(force: Bool = false) async {
-        guard force || allChannels.isEmpty, !liveLoading else { return }
         let iptv = sources.iptv
         guard !iptv.isEmpty else {
             categories = []
@@ -377,6 +382,10 @@ final class AppModel {
             liveErrors = []
             return
         }
+        if allChannels.isEmpty, let saved = await Self.savedLineup(), saved.sources == iptv.map(\.id) {
+            await applyLineup(categories: saved.categories, channels: saved.channels)
+        }
+        guard force || !liveFetched, !liveLoading else { return }
         liveLoading = true
         defer { liveLoading = false }
         providers = Dictionary(uniqueKeysWithValues: iptv.map { ($0.id, Providers.make($0)) })
@@ -394,6 +403,9 @@ final class AppModel {
         let order = Dictionary(uniqueKeysWithValues: iptv.enumerated().map { ($1.id, $0) })
         lineups.sort { (order[$0.0.id] ?? 0) < (order[$1.0.id] ?? 0) }
 
+        // A source that can't be reached keeps the channels it had (saved
+        // or from earlier), so one failing provider doesn't empty the list.
+        let previousCategories = categories, previousChannels = allChannels
         var cats: [LiveCategory] = []
         var channels: [LiveChannel] = []
         var errors: [String] = []
@@ -408,17 +420,15 @@ final class AppModel {
                 guideURLs += lineup.guideURLs
             case let .failure(error):
                 errors.append("\(source.name): \(SourceError.wrap(error).localizedDescription)")
+                cats += previousCategories.filter { $0.id.hasPrefix(source.id.uuidString + "|") }
+                channels += previousChannels.filter { $0.sourceId == source.id }
             }
         }
-        categories = cats
-        allChannels = channels
-        channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
-        channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
-        channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         liveErrors = errors
-        if selectedCategory == nil
-            || (selectedCategory != Self.favoritesID && !cats.contains { $0.id == selectedCategory }) {
-            selectedCategory = cats.first?.id
+        if !channels.isEmpty {
+            await applyLineup(categories: cats, channels: channels)
+            liveFetched = true
+            Self.saveLineup(sources: iptv.map(\.id), categories: cats, channels: channels)
         }
 
         let keep = Set(channels.compactMap(\.epgId))
@@ -441,9 +451,67 @@ final class AppModel {
         scheduleNowNext()
     }
 
-    func channels(in category: String?, favorites: [LiveChannel]) -> [LiveChannel] {
+    func channels(in category: String?, favorites: [LiveChannel], area: LocalArea? = nil) -> [LiveChannel] {
         if category == Self.favoritesID { return resolved(favorites) }
+        if category == Self.localID { return area.map(localChannels) ?? [] }
         return channelsByCategory[category ?? ""] ?? []
+    }
+
+    /// The area's stations from the providers' local categories (US | Local
+    /// ABC, NBC…): its city's first, then by network.
+    func localChannels(_ area: LocalArea) -> [LiveChannel] {
+        let local = Set(categories.filter { $0.name.localizedCaseInsensitiveContains("local") }.map(\.id))
+        let networks = ["ABC", "CBS", "NBC", "FOX", "CW", "MY", "PBS", "TELEMUNDO", "UNIVISION"]
+        func network(_ name: String) -> Int {
+            let upper = name.uppercased()
+            return networks.firstIndex { upper.contains($0) } ?? networks.count
+        }
+        let city = area.city?.lowercased()
+        return allChannels
+            .filter { local.contains($0.categoryId ?? "") && area.includes($0.name) }
+            .sorted { first, second in
+                let a = city.map { first.name.lowercased().contains($0) } ?? false
+                let b = city.map { second.name.lowercased().contains($0) } ?? false
+                if a != b { return a }
+                let na = network(first.name), nb = network(second.name)
+                return na != nb ? na < nb : first.name.localizedStandardCompare(second.name) == .orderedAscending
+            }
+    }
+
+    // MARK: Saved lineup
+
+    private var liveFetched = false
+
+    private struct SavedLineup: Codable {
+        let sources: [UUID]
+        let categories: [LiveCategory]
+        let channels: [LiveChannel]
+    }
+
+    private static let lineupFile = "live-lineup.v1.json"
+
+    private func applyLineup(categories cats: [LiveCategory], channels: [LiveChannel]) async {
+        categories = cats
+        allChannels = channels
+        channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
+        channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
+        channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if selectedCategory == nil || (selectedCategory != Self.favoritesID && selectedCategory != Self.localID
+                                       && !cats.contains { $0.id == selectedCategory }) {
+            selectedCategory = cats.first?.id
+        }
+    }
+
+    private nonisolated static func savedLineup() async -> SavedLineup? {
+        await Task.detached(priority: .userInitiated) { AppCache.read(lineupFile) as SavedLineup? }.value
+    }
+
+    /// Playlist stream URLs can hold a login, so they're saved blank and
+    /// the providers' current lineup supplies them.
+    private nonisolated static func saveLineup(sources: [UUID], categories: [LiveCategory], channels: [LiveChannel]) {
+        Task.detached(priority: .utility) {
+            AppCache.write(lineupFile, SavedLineup(sources: sources, categories: categories, channels: channels.map(\.withoutSecrets)))
+        }
     }
 
     /// Swap saved channels for their current lineup entries (fresh stream
