@@ -44,6 +44,8 @@ enum PlayerProfile: String, CaseIterable, Codable, Identifiable {
 final class Preferences {
     var playerProfile: PlayerProfile { didSet { save() } }
     var hardwareDecoding: Bool { didSet { save() } }
+    /// Lower the quality instead of stopping to buffer (Emby).
+    var adaptiveQuality: Bool { didSet { save() } }
     var favorites: [LiveChannel] { didSet { save() } }
     var hiddenCategories: Set<String> { didSet { save() } }
     var hiddenRows: Set<String> { didSet { save() } }
@@ -51,6 +53,7 @@ final class Preferences {
     private struct Stored: Codable {
         var playerProfile = PlayerProfile.fastStart
         var hardwareDecoding = true
+        var adaptiveQuality: Bool? = true
         var favorites: [LiveChannel] = []
         var hiddenCategories: Set<String> = []
         var hiddenRows: Set<String> = []
@@ -66,6 +69,7 @@ final class Preferences {
             .flatMap { try? JSONDecoder().decode(Stored.self, from: $0) } ?? Stored()
         playerProfile = stored.playerProfile
         hardwareDecoding = stored.hardwareDecoding
+        adaptiveQuality = stored.adaptiveQuality ?? true
         favorites = stored.favorites
         hiddenCategories = stored.hiddenCategories
         hiddenRows = stored.hiddenRows
@@ -85,6 +89,7 @@ final class Preferences {
         let stored = Stored(
             playerProfile: playerProfile,
             hardwareDecoding: hardwareDecoding,
+            adaptiveQuality: adaptiveQuality,
             favorites: favorites.map(\.withoutSecrets),
             hiddenCategories: hiddenCategories,
             hiddenRows: hiddenRows

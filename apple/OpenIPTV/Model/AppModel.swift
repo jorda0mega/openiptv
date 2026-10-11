@@ -38,6 +38,9 @@ final class AppModel {
     private(set) var channelCorpus = SearchCorpus<LiveChannel>(name: \.name)
     /// Server search results by query, for episodes the index doesn't hold.
     private var serverSearchCache: [String: [Card]] = [:]
+    /// Playback worked out ahead of a tap (Continue Watching, Next Up, an
+    /// open show), so selecting it goes straight to the player.
+    private var prepared: [String: (at: Date, task: Task<EmbyPlayback, Error>)] = [:]
     private var visible: Set<String> = []
     private var nowNextTask: Task<Void, Never>?
     private var boundaryTask: Task<Void, Never>?
@@ -74,15 +77,101 @@ final class AppModel {
             if fresh != rows { rows = fresh }
             homeError = nil
             AppCache.write("home.json", fresh)
+            // The first few things you'd tap on Home are ready before you do.
+            let likely = fresh.prefix(2).flatMap { $0.cards.prefix(3) }
+            prepare(likely.map { (id: $0.id, kind: Optional($0.kind)) })
             Task { await library.prepare(emby) }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
         }
     }
 
-    func playback(itemId: String) async throws -> EmbyPlayback {
-        guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
-        return try await emby.playback(itemId: itemId)
+    func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
+        let started = Date()
+        let task: Task<EmbyPlayback, Error>
+        if let ready = prepared[itemId], Date().timeIntervalSince(ready.at) < 180 {
+            task = ready.task
+        } else {
+            guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
+            task = Task { try await emby.playback(itemId: itemId, kind: kind) }
+        }
+        prepared[itemId] = nil
+        var playback = try await task.value
+        playback.resolvedIn = Date().timeIntervalSince(started)
+        playback.requestedAt = started
+        return playback
+    }
+
+    // MARK: Warm start
+
+    /// The item most likely to be played next, already opened and paused at
+    /// its resume point in a hidden player, so selecting it starts at once.
+    /// `key` is what was tapped (a show for Play next episode); `playback`
+    /// says which episode or movie is actually open.
+    private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback)?
+    private var warmExpiry: Task<Void, Never>?
+
+    func warmUp(_ itemId: String, kind: String?, options: [(String, String)], hardwareDecoding: Bool) {
+        guard warm?.key != itemId else { return }
+        coolDown()
+        prepare([(id: itemId, kind: kind)])
+        Task {
+            guard let playback = try? await prepared[itemId]?.task.value, warm == nil else { return }
+            let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding)
+            player.prepareOffscreen()
+            player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true)
+            warm = (itemId, player, playback)
+            // Don't hold a connection open for long if it isn't wanted.
+            warmExpiry = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(300))
+                guard !Task.isCancelled else { return }
+                self?.coolDown()
+            }
+        }
+    }
+
+    /// Hands over the warmed-up player for this episode or movie, if any.
+    func takeWarm(_ itemId: String) -> (MPVPlayer, EmbyPlayback)? {
+        guard let warm, warm.playback.itemId == itemId else { return nil }
+        self.warm = nil
+        warmExpiry?.cancel()
+        return (warm.player, warm.playback)
+    }
+
+    func coolDown() {
+        warmExpiry?.cancel()
+        warm?.player.shutdown()
+        warm = nil
+    }
+
+    /// Works out how to play these in the background; a later tap uses it.
+    func prepare(_ items: [(id: String, kind: String?)]) {
+        guard let emby else { return }
+        for (id, kind) in items where prepared[id].map({ Date().timeIntervalSince($0.at) >= 180 }) ?? true {
+            prepared[id] = (Date(), Task(priority: .utility) { try await emby.playback(itemId: id, kind: kind) })
+        }
+    }
+
+    /// The same item converted by the server at `bitrate`, from `start`.
+    func convertedURL(for playback: EmbyPlayback, bitrate: Int, start: Double) -> URL? {
+        emby?.hlsURL(playback.itemId, mediaSourceId: playback.mediaSourceId ?? playback.itemId,
+                     playSessionId: playback.playSessionId, start: start, bitrate: bitrate)
+    }
+
+    /// Download speed (bits/s) last measured from this Emby server, to pick
+    /// a starting quality that won't stall.
+    var knownSpeed: Double? {
+        get {
+            #if DEBUG
+            if let forced = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_KNOWN_SPEED"].flatMap(Double.init) { return forced }
+            #endif
+            return sources.emby.map { UserDefaults.standard.double(forKey: "speed." + ($0.serverURL.host() ?? "")) }.flatMap { $0 > 0 ? $0 : nil }
+        }
+        set { if let host = sources.emby?.serverURL.host(), let newValue, newValue > 0 { UserDefaults.standard.set(newValue, forKey: "speed." + host) } }
+    }
+
+    func trickplay(for playback: EmbyPlayback) async -> TrickplayImages? {
+        await emby?.trickplay(itemId: playback.itemId, mediaSourceId: playback.mediaSourceId)
     }
 
     func diagnose(_ playback: EmbyPlayback) async -> String {
@@ -96,13 +185,17 @@ final class AppModel {
     }
 
     func playback(for card: Card) async throws -> EmbyPlayback {
-        guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
-        return try await emby.playback(itemId: card.id)
+        try await playback(itemId: card.id, kind: card.kind)
     }
 
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
         await emby?.report(event, itemId: playback.itemId, seconds: seconds,
                            mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
+        // Positions changed, so anything prepared earlier may resume wrongly.
+        if event == .stopped {
+            prepared = [:]
+            coolDown()
+        }
         if event == .stopped { await loadHome(cardWidth: lastCardWidth) }
     }
 

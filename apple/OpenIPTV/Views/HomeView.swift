@@ -29,6 +29,8 @@ struct HomeView: View {
             .task { await model.loadHome(cardWidth: pixelWidth) }
             .sheet(isPresented: $addingEmby) { AddEmbyView() }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
+            // The first thing in Continue Watching opens the moment it's tapped.
+            .task(id: model.rows.first?.cards.first?.id) { warmFirst() }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -59,6 +61,12 @@ struct HomeView: View {
         } else {
             ContentUnavailableView("All rows are hidden", systemImage: "eye.slash", description: Text("Turn rows back on in Settings."))
         }
+    }
+
+    private func warmFirst() {
+        guard let card = (model.rows.first { $0.title == "Continue Watching" } ?? model.rows.first)?.cards.first,
+              card.kind != "Series" else { return }
+        model.warmUp(card.id, kind: card.kind, options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
     }
 
     /// Shows open their page; everything else plays.

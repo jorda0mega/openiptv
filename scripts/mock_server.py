@@ -90,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"", status=204)
         if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == "tok":
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
-            return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv",
+            return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": 8000000,
                                                 "SupportsDirectPlay": True, "SupportsDirectStream": True}],
                               "PlaySessionId": "ps1"})
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":

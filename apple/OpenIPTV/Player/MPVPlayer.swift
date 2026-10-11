@@ -24,6 +24,9 @@ final class MPVPlayer: @unchecked Sendable {
         case failed(String)
         case time(position: Double, duration: Double?)
         case paused(Bool)
+        /// Seconds buffered ahead and the current download speed (bytes/s),
+        /// about once a second.
+        case network(buffer: Double, bytesPerSecond: Double)
         case ended
     }
 
@@ -33,8 +36,15 @@ final class MPVPlayer: @unchecked Sendable {
     private var mpv: OpaquePointer?
     private let queue = DispatchQueue(label: "openiptv.mpv", qos: .userInitiated)
     private var loadStarted = CFAbsoluteTimeGetCurrent()
+    /// When the file was open (headers read), for the start-up breakdown.
+    private(set) var openedAfter: Double?
     private var reportedStart = false
+    /// The first frame is ready (a warmed-up player may already be there).
+    var hasStarted: Bool { queue.sync { reportedStart } }
     private var duration: Double?
+    private var buffered: Double = 0
+    private var downloadSpeed: Double = 0
+    private var lastNetworkReport: CFAbsoluteTime = 0
 
     init(options: [(String, String)], hardwareDecoding: Bool) {
         layer.framebufferOnly = true
@@ -53,6 +63,7 @@ final class MPVPlayer: @unchecked Sendable {
         set("terminal", "no")
         set("keep-open", "no")
         set("cache", "yes")
+        set("demuxer-mkv-probe-start-time", "no")
         // No log output at all: stream URLs carry credentials.
         set("msg-level", "all=no")
         for (name, value) in options { set(name, value) }
@@ -61,6 +72,8 @@ final class MPVPlayer: @unchecked Sendable {
         mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "duration", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, "demuxer-cache-duration", MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, "cache-speed", MPV_FORMAT_INT64)
         mpv_set_wakeup_callback(mpv, { context in
             guard let context else { return }
             Unmanaged<MPVPlayer>.fromOpaque(context).takeUnretainedValue().drainEvents()
@@ -68,17 +81,44 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     /// Start a stream with any headers the provider requires; `start`
-    /// resumes a file at that many seconds.
-    func load(_ url: URL, headers: [String] = [], start: Double? = nil) {
+    /// resumes a file at that many seconds. Files (`file: true`, Emby) are
+    /// read in bounded ranges over one kept-alive connection, so the jumps
+    /// to the end of a Matroska file and back (index, tags) and the resume
+    /// seek don't each pay for a new HTTPS handshake. Live streams can't be
+    /// range-requested, so they're read as one stream.
+    func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false) {
         queue.async { [self] in
             guard let mpv else { return }
             loadStarted = CFAbsoluteTimeGetCurrent()
+            openedAfter = nil
             reportedStart = false
             duration = nil
             mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
+            mpv_set_property_string(mpv, "stream-lavf-o", file
+                ? "multiple_requests=1,initial_request_size=524288,request_size=8388608,short_seek_size=1048576"
+                : "")
             mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
+            // Resume at the nearest keyframe instead of decoding up to the
+            // exact second; precise seeking comes back once it's playing.
+            mpv_set_property_string(mpv, "hr-seek", start == nil ? "default" : "no")
             command(["loadfile", url.absoluteString, "replace"])
         }
+    }
+
+    func setPaused(_ paused: Bool) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
+        }
+    }
+
+    /// Gives the video layer a full-screen drawable before it's on screen,
+    /// so a player warmed up in the background can render its first frame.
+    @MainActor func prepareOffscreen() {
+        guard let screen = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.screen }).first else { return }
+        layer.frame = screen.bounds
+        layer.contentsScale = screen.scale
+        layer.drawableSize = CGSize(width: screen.bounds.width * screen.scale, height: screen.bounds.height * screen.scale)
     }
 
     func togglePause() {
@@ -125,8 +165,11 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func handle(_ event: mpv_event) {
         switch event.event_id {
+        case MPV_EVENT_FILE_LOADED:
+            openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
         case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:
             reportedStart = true
+            if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
             emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted))
         case MPV_EVENT_END_FILE:
             guard let data = event.data else { return }
@@ -149,12 +192,25 @@ final class MPVPlayer: @unchecked Sendable {
                 duration = value.assumingMemoryBound(to: Double.self).pointee
             case "time-pos" where property.format == MPV_FORMAT_DOUBLE:
                 emit(.time(position: value.assumingMemoryBound(to: Double.self).pointee, duration: duration))
+            case "demuxer-cache-duration" where property.format == MPV_FORMAT_DOUBLE:
+                buffered = value.assumingMemoryBound(to: Double.self).pointee
+                reportNetwork()
+            case "cache-speed" where property.format == MPV_FORMAT_INT64:
+                downloadSpeed = Double(value.assumingMemoryBound(to: Int64.self).pointee)
+                reportNetwork()
             default:
                 break
             }
         default:
             break
         }
+    }
+
+    private func reportNetwork() {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastNetworkReport >= 1 else { return }
+        lastNetworkReport = now
+        emit(.network(buffer: buffered, bytesPerSecond: downloadSpeed))
     }
 
     private func emit(_ event: Event) {

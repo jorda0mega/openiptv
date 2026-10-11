@@ -11,6 +11,7 @@ struct ShowRoute: Hashable {
 /// and their episodes (with progress). Selecting an episode plays it.
 struct ShowView: View {
     @Environment(AppModel.self) private var model
+    @Environment(Preferences.self) private var prefs
     @Environment(\.displayScale) private var displayScale
     let route: ShowRoute
     @Binding var playing: PlayerItem?
@@ -44,7 +45,7 @@ struct ShowView: View {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
             }
             ForEach(episodes, id: \.id) { episode in
-                Button { play(episode.id) } label: { EpisodeRow(episode: episode, card: card(episode), loading: loadingItem == episode.id) }
+                Button { play(episode.id, kind: "Episode") } label: { EpisodeRow(episode: episode, card: card(episode), loading: loadingItem == episode.id) }
                     .buttonStyle(.plain)
             }
             if episodes.isEmpty, error == nil {
@@ -54,7 +55,11 @@ struct ShowView: View {
         .listStyle(.plain)
         .navigationTitle(route.title)
         .inlineTitle()
-        .task { await load() }
+        .task {
+            // "Play next episode" opens the moment it's tapped.
+            model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+            await load()
+        }
         .task(id: season) { await loadEpisodes() }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -78,7 +83,7 @@ struct ShowView: View {
                 if let year = show?.productionYear {
                     Text(String(year)).font(.subheadline).foregroundStyle(.secondary)
                 }
-                Button { play(route.id) } label: {
+                Button { play(route.id, kind: "Series") } label: {
                     Label(loadingItem == route.id ? "Starting…" : "Play next episode", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
@@ -122,13 +127,13 @@ struct ShowView: View {
         }
     }
 
-    private func play(_ id: String) {
+    private func play(_ id: String, kind: String) {
         guard loadingItem == nil else { return }
         loadingItem = id
         Task {
             defer { loadingItem = nil }
             do {
-                playing = .vod(try await model.playback(itemId: id))
+                playing = .vod(try await model.playback(itemId: id, kind: kind))
             } catch {
                 playError = error.localizedDescription
             }

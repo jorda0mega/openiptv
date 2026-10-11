@@ -47,6 +47,7 @@ struct SettingsView: View {
                         ForEach(PlayerProfile.allCases) { Text($0.title).tag($0) }
                     }
                     Toggle(isOn: $prefs.hardwareDecoding) { Text("Hardware decoding").rowForeground() }
+                    Toggle(isOn: $prefs.adaptiveQuality) { Text("Lower quality instead of buffering").rowForeground() }
                 } header: {
                     Text("Playback")
                 } footer: {

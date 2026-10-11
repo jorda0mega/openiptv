@@ -131,6 +131,13 @@ struct EmbyPlayback: Hashable, Identifiable {
     /// Headers for the fallbacks (Emby's token, in case a server ignores it
     /// in the address).
     var fallbackHeaders: [String] = []
+    /// Seconds spent asking the server before the player started (0 when
+    /// it was prepared ahead of the tap).
+    var resolvedIn: Double = 0
+    /// When the user asked for it, to time the whole start.
+    var requestedAt = Date()
+    /// Bitrate of the original file (bits/s), when the server knows it.
+    var bitrate: Int?
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {

@@ -277,6 +277,27 @@ struct MoviePlayerView: View {
     @State private var attempt = 0
     /// Where a server-converted (HLS) fallback starts, since its clock starts at 0.
     @State private var offset: Double = 0
+    /// "Started in …" for a few seconds after the first frame.
+    @State private var timing: String?
+    @State private var warmStart = false
+    /// Scrubbing thumbnails, if the server has them.
+    @State private var thumbnails: TrickplayImages?
+    /// Apple TV: presses add up into one seek, applied after a short pause.
+    @State private var pendingSeek: Task<Void, Never>?
+    /// Picks original vs a server-converted lower bitrate to avoid stalls.
+    @State private var governor: QualityGovernor?
+    /// Shown briefly when the quality changes.
+    @State private var qualityNote: String?
+    /// The converted bitrate playing before a switch back to the original,
+    /// to return to if the original won't open.
+    @State private var revertTo: Int?
+    @State private var lastConverted: Int?
+    /// The first start has been reported (later starts are quality switches).
+    @State private var startedOnce = false
+    #if DEBUG
+    /// Debug builds: current quality, measured speed and buffer.
+    @State private var stats = ""
+    #endif
 
     var body: some View {
         ZStack {
@@ -304,8 +325,8 @@ struct MoviePlayerView: View {
         .focusable()
         .onMoveCommand { direction in
             switch direction {
-            case .left: player?.seek(by: -10)
-            case .right: player?.seek(by: 10)
+            case .left: scrub(by: -10)
+            case .right: scrub(by: 10)
             default: break
             }
             showControls()
@@ -332,6 +353,10 @@ struct MoviePlayerView: View {
                         Text(playback.title).font(.headline).lineLimit(1)
                         if let error {
                             Text(error).font(.caption).foregroundStyle(.red).lineLimit(6)
+                        } else if let qualityNote {
+                            Text(qualityNote).font(.caption).foregroundStyle(.yellow).lineLimit(1)
+                        } else if let timing {
+                            Text(timing).font(.caption.monospacedDigit()).foregroundStyle(.green).lineLimit(1)
                         } else if let subtitle = playback.subtitle {
                             Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
@@ -355,10 +380,18 @@ struct MoviePlayerView: View {
             }
             Spacer()
             #endif
+            #if DEBUG
+            if !stats.isEmpty {
+                Text(stats).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
+            }
+            #endif
             scrubber
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .glassEffect(.regular, in: .rect(cornerRadius: 22))
+                .overlay(alignment: .topLeading) { scrubPreview }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -398,31 +431,154 @@ struct MoviePlayerView: View {
     }
 
     private func start() {
-        let player = makePlayer(prefs: prefs)
-        player.onEvent = { event in handle(event) }
-        self.player = player
-        player.load(playback.url, headers: playback.headers, start: playback.startSeconds)
         position = playback.startSeconds ?? 0
+        Task { thumbnails = await model.trickplay(for: playback) }
+        if let (warmPlayer, _) = model.takeWarm(playback.itemId) {
+            // Already open and paused at the resume point: just show and play.
+            warmStart = true
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            warmPlayer.onEvent = { event in handle(event) }
+            self.player = warmPlayer
+            if warmPlayer.hasStarted { handle(.started(0)) }
+            warmPlayer.setPaused(false)
+        } else {
+            let player = makePlayer(prefs: prefs)
+            player.onEvent = { event in handle(event) }
+            self.player = player
+            // On a connection too slow for this file last time, start at a
+            // quality it can keep up with instead of stalling first.
+            let startAt = prefs.adaptiveQuality
+                ? QualityGovernor.startingQuality(original: playback.bitrate, knownSpeed: model.knownSpeed) : nil
+            if let startAt, let url = model.convertedURL(for: playback, bitrate: startAt, start: position) {
+                governor = QualityGovernor(original: playback.bitrate, current: startAt)
+                lastConverted = startAt
+                offset = position
+                player.load(url, headers: playback.fallbackHeaders, file: false)
+            } else {
+                player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true)
+            }
+        }
+        if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
+        Task { await probeWhileConverted() }
+    }
+
+    /// While playing a converted version, test the connection every 20 s by
+    /// fetching 4 MB of the original, so it can return to full quality.
+    private func probeWhileConverted() async {
+        while !Task.isCancelled, player != nil || !started {
+            try? await Task.sleep(for: .seconds(20))
+            guard governor?.current != nil, player != nil, !paused else { continue }
+            var request = URLRequest(url: playback.url)
+            request.timeoutInterval = 15
+            let from = Int.random(in: 0...50) * 4_194_304
+            request.setValue("bytes=\(from)-\(from + 4_194_303)", forHTTPHeaderField: "Range")
+            for header in playback.headers {
+                let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                if pair.count == 2 { request.setValue(pair[1], forHTTPHeaderField: pair[0]) }
+            }
+            let begun = Date()
+            guard let (data, _) = try? await HTTP.session.data(for: request), data.count > 500_000 else { continue }
+            governor?.noteProbe(bitsPerSecond: Double(data.count * 8) / max(Date().timeIntervalSince(begun), 0.05))
+        }
+    }
+
+    /// Switches quality at the current position.
+    private func apply(_ decision: QualityGovernor.Decision) {
+        guard let player else { return }
+        let at = position
+        switch decision {
+        case let .converted(bitrate):
+            revertTo = nil
+            lastConverted = bitrate
+            guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at) else { return }
+            offset = at
+            player.load(url, headers: playback.fallbackHeaders, file: false)
+            note("Lower quality to keep playing smoothly")
+        case .original:
+            revertTo = lastConverted
+            offset = 0
+            player.load(playback.url, headers: playback.headers, start: at, file: true)
+            note("Back to full quality")
+        }
+    }
+
+    private func note(_ text: String) {
+        qualityNote = text
+        showControls()
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if qualityNote == text { qualityNote = nil }
+        }
     }
 
     private func handle(_ event: MPVPlayer.Event) {
         switch event {
-        case .started:
+        case let .started(playerSeconds):
             started = true
             buffering = false
+            guard !startedOnce else { return }
+            startedOnce = true
+            // Whole start from the tap: server, then screen/player setup,
+            // opening the file, and seeking + the first frame.
+            let total = Date().timeIntervalSince(playback.requestedAt)
+            if warmStart {
+                timing = String(format: "Started in %.1f s · ready before you tapped", total)
+            } else {
+                let opened = player?.openedAfter ?? 0
+                let setup = max(0, total - playback.resolvedIn - playerSeconds)
+                timing = String(format: "Started in %.1f s · server %.1f · setup %.1f · open %.1f · first frame %.1f",
+                                total, playback.resolvedIn, setup, opened, playerSeconds - opened)
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                timing = nil
+            }
             if controlsVisible { showControls() }
             Task { await model.report(playback, seconds: position, event: .started) }
         case let .buffering(isBuffering):
             buffering = isBuffering
+            // A stall: drop quality straight away rather than wait it out.
+            if isBuffering, started, let decision = governor?.observe(buffer: 0, bytesPerSecond: 0, stalled: true) {
+                apply(decision)
+            }
+        case let .network(buffer, bytesPerSecond):
+            if started, !paused, let decision = governor?.observe(buffer: buffer, bytesPerSecond: bytesPerSecond, stalled: false) {
+                apply(decision)
+            }
+            #if DEBUG
+            let quality = governor?.current.map { String(format: "converted %.1f Mbps", Double($0) / 1e6) } ?? "original"
+            let file = playback.bitrate.map { String(format: "file %.1f Mbps", Double($0) / 1e6) } ?? "file bitrate ?"
+            stats = String(format: "%@ · %@ · speed %.1f Mbps · %.0f s buffered", quality, file,
+                           (governor?.speed ?? bytesPerSecond * 8) / 1e6, buffer)
+            #endif
         case let .failed(message):
+            // Back to full quality didn't open: carry on at the lower one.
+            if started, let bitrate = revertTo, let url = model.convertedURL(for: playback, bitrate: bitrate, start: position) {
+                revertTo = nil
+                governor?.revert(to: bitrate)
+                offset = position
+                player?.load(url, headers: playback.fallbackHeaders, file: false)
+                note("Staying at lower quality")
+                return
+            }
+            // A converted version the server won't make: go back to the
+            // original and stop adapting.
+            if started, governor?.current != nil {
+                governor = nil
+                offset = 0
+                player?.load(playback.url, headers: playback.headers, start: position, file: true)
+                note("Couldn't lower the quality; playing the original")
+                return
+            }
             if !started, attempt < playback.fallbacks.count {
                 // The original didn't open; try the next way Emby offers.
                 let next = playback.fallbacks[attempt]
                 attempt += 1
                 let converted = next.path().hasSuffix(".m3u8")
                 offset = converted ? (playback.startSeconds ?? 0) : 0
-                player?.load(next, headers: playback.fallbackHeaders, start: converted ? nil : playback.startSeconds)
+                player?.load(next, headers: playback.fallbackHeaders, start: converted ? nil : playback.startSeconds, file: !converted)
                 return
             }
             error = "Couldn't play: \(message)"
@@ -451,6 +607,7 @@ struct MoviePlayerView: View {
 
     private func finish() {
         hideTask?.cancel()
+        if let speed = governor?.speed, speed > 0 { model.knownSpeed = speed }
         let seconds = position
         player?.shutdown()
         player = nil
@@ -474,6 +631,51 @@ struct MoviePlayerView: View {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled, error == nil else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
+        }
+    }
+
+    /// Where a drag or remote presses would land: a thumbnail of that
+    /// moment (when the server has them), the time, and how far it jumps.
+    @ViewBuilder private var scrubPreview: some View {
+        if let target = scrubbing {
+            GeometryReader { geo in
+                let width: CGFloat = thumbnails == nil ? 120 : Layout.scrubPreviewWidth
+                let fraction = total > 0 ? min(max(target / total, 0), 1) : 0
+                let x = min(max(16 + fraction * (geo.size.width - 32) - width / 2, 0), geo.size.width - width)
+                VStack(spacing: 4) {
+                    if let image = thumbnails?.image(at: target) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(16 / 9, contentMode: .fill)
+                            .frame(width: width, height: width * 9 / 16)
+                            .clipShape(.rect(cornerRadius: 10))
+                    }
+                    Text(timeString(target)).font(.headline.monospacedDigit())
+                    let delta = target - position
+                    Text((delta < 0 ? "−" : "+") + timeString(abs(delta)))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .frame(width: width + 16)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .offset(x: x - 8, y: -(thumbnails == nil ? 76 : width * 9 / 16 + 84))
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Apple TV: each press moves the target; the seek happens once the
+    /// presses stop, so holding skips far without stuttering.
+    private func scrub(by seconds: Double) {
+        let target = min(max((scrubbing ?? position) + seconds, 0), max(total, 1))
+        scrubbing = target
+        pendingSeek?.cancel()
+        pendingSeek = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            player?.seek(to: max(0, target - offset))
+            position = target
+            scrubbing = nil
         }
     }
 

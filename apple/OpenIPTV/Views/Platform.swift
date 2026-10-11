@@ -10,6 +10,7 @@ enum Layout {
     static let chipStripHeight: CGFloat = 110
     static let searchThumb: CGFloat = 80
     static let searchThumbWide: CGFloat = 170
+    static let scrubPreviewWidth: CGFloat = 400
     #else
     static let posterWidth: CGFloat = 118
     static let rowSpacing: CGFloat = 24
@@ -17,6 +18,7 @@ enum Layout {
     static let chipStripHeight: CGFloat = 60
     static let searchThumb: CGFloat = 46
     static let searchThumbWide: CGFloat = 96
+    static let scrubPreviewWidth: CGFloat = 200
     #endif
 }
 

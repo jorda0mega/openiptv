@@ -313,15 +313,31 @@ struct EmbyClient {
     // MARK: Playback
 
     /// Series and seasons resolve to the next unwatched episode; partly
-    /// watched items resume.
-    func playback(itemId: String) async throws -> EmbyPlayback {
-        var item: EmbyItem = try await get("Users/\(account.userId)/Items/\(itemId)", [])
-        if item.kind == "Series" || item.kind == "Season" {
-            let series = item.kind == "Series" ? item.id : (item.seriesId ?? "")
-            guard let episode = try await episodeToPlay(series: series, season: item.kind == "Season" ? item.id : nil) else {
+    /// watched items resume. With `kind` known, the item and how to play it
+    /// are fetched at the same time instead of one after the other.
+    func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
+        let item: EmbyItem
+        var prefetchedInfo: PlaybackInfo?
+        if kind == "Series" {
+            guard let episode = try await episodeToPlay(series: itemId, season: nil) else {
                 throw SourceError.unexpected("There's nothing to play in this show yet.")
             }
             item = episode
+        } else if kind == "Movie" || kind == "Episode" || kind == "Video" {
+            async let fetched: EmbyItem = get("Users/\(account.userId)/Items/\(itemId)", [])
+            async let info = try? playbackInfo(itemId, startSeconds: nil)
+            item = try await fetched
+            prefetchedInfo = await info
+        } else {
+            var fetched: EmbyItem = try await get("Users/\(account.userId)/Items/\(itemId)", [])
+            if fetched.kind == "Series" || fetched.kind == "Season" {
+                let series = fetched.kind == "Series" ? fetched.id : (fetched.seriesId ?? "")
+                guard let episode = try await episodeToPlay(series: series, season: fetched.kind == "Season" ? fetched.id : nil) else {
+                    throw SourceError.unexpected("There's nothing to play in this show yet.")
+                }
+                fetched = episode
+            }
+            item = fetched
         }
         let resume = (item.userData?.played == true) ? nil
             : item.userData?.playbackPositionTicks.flatMap { $0 > 0 ? Double($0) / 1e7 : nil }
@@ -333,7 +349,9 @@ struct EmbyClient {
         // Ask the server how to play it, like Emby's own apps do: the media
         // source id can differ from the item id, and some sources are remote
         // files to open directly. Fall back to direct stream if this fails.
-        if let info = try? await playbackInfo(item.id, startSeconds: resume), let source = info.MediaSources?.first {
+        let info: PlaybackInfo?
+        if let prefetchedInfo { info = prefetchedInfo } else { info = try? await playbackInfo(item.id, startSeconds: resume) }
+        if let info, let source = info.MediaSources?.first {
             playback.mediaSourceId = source.Id
             playback.playSessionId = info.PlaySessionId
             if source.Protocol == "Http", let path = source.Path, let remote = URL(string: path),
@@ -358,12 +376,26 @@ struct EmbyClient {
                                         fallbacks: [hlsURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId, start: resume)])
             }
         }
+        playback.bitrate = info?.MediaSources?.first?.Bitrate
         // Some servers only honour the token as a header; send it both ways
         // for Emby's own stream addresses (not for remote files).
         let auth = ["X-Emby-Token: \(account.accessToken)"]
         if playback.method != "remote file" { playback.headers += auth }
         playback.fallbackHeaders = auth
         return playback
+    }
+
+    /// Scrubbing thumbnails, when the server has generated them (Emby's
+    /// "thumbnail image extraction"); nil otherwise.
+    func trickplay(itemId: String, mediaSourceId: String?, width: Int = 320) async -> TrickplayImages? {
+        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/index.bif"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "width", value: String(width))]
+            + (mediaSourceId.map { [URLQueryItem(name: "MediaSourceId", value: $0)] } ?? [])
+        var request = URLRequest(url: parts.url!)
+        request.timeoutInterval = 30
+        authorize(&request)
+        guard let data = try? await HTTP.data(request) else { return nil }
+        return await Task.detached(priority: .utility) { TrickplayImages(bif: data) }.value
     }
 
     /// When nothing would play: how the server answers each address, in
@@ -424,7 +456,9 @@ struct EmbyClient {
     /// Emby's HLS stream, converted on the server: the last resort when the
     /// original file won't open. Starts at `start` because seeking in a
     /// live-converted stream is limited.
-    func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?) -> URL {
+    func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?, bitrate: Int = 20_000_000) -> URL {
+        // Lower bitrates read better at lower resolutions.
+        let maxWidth = bitrate >= 8_000_000 ? 1920 : bitrate >= 3_000_000 ? 1280 : 854
         var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/master.m3u8"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [
             .init(name: "MediaSourceId", value: mediaSourceId), .init(name: "api_key", value: account.accessToken),
@@ -432,7 +466,9 @@ struct EmbyClient {
             .init(name: "VideoCodec", value: "h264"), .init(name: "AudioCodec", value: "aac"),
             .init(name: "TranscodingMaxAudioChannels", value: "2"), .init(name: "SegmentContainer", value: "ts"),
             .init(name: "MinSegments", value: "1"), .init(name: "BreakOnNonKeyFrames", value: "True"),
-            .init(name: "MaxStreamingBitrate", value: "20000000"),
+            .init(name: "MaxStreamingBitrate", value: String(bitrate)),
+            .init(name: "VideoBitrate", value: String(max(bitrate - 192_000, 500_000))), .init(name: "AudioBitrate", value: "192000"),
+            .init(name: "MaxWidth", value: String(maxWidth)),
             .init(name: "StartTimeTicks", value: String(Int64((start ?? 0) * 1e7))),
         ] + (playSessionId.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
         return parts.url!
@@ -444,6 +480,7 @@ struct EmbyClient {
             let `Protocol`: String?
             let Path: String?
             let Container: String?
+            let Bitrate: Int?
             let SupportsDirectPlay: Bool?
             let SupportsDirectStream: Bool?
             let TranscodingUrl: String?
@@ -460,8 +497,9 @@ struct EmbyClient {
     func playbackInfo(_ itemId: String, startSeconds: Double?) async throws -> PlaybackInfo {
         var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(itemId)/PlaybackInfo"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [
-            .init(name: "UserId", value: account.userId), .init(name: "IsPlayback", value: "true"),
-            .init(name: "AutoOpenLiveStream", value: "true"), .init(name: "MaxStreamingBitrate", value: "200000000"),
+            // IsPlayback=false: just the plan, so it can be asked ahead of a tap.
+            .init(name: "UserId", value: account.userId), .init(name: "IsPlayback", value: "false"),
+            .init(name: "AutoOpenLiveStream", value: "false"), .init(name: "MaxStreamingBitrate", value: "200000000"),
             .init(name: "StartTimeTicks", value: String(Int64((startSeconds ?? 0) * 1e7))),
         ]
         var request = URLRequest(url: parts.url!)
