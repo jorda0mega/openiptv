@@ -8,11 +8,15 @@ enum Layout {
     static let rowSpacing: CGFloat = 40
     static let cardSpacing: CGFloat = 40
     static let chipStripHeight: CGFloat = 110
+    static let searchThumb: CGFloat = 80
+    static let searchThumbWide: CGFloat = 170
     #else
     static let posterWidth: CGFloat = 118
     static let rowSpacing: CGFloat = 24
     static let cardSpacing: CGFloat = 12
     static let chipStripHeight: CGFloat = 60
+    static let searchThumb: CGFloat = 46
+    static let searchThumbWide: CGFloat = 96
     #endif
 }
 

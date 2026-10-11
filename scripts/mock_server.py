@@ -231,6 +231,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"Items": items, "TotalRecordCount": len(items)})
         if path.startswith("/Videos/") and path.endswith("/stream"):
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
+        if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q:
+            # The library index: movies plus a few real-looking show names.
+            names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
+            shows = [{"Id": f"s{i}", "Name": n, "Type": "Series", "ProductionYear": 2000 + i,
+                      "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
+            everything = shows + [movie(i) for i in range(40)]
+            start, limit = int(q.get("StartIndex", 0)), int(q.get("Limit", 100))
+            return self.send({"Items": everything[start:start + limit]})
+        if path == "/Users/U1/Items" and "SearchTerm" in q:
+            term = q["SearchTerm"].lower()
+            found = [episode(i) for i in range(3) if term in "episode"] + \
+                    [movie(i) for i in range(40) if term in f"movie {i}"]
+            return self.send({"Items": found[: int(q.get("Limit", 40))]})
         if path == "/Users/U1/Items" and q.get("Filters") == "IsResumable":
             return self.send({"Items": [episode(i) for i in range(3)]})
         if path == "/Users/U1/Items/Resume":

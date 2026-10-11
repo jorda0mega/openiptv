@@ -65,6 +65,7 @@
 		6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
 		62FC945DE2AA99B3AFD08224 /* Libfribidi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */; };
 		65E5DDEBE26E74B78CA34AB4 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DE7D9201148434BE2E8348A /* CoreVideo.framework */; };
+		668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
 		673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
 		675F87B1E11CC35003D7F57C /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
 		6AB7EB94E728096236440394 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */; };
@@ -122,6 +123,7 @@
 		C7655AEC73FDEB4B56A49695 /* Libdav1d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */; };
 		CBB6BCA84516D445B5F74E8A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
 		CBE34968B8E97EBD13B63FB1 /* OpenIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */; };
+		CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
 		D01B9761AC76010F22918EFD /* Libuavs3d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */; };
 		D23BC078C762E09CCD49BD29 /* nettle.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57788799C7CF36103C03E61C /* nettle.xcframework */; };
 		D9ADA4B59CE9DE2921B38B77 /* Libuchardet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */; };
@@ -166,6 +168,7 @@
 		22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		305D39F34D3489D37AA89297 /* EmbyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyModels.swift; sourceTree = "<group>"; };
+		312496694F477570E1827C77 /* SearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchIndex.swift; sourceTree = "<group>"; };
 		320EE0FE4DDEEB903360A4AF /* Sources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources.swift; sourceTree = "<group>"; };
 		363AD3E84AD3778E05926FBC /* gmp.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = gmp.xcframework; path = Vendor/gmp.xcframework; sourceTree = "<group>"; };
 		3CE629B229349145FBEDD02D /* Libshaderc_combined.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libshaderc_combined.xcframework; path = Vendor/Libshaderc_combined.xcframework; sourceTree = "<group>"; };
@@ -481,6 +484,14 @@
 			);
 			sourceTree = "<group>";
 		};
+		E44E52CEEFAA9AF5C6CB4BBC /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				312496694F477570E1827C77 /* SearchIndex.swift */,
+			);
+			path = Search;
+			sourceTree = "<group>";
+		};
 		E673F7EEC354D93C2AD5B15D /* Live */ = {
 			isa = PBXGroup;
 			children = (
@@ -503,6 +514,7 @@
 				62350A47D68B597B15F396A1 /* Model */,
 				03EBA60F67C7DE2879FBE5FA /* Player */,
 				34F0E4783A9AFA4CC6A85ACB /* Resources */,
+				E44E52CEEFAA9AF5C6CB4BBC /* Search */,
 				476F05FBBF3EABD8C2C40D1B /* Views */,
 			);
 			path = OpenIPTV;
@@ -673,6 +685,7 @@
 				EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */,
 				09D42133B87A08F33EEB1C07 /* PlayerView.swift in Sources */,
 				446773C297E6355CDB46F2A6 /* Preferences.swift in Sources */,
+				668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */,
 				21673D3FCC00E6AAD2482428 /* SearchView.swift in Sources */,
 				9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */,
 				256361B5F9FE060AAED11A31 /* Sources.swift in Sources */,
@@ -703,6 +716,7 @@
 				461BF742965E3E5A547A1485 /* Platform.swift in Sources */,
 				05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */,
 				7048D6DC77B943DA816AC4C1 /* Preferences.swift in Sources */,
+				CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */,
 				4B7140CB6E5B116E80716522 /* SearchView.swift in Sources */,
 				CBB6BCA84516D445B5F74E8A /* SettingsView.swift in Sources */,
 				863051AB331FB77AD9A8617F /* Sources.swift in Sources */,

@@ -100,6 +100,27 @@ do {
             let playback = try await client.playback(itemId: card.id)
             print("  playback      \(playback.title) from \(playback.startSeconds.map { "\(Int($0)) s" } ?? "start") via \(playback.url.host() ?? "?") in \(ms(playStart))")
         }
+        let indexStart = Date()
+        let entries = try await client.libraryIndex()
+        print("  index         \(entries.count) movies and shows in \(ms(indexStart))")
+        let buildStart = Date()
+        let corpus = SearchCorpus(entries, name: \.name)
+        print("  index build   \(ms(buildStart))")
+        let term = value("OPENIPTV_SMOKE_SEARCH") ?? "forensic files"
+        var previous: SearchCorpus<LibraryEntry>.Match?
+        var typed = ""
+        var slowest = 0.0
+        for character in term {
+            typed.append(character)
+            let keyStart = Date()
+            previous = corpus.search(typed, refining: previous)
+            slowest = max(slowest, Date().timeIntervalSince(keyStart))
+        }
+        let top = previous?.ranked.prefix(3).map { corpus.items[$0].name } ?? []
+        print("  search        \"\(term)\" typed key by key, slowest keystroke \(Int(slowest * 1000)) ms → \(previous?.ranked.count ?? 0) matches: \(top.joined(separator: ", "))")
+        let serverStart = Date()
+        let cards = try await client.search(term, cardWidth: 200)
+        print("  server search \(cards.count) results (\(cards.filter { $0.kind == "Episode" }.count) episodes) in \(ms(serverStart))")
         await client.logout()
         print("  logged out    session ended on the server")
     }

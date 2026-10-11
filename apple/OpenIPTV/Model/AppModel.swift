@@ -9,6 +9,7 @@ import Observation
 final class AppModel {
     let sources = SourceStore()
     let guide = GuideStore()
+    let library = LibraryIndex()
 
     // MARK: Home (Emby)
 
@@ -33,6 +34,10 @@ final class AppModel {
     private var providers: [UUID: any LiveProvider] = [:]
     private var channelsByCategory: [String: [LiveChannel]] = [:]
     private var channelById: [String: LiveChannel] = [:]
+    /// Channel names prepared for instant search.
+    private(set) var channelCorpus = SearchCorpus<LiveChannel>(name: \.name)
+    /// Server search results by query, for episodes the index doesn't hold.
+    private var serverSearchCache: [String: [Card]] = [:]
     private var visible: Set<String> = []
     private var nowNextTask: Task<Void, Never>?
     private var boundaryTask: Task<Void, Never>?
@@ -40,7 +45,7 @@ final class AppModel {
 
     init() {
         selectedCategory = UserDefaults.standard.string(forKey: "category")
-        rows = Self.readCache("home.json") ?? []
+        rows = AppCache.read("home.json") ?? []
         Task { await guide.loadCache(); guideState = await guide.state }
     }
 
@@ -60,7 +65,8 @@ final class AppModel {
             let fresh = try await emby.home(cardWidth: cardWidth)
             if fresh != rows { rows = fresh }
             homeError = nil
-            Self.writeCache("home.json", fresh)
+            AppCache.write("home.json", fresh)
+            Task { await library.prepare(emby) }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
         }
@@ -87,7 +93,9 @@ final class AppModel {
         await emby?.logout()
         sources.setEmby(nil)
         rows = []
-        Self.removeCache("home.json")
+        AppCache.remove("home.json")
+        library.clear()
+        serverSearchCache = [:]
     }
 
     func add(_ source: IPTVSource) async {
@@ -104,6 +112,9 @@ final class AppModel {
         await emby?.logout()
         sources.forgetEverything()
         await guide.clear()
+        library.clear()
+        serverSearchCache = [:]
+        channelCorpus = SearchCorpus(name: \.name)
         rows = []
         categories = []
         allChannels = []
@@ -165,6 +176,7 @@ final class AppModel {
         }
         categories = cats
         allChannels = channels
+        channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
         channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
         channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         liveErrors = errors
@@ -204,11 +216,19 @@ final class AppModel {
         channels.map { channelById[$0.id] ?? $0 }
     }
 
-    /// Case-insensitive search across every source, on the device.
-    func search(_ query: String) -> [LiveChannel] {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard q.count >= 2 else { return [] }
-        return Array(allChannels.lazy.filter { $0.name.localizedCaseInsensitiveContains(q) }.prefix(300))
+    /// Episodes and anything the on-device index doesn't hold yet, from the
+    /// Emby server. Answers are kept for the session so retyping is instant.
+    func serverSearch(_ query: String, cardWidth: Int) async -> [Card] {
+        let key = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard key.count >= 2, let emby else { return [] }
+        if let cached = serverSearchCache[key] { return cached }
+        guard let cards = try? await emby.search(key, cardWidth: cardWidth) else { return [] }
+        serverSearchCache[key] = cards
+        return cards
+    }
+
+    func card(for entry: LibraryEntry, width: Int) -> Card? {
+        emby?.card(for: entry, width: width)
     }
 
     func playable(_ channel: LiveChannel) async throws -> PlayableStream {
@@ -296,25 +316,5 @@ final class AppModel {
             guard let self, !Task.isCancelled else { return }
             self.scheduleNowNext()
         }
-    }
-
-    // MARK: Cache (display data only; never credentials or stream URLs)
-
-    private static var cacheDir: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    }
-
-    private static func readCache<T: Decodable>(_ name: String) -> T? {
-        guard let data = try? Data(contentsOf: cacheDir.appending(path: name)) else { return nil }
-        return try? JSONDecoder().decode(T.self, from: data)
-    }
-
-    private static func writeCache<T: Encodable>(_ name: String, _ value: T) {
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        try? data.write(to: cacheDir.appending(path: name), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-    }
-
-    private static func removeCache(_ name: String) {
-        try? FileManager.default.removeItem(at: cacheDir.appending(path: name))
     }
 }

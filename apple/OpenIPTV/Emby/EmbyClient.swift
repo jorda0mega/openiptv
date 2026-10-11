@@ -151,19 +151,100 @@ struct EmbyClient {
     private func row(_ title: String, _ items: [EmbyItem], _ context: Artwork.Context, _ width: Int) -> HomeRow? {
         guard !items.isEmpty else { return nil }
         let shape = Artwork.listShape(items, context: context)
-        let pixelWidth = shape == .landscape ? width * 16 / 10 : width
-        let cards = items.map { item in
-            let images = Artwork.candidates(item, context: context).map { candidate in
-                CardImage(url: imageURL(candidate, width: pixelWidth, shape: shape).absoluteString,
-                          contain: candidate.contain(in: shape))
-            }
-            let (title, subtitle) = Self.titles(item)
-            let progress = item.userData?.playedPercentage.flatMap { $0 > 0 && $0 < 100 ? $0 : nil }
-            let playable = ["Movie", "Episode", "Video", "MusicVideo", "Series", "Season"].contains(item.kind)
-            return Card(id: item.id, kind: item.kind, title: title, subtitle: subtitle,
-                        images: images, progress: progress, playable: playable)
-        }
+        let cards = items.map { card($0, context: context, shape: shape, width: width) }
         return HomeRow(title: title, shape: shape.rawValue, aspect: shape.aspect, cards: cards)
+    }
+
+    private func card(_ item: EmbyItem, context: Artwork.Context, shape: Artwork.Shape, width: Int) -> Card {
+        let pixelWidth = shape == .landscape ? width * 16 / 10 : width
+        let images = Artwork.candidates(item, context: context).map { candidate in
+            CardImage(url: imageURL(candidate, width: pixelWidth, shape: shape).absoluteString,
+                      contain: candidate.contain(in: shape))
+        }
+        let (title, subtitle) = Self.titles(item)
+        let progress = item.userData?.playedPercentage.flatMap { $0 > 0 && $0 < 100 ? $0 : nil }
+        let playable = ["Movie", "Episode", "Video", "MusicVideo", "Series", "Season"].contains(item.kind)
+        return Card(id: item.id, kind: item.kind, title: title, subtitle: subtitle,
+                    images: images, progress: progress, playable: playable)
+    }
+
+    // MARK: Search
+
+    /// Every movie and show (name, year, poster tag) for instant on-device
+    /// search, fetched in pages sorted by name.
+    func libraryIndex(pageSize: Int = 5000, cap: Int = 250_000) async throws -> [LibraryEntry] {
+        struct Entry: Decodable {
+            let id: String
+            let name: String?
+            let kind: String?
+            let year: Int?
+            let tags: [String: String]?
+            let aspect: Double?
+            enum CodingKeys: String, CodingKey {
+                case id = "Id", name = "Name", kind = "Type", year = "ProductionYear"
+                case tags = "ImageTags", aspect = "PrimaryImageAspectRatio"
+            }
+        }
+        struct Page: Decodable { let Items: [Lenient<Entry>]? }
+        var out: [LibraryEntry] = []
+        var start = 0
+        while start < cap {
+            var parts = URLComponents(url: Self.api(account.serverURL, "Users/\(account.userId)/Items"), resolvingAgainstBaseURL: false)!
+            parts.queryItems = [
+                .init(name: "Recursive", value: "true"), .init(name: "IncludeItemTypes", value: "Movie,Series"),
+                .init(name: "Fields", value: "ProductionYear,PrimaryImageAspectRatio"),
+                .init(name: "EnableImageTypes", value: "Primary"), .init(name: "ImageTypeLimit", value: "1"),
+                .init(name: "EnableUserData", value: "false"), .init(name: "EnableTotalRecordCount", value: "false"),
+                .init(name: "SortBy", value: "SortName"), .init(name: "SortOrder", value: "Ascending"),
+                .init(name: "StartIndex", value: String(start)), .init(name: "Limit", value: String(pageSize)),
+            ]
+            var request = URLRequest(url: parts.url!)
+            request.timeoutInterval = 60
+            authorize(&request)
+            let data = try await HTTP.data(request)
+            let page = try await Task.detached(priority: .utility) {
+                (try JSONDecoder().decode(Page.self, from: data).Items ?? []).compactMap(\.value)
+            }.value
+            out += page.compactMap { entry in
+                guard let name = entry.name, !name.isEmpty else { return nil }
+                return LibraryEntry(id: entry.id, name: name, kind: entry.kind ?? "Movie", year: entry.year,
+                                    imageTag: entry.tags?["Primary"], aspect: entry.aspect)
+            }
+            if page.count < pageSize { break }
+            start += pageSize
+        }
+        return out
+    }
+
+    /// The server's own search, for episodes (which the on-device index
+    /// leaves out) and anything added since the index was built.
+    func search(_ term: String, cardWidth: Int) async throws -> [Card] {
+        let found = try await items("Users/\(account.userId)/Items", [
+            .init(name: "SearchTerm", value: term), .init(name: "Recursive", value: "true"),
+            .init(name: "IncludeItemTypes", value: "Movie,Series,Episode"), .init(name: "Limit", value: "40"),
+            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear"),
+            .init(name: "ImageTypeLimit", value: "1"), .init(name: "EnableImageTypes", value: "Primary,Thumb,Backdrop"),
+            .init(name: "EnableUserData", value: "false"), .init(name: "EnableTotalRecordCount", value: "false"),
+        ])
+        return found.map { item in
+            let landscape = item.kind == "Episode"
+            return card(item, context: landscape ? .landscape : .poster, shape: landscape ? .landscape : .portrait, width: cardWidth)
+        }
+    }
+
+    /// A card for an on-device index entry (poster from its image tag).
+    func card(for entry: LibraryEntry, width: Int) -> Card {
+        var images: [CardImage] = []
+        if let tag = entry.imageTag {
+            let candidate = Artwork.Candidate(itemId: entry.id, type: "Primary", tag: tag, index: nil,
+                                              aspect: entry.aspect ?? Artwork.Shape.portrait.aspect, letterbox: false)
+            images.append(CardImage(url: imageURL(candidate, width: width, shape: .portrait).absoluteString,
+                                    contain: candidate.contain(in: .portrait)))
+        }
+        let kind = entry.kind == "Series" ? "Show" : "Movie"
+        return Card(id: entry.id, kind: entry.kind, title: entry.name,
+                    subtitle: entry.year.map { "\(kind) · \($0)" } ?? kind,
+                    images: images, progress: nil, playable: true)
     }
 
     private static func titles(_ item: EmbyItem) -> (String, String?) {

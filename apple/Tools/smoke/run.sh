@@ -11,5 +11,6 @@ swiftc -O -target arm64-apple-macos14 -o "$out/smoke" \
   "$src/Live/LiveModels.swift" "$src/Live/XtreamProvider.swift" "$src/Live/M3UProvider.swift" \
   "$src/Live/StalkerProvider.swift" "$src/Live/Guide.swift" \
   "$src/Emby/EmbyModels.swift" "$src/Emby/Artwork.swift" "$src/Emby/EmbyClient.swift" \
+  "$src/Search/SearchIndex.swift" \
   Tools/smoke/main.swift
 "$out/smoke"
