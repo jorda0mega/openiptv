@@ -32,6 +32,11 @@ struct HomeContent: Codable, Hashable {
 @MainActor
 enum HomeFeed {
     static func load(_ emby: EmbyClient, library: LibraryIndex, cardWidth: Int, backdropWidth: Int) async throws -> HomeContent {
+        // Everything that doesn't depend on something else, at once: what
+        // you're watching and what's new, and the trending titles with what
+        // you've seen of them.
+        let trendingIds = library.trending.prefix(100).map(\.id)
+        async let trendingItems = emby.items(ids: trendingIds)
         let sources = try await emby.homeSources()
         let ratings = library.ratings, popularity = library.popularity
         let thisYear = Calendar.current.component(.year, from: Date())
@@ -82,11 +87,7 @@ enum HomeFeed {
         (sources.watching + upNext).forEach(show)
 
         // Trending titles on the server, with what this user has seen of them.
-        let candidates = library.trending.filter { entry in
-            !shown.contains(entry.titleKey) && !shown.contains("show:" + entry.id)
-                && !shown.contains("showname:" + entry.name.lowercased())
-        }.prefix(100)
-        let popular = await emby.items(ids: candidates.map(\.id)).filter { !watched($0) && !isShown($0) && worthIt($0) }
+        let popular = await trendingItems.filter { !watched($0) && !isShown($0) && worthIt($0) }
 
         // New & notable candidates, needed for the featured pick when
         // popularity hasn't downloaded yet.
@@ -103,7 +104,12 @@ enum HomeFeed {
         // Featured: popular and recent, with a backdrop to show.
         let pool = popular.isEmpty ? Array(added.prefix(20)) : popular
         let withBackdrop = pool.filter { emby.backdropURL(for: $0, width: backdropWidth) != nil }
-        let pick = withBackdrop.first { ($0.productionYear ?? 0) >= thisYear - 1 } ?? withBackdrop.first
+        // The same pick all day (one of the top few recent ones, by date),
+        // so refreshing doesn't swap the top of the screen.
+        let recent = withBackdrop.filter { ($0.productionYear ?? 0) >= thisYear - 1 }
+        let choices = Array((recent.isEmpty ? withBackdrop : recent).prefix(5))
+        let day = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
+        let pick = choices.isEmpty ? nil : choices[day % choices.count]
         var featured: Featured?
         if let pick, let backdrop = emby.backdropURL(for: pick, width: backdropWidth) {
             let poster = emby.card(pick, context: .poster, shape: .portrait, width: cardWidth)

@@ -59,9 +59,10 @@ final class AppModel {
         selectedCategory = UserDefaults.standard.string(forKey: "category")
         // Ready before the first film opens.
         DispatchQueue.global(qos: .userInitiated).async { StreamRelay.shared.start() }
-        // v3: personal Home; older caches had a row per library.
-        for old in ["home.json", "home.v2.json"] { AppCache.remove(old) }
-        let home: HomeContent? = AppCache.read("home.v3.json")
+        // v4: Top picks layout; older caches had other rows, and showing
+        // one first would flash the old layout before the new.
+        for old in ["home.json", "home.v2.json", "home.v3.json"] { AppCache.remove(old) }
+        let home: HomeContent? = AppCache.read("home.v4.json")
         rows = home?.rows ?? []
         featured = home?.featured
         Task { await guide.loadCache(); guideState = await guide.state }
@@ -86,10 +87,22 @@ final class AppModel {
         do {
             let fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
                                                 backdropWidth: Self.backdropWidth)
+            // The pictures first (all at once), so the page changes in one go
+            // instead of covers popping in; on the very first load, show the
+            // rows straight away and let the pictures follow.
+            let prefetch = Task { await ImagePipeline.shared.prefetch(Self.visibleImages(fresh)) }
+            if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured {
+                _ = await withTaskGroup(of: Void.self) { group in
+                    group.addTask { await prefetch.value }
+                    group.addTask { try? await Task.sleep(for: .seconds(1.5)) }
+                    await group.next()
+                    group.cancelAll()
+                }
+            }
             if fresh.rows != rows { rows = fresh.rows }
             if fresh.featured != featured { featured = fresh.featured }
             homeError = nil
-            AppCache.write("home.v3.json", fresh)
+            AppCache.write("home.v4.json", fresh)
             // The first few things you'd tap on Home are ready before you do.
             let likely = (fresh.featured.map { [$0.card] } ?? []) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(3) }
             prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
@@ -101,6 +114,14 @@ final class AppModel {
 
     /// Wide enough for Home's featured backdrop on any screen.
     private static let backdropWidth = 1920
+
+    /// The pictures on Home's first screen and a half: the featured
+    /// backdrop and the first cards of the first rows.
+    private static func visibleImages(_ home: HomeContent) -> [URL] {
+        let backdrop = home.featured.flatMap { URL(string: $0.backdrop) }.map { [$0] } ?? []
+        let covers = home.rows.prefix(3).flatMap { $0.cards.prefix(6) }.compactMap { $0.images.first.flatMap { URL(string: $0.url) } }
+        return backdrop + covers
+    }
 
     /// Which copy of a title to play when there are several: the sharpest
     /// on Apple TV; on iPhone and iPad up to 1080p, which looks the same on
@@ -271,8 +292,10 @@ final class AppModel {
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
         await library.prepare(emby)
         await charts
-        // Popularity or the catalog arrived: Home's popular titles changed.
-        if library.trending.prefix(40).map(\.id) != before { await loadHome(cardWidth: lastCardWidth, sync: false) }
+        // Trending arrived for the first time (Home was built without it):
+        // rebuild once. Otherwise the next visit or refresh picks it up,
+        // rather than the page changing under you.
+        if before.isEmpty, !library.trending.isEmpty { await loadHome(cardWidth: lastCardWidth, sync: false) }
     }
 
     func playback(for card: Card) async throws -> EmbyPlayback {
@@ -304,7 +327,7 @@ final class AppModel {
         sources.setEmby(nil)
         rows = []
         featured = nil
-        AppCache.remove("home.v3.json")
+        AppCache.remove("home.v4.json")
         library.clear()
         serverSearchCache = [:]
     }
@@ -328,7 +351,7 @@ final class AppModel {
         channelCorpus = SearchCorpus(name: \.name)
         rows = []
         featured = nil
-        AppCache.remove("home.v3.json")
+        AppCache.remove("home.v4.json")
         categories = []
         allChannels = []
         channelsByCategory = [:]
