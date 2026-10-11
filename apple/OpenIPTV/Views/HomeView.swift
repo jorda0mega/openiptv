@@ -121,14 +121,12 @@ private struct RowView: View {
                         .cardButtonStyle()
                     }
                 }
-                .scrollTargetLayout()
                 .padding(.horizontal)
                 #if os(tvOS)
                 .padding(.vertical, 30)
                 #endif
             }
             .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned)
             #if os(tvOS)
             .scrollClipDisabled()
             #endif

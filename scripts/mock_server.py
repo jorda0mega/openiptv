@@ -322,7 +322,8 @@ class Handler(BaseHTTPRequestHandler):
             # Several episodes of one show (shown as one card) and a movie.
             ep = lambda s, i: episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
                                                     "UserData": {"PlaybackPositionTicks": 5280000000, "PlayedPercentage": 40}}
-            return self.send({"Items": [ep(2, 3), movie(5) | {"UserData": {"PlayedPercentage": 25}}, ep(1, 4), ep(1, 2)]})
+            twin = ep(2, 3) | {"Id": "e4k203", "SeriesId": "s1-4k"}  # same show, another library
+            return self.send({"Items": [ep(2, 3), twin, movie(5) | {"UserData": {"PlayedPercentage": 25}}, ep(1, 4), ep(1, 2)]})
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
         if path == "/Users/U1/Items/Latest":

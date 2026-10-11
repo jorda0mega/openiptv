@@ -56,7 +56,9 @@ final class AppModel {
         }
         #endif
         selectedCategory = UserDefaults.standard.string(forKey: "category")
-        rows = AppCache.read("home.json") ?? []
+        // v2: shows grouped into one card; older caches listed episodes.
+        AppCache.remove("home.json")
+        rows = AppCache.read("home.v2.json") ?? []
         Task { await guide.loadCache(); guideState = await guide.state }
     }
 
@@ -76,7 +78,7 @@ final class AppModel {
             let fresh = try await emby.home(cardWidth: cardWidth)
             if fresh != rows { rows = fresh }
             homeError = nil
-            AppCache.write("home.json", fresh)
+            AppCache.write("home.v2.json", fresh)
             // The first few things you'd tap on Home are ready before you do.
             let likely = fresh.prefix(2).flatMap { $0.cards.prefix(3) }
             prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
@@ -265,7 +267,7 @@ final class AppModel {
         await emby?.logout()
         sources.setEmby(nil)
         rows = []
-        AppCache.remove("home.json")
+        AppCache.remove("home.v2.json")
         library.clear()
         serverSearchCache = [:]
     }

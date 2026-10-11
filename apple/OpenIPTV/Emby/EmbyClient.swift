@@ -144,7 +144,10 @@ struct EmbyClient {
         if let row = showRow("Continue Watching", watching, cardWidth) { rows.append(row) }
         // Next Up without the shows already in Continue Watching.
         let inProgress = Set(watching.compactMap(\.seriesId))
-        let upNext = ((try? await nextUp) ?? []).filter { !inProgress.contains($0.seriesId ?? "") }
+        let inProgressNames = Set(watching.compactMap { $0.seriesName?.lowercased() })
+        let upNext = ((try? await nextUp) ?? []).filter {
+            !inProgress.contains($0.seriesId ?? "") && !inProgressNames.contains($0.seriesName?.lowercased() ?? "")
+        }
         if let row = showRow("Next Up", upNext, cardWidth) { rows.append(row) }
         for (library, items) in zip(libraries, latest) {
             if let items, let row = row("Latest in \(library.name)", items, .poster, cardWidth) { rows.append(row) }
@@ -155,8 +158,18 @@ struct EmbyClient {
     /// One card per show (Netflix-style), carrying the episode to resume;
     /// movies stay as they are.
     private func showRow(_ title: String, _ items: [EmbyItem], _ width: Int) -> HomeRow? {
+        // By show, and by show name too: the same show in two libraries (HD
+        // and 4K, say) has two ids but should be one card.
         var seen = Set<String>()
-        let unique = items.filter { seen.insert($0.kind == "Episode" ? ($0.seriesId ?? $0.id) : $0.id).inserted }.prefix(12)
+        let unique = items.filter { item in
+            guard item.kind == "Episode" else { return seen.insert(item.id).inserted }
+            let byName = "name:" + (item.seriesName ?? "").lowercased()
+            let byId = "id:" + (item.seriesId ?? item.id)
+            let fresh = !seen.contains(byName) && !seen.contains(byId)
+            seen.insert(byName)
+            seen.insert(byId)
+            return fresh
+        }.prefix(12)
         guard !unique.isEmpty else { return nil }
         let shape = Artwork.Shape.landscape
         let cards = unique.map { item -> Card in
