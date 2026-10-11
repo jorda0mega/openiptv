@@ -34,6 +34,10 @@ final class AppModel {
     /// Live TV by what's on (Sports, News, Movies…), one entry per channel;
     /// see LiveOrganizer.
     private(set) var liveLibrary = LiveOrganizer.Library()
+    /// The channel to play for each guide id (the best copy), for guide
+    /// search; and channels from abroad, listed after the rest.
+    @ObservationIgnored private var guideChannels: [String: LiveChannel] = [:]
+    @ObservationIgnored private var abroad: Set<String> = []
     /// A provider category chosen from the full list (rather than a shelf):
     /// kept until the lineup next loads.
     var browsingProviderCategory = false
@@ -740,6 +744,7 @@ final class AppModel {
         categories = cats
         allChannels = channels
         localCache = nil
+        indexGuideChannels(categories: own)
         channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
         channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
         channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -751,6 +756,83 @@ final class AppModel {
                 || (browsingProviderCategory && cats.contains { $0.id == id })
         } ?? false
         if !valid { selectedCategory = shelves.first?.id ?? cats.first?.id }
+    }
+
+    /// Which channel plays each guide id, and the names guide search
+    /// matches against.
+    private func indexGuideChannels(categories: [LiveCategory]) {
+        let local = Set(categories.filter { LiveOrganizer.Kind($0.name, home: Self.homeRegion).topic == .local }.map(\.id))
+        var byGuide: [String: LiveChannel] = [:]
+        var names: [String: String] = [:]
+        for channel in allChannels {
+            guard let epg = channel.epgId, byGuide[epg] == nil else { continue }
+            let best = copies(of: channel).first ?? channel
+            byGuide[epg] = best
+            names[epg] = GuideStore.fold(title(of: best))
+        }
+        guideChannels = byGuide
+        localGuideCategories = local
+        abroad = Set(shelf(LiveOrganizer.internationalID)?.sections.flatMap { $0.entries.flatMap { $0.channels.map(\.id) } } ?? [])
+        let guide = guide
+        Task { await guide.setChannelNames(names) }
+    }
+
+    @ObservationIgnored private var localGuideCategories: Set<String> = []
+
+    /// Something on TV that matches a search: a programme from the guide or
+    /// a game from Sports.
+    struct GuideHit: Identifiable, Hashable {
+        let title: String
+        let channel: LiveChannel
+        let channelTitle: String
+        let start: Int64?
+        let stop: Int64?
+        let league: String?
+        var id: String { "\(channel.id)|\(start ?? 0)|\(title)" }
+        func isOn(at now: Int64 = Int64(Date().timeIntervalSince1970)) -> Bool {
+            guard let start else { return false }
+            return start <= now && (stop.map { now < $0 } ?? true)
+        }
+    }
+
+    /// What's on now or later that matches the query: programmes from the
+    /// guide (each word in the title or the channel's name) and games from
+    /// Sports. On now first, then by start; channels from abroad after
+    /// local ones; local stations only for your area.
+    func searchGuide(_ query: String, area: LocalArea?, limit: Int = 40) async -> [GuideHit] {
+        let words = GuideStore.fold(query).split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+            .filter { $0.count >= 2 || $0.allSatisfy(\.isNumber) }
+        guard !words.isEmpty else { return [] }
+        let now = Int64(Date().timeIntervalSince1970)
+        var hits: [GuideHit] = []
+        var seen = Set<String>()
+        for (epg, programme) in await guide.search(words, now: now) {
+            guard let channel = guideChannels[epg] else { continue }
+            if localGuideCategories.contains(channel.categoryId ?? "") {
+                guard let area, area.includes(channel.name) else { continue }
+            }
+            let key = "\(channel.id)|\(programme.start)"
+            guard seen.insert(key).inserted else { continue }
+            hits.append(GuideHit(title: programme.title, channel: channel, channelTitle: title(of: channel),
+                                 start: programme.start, stop: programme.stop, league: nil))
+        }
+        let events = shelf(LiveOrganizer.sportsID)?.sections.first { $0.id == "events" }?.entries ?? []
+        for entry in events {
+            let start = entry.event?.start.map { Int64($0.timeIntervalSince1970) }
+            if let start, now - start > 4 * 3600 { continue }
+            let text = GuideStore.fold(entry.title + " " + (entry.event?.league ?? ""))
+            guard words.allSatisfy({ text.contains($0) }) else { continue }
+            hits.append(GuideHit(title: entry.title, channel: entry.channels[0], channelTitle: entry.event?.league ?? "",
+                                 start: start, stop: start.map { $0 + 3 * 3600 }, league: entry.event?.league))
+        }
+        return hits.enumerated().sorted { a, b in
+            let x = a.element, y = b.element
+            if x.isOn(at: now) != y.isOn(at: now) { return x.isOn(at: now) }
+            let ax = abroad.contains(x.channel.id), ay = abroad.contains(y.channel.id)
+            if ax != ay { return !ax }
+            let sx = x.start ?? .max, sy = y.start ?? .max
+            return sx != sy ? sx < sy : a.offset < b.offset
+        }.prefix(limit).map(\.element)
     }
 
     /// The country Live TV is arranged for: the device's region.

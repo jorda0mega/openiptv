@@ -553,7 +553,7 @@ enum LiveOrganizer {
             var detail = pieces.count > 1 ? pieces.dropFirst().joined(separator: " · ") : label
             title = title.replacingOccurrences(of: " _ ", with: " · ").replacingOccurrences(of: "`", with: "’")
                 .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
-                .trimmingCharacters(in: CharacterSet(charactersIn: " @-–_:·"))
+                .trimmingCharacters(in: CharacterSet(charactersIn: " @-–_:·•●◈▼▲★"))
             // "( OneSoccer Feed )" → a detail.
             if detail == nil, let open = title.lastIndex(of: "("), title.hasSuffix(")") {
                 let inside = title[title.index(after: open)..<title.index(before: title.endIndex)].trimmingCharacters(in: .whitespaces)

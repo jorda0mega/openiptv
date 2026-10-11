@@ -15,8 +15,16 @@ actor GuideStore {
     }
 
     private(set) var state: State = .idle
-    private var programmes: [String: [Programme]] = [:]
+    private var programmes: [String: [Programme]] = [:] {
+        didSet { searchIndex = nil }
+    }
     private var fetchedAt: Date?
+    /// Every programme with its title folded for matching, in start order
+    /// (built on the first search after the guide changes).
+    private var searchIndex: [(epgId: String, programme: Programme, folded: String)]?
+    /// Each guide id's channel name, folded: words can match the channel
+    /// as well as the programme ("simpsons fox").
+    private var channelNames: [String: String] = [:]
 
     private struct Cache: Codable {
         let fetchedAt: Date
@@ -41,8 +49,9 @@ actor GuideStore {
     }
 
     /// Downloads and parses every guide URL, keeping programmes for `keep`
-    /// (XMLTV channel ids) from 2 h ago to `hoursAhead` from now.
-    func refresh(from urls: [URL], keep: Set<String>, hoursAhead: Int64 = 12) async {
+    /// (XMLTV channel ids) from 2 h ago to `hoursAhead` from now (today and
+    /// tomorrow, so search finds what's coming up too).
+    func refresh(from urls: [URL], keep: Set<String>, hoursAhead: Int64 = 24) async {
         guard !urls.isEmpty, state != .loading else { return }
         state = .loading
         let now = Int64(Date().timeIntervalSince1970)
@@ -88,6 +97,42 @@ actor GuideStore {
     /// Everything kept for one channel (from 2 h ago), in order.
     func programmes(_ epgId: String) -> [Programme] {
         programmes[epgId] ?? []
+    }
+
+    func setChannelNames(_ names: [String: String]) {
+        channelNames = names
+    }
+
+    /// Programmes on now or later whose title has the query's words (each
+    /// word in the title or the channel's name, at least one in the title):
+    /// the ones on now first, then by start time.
+    func search(_ words: [String], now: Int64 = Int64(Date().timeIntervalSince1970), limit: Int = 300)
+        -> [(epgId: String, programme: Programme)] {
+        guard !words.isEmpty else { return [] }
+        if searchIndex == nil {
+            searchIndex = programmes.flatMap { id, list in
+                list.map { (epgId: id, programme: $0, folded: GuideStore.fold($0.title)) }
+            }.sorted { $0.programme.start < $1.programme.start }
+        }
+        var onNow: [(String, Programme)] = [], later: [(String, Programme)] = []
+        for item in searchIndex ?? [] where item.programme.stop > now {
+            var inTitle = false
+            var matched = true
+            for word in words {
+                if item.folded.contains(word) { inTitle = true; continue }
+                if channelNames[item.epgId]?.contains(word) == true { continue }
+                matched = false
+                break
+            }
+            guard matched, inTitle else { continue }
+            if item.programme.start <= now { onNow.append((item.epgId, item.programme)) } else { later.append((item.epgId, item.programme)) }
+            if onNow.count + later.count >= limit { break }
+        }
+        return (onNow + later).map { (epgId: $0.0, programme: $0.1) }
+    }
+
+    nonisolated static func fold(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
     func clear() {

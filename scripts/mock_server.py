@@ -108,6 +108,12 @@ def xmltv_time(ts):
     return datetime.fromtimestamp(ts, PANEL_TZ).strftime("%Y%m%d%H%M%S +0100")
 
 
+GUIDE_TITLES = ["The Simpsons", "Friends", "SportsCenter", "World News Tonight", "The Office", "Seinfeld",
+                "NFL Live", "Law & Order: SVU", "Jeopardy!", "Wheel of Fortune", "Family Guy", "Bob's Burgers",
+                "Chopped", "Diners, Drive-Ins and Dives", "Property Brothers", "House Hunters", "Paw Patrol",
+                "Bluey", "SpongeBob SquarePants", "The Big Bang Theory", "Modern Family", "Dateline", "60 Minutes",
+                "NBA Today", "College GameDay", "Pardon the Interruption", "The Daily Show", "Saturday Night Live",
+                "Shark Tank", "Survivor", "Grey's Anatomy", "Chicago Fire", "NCIS", "Blue Bloods", "Yellowstone"]
 LINEUP = None
 if os.environ.get("OPENIPTV_MOCK_LINEUP"):
     with open(os.environ["OPENIPTV_MOCK_LINEUP"]) as f:
@@ -375,6 +381,19 @@ class Handler(BaseHTTPRequestHandler):
             for s, e in slots(now - SLOT * 4, 48):
                 parts.append(f'<programme start="{xmltv_time(s)}" stop="{xmltv_time(e)}" channel="ch{ch}.uk">'
                              f'<title lang="en">{title(ch, s)}</title><desc>About it.</desc></programme>')
+        if LINEUP:
+            # A guide for a saved lineup's US channels, with familiar titles,
+            # a day ahead, so guide search has something real to find.
+            from xml.sax.saxutils import escape
+            cats = {str(c["category_id"]) for c in LINEUP["categories"]
+                    if c["category_name"].startswith("US |") and "Local" not in c["category_name"]}
+            ids = sorted({s["epg_channel_id"] for s in LINEUP["streams"]
+                          if str(s.get("category_id")) in cats and s.get("epg_channel_id")})
+            for n, epg in enumerate(ids):
+                for k, (s, e) in enumerate(slots(now - SLOT * 4, 52)):
+                    show = GUIDE_TITLES[(n * 7 + k) % len(GUIDE_TITLES)]
+                    parts.append(f'<programme start="{xmltv_time(s)}" stop="{xmltv_time(e)}" channel="{escape(epg)}">'
+                                 f'<title lang="en">{escape(show)}</title></programme>')
         parts.append("</tv>")
         self.send("\n".join(parts), "application/xml")
 

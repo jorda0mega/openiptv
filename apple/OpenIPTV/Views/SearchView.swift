@@ -3,7 +3,8 @@ import SwiftUI
 /// One search for everything. Movies, shows and channels come from indexes
 /// on the device and update on every keystroke, with completions on top;
 /// episodes (and anything newer than the index) follow from the Emby server
-/// a moment later.
+/// a moment later. "On TV" finds what's on now or later today and tomorrow
+/// by its name (the guide, and games in Sports), wherever it's showing.
 struct SearchView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
@@ -26,6 +27,7 @@ struct SearchView: View {
     #endif
     @State private var library: [Card] = []
     @State private var channels: [LiveChannel] = []
+    @State private var onTV: [AppModel.GuideHit] = []
     @State private var completions: [String] = []
     @State private var serverCards: [Card] = []
     @State private var serverDone = false
@@ -61,7 +63,7 @@ struct SearchView: View {
         case .all: true
         case .movies: !movies.isEmpty
         case .shows: !shows.isEmpty || !episodes.isEmpty
-        case .live: !channels.isEmpty
+        case .live: !channels.isEmpty || !onTV.isEmpty
         }
     }
 
@@ -98,6 +100,19 @@ struct SearchView: View {
                 if scope == .all || scope == .shows, !episodes.isEmpty {
                     Section("Episodes") {
                         ForEach(episodes) { card in result(card, wide: true) }
+                    }
+                }
+                if scope == .all || scope == .live, !onTV.isEmpty {
+                    Section("On TV") {
+                        let tuned = onTV.map(\.channel)
+                        ForEach(Array(onTV.enumerated()), id: \.element.id) { index, hit in
+                            Button {
+                                playing = .live(tuned, index)
+                            } label: {
+                                GuideHitRow(hit: hit)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 if scope == .all || scope == .live, !channels.isEmpty {
@@ -145,7 +160,7 @@ struct SearchView: View {
             }
             .onAppear { if query.isEmpty { fieldFocused = true } }
             #else
-            .searchable(text: $query, prompt: "Movies, shows, channels")
+            .searchable(text: $query, prompt: "Movies, shows, channels, what's on")
             .autocorrectionDisabled()
             #endif
             // Re-run when the text changes or an index finishes loading.
@@ -200,7 +215,7 @@ struct SearchView: View {
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Movies, shows, people, channels", text: $query)
+            TextField("Movies, shows, people, what's on TV", text: $query)
                 .focused($fieldFocused)
                 .submitLabel(.search)
                 .onSubmit { fieldFocused = false }
@@ -231,8 +246,8 @@ struct SearchView: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
             ContentUnavailableView("Search everything", systemImage: "magnifyingglass",
-                                   description: Text("Movies, shows, episodes and live channels. Results appear as you type."))
-        } else if serverDone, moviesAndShows.isEmpty, episodes.isEmpty, channels.isEmpty {
+                                   description: Text("Movies, shows, episodes, channels, and what's on TV now or later by its name. Results appear as you type."))
+        } else if serverDone, moviesAndShows.isEmpty, episodes.isEmpty, channels.isEmpty, onTV.isEmpty {
             ContentUnavailableView.search(text: q)
         } else if scope != .all, !hasResults(scope), serverDone {
             let what = switch scope {
@@ -358,9 +373,13 @@ struct SearchView: View {
         let typos = typoLibrary.map { SearchHit(entry: $0, pending: []) }
         library = cards(hits + typos)
         channels = (Array(cm.ranked.prefix(60)) + typoChannels).map { channelCorpus.items[$0] }
+        // What's on: the guide and today's games, by name.
+        let guideHits = await model.searchGuide(q, area: prefs.area)
+        guard !Task.isCancelled else { return }
+        onTV = guideHits
         completions = Self.completions(for: q,
                                        names: (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
-                                           + (Array(cm.ranked.prefix(6)) + typoChannels.prefix(3)).map { channelCorpus.items[$0].name })
+                                           + (Array(cm.ranked.prefix(6)) + typoChannels.prefix(3)).map { model.title(of: channelCorpus.items[$0]) })
         serverDone = false
 
         // Results settled: treat the top title as intent and get it ready,
@@ -431,5 +450,58 @@ struct SearchView: View {
                 playError = error.localizedDescription
             }
         }
+    }
+}
+
+
+/// Something on TV that matched: what it is, when (LIVE while it's on, with
+/// how far through), and the channel.
+struct GuideHitRow: View {
+    let hit: AppModel.GuideHit
+
+    var body: some View {
+        let now = Int64(Date().timeIntervalSince1970)
+        let on = hit.isOn(at: now)
+        HStack(spacing: 12) {
+            ChannelLogo(url: hit.channel.logo, name: hit.channelTitle)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(hit.title).font(.body.weight(.semibold)).lineLimit(2)
+                HStack(spacing: 6) {
+                    if on {
+                        Text("LIVE")
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.red, in: .capsule)
+                    }
+                    Text([when(on: on), hit.channelTitle].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if on, hit.league == nil, let start = hit.start, let stop = hit.stop, stop > start {
+                    ProgressView(value: Double(now - start), total: Double(stop - start))
+                        .frame(maxWidth: 220)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .rowForeground()
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private func when(on: Bool) -> String {
+        guard let start = hit.start else { return "" }
+        let date = Date(timeIntervalSince1970: TimeInterval(start))
+        if on {
+            if hit.league != nil { return "Started \(start.clock)" }
+            return hit.stop.map { "Now · until \($0.clock)" } ?? "Now"
+        }
+        if Calendar.current.isDateInToday(date) { return start.clock }
+        if Calendar.current.isDateInTomorrow(date) { return "Tomorrow \(start.clock)" }
+        return date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 }
