@@ -116,7 +116,8 @@ struct MoviePlayerView: View {
                     .accessibilityAction { showControls() }
                     .accessibilityAction(.escape) { dismiss() }
             }
-            if (buffering || !started) && error == nil {
+            // With the controls up, their play button turns into the spinner.
+            if (buffering || !started), error == nil, !controlsVisible {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
@@ -147,15 +148,12 @@ struct MoviePlayerView: View {
     }
 
     /// Minimal, like the streaming apps (see PlayerChrome): the episode and
-    /// show at the bottom over one bar with the times; rotate at the top.
+    /// show at the bottom over one bar with the times and rotate.
     private var controls: some View {
         PlayerChrome(caption: playback.subtitle, title: playback.title, note: note, paused: paused,
+                     busy: (buffering || !started) && error == nil, ready: started,
                      close: { dismiss() }, back: { player?.seek(by: -10) },
                      playPause: { player?.togglePause() }, forward: { player?.seek(by: 10) }) {
-            #if os(iOS)
-            GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
-            #endif
-        } accessory: {
             EmptyView()
         } bar: {
             scrubber.overlay(alignment: .topLeading) { scrubPreview }
@@ -523,7 +521,7 @@ struct GlassIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(size > 60 ? .title.weight(.semibold) : .title3.weight(.semibold))
+                .font(size > 60 ? .title.weight(.semibold) : size < 40 ? .body.weight(.semibold) : .title3.weight(.semibold))
                 .frame(width: size, height: size)
         }
         .buttonStyle(.glass)

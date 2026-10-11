@@ -71,9 +71,8 @@ struct LivePlayerView: View {
                     .accessibilityAction(.escape) { dismiss() }
             }
             if !controlsVisible { picture.ignoresSafeArea() }
-            if !started && error == nil {
-                tuning.transition(.opacity)
-            } else if buffering && error == nil {
+            // With the controls up, their play button turns into the spinner.
+            if (buffering || !started), error == nil, !controlsVisible {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
@@ -110,25 +109,6 @@ struct LivePlayerView: View {
 
     // MARK: Screen
 
-    /// While a channel opens: its logo, name and what's on, straight away.
-    private var tuning: some View {
-        let showing = recording ?? model.nowNext[channel.id]?.now
-        return VStack(spacing: 10) {
-            ChannelLogo(url: channel.logo, name: displayName)
-            Text(displayName).font(.title3.weight(.semibold)).lineLimit(1)
-            if let showing {
-                Text(recording == nil ? showing.title : "\(showing.title) · from the start")
-                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-            }
-            ProgressView().tint(.white).padding(.top, 4)
-        }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 26))
-        .padding(.horizontal, 40)
-        .allowsHitTesting(false)
-    }
-
     /// Minimal, like the streaming apps (see PlayerChrome): what's on and
     /// the channel at the bottom over one bar (everything kept since tuning
     /// in, or the whole recording) with LIVE beside it; rotate and a "…"
@@ -139,10 +119,10 @@ struct LivePlayerView: View {
         let event = recording == nil ? model.event(of: channel) : nil
         return PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
                             note: note, paused: paused, canGoForward: !(recording == nil && atLive),
+                            busy: (buffering || !started) && error == nil, ready: started,
                             close: { dismiss() }, back: { skip(-10) },
                             playPause: { error == nil ? togglePause() : retry() }, forward: { skip(10) }) {
             #if os(iOS)
-            GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
             more(info: info)
             #endif
         } accessory: {
@@ -249,7 +229,7 @@ struct LivePlayerView: View {
 
     #if os(iOS)
     private func more(info: NowNext?) -> some View {
-        GlassIconButton(systemName: "ellipsis", label: "More") {
+        GlassIconButton(systemName: "ellipsis", label: "More", size: 30) {
             showMore = true
             showControls(autoHide: false)
         }

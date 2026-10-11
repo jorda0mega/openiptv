@@ -400,7 +400,7 @@ class Handler(BaseHTTPRequestHandler):
     def live_video(self):
         """A real live channel: the test video looped and sent at its own
         pace as MPEG-TS, endlessly, like a provider's stream."""
-        time.sleep(0.3)
+        time.sleep(float(os.environ.get("OPENIPTV_MOCK_LIVE_DELAY", "0.3")))
         self.send_response(200)
         self.send_header("Content-Type", "video/mp2t")
         self.send_header("Connection", "close")
