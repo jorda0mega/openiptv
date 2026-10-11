@@ -158,36 +158,31 @@ struct ShowView: View {
     }
 
     @ViewBuilder private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let show = data?.show, let url = model.emby?.backdropURL(for: show, width: Int(1280 * displayScale / 2)) {
-                // A fixed 16:9 box; the image fills it whatever its own shape.
-                Color.clear
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .overlay { CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: route.title) }
-                    .clipped()
+        let show = data?.show
+        VStack(alignment: .leading, spacing: 14) {
+            TitleHero(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: 1280) },
+                      logo: show.flatMap { model.emby?.logoURL(for: $0, width: 800) },
+                      title: route.title, line: showLine, height: 0.95) {
+                PlayCapsule(label: loadingItem == mainId ? "Starting…" : mainLabel,
+                            progress: upNext?.userData?.playedPercentage.map { $0 / 100 },
+                            loading: loadingItem == mainId) { playMain() }
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Text(route.title).font(.title2.weight(.bold))
-                let rating = model.library.ratings?.rating(data?.show.imdb)
-                let details = [data?.show.productionYear.map(String.init), rating.map(IMDbRatings.detail)].compactMap(\.self)
-                if !details.isEmpty {
-                    Text(details.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
-                }
-                Button { playMain() } label: {
-                    Label(loadingItem == mainId ? "Starting…" : mainLabel, systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-                .disabled(loadingItem != nil)
-                if let overview = data?.show.overview, !overview.isEmpty {
-                    Text(overview).font(.callout).foregroundStyle(.secondary).lineLimit(5)
-                }
+            if let overview = show?.overview, !overview.isEmpty {
+                Text(overview)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(3)
+                    .padding(.horizontal, 20)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
         }
+        .padding(.bottom, 8)
+    }
+
+    /// "Show · 2016 · IMDb 7.3"
+    private var showLine: String {
+        let show = data?.show
+        let rating = model.library.ratings?.rating(show?.imdb).map(IMDbRatings.label)
+        return ["Show", show?.productionYear.map(String.init), rating].compactMap(\.self).joined(separator: " · ")
     }
 
     #if os(tvOS)
@@ -353,7 +348,7 @@ private struct SeasonBar: View {
                 .overlay(alignment: .bottom) {
                     if selected {
                         Capsule()
-                            .fill(.tint)
+                            .fill(.white)
                             .frame(height: 3)
                             .padding(.bottom, 6)
                             .matchedGeometryEffect(id: "current", in: underline)
@@ -418,7 +413,7 @@ private struct EpisodeRow: View {
                 .overlay(alignment: .bottom) {
                     if let progress = episode.userData?.playedPercentage, progress > 0, progress < 100 {
                         GeometryReader { geo in
-                            Capsule().fill(.tint).frame(width: geo.size.width * progress / 100, height: 3)
+                            Capsule().fill(.white).frame(width: geo.size.width * progress / 100, height: 3)
                         }
                         .frame(height: 3)
                         .padding(4)
@@ -427,11 +422,11 @@ private struct EpisodeRow: View {
                 .overlay { if loading { ProgressView() } }
                 .clipShape(.rect(cornerRadius: 8))
                 .overlay {
-                    if upNext { RoundedRectangle(cornerRadius: 8).strokeBorder(.tint, lineWidth: 2) }
+                    if upNext { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.9), lineWidth: 2) }
                 }
             VStack(alignment: .leading, spacing: 3) {
                 if upNext {
-                    Text("Up next").font(.caption2.weight(.bold)).foregroundStyle(.tint)
+                    Text("UP NEXT").font(.caption2.weight(.bold)).foregroundStyle(.white.opacity(0.7))
                 }
                 HStack(spacing: 6) {
                     Text(title).font(.subheadline.weight(.semibold)).lineLimit(2)

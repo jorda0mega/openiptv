@@ -180,6 +180,7 @@
 		E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036E1882E4281173C09E8777 /* TabStrip.swift */; };
 		E1DC94CF4B233A2762C4FDC5 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
 		E40A99A7F0AB7CF0C2BEC24E /* EmbyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 305D39F34D3489D37AA89297 /* EmbyModels.swift */; };
+		E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C786F389C51A2833D4205BE /* TitleHero.swift */; };
 		EA8F7A63FFC991764504B776 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
 		EAA9E81F338896A834778400 /* libxml2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 12D689360F95FEEBC85A1443 /* libxml2.tbd */; };
 		EAC30F65A7C729D3E2CC42C0 /* TVLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B020D0F87B72E286D9A48D /* TVLiveView.swift */; };
@@ -187,6 +188,7 @@
 		EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DF96B743FAE66F816DD9294 /* Platform.swift */; };
 		EF729A91220E6C66170831E6 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5EDE0462D2DCE22124164E8 /* Metal.framework */; };
 		F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9236570FD5D04A7FE5B59AB8 /* Artwork.swift */; };
+		F72204C9018C0C581257040E /* TitleHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C786F389C51A2833D4205BE /* TitleHero.swift */; };
 		F7D4B4BAB7ABD5CC5632552E /* TVTitlePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21CB2421CE9A188C91DE446 /* TVTitlePages.swift */; };
 		F94FBD0EACF48BA881EB6403 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C868DE1356883E3FDC24AC23 /* AVFoundation.framework */; };
 		F9F1900B7CD49CEF98E0377B /* Libshaderc_combined.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CE629B229349145FBEDD02D /* Libshaderc_combined.xcframework */; };
@@ -245,6 +247,7 @@
 		66B020D0F87B72E286D9A48D /* TVLiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVLiveView.swift; sourceTree = "<group>"; };
 		66D066C9DD9FC2285C24EF35 /* LiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveView.swift; sourceTree = "<group>"; };
 		68BDF569FD33B278E6B18C1B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		6C786F389C51A2833D4205BE /* TitleHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleHero.swift; sourceTree = "<group>"; };
 		72303AAC600EF3DE6075EF7A /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		766249862D814DF2C6786AF4 /* LiveShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveShelfViews.swift; sourceTree = "<group>"; };
 		7A1F2D0451F66503C9B600AF /* libbz2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libbz2.tbd; path = usr/lib/libbz2.tbd; sourceTree = SDKROOT; };
@@ -522,6 +525,7 @@
 				68BDF569FD33B278E6B18C1B /* SettingsView.swift */,
 				63408BC25C1847C3DC54CDDE /* ShowView.swift */,
 				036E1882E4281173C09E8777 /* TabStrip.swift */,
+				6C786F389C51A2833D4205BE /* TitleHero.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -822,6 +826,7 @@
 				EAC30F65A7C729D3E2CC42C0 /* TVLiveView.swift in Sources */,
 				F7D4B4BAB7ABD5CC5632552E /* TVTitlePages.swift in Sources */,
 				71899403CBD5CEFA439BEEBA /* TabStrip.swift in Sources */,
+				E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */,
 				53DB13F49C470CA57F047B5A /* Trickplay.swift in Sources */,
 				5633E2B7128DB4B72E585CD4 /* XtreamProvider.swift in Sources */,
 			);
@@ -878,6 +883,7 @@
 				1D626F013984C6DFB17DDA92 /* TVLiveView.swift in Sources */,
 				5F01E1907CEC93ADB72EB792 /* TVTitlePages.swift in Sources */,
 				E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */,
+				F72204C9018C0C581257040E /* TitleHero.swift in Sources */,
 				8ACAF07CCDB43E80951A72B7 /* Trickplay.swift in Sources */,
 				21102DA03C0F276A1F777950 /* XtreamProvider.swift in Sources */,
 			);

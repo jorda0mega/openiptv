@@ -22,53 +22,56 @@ struct MovieView: View {
     @State private var loading = false
     @State private var playError: String?
 
+    @State private var expanded = false
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                backdrop
+            VStack(alignment: .leading, spacing: 28) {
+                TitleHero(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: 1280) },
+                          logo: item.flatMap { model.emby?.logoURL(for: $0, width: 800) },
+                          title: route.title, line: genreLine) {
+                    PlayCapsule(label: loading ? "Starting…" : playLabel, progress: resumeFraction, loading: loading, action: play)
+                }
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(route.title).font(.title2.weight(.bold))
-                    if !details.isEmpty {
-                        Text(details).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    Button(action: play) {
-                        Label(loading ? "Starting…" : playLabel, systemImage: "play.fill").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.large)
-                    .disabled(loading)
-                    if let progress = item?.userData?.playedPercentage, progress > 0, progress < 100, item?.userData?.played != true {
-                        ProgressView(value: progress, total: 100).tint(.accentColor)
-                    }
                     if let overview = item?.overview, !overview.isEmpty {
-                        Text(overview).font(.callout).foregroundStyle(.secondary)
+                        Text(overview)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(expanded ? nil : 3)
+                            .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint(expanded ? "Shows less" : "Shows the whole story")
                     }
-                    if let cast = names("Actor", limit: 5) {
-                        Text("\(Text("Starring ").foregroundStyle(.secondary))\(cast)")
-                    }
-                    if let directors = names("Director", limit: 2) {
-                        Text("\(Text("Directed by ").foregroundStyle(.secondary))\(directors)")
+                    if !facts.isEmpty {
+                        Text(facts).font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                .font(.callout)
-                .padding(.horizontal)
+                .padding(.horizontal, 20)
+                CastRow(people: item?.people ?? [])
                 if !similar.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("More like this").font(.title3.weight(.bold)).padding(.horizontal)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("More Like This").font(.title3.weight(.bold)).padding(.horizontal, 20)
+                            .accessibilityAddTraits(.isHeader)
                         ScrollView(.horizontal) {
-                            HStack(alignment: .top, spacing: Layout.cardSpacing) {
+                            LazyHStack(spacing: 10) {
                                 ForEach(similar) { card in moreLikeThis(card) }
                             }
-                            .padding(.horizontal)
+                            .padding(.horizontal, 20)
                         }
                         .scrollIndicators(.hidden)
                     }
                 }
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, 30)
         }
-        .navigationTitle(route.title)
+        // The art runs up under the navigation bar.
+        .ignoresSafeArea(edges: .top)
+        .background(Color.black)
+        .scrollIndicators(.hidden)
         .inlineTitle()
+        #if os(iOS)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        #endif
         .task { await load() }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -77,26 +80,23 @@ struct MovieView: View {
         }
     }
 
-    @ViewBuilder private var backdrop: some View {
-        if let item, let url = model.emby?.backdropURL(for: item, width: Int(1280 * displayScale / 2)) {
-            Color.clear
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .overlay { CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: route.title) }
-                .clipped()
-        } else {
-            Color.clear.aspectRatio(16 / 9, contentMode: .fit).frame(maxWidth: .infinity)
-        }
+    /// "Movie · Science Fiction · Adventure"
+    private var genreLine: String {
+        (["Movie"] + (item?.genres ?? []).prefix(2)).joined(separator: " · ")
     }
 
-    /// "2024 · 2 h 46 min · IMDb 8.4 · 1.2M ratings · Science Fiction, Adventure"
-    private var details: String {
+    /// "2024 · 2 h 46 min · IMDb 8.4 · 1.2M ratings"
+    private var facts: String {
         guard let item else { return "" }
         let minutes = item.runTimeTicks.map { Int($0 / 600_000_000) }
         let length = minutes.map { $0 >= 60 ? "\($0 / 60) h \($0 % 60) min" : "\($0) min" }
         let rating = model.library.ratings?.rating(item.imdb).map(IMDbRatings.detail)
-        let genres = item.genres.flatMap { $0.isEmpty ? nil : $0.prefix(2).joined(separator: ", ") }
-        return [item.productionYear.map(String.init), length, rating, genres].compactMap(\.self).joined(separator: " · ")
+        return [item.productionYear.map(String.init), length, rating].compactMap(\.self).joined(separator: " · ")
+    }
+
+    private var resumeFraction: Double? {
+        guard let percent = item?.userData?.playedPercentage, percent > 0, percent < 100, item?.userData?.played != true else { return nil }
+        return percent / 100
     }
 
     private var playLabel: String {
@@ -107,19 +107,12 @@ struct MovieView: View {
         return "Resume"
     }
 
-    private func names(_ type: String, limit: Int) -> String? {
-        let people = (item?.people ?? []).filter { $0.type == type }.prefix(limit).map(\.name)
-        return people.isEmpty ? nil : people.joined(separator: ", ")
-    }
 
     @ViewBuilder private func moreLikeThis(_ card: Card) -> some View {
-        let label = VStack(alignment: .leading, spacing: 4) {
-            CoverImage(images: card.images, title: card.title)
-                .frame(width: Layout.posterWidth, height: Layout.posterWidth * 1.5)
-                .clipShape(.rect(cornerRadius: 12))
-            Text(card.title).font(.caption.weight(.medium)).lineLimit(1)
-        }
-        .frame(width: Layout.posterWidth)
+        let label = CoverImage(images: card.images, title: card.title)
+            .frame(width: Layout.posterWidth, height: Layout.posterWidth * 1.5)
+            .clipShape(.rect(cornerRadius: 10))
+            .accessibilityLabel(card.title)
         if card.kind == "Series" {
             NavigationLink(value: ShowRoute(id: card.id, title: card.title)) { label }.buttonStyle(.plain)
         } else {

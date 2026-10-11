@@ -39,9 +39,6 @@ struct RootView: View {
                     Tab("Live TV", systemImage: "dot.radiowaves.left.and.right") {
                         LiveView(playing: $playing)
                     }
-                    Tab("Settings", systemImage: "gearshape") {
-                        SettingsView()
-                    }
                     Tab(role: .search) {
                         SearchView(playing: $playing)
                     }

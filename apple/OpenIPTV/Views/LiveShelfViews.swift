@@ -11,7 +11,7 @@ struct ShelfContent: View {
         switch shelf.id {
         case LiveOrganizer.sportsID: SportsContent(shelf: shelf, playing: $playing)
         case LiveOrganizer.internationalID: CountryList(shelf: shelf)
-        default: EntrySections(sections: shelf.sections, playing: $playing)
+        default: EntrySections(sections: shelf.sections, shelfTitle: shelf.title, playing: $playing)
         }
     }
 }
@@ -19,6 +19,9 @@ struct ShelfContent: View {
 /// Sections of entries, titled when there's more than one.
 struct EntrySections: View {
     let sections: [LiveOrganizer.Section]
+    /// The shelf's own name: its main section needs no heading (the tab
+    /// already says it).
+    var shelfTitle: String? = nil
     @Binding var playing: PlayerItem?
 
     var body: some View {
@@ -26,7 +29,7 @@ struct EntrySections: View {
             Section {
                 EntryRows(entries: section.entries, playing: $playing)
             } header: {
-                if sections.count > 1 { Text(section.title) }
+                if sections.count > 1, section.title != shelfTitle { Text(section.title) }
             }
         }
     }
@@ -168,7 +171,11 @@ struct FilterChips: View {
                     Button(choice) { choose(choice) }.buttonStyle(TVChipStyle(selected: choice == chosen))
                     #else
                     if choice == chosen {
-                        Button(choice) { choose(choice) }.buttonStyle(.glassProminent)
+                        // Selected: white, like the references' filters.
+                        Button(choice) { choose(choice) }
+                            .buttonStyle(.glassProminent)
+                            .tint(.white)
+                            .foregroundStyle(.black)
                     } else {
                         Button(choice) { choose(choice) }.buttonStyle(.glass)
                     }

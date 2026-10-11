@@ -1,0 +1,127 @@
+import SwiftUI
+
+/// The top of a film's or show's page, like the TV apps' (Apple TV, HBO
+/// Max): the backdrop edge to edge, fading into the page, the title's logo
+/// (or its name) centred over it, what it is, and the buttons.
+struct TitleHero<Buttons: View>: View {
+    let backdrop: URL?
+    let logo: URL?
+    let title: String
+    /// "Movie · Science Fiction · Adventure"
+    let line: String
+    /// Taller when it runs up under the navigation bar.
+    var height: CGFloat = 1.15
+    @ViewBuilder var buttons: Buttons
+    @State private var width: CGFloat = 393
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.black
+                .overlay {
+                    if let backdrop {
+                        CoverImage(images: [CardImage(url: backdrop.absoluteString, contain: false)], title: title)
+                    }
+                }
+                .overlay {
+                    LinearGradient(stops: [.init(color: .black.opacity(0.4), location: 0), .init(color: .clear, location: 0.22),
+                                           .init(color: .clear, location: 0.45), .init(color: .black, location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                .clipped()
+                .accessibilityHidden(true)
+            VStack(spacing: 12) {
+                HeroTitle(logo: logo?.absoluteString, title: title)
+                if !line.isEmpty {
+                    Text(line)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .multilineTextAlignment(.center)
+                }
+                buttons.padding(.top, 4)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: (width * height).rounded())
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+    }
+}
+
+/// The white Play capsule (Resume when partway through), with a spinner
+/// while it opens.
+struct PlayCapsule: View {
+    let label: String
+    var progress: Double? = nil
+    let loading: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Label(label, systemImage: "play.fill")
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
+                if let progress, progress > 0 {
+                    Capsule().fill(.black.opacity(0.15))
+                        .frame(width: 120, height: 3)
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(.black).frame(width: 120 * min(progress, 1), height: 3)
+                        }
+                }
+            }
+            .frame(minWidth: 200)
+            .padding(.horizontal, 24)
+            .frame(height: 50)
+            .opacity(loading ? 0 : 1)
+            .overlay { if loading { ProgressView().tint(.black) } }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.black)
+        .background(.white, in: .capsule)
+        .disabled(loading)
+    }
+}
+
+/// Cast & Crew: round photos with name and part.
+struct CastRow: View {
+    @Environment(AppModel.self) private var model
+    let people: [EmbyItem.Person]
+
+    var body: some View {
+        let shown = Array(people.filter { ["Actor", "Director", "GuestStar", "Writer"].contains($0.type ?? "") }.prefix(20))
+        if !shown.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Cast & Crew").font(.title3.weight(.bold)).padding(.horizontal, 20)
+                    .accessibilityAddTraits(.isHeader)
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: 16) {
+                        ForEach(Array(shown.enumerated()), id: \.offset) { _, person in
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Circle().fill(Color(white: 0.16))
+                                    Text(person.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined())
+                                        .font(.headline).foregroundStyle(.secondary)
+                                    if let url = model.emby?.personImageURL(person, width: 200) {
+                                        CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: "")
+                                    }
+                                }
+                                .frame(width: 76, height: 76)
+                                .clipShape(.circle)
+                                VStack(spacing: 2) {
+                                    Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
+                                    Text(person.role.flatMap { $0.isEmpty ? nil : $0 } ?? (person.type == "GuestStar" ? "Guest Star" : person.type ?? ""))
+                                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                .frame(width: 88)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
+}

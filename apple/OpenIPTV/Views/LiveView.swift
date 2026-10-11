@@ -81,8 +81,19 @@ struct LiveView: View {
                 }
             }
             .listStyle(.plain)
-            .navigationTitle(selectedName)
+            // The tab strip says which shelf; the title says where you are.
+            .navigationTitle("Live TV")
             .inlineTitle()
+            #if os(iOS)
+            .toolbar {
+                if !model.sources.iptv.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showingAllCategories = true } label: { Image(systemName: "list.bullet") }
+                            .accessibilityLabel("Provider categories")
+                    }
+                }
+            }
+            #endif
             // safeAreaBar (iOS/tvOS 26) keeps the chips in the bar area with the
             // scroll edge effect.
             .safeAreaBar(edge: .top, spacing: 0) {
@@ -148,14 +159,7 @@ struct LiveView: View {
 
     #if os(iOS)
     private var categoryTabs: some View {
-        TabStrip(items: tabs,
-                        selected: model.selectedCategory,
-                        leading: AnyView(Button { showingAllCategories = true } label: {
-                            Image(systemName: "list.bullet").font(.body.weight(.semibold)).frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .accessibilityLabel("All categories"))) { id in
+        TabStrip(items: tabs, selected: model.selectedCategory) { id in
                             model.browsingProviderCategory = model.categories.contains { $0.id == id }
                             model.selectedCategory = id
                         }
@@ -286,42 +290,43 @@ struct ChannelRow: View {
     var body: some View {
         let info = slot.value
         let now = info?.now
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             ChannelLogo(url: logo, name: title)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    Text(title).font(.body.weight(.semibold)).lineLimit(1)
+                    Text(now?.title ?? title).font(.body.weight(.semibold)).lineLimit(1)
                     if favorite {
-                        Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
+                        Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
                             .accessibilityLabel("Favourite")
                     }
                 }
-                Group {
-                    // Re-render every 30 s so progress bars move.
-                    TimelineView(.periodic(from: .now, by: 30)) { context in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(now.map { "\($0.title) · until \($0.stop.clock)" }
-                                 ?? (info == nil ? "Programme title · until 9:00 PM" : "No guide data"))
-                                .font(.subheadline)
-                                .foregroundStyle(now == nil && info != nil ? .tertiary : .secondary)
-                                .lineLimit(1)
-                            ProgressView(value: now?.progress(at: context.date) ?? 0)
-                                .frame(maxWidth: 220)
-                                .opacity(now == nil ? 0 : 1)
+                // Re-render every 30 s so the bars move.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    HStack(spacing: 8) {
+                        if let now {
+                            ProgressBar(value: now.progress(at: context.date)).frame(width: 36)
+                            Text("\(Self.left(now, at: context.date)) · \(title)").lineLimit(1)
+                        } else {
+                            Text(info == nil ? "Programme · 24m left" : title).lineLimit(1)
                         }
                     }
-                    Text(info?.next.map { "Next \($0.start.clock) · \($0.title)" } ?? (info == nil ? "Next 9:30 PM · Programme" : " "))
-                        .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
                 .redacted(reason: info == nil ? .placeholder : [])
-                .accessibilityHidden(info == nil)
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .rowForeground()
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+
+    /// "24m left", "1h 5m left".
+    static func left(_ programme: Programme, at date: Date) -> String {
+        let minutes = max(0, Int((Double(programme.stop) - date.timeIntervalSince1970) / 60))
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m left" : "\(minutes)m left"
     }
 }
 
@@ -334,14 +339,14 @@ struct ChannelLogo: View {
         // Already decoded (scrolling back, or fetched ahead): shown at once.
         let shown = image ?? url.flatMap(ImagePipeline.shared.cached)
         ZStack {
-            RoundedRectangle(cornerRadius: 10).fill(.quaternary)
+            RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.14))
             if let image = shown {
-                Image(uiImage: image).resizable().scaledToFit().padding(5)
+                Image(uiImage: image).resizable().scaledToFit().padding(8)
             } else {
                 Text(String(name.prefix(2)).uppercased()).font(.caption.weight(.bold)).foregroundStyle(.secondary)
             }
         }
-        .frame(width: 56, height: 40)
+        .frame(width: 68, height: 48)
         .task(id: url) {
             guard let url, ImagePipeline.shared.cached(url) == nil else { return }
             image = try? await ImagePipeline.shared.image(for: url)

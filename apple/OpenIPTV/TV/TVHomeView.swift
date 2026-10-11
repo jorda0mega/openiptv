@@ -398,19 +398,4 @@ struct TVRowTitle: View {
     }
 }
 
-/// A thin white progress line on a dim track.
-struct ProgressBar: View {
-    let value: Double
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.3))
-                Capsule().fill(.white).frame(width: geo.size.width * min(max(value, 0), 1))
-            }
-        }
-        .frame(height: 6)
-        .accessibilityHidden(true)
-    }
-}
 #endif

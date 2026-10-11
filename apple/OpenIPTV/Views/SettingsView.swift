@@ -4,6 +4,9 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
+    @Environment(\.dismiss) private var dismiss
+    /// Opened from Home's gear: a Done button to close it.
+    var asSheet = false
     @State private var adding: AddSheet?
     @State private var confirmForget = false
 
@@ -118,6 +121,11 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                if asSheet {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                }
+            }
             .sheet(item: $adding) { sheet in
                 switch sheet {
                 case .emby: AddEmbyView()

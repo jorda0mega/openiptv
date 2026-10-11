@@ -1,9 +1,14 @@
 import SwiftUI
 
-/// A featured pick, Continue Watching, what's popular on the server, titles
-/// like the ones just watched, and what's new and worth it (see HomeFeed).
+/// Home, like the best streaming apps' (Apple TV, Netflix, HBO Max): a
+/// full-bleed hero under the status bar moving through the featured titles
+/// (the title, what it is, Play and a details button, page dots), Continue
+/// Watching as wide pictures with the progress under them, then rows of
+/// posters with nothing but the artwork. Posters open the title's page;
+/// Continue Watching plays (press and hold for the page). Settings sit
+/// behind the gear, out of the tab bar.
 /// Rows render from the on-device cache immediately; card boxes are sized
-/// before images load. Shows open their page; everything else plays.
+/// before images load.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
@@ -12,7 +17,9 @@ struct HomeView: View {
     @State private var loadingCard: String?
     @State private var playError: String?
     @State private var addingEmby = false
+    @State private var showingSettings = false
     @State private var path: [ShowRoute] = []
+    @State private var movie: MovieRoute?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -20,23 +27,44 @@ struct HomeView: View {
                 // Not lazy: there are only a dozen rows (each scrolls lazily
                 // itself), and a lazy stack adding a row as the page slides
                 // back after pull to refresh stops it halfway, stuck down.
-                VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                    if let featured = model.featured {
-                        FeaturedView(featured: featured, loading: loadingCard == featured.card.id) { play(featured.card) }
+                VStack(alignment: .leading, spacing: 30) {
+                    let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
+                    if !heroes.isEmpty {
+                        HomeHero(items: heroes, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                    } else {
+                        Color.clear.frame(height: 100)
                     }
                     if visibleRows.isEmpty, model.featured == nil { emptyState }
                     ForEach(visibleRows) { row in
-                        RowView(row: row, loadingCard: loadingCard) { card in play(card) }
+                        if row.title == "Continue Watching" {
+                            ContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                        } else {
+                            PosterRow(title: row.title, cards: row.cards, open: { open($0) }, play: { play($0) })
+                        }
                     }
                 }
-                .padding(.vertical, 12)
+                .padding(.bottom, 24)
             }
+            // The hero runs up under the status bar, like the TV apps'.
+            .ignoresSafeArea(edges: .top)
+            .background(Color.black)
+            .scrollIndicators(.hidden)
             .navigationTitle("Home")
+            #if os(iOS)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                        .accessibilityLabel("Settings")
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            #endif
             .refreshableOnPhone { await model.loadHome(cardWidth: pixelWidth, full: true) }
             .task { await model.loadHome(cardWidth: pixelWidth) }
             .sheet(isPresented: $addingEmby) { AddEmbyView() }
+            .sheet(isPresented: $showingSettings) { SettingsView(asSheet: true) }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
-            .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
+            .navigationDestination(item: $movie) { MovieView(route: $0, playing: $playing) }
             // The first thing in Continue Watching opens the moment it's tapped.
             .task(id: model.rows.first?.cards.first?.id) { warmFirst() }
             .onAppear { warmFirst() }
@@ -86,18 +114,27 @@ struct HomeView: View {
         }
     }
 
-    /// Shows open their page; everything else plays.
-    private func play(_ card: Card) {
+    /// A title's page (a show at the episode you're up to).
+    private func open(_ card: Card) {
         if card.kind == "Series" {
             path.append(ShowRoute(id: card.id, title: card.title, episodeId: card.episodeId))
-            return
+        } else {
+            movie = MovieRoute(id: card.id, title: card.title)
         }
-        guard card.playable, loadingCard == nil else { return }
+    }
+
+    /// Straight to the player: the episode being resumed, or the title.
+    private func play(_ card: Card) {
+        guard loadingCard == nil else { return }
         loadingCard = card.id
         Task {
             defer { loadingCard = nil }
             do {
-                playing = .vod(try await model.playback(for: card))
+                if let episode = card.episodeId {
+                    playing = .vod(try await model.playback(itemId: episode, kind: "Episode"))
+                } else {
+                    playing = .vod(try await model.playback(itemId: card.id, kind: card.kind))
+                }
             } catch {
                 playError = error.localizedDescription
             }
@@ -105,130 +142,241 @@ struct HomeView: View {
     }
 }
 
-/// The featured pick: a large backdrop with the title, why it's worth it,
-/// and one button to start.
-private struct FeaturedView: View {
-    let featured: Featured
-    let loading: Bool
-    let action: () -> Void
-
-    private var isShow: Bool { featured.card.kind == "Series" }
+/// The top of Home: the featured titles full-bleed, one at a time (swipe or
+/// wait), each with its name, what it is, Play and a details button.
+private struct HomeHero: View {
+    let items: [Featured]
+    let loadingCard: String?
+    let play: (Card) -> Void
+    let open: (Card) -> Void
+    @State private var index = 0
+    @State private var width: CGFloat = 393
 
     var body: some View {
-        Button(action: action) {
-            Color.clear
-                .aspectRatio(Layout.featuredAspect, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .overlay {
-                    CoverImage(images: [CardImage(url: featured.backdrop, contain: false)], title: featured.card.title)
+        VStack(spacing: 14) {
+            TabView(selection: $index) {
+                ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+                    page(item).tag(offset)
                 }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            // A fixed size, so pages line up exactly (a size worked out from
+            // an aspect ratio left a sliver of the previous one showing).
+            .frame(width: width, height: (width * 1.3).rounded())
+            if items.count > 1 {
+                HStack(spacing: 7) {
+                    ForEach(items.indices, id: \.self) { i in
+                        Capsule()
+                            .fill(.white.opacity(i == index ? 0.9 : 0.3))
+                            .frame(width: i == index ? 18 : 6, height: 6)
+                    }
+                }
+                .animation(.snappy, value: index)
+                .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // Moves on by itself every eight seconds.
+        .task(id: index) {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, items.count > 1 else { return }
+            withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % items.count }
+        }
+    }
+
+    private func page(_ item: Featured) -> some View {
+        ZStack(alignment: .bottom) {
+            Color.black
+                .overlay { CoverImage(images: [CardImage(url: item.backdrop, contain: false)], title: item.card.title) }
                 .overlay {
-                    LinearGradient(stops: [.init(color: .clear, location: 0.3), .init(color: .black.opacity(0.92), location: 1)],
+                    LinearGradient(stops: [.init(color: .black.opacity(0.35), location: 0), .init(color: .clear, location: 0.25),
+                                           .init(color: .clear, location: 0.5), .init(color: .black, location: 1)],
                                    startPoint: .top, endPoint: .bottom)
                 }
-                .overlay(alignment: .bottomLeading) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(featured.card.title).font(.title2.weight(.bold)).lineLimit(2)
-                        Text(featured.details).font(.subheadline).foregroundStyle(.white.opacity(0.75))
-                        if let overview = featured.overview, !overview.isEmpty {
-                            Text(overview).font(.footnote).foregroundStyle(.white.opacity(0.8)).lineLimit(2)
-                        }
-                        Label(isShow ? "Watch" : "Play", systemImage: isShow ? "rectangle.stack.fill" : "play.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 9)
-                            .background(.white, in: .capsule)
-                            .padding(.top, 4)
+                .clipped()
+                .contentShape(Rectangle())
+                .onTapGesture { open(item.card) }
+            VStack(spacing: 12) {
+                HeroTitle(logo: item.logo, title: item.card.title)
+                Text(item.details)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                HStack(spacing: 12) {
+                    Button { play(item.card) } label: {
+                        Label("Play", systemImage: "play.fill")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 150, height: 44)
+                            .opacity(loadingCard == item.card.id ? 0 : 1)
+                            .overlay { if loadingCard == item.card.id { ProgressView().tint(.black) } }
                     }
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                    .padding(18)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.black)
+                    .background(.white, in: .capsule)
+                    GlassIconButton(systemName: "info", label: "Details") { open(item.card) }
                 }
-                .overlay {
-                    if loading { ProgressView().padding(12).glassEffect(.regular, in: .circle) }
-                }
-                .clipShape(.rect(cornerRadius: 20))
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
         }
-        .cardButtonStyle()
-        .padding(.horizontal)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(featured.card.title), \(featured.details)")
-        .accessibilityHint(isShow ? "Opens the show" : "Plays it")
-        .accessibilityAddTraits(.isButton)
+        .accessibilityElement(children: .contain)
     }
 }
 
-private struct RowView: View {
+/// A title's logo when the server has one, else its name, centred.
+struct HeroTitle: View {
+    let logo: String?
+    let title: String
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFit()
+                    .frame(maxWidth: 260, maxHeight: 96)
+                    .accessibilityLabel(title)
+            } else if logo == nil || failed {
+                Text(title)
+                    .font(.system(.largeTitle, design: .default, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+            } else {
+                Color.clear.frame(width: 200, height: 72)
+            }
+        }
+        .foregroundStyle(.white)
+        .shadow(color: .black.opacity(0.4), radius: 10)
+        .task(id: logo) {
+            guard let logo, let url = URL(string: logo) else { return }
+            if let loaded = try? await ImagePipeline.shared.image(for: url) { image = loaded } else { failed = true }
+        }
+    }
+}
+
+/// A row heading in Apple's style.
+private struct RowTitle: View {
+    let title: String
+    var body: some View {
+        Text(title)
+            .font(.title3.weight(.bold))
+            .padding(.horizontal, 20)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Continue Watching: wide pictures, and under each a play mark, how far
+/// through, the episode and what's left. Tap plays; press and hold for the
+/// show or film.
+private struct ContinueRow: View {
     let row: HomeRow
     let loadingCard: String?
-    let onSelect: (Card) -> Void
+    let play: (Card) -> Void
+    let open: (Card) -> Void
 
-    private var cardWidth: CGFloat {
-        let poster = Layout.posterWidth
-        return switch row.shape {
-        case "landscape": poster * 2
-        case "fourThree": poster * 1.45
-        case "square": poster * 1.15
-        default: poster
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RowTitle(title: row.title)
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(row.cards) { card in
+                        Button { play(card) } label: { cardView(card) }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
+                            }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .scrollIndicators(.hidden)
         }
     }
 
+    private func cardView(_ card: Card) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CoverImage(images: card.images, title: card.title)
+                .frame(width: 280, height: 158)
+                .overlay(alignment: .bottomLeading) {
+                    Text(card.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom))
+                }
+                .overlay { if loadingCard == card.id { ProgressView().tint(.white) } }
+                .clipShape(.rect(cornerRadius: 14))
+            HStack(spacing: 8) {
+                Image(systemName: "play.fill").font(.caption2)
+                if let progress = card.progress, progress > 0 {
+                    ProgressBar(value: progress / 100).frame(width: 40, height: 4)
+                }
+                Text(card.subtitle ?? "").font(.caption).lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: 280, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Plays it")
+    }
+}
+
+/// A row of posters: the artwork only (it carries the title). Tap opens
+/// the title; press and hold to play.
+private struct PosterRow: View {
+    let title: String
+    let cards: [Card]
+    let open: (Card) -> Void
+    let play: (Card) -> Void
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(row.title).font(.title3.weight(.bold)).padding(.horizontal)
+        VStack(alignment: .leading, spacing: 12) {
+            RowTitle(title: title)
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: Layout.cardSpacing) {
-                    ForEach(row.cards) { card in
-                        Button { onSelect(card) } label: {
-                            CardView(card: card, width: cardWidth, aspect: row.aspect, loading: loadingCard == card.id)
+                LazyHStack(spacing: 10) {
+                    ForEach(cards) { card in
+                        Button { open(card) } label: {
+                            CoverImage(images: card.images, title: card.title)
+                                .frame(width: Layout.posterWidth, height: Layout.posterWidth * 1.5)
+                                .clipShape(.rect(cornerRadius: 10))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                                }
                         }
-                        .cardButtonStyle()
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Play", systemImage: "play.fill") { play(card) }
+                        }
+                        .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
                 }
-                .padding(.horizontal)
-                #if os(tvOS)
-                .padding(.vertical, 30)
-                #endif
+                .padding(.horizontal, 20)
             }
             .scrollIndicators(.hidden)
-            #if os(tvOS)
-            .scrollClipDisabled()
-            #endif
         }
     }
 }
 
-private struct CardView: View {
-    let card: Card
-    let width: CGFloat
-    let aspect: Double
-    let loading: Bool
+/// A thin white progress line on a dim track.
+struct ProgressBar: View {
+    let value: Double
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            CoverImage(images: card.images, title: card.title)
-                .frame(width: width, height: width / aspect)
-                .overlay(alignment: .bottom) {
-                    if let progress = card.progress {
-                        GeometryReader { geo in
-                            Capsule().fill(.tint).frame(width: geo.size.width * progress / 100, height: 4)
-                        }
-                        .frame(height: 4)
-                        .padding(8)
-                    }
-                }
-                .overlay {
-                    if loading { ProgressView().padding(12).glassEffect(.regular, in: .circle) }
-                }
-                .clipShape(.rect(cornerRadius: 14))
-            Text(card.title).font(.subheadline.weight(.medium)).lineLimit(1)
-            if let subtitle = card.subtitle {
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.3))
+                Capsule().fill(.white).frame(width: geo.size.width * min(max(value, 0), 1))
             }
         }
-        .frame(width: width)
-        .accessibilityElement(children: .combine)
+        #if os(tvOS)
+        .frame(height: 6)
+        #else
+        .frame(height: 4)
+        #endif
+        .accessibilityHidden(true)
     }
 }
 

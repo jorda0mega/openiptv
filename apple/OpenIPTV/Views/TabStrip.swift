@@ -51,7 +51,7 @@ struct TabStrip<ID: Hashable>: View {
                 .padding(.vertical, 12)
                 .overlay(alignment: .bottom) {
                     if chosen {
-                        Capsule().fill(.tint).frame(height: 3).padding(.bottom, 6)
+                        Capsule().fill(.white).frame(height: 3).padding(.bottom, 6)
                             .matchedGeometryEffect(id: "tab", in: underline)
                     }
                 }

@@ -74,9 +74,10 @@ struct SearchView: View {
                     Section {
                         ForEach(completions, id: \.self) { completion in
                             Button { query = completion } label: {
-                                Label(completion, systemImage: "magnifyingglass")
-                                    .lineLimit(1)
-                                    .rowForeground()
+                                HStack(spacing: 12) {
+                                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                                    Text(completion).foregroundStyle(Color.primary).lineLimit(1)
+                                }
                             }
                         }
                     }
@@ -176,7 +177,7 @@ struct SearchView: View {
     #if os(iOS)
     /// All · Movies · Shows · Live TV, the chosen one underlined.
     private var scopeBar: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 8) {
             ForEach(Scope.allCases) { option in
                 let selected = option == scope
                 Button {
@@ -184,16 +185,18 @@ struct SearchView: View {
                 } label: {
                     Text(option.rawValue)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(selected ? Color.primary : Color.secondary)
+                        .foregroundStyle(selected ? Color.black : Color.white)
                         .opacity(hasResults(option) || selected ? 1 : 0.4)
-                        .padding(.vertical, 12)
-                        .overlay(alignment: .bottom) {
+                        .padding(.horizontal, 14)
+                        .frame(height: 34)
+                        .background {
                             if selected {
-                                Capsule().fill(.tint).frame(height: 3).padding(.bottom, 6)
-                                    .matchedGeometryEffect(id: "scope", in: scopeUnderline)
+                                Capsule().fill(.white).matchedGeometryEffect(id: "scope", in: scopeUnderline)
+                            } else {
+                                Capsule().fill(Color(white: 0.15))
                             }
                         }
-                        .contentShape(Rectangle())
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selected ? .isSelected : [])
@@ -201,6 +204,7 @@ struct SearchView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)
+        .padding(.vertical, 8)
         .background {
             Color.black
                 .overlay(alignment: .bottom) {
@@ -271,11 +275,8 @@ struct SearchView: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Play \(card.title)")
             Button { openDetails(card) } label: {
-                HStack(spacing: 8) {
-                    info(card)
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
+                info(card)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .accessibilityLabel(card.title)
@@ -312,11 +313,11 @@ struct SearchView: View {
                     ProgressView()
                 } else if playBadge {
                     Image(systemName: "play.fill")
-                        .font(.system(size: wide ? 14 : 12, weight: .bold))
+                        .font(.system(size: wide ? 12 : 10, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: wide ? 32 : 26, height: wide ? 32 : 26)
-                        .background(.black.opacity(0.55), in: .circle)
-                        .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 1))
+                        .frame(width: wide ? 28 : 22, height: wide ? 28 : 22)
+                        .background(.ultraThinMaterial, in: .circle)
+                        .environment(\.colorScheme, .dark)
                 }
             }
     }
