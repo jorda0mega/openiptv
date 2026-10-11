@@ -29,6 +29,13 @@ final class AppModel {
     }
     private(set) var nowNext: [String: NowNext] = [:]
     private(set) var guideState: GuideStore.State = .idle
+    /// Live TV by what's on (Sports, News, Movies…), one entry per channel;
+    /// see LiveOrganizer.
+    private(set) var liveLibrary = LiveOrganizer.Library()
+    /// A provider category chosen from the full list (rather than a shelf):
+    /// kept until the lineup next loads.
+    var browsingProviderCategory = false
+    private var refreshingEvents = false
 
     static let favoritesID = "__favorites"
     /// The channels of the area set in Settings.
@@ -71,6 +78,9 @@ final class AppModel {
         // v4: Top picks layout; older caches had other rows, and showing
         // one first would flash the old layout before the new.
         for old in ["home.json", "home.v2.json", "home.v3.json"] { AppCache.remove(old) }
+        // Lineups saved before v3 could hold a provider's "Account Info"
+        // channels, which spell out the login.
+        for old in ["live-lineup.v1.json", "live-lineup.v2.json"] { AppCache.remove(old) }
         let home: HomeContent? = AppCache.read("home.v4.json")
         rows = home?.rows ?? []
         featured = home?.featured
@@ -594,10 +604,11 @@ final class AppModel {
         for (source, result) in lineups {
             switch result {
             case let .success(lineup):
-                cats += lineup.categories.map {
+                let (ownCategories, ownChannels) = LiveOrganizer.withoutLogin(categories: lineup.categories, channels: lineup.channels)
+                cats += ownCategories.map {
                     LiveCategory(id: $0.id, name: multiple ? "\(source.name) · \($0.name)" : $0.name, channels: $0.channels)
                 }
-                channels += lineup.channels
+                channels += ownChannels
                 guideURLs += lineup.guideURLs
             case let .failure(error):
                 errors.append("\(source.name): \(SourceError.wrap(error).localizedDescription)")
@@ -685,8 +696,9 @@ final class AppModel {
               categoryFetchedAt[id].map({ Date().timeIntervalSince($0) >= 300 }) ?? true,
               let sourceId = id.split(separator: "|").first.flatMap({ UUID(uuidString: String($0)) }),
               let provider = providers[sourceId] ?? sources.iptv.first(where: { $0.id == sourceId }).map(Providers.make),
-              let fresh = try? await provider.channels(inCategory: id)
+              let listed = try? await provider.channels(inCategory: id)
         else { return }
+        let fresh = listed.filter { !LiveOrganizer.leaksLogin($0.name) }
         categoryFetchedAt[id] = Date()
         guard fresh != channelsByCategory[id] else { return }
         let channels = allChannels.filter { $0.categoryId != id } + fresh
@@ -701,20 +713,104 @@ final class AppModel {
             .contains { upper.contains($0) }
     }
 
-    // v2: channels say how many days the provider records.
-    private nonisolated static let lineupFile = "live-lineup.v2.json"
+    // v2: channels say how many days the provider records. v3: without the
+    // channels some providers use to show the login.
+    private nonisolated static let lineupFile = "live-lineup.v3.json"
 
-    private func applyLineup(categories cats: [LiveCategory], channels: [LiveChannel]) async {
+    private func applyLineup(categories allCategories: [LiveCategory], channels allListed: [LiveChannel]) async {
+        let (cats, channels) = LiveOrganizer.withoutLogin(categories: allCategories, channels: allListed)
+        let home = Self.homeRegion
+        // The provider's own category names (with several providers they're
+        // shown as "Provider · US | News"), so the same channel from each
+        // provider becomes one entry that can fall back to the other.
+        let names = Dictionary(sources.iptv.map { ($0.id.uuidString, $0.name + " · ") }, uniquingKeysWith: { a, _ in a })
+        let own = cats.map { category -> LiveCategory in
+            guard let source = category.id.split(separator: "|").first, let prefix = names[String(source)],
+                  category.name.hasPrefix(prefix) else { return category }
+            return LiveCategory(id: category.id, name: String(category.name.dropFirst(prefix.count)), channels: category.channels)
+        }
+        liveLibrary = await Task.detached(priority: .userInitiated) {
+            LiveOrganizer.organize(categories: own, channels: channels, home: home)
+        }.value
         categories = cats
         allChannels = channels
         localCache = nil
         channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
         channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
         channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        if selectedCategory == nil || (selectedCategory != Self.favoritesID && selectedCategory != Self.localID
-                                       && !cats.contains { $0.id == selectedCategory }) {
-            selectedCategory = cats.first?.id
+        // A shelf, Favourites or Local; a provider category only while it's
+        // being browsed from the full list.
+        let shelves = liveLibrary.shelves
+        let valid = selectedCategory.map { id in
+            id == Self.favoritesID || id == Self.localID || shelves.contains { $0.id == id }
+                || (browsingProviderCategory && cats.contains { $0.id == id })
+        } ?? false
+        if !valid { selectedCategory = shelves.first?.id ?? cats.first?.id }
+    }
+
+    /// The country Live TV is arranged for: the device's region.
+    nonisolated static var homeRegion: String {
+        let code = Locale.current.region?.identifier ?? "US"
+        return code == "GB" ? "UK" : code
+    }
+
+    func shelf(_ id: String?) -> LiveOrganizer.Shelf? {
+        guard let id else { return nil }
+        return liveLibrary.shelves.first { $0.id == id }
+    }
+
+    /// Every copy of a channel, best first (itself included): what to fall
+    /// back to when one won't play.
+    func copies(of channel: LiveChannel) -> [LiveChannel] {
+        liveLibrary.copies[channel.id] ?? [channel]
+    }
+
+    /// "TLC" for "US: TLC HD"; a game's title for its channel.
+    func title(of channel: LiveChannel) -> String {
+        liveLibrary.titles[channel.id] ?? LiveOrganizer.Name(channel.name).display
+    }
+
+    func event(of channel: LiveChannel) -> LiveOrganizer.Event? {
+        liveLibrary.events[channel.id]
+    }
+
+    /// Event lists change names game by game: when Sports opens, the ones
+    /// not fetched in the last 15 minutes are fetched again (four at a
+    /// time) and applied together.
+    func refreshEvents() async {
+        guard !refreshingEvents else { return }
+        let stale = liveLibrary.eventCategories.filter { categoryFetchedAt[$0].map { Date().timeIntervalSince($0) >= 900 } ?? true }
+        guard !stale.isEmpty else { return }
+        refreshingEvents = true
+        defer { refreshingEvents = false }
+        var work: [(id: String, provider: any LiveProvider)] = []
+        for id in stale {
+            guard let sourceId = id.split(separator: "|").first.flatMap({ UUID(uuidString: String($0)) }),
+                  let source = sources.iptv.first(where: { $0.id == sourceId }) else { continue }
+            let provider = providers[sourceId] ?? Providers.make(source)
+            providers[sourceId] = provider
+            work.append((id, provider))
         }
+        var fresh: [String: [LiveChannel]] = [:]
+        await withTaskGroup(of: (String, [LiveChannel]?).self) { group in
+            var queue = work[...]
+            for _ in 0..<4 {
+                guard let next = queue.popFirst() else { break }
+                group.addTask { (next.id, try? await next.provider.channels(inCategory: next.id)) }
+            }
+            for await (id, listed) in group {
+                categoryFetchedAt[id] = Date()
+                if let listed { fresh[id] = listed.filter { !LiveOrganizer.leaksLogin($0.name) } }
+                if let next = queue.popFirst() {
+                    group.addTask { (next.id, try? await next.provider.channels(inCategory: next.id)) }
+                }
+            }
+        }
+        let changed = fresh.filter { $0.value != channelsByCategory[$0.key] }
+        guard !changed.isEmpty else { return }
+        let channels = allChannels.filter { !changed.keys.contains($0.categoryId ?? "") } + changed.values.flatMap { $0 }
+        await applyLineup(categories: categories, channels: channels)
+        Self.saveLineup(sources: sources.iptv.map(\.id), categories: categories, channels: allChannels)
     }
 
     private nonisolated static func savedLineup() async -> SavedLineup? {
@@ -924,24 +1020,26 @@ final class AppModel {
         let now = Int64(Date().timeIntervalSince1970)
         var needProvider: [LiveChannel] = []
         for channel in channels {
-            if let id = channel.epgId, let fromGuide = await guide.nowNext(id, at: now),
+            let guided = channel.epgId == nil ? (liveLibrary.guideAlias[channel.id] ?? channel) : channel
+            if let id = guided.epgId, let fromGuide = await guide.nowNext(id, at: now),
                let title = fromGuide.now?.title, !NowNext.isPlaceholder(title) {
                 setNowNext(channel.id, fromGuide)
             } else {
                 needProvider.append(channel)
             }
         }
-        var fetch: [(LiveChannel, any LiveProvider)] = []
+        var fetch: [(id: String, channel: LiveChannel, provider: any LiveProvider)] = []
         for channel in needProvider {
+            let guided = channel.epgId == nil ? (liveLibrary.guideAlias[channel.id] ?? channel) : channel
             if let cached = providerEPG[channel.id], now < cached.until {
                 setNowNext(channel.id, .from(cached.list, at: now, source: .provider))
-            } else if let provider = provider(for: channel) {
-                fetch.append((channel, provider))
+            } else if let provider = provider(for: guided) {
+                fetch.append((channel.id, guided, provider))
             }
         }
         await withTaskGroup(of: (String, [Programme]).self) { group in
-            for (channel, provider) in fetch {
-                group.addTask { (channel.id, await provider.shortEPG(for: channel)) }
+            for item in fetch {
+                group.addTask { (item.id, await item.provider.shortEPG(for: item.channel)) }
             }
             for await (id, list) in group {
                 let value = NowNext.from(list, at: now, source: .provider)

@@ -1,6 +1,9 @@
 import SwiftUI
 
-/// Live TV: category tabs (Favourites and Local first) over a channel list.
+/// Live TV: shelves by what's on (Sports, Local, News, Entertainment…;
+/// see LiveOrganizer) over their channels, one row per channel however
+/// many copies the provider lists. The provider's own categories are a tap
+/// away (the list button).
 /// The lineup saved on the device shows at once and refreshes in the
 /// background, so there's no pull to refresh (which also made the page
 /// jump while swiping the tabs). Now/next is fetched for the rows on
@@ -20,6 +23,7 @@ struct LiveView: View {
 
     private var showingFavorites: Bool { model.selectedCategory == AppModel.favoritesID }
     private var showingLocal: Bool { model.selectedCategory == AppModel.localID }
+    private var shelf: LiveOrganizer.Shelf? { model.shelf(model.selectedCategory) }
     private var displayed: [LiveChannel] {
         model.channels(in: model.selectedCategory, favorites: prefs.favorites, area: prefs.area)
     }
@@ -49,13 +53,16 @@ struct LiveView: View {
                 } else if showingLocal, displayed.isEmpty, !model.liveLoading, let area = prefs.area {
                     ContentUnavailableView("No local channels for \(area.label)", systemImage: "antenna.radiowaves.left.and.right",
                                            description: Text("Your subscription doesn't seem to carry stations for this area."))
-                } else if displayed.isEmpty, model.liveLoading {
+                } else if shelf == nil, displayed.isEmpty, model.liveLoading {
                     HStack { Spacer(); ProgressView("Loading channels…"); Spacer() }.padding(.vertical, 40)
                 }
                 ForEach(model.liveErrors, id: \.self) { message in
                     Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
                 }
-                let channels = displayed
+                if let shelf {
+                    ShelfContent(shelf: shelf, playing: $playing)
+                }
+                let channels = shelf == nil ? displayed : []
                 ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
                     Button {
                         playing = .live(channels, index)
@@ -87,11 +94,20 @@ struct LiveView: View {
                     #endif
                 }
             }
+            .navigationDestination(for: LiveCountry.self) { country in
+                CountryChannels(code: country.code, playing: $playing)
+            }
             .sheet(isPresented: $showingAllCategories) { categoryPicker }
             .sheet(isPresented: $addingSource) { AddIPTVView() }
             .sheet(isPresented: $choosingArea) { NavigationStack { AreaPicker() } }
             // Event and PPV categories change names per game: fresh on open.
-            .task(id: model.selectedCategory) { await model.refreshCategory(model.selectedCategory) }
+            .task(id: model.selectedCategory) {
+                if model.selectedCategory == LiveOrganizer.sportsID {
+                    await model.refreshEvents()
+                } else {
+                    await model.refreshCategory(model.selectedCategory)
+                }
+            }
             .task {
                 if model.selectedCategory == nil, !prefs.favorites.isEmpty {
                     model.selectedCategory = AppModel.favoritesID
@@ -108,21 +124,41 @@ struct LiveView: View {
     private var selectedName: String {
         if showingFavorites { return "Favourites" }
         if showingLocal { return prefs.area.map { "Local · \($0.label)" } ?? "Local" }
+        if let shelf { return shelf.title }
         return model.categories.first(where: { $0.id == model.selectedCategory })?.name ?? "Live TV"
+    }
+
+    /// Favourites, then the shelves with Local after Sports, then the
+    /// provider category being browsed, if any.
+    private var tabs: [(id: String, title: String)] {
+        var items: [(id: String, title: String)] = prefs.favorites.isEmpty ? [] : [(AppModel.favoritesID, "Favourites")]
+        let shelves = model.liveLibrary.shelves.map { (id: $0.id, title: $0.title) }
+        let local = (id: AppModel.localID, title: "Local")
+        if let first = shelves.first, first.id == LiveOrganizer.sportsID {
+            items += [first, local] + shelves.dropFirst()
+        } else {
+            items += [local] + shelves
+        }
+        if let id = model.selectedCategory, !items.contains(where: { $0.id == id }),
+           let category = model.categories.first(where: { $0.id == id }) {
+            items.append((id, category.name))
+        }
+        return items
     }
 
     #if os(iOS)
     private var categoryTabs: some View {
-        let lead: [(id: String, title: String)] = (prefs.favorites.isEmpty ? [] : [(AppModel.favoritesID, "Favourites")])
-            + [(AppModel.localID, "Local")]
-        return TabStrip(items: lead + visibleCategories.map { ($0.id, $0.name) },
+        TabStrip(items: tabs,
                         selected: model.selectedCategory,
                         leading: AnyView(Button { showingAllCategories = true } label: {
                             Image(systemName: "list.bullet").font(.body.weight(.semibold)).frame(width: 36, height: 36)
                         }
                         .buttonStyle(.glass)
                         .buttonBorderShape(.circle)
-                        .accessibilityLabel("All categories"))) { model.selectedCategory = $0 }
+                        .accessibilityLabel("All categories"))) { id in
+                            model.browsingProviderCategory = model.categories.contains { $0.id == id }
+                            model.selectedCategory = id
+                        }
     }
     #endif
 
@@ -140,17 +176,8 @@ struct LiveView: View {
                     #else
                     .buttonStyle(.glass)
                     #endif
-                    if !prefs.favorites.isEmpty {
-                        chip(id: AppModel.favoritesID, title: "★ Favourites")
-                    }
-                    chip(id: AppModel.localID, title: "Local")
-                    ForEach(visibleCategories) { category in
-                        chip(id: category.id, title: category.name)
-                            .contextMenu {
-                                Button("Hide Category", systemImage: "eye.slash") {
-                                    prefs.hiddenCategories.insert(category.id)
-                                }
-                            }
+                    ForEach(tabs, id: \.id) { tab in
+                        chip(id: tab.id, title: tab.id == AppModel.favoritesID ? "★ Favourites" : tab.title)
                     }
                 }
                 .padding(.horizontal)
@@ -169,21 +196,27 @@ struct LiveView: View {
 
     @ViewBuilder private func chip(id: String, title: String) -> some View {
         #if os(tvOS)
-        Button(title) { model.selectedCategory = id }
+        Button(title) { select(id) }
             .buttonStyle(TVChipStyle(selected: id == model.selectedCategory)).lineLimit(1).id(id)
         #else
         if id == model.selectedCategory {
-            Button(title) { model.selectedCategory = id }.buttonStyle(.glassProminent).lineLimit(1).id(id)
+            Button(title) { select(id) }.buttonStyle(.glassProminent).lineLimit(1).id(id)
         } else {
-            Button(title) { model.selectedCategory = id }.buttonStyle(.glass).lineLimit(1).id(id)
+            Button(title) { select(id) }.buttonStyle(.glass).lineLimit(1).id(id)
         }
         #endif
+    }
+
+    private func select(_ id: String) {
+        model.browsingProviderCategory = model.categories.contains { $0.id == id }
+        model.selectedCategory = id
     }
 
     private var categoryPicker: some View {
         NavigationStack {
             List(filteredCategories) { category in
                 Button {
+                    model.browsingProviderCategory = true
                     model.selectedCategory = category.id
                     showingAllCategories = false
                 } label: {
@@ -206,8 +239,13 @@ struct LiveView: View {
                     Button("Hide Category", systemImage: "eye.slash") { prefs.hiddenCategories.insert(category.id) }
                 }
             }
+            #if os(iOS)
+            // At the top, under the title, where it doesn't cover the list.
+            .searchable(text: $categoryFilter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter categories")
+            #else
             .searchable(text: $categoryFilter, prompt: "Filter categories")
-            .navigationTitle("Categories")
+            #endif
+            .navigationTitle("Provider categories")
             .inlineTitle()
         }
         #if os(iOS)
@@ -226,18 +264,33 @@ struct LiveView: View {
 /// placeholders until the details arrive, blanks when there are none), so
 /// the row never changes height as you scroll.
 struct ChannelRow: View {
-    let channel: LiveChannel
+    let title: String
+    let logo: URL?
     let slot: NowNextSlot
     var favorite = false
+
+    init(channel: LiveChannel, slot: NowNextSlot, favorite: Bool = false) {
+        title = LiveOrganizer.Name(channel.name).display
+        logo = channel.logo
+        self.slot = slot
+        self.favorite = favorite
+    }
+
+    init(entry: LiveOrganizer.Entry, slot: NowNextSlot, favorite: Bool = false) {
+        title = entry.title
+        logo = entry.logo
+        self.slot = slot
+        self.favorite = favorite
+    }
 
     var body: some View {
         let info = slot.value
         let now = info?.now
         HStack(spacing: 12) {
-            ChannelLogo(url: channel.logo, name: channel.name)
+            ChannelLogo(url: logo, name: title)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(channel.name).font(.body.weight(.semibold)).lineLimit(1)
+                    Text(title).font(.body.weight(.semibold)).lineLimit(1)
                     if favorite {
                         Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
                             .accessibilityLabel("Favourite")

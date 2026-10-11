@@ -108,6 +108,11 @@ def xmltv_time(ts):
     return datetime.fromtimestamp(ts, PANEL_TZ).strftime("%Y%m%d%H%M%S +0100")
 
 
+LINEUP = None
+if os.environ.get("OPENIPTV_MOCK_LINEUP"):
+    with open(os.environ["OPENIPTV_MOCK_LINEUP"]) as f:
+        LINEUP = json.load(f)
+
 _RECORDED = None
 
 
@@ -273,6 +278,15 @@ class Handler(BaseHTTPRequestHandler):
                               "allowed_output_formats": ["m3u8", "ts"]},
                 "server_info": {"timezone": "Europe/London", "timestamp_now": now, "time_now": wall(now)},
             })
+        if LINEUP and action == "get_live_categories":
+            return self.send(LINEUP["categories"])
+        if LINEUP and action == "get_live_streams":
+            # A real lineup's names and categories (OPENIPTV_MOCK_LINEUP, saved
+            # by the smoke tool's dump-lineup), times moved to today.
+            streams = LINEUP["streams"]
+            if q.get("category_id"):
+                streams = [s for s in streams if str(s.get("category_id")) == q["category_id"]]
+            return self.send(streams)
         if action == "get_live_categories":
             return self.send([{"category_id": "1", "category_name": "UK", "parent_id": 0},
                               {"category_id": "2", "category_name": "US | Local ABC", "parent_id": 0},

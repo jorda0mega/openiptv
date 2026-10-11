@@ -204,6 +204,97 @@ if value("OPENIPTV_SMOKE_MODE") == "perf" {
 // grouping and source ranking: catch-up support, categories, name
 // prefixes and quality tags, duplicates, PPV and event naming. Prints
 // names and counts only, never the server, login or stream addresses.
+// `organize`: Live TV's shelves from a lineup saved by `dump-lineup`
+// (OPENIPTV_SMOKE_LINEUP): what goes where, the events read from channel
+// names, and how long it takes. No network.
+if value("OPENIPTV_SMOKE_MODE") == "organize" {
+    guard let path = value("OPENIPTV_SMOKE_LINEUP"), let data = FileManager.default.contents(atPath: path),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { print("organize: no lineup"); exit(1) }
+    func str(_ any: Any?) -> String { any.map { "\($0)" } ?? "" }
+    let source = UUID()
+    let rawCategories = root["categories"] as? [[String: Any]] ?? []
+    let rawStreams = root["streams"] as? [[String: Any]] ?? []
+    var counts: [String: Int] = [:]
+    for s in rawStreams { counts[str(s["category_id"]), default: 0] += 1 }
+    let categories = rawCategories.map { c in
+        LiveCategory(id: "\(source.uuidString)|\(str(c["category_id"]))", name: str(c["category_name"]), channels: counts[str(c["category_id"])] ?? 0)
+    }
+    let channels = rawStreams.map { s -> LiveChannel in
+        let id = Int64(str(s["stream_id"])) ?? 0
+        let epg = str(s["epg_channel_id"])
+        let days = Int(str(s["tv_archive_duration"])) ?? 0
+        return LiveChannel(id: "\(source.uuidString)|\(id)", sourceId: source, number: Int64(str(s["num"])), name: str(s["name"]),
+                           logo: nil, categoryId: "\(source.uuidString)|\(str(s["category_id"]))",
+                           epgId: epg.isEmpty || epg == "<null>" ? nil : epg, nativeId: String(id), stream: .xtream(streamId: id),
+                           archiveDays: str(s["tv_archive"]) == "1" && days > 0 ? days : nil)
+    }
+    let started = Date()
+    let library = LiveOrganizer.organize(categories: categories, channels: channels, home: value("OPENIPTV_SMOKE_HOME") ?? "US")
+    print(String(format: "organized %d channels in %.2f s", channels.count, Date().timeIntervalSince(started)))
+    let detail = value("OPENIPTV_SMOKE_SHELF")
+    for shelf in library.shelves {
+        let total = shelf.sections.reduce(0) { $0 + $1.entries.count }
+        let channelsIn = shelf.sections.reduce(0) { $0 + $1.entries.reduce(0) { $0 + $1.channels.count } }
+        print("\n== \(shelf.title): \(total) entries from \(channelsIn) channels, \(shelf.sections.count) sections")
+        for section in shelf.sections {
+            let full = detail == shelf.title
+            let shown = section.entries.prefix(full ? 400 : 6).map { entry -> String in
+                var text = entry.title
+                if let event = entry.event {
+                    let when = event.start.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "no time"
+                    text = "[\(event.league)] \(text) · \(when)" + (event.detail.map { " · \($0)" } ?? "")
+                }
+                return entry.channels.count > 1 ? text + " ×\(entry.channels.count)" : text
+            }
+            let country = section.country.map { "\(LiveOrganizer.flag($0)) \(LiveOrganizer.countryName($0)) · " } ?? ""
+            print("  - \(country)\(section.title) (\(section.entries.count)): " + shown.joined(separator: full ? "\n      " : " | "))
+        }
+    }
+    if let events = library.shelves.first?.sections.first(where: { $0.id == "events" })?.entries {
+        var leagues: [String: Int] = [:]
+        for event in events { leagues[event.event?.league ?? "?", default: 0] += 1 }
+        let timed = events.filter { $0.event?.start != nil }.count
+        print("\nevents by league (\(events.count), \(timed) with a time): " + leagues.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))
+        let untimed = events.filter { $0.event?.start == nil }.prefix(25).map(\.title)
+        print("untimed sample: " + untimed.joined(separator: " | "))
+    }
+    print("\nevent categories: \(library.eventCategories.count); channels with copies: \(library.copies.count); guide aliases: \(library.guideAlias.count)")
+    exit(0)
+}
+// `dump-lineup`: saves the provider's categories and channels (names,
+// ids, categories, guide ids, catch-up days only; no login, no addresses,
+// no logos) to OPENIPTV_SMOKE_OUT, for working on Live TV's organisation
+// offline.
+if value("OPENIPTV_SMOKE_MODE") == "dump-lineup" {
+    guard let server = value("OPENIPTV_XTREAM_URL").flatMap({ XtreamProvider.parse($0.split(separator: " ").first.map(String.init) ?? $0) }),
+          let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS"),
+          let out = value("OPENIPTV_SMOKE_OUT") else { print("dump: no Xtream login or output path"); exit(1) }
+    func api(_ action: String) async -> [[String: Any]] {
+        var parts = URLComponents(url: server.server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "username", value: user), .init(name: "password", value: pass), .init(name: "action", value: action)]
+        var request = URLRequest(url: parts.url!)
+        request.timeoutInterval = 120
+        let data = try? await URLSession.shared.data(for: request).0
+        return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? []
+    }
+    let keep = ["category_id", "category_name", "name", "stream_id", "num", "epg_channel_id", "tv_archive", "tv_archive_duration"]
+    func trimmed(_ rows: [[String: Any]]) -> [[String: Any]] { rows.map { $0.filter { keep.contains($0.key) } } }
+    // Providers list the login itself as channels ("Account Info": "Your
+    // Password is; …"): never saved.
+    let allCategories = trimmed(await api("get_live_categories"))
+    let accountInfo = Set(allCategories.filter { "\($0["category_name"] ?? "")".localizedCaseInsensitiveContains("account") }
+        .map { "\($0["category_id"] ?? "")" })
+    let categories = allCategories.filter { !accountInfo.contains("\($0["category_id"] ?? "")") }
+    let streams = trimmed(await api("get_live_streams")).filter { stream in
+        let name = "\(stream["name"] ?? "")"
+        return !accountInfo.contains("\(stream["category_id"] ?? "")")
+            && name.range(of: "password|username|user name", options: [.regularExpression, .caseInsensitive]) == nil
+    }
+    let body = try! JSONSerialization.data(withJSONObject: ["categories": categories, "streams": streams])
+    FileManager.default.createFile(atPath: out, contents: body, attributes: [.posixPermissions: 0o600])
+    print("dump: \(categories.count) categories, \(streams.count) channels saved")
+    exit(0)
+}
 if value("OPENIPTV_SMOKE_MODE") == "survey" {
     guard let server = value("OPENIPTV_XTREAM_URL").flatMap({ XtreamProvider.parse($0.split(separator: " ").first.map(String.init) ?? $0) }),
           let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS") else { print("survey: no Xtream login"); exit(1) }

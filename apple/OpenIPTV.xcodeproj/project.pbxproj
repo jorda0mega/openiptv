@@ -24,6 +24,7 @@
 		0D646AB8C8A7382117611F70 /* TMDbPopularity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9007B25996DDA88FE40D727B /* TMDbPopularity.swift */; };
 		0DE6D69F6DA84444642E07C3 /* OpenIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */; };
 		0E87FB9A008BD21779D3A16E /* Libmpv.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */; };
+		0F5DA94E3A68E664F7B7DDFD /* LiveShelfViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766249862D814DF2C6786AF4 /* LiveShelfViews.swift */; };
 		0FB942BAE8072453D1B7CD43 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */; };
 		10831580B6F72D43D2609FD1 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
 		10E6DBCB2E85AE6FC761AF98 /* LocalArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */; };
@@ -39,6 +40,7 @@
 		23168F779200D94FECA8F7DF /* Libmpv.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */; };
 		23B67B05DCEB22C87EDA490A /* StalkerProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01633BC141A3C9A9B66CFBB /* StalkerProvider.swift */; };
 		240BD0211D4FCFCF292DBB40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA8AA4353609B682F3F99884 /* Assets.xcassets */; };
+		244127A393B955C4418AEB4A /* LiveShelfViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766249862D814DF2C6786AF4 /* LiveShelfViews.swift */; };
 		256361B5F9FE060AAED11A31 /* Sources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320EE0FE4DDEEB903360A4AF /* Sources.swift */; };
 		28B8F7BBE18EBEB9722388B6 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DE7D9201148434BE2E8348A /* CoreVideo.framework */; };
 		30946DBB482F4C1006EC80F5 /* StreamRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857825645808317F48AB50AA /* StreamRelay.swift */; };
@@ -87,10 +89,12 @@
 		673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
 		675F87B1E11CC35003D7F57C /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
 		6A41782159CEB6B853714738 /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */; };
+		6AAED15590593E71877BC43A /* LiveOrganizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF29F5EC9640222904218E1B /* LiveOrganizer.swift */; };
 		6AB7EB94E728096236440394 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */; };
 		6C06C2BAAAB78489283A8E78 /* Libcrypto.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B41963718B2429F644A73CAD /* Libcrypto.xcframework */; };
 		6C46F5C97FF574089046DC42 /* Guide.swift in Sources */ = {isa = PBXBuildFile; fileRef = B878EE2EE283C3772241FCF0 /* Guide.swift */; };
 		6D11C39A6F6455DAEC94AE5E /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BBE98FBA505A36A33CB129 /* libresolv.tbd */; };
+		6D5968936DF5594E32D6D529 /* LiveOrganizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF29F5EC9640222904218E1B /* LiveOrganizer.swift */; };
 		6E93EF7246D35B6993B9DB7E /* StalkerProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01633BC141A3C9A9B66CFBB /* StalkerProvider.swift */; };
 		7048D6DC77B943DA816AC4C1 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6624BB656CA61632353DBA8C /* Preferences.swift */; };
 		70CFBFACBD2EFCA866865C45 /* Libshaderc_combined.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CE629B229349145FBEDD02D /* Libshaderc_combined.xcframework */; };
@@ -232,6 +236,7 @@
 		66D066C9DD9FC2285C24EF35 /* LiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveView.swift; sourceTree = "<group>"; };
 		68BDF569FD33B278E6B18C1B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		72303AAC600EF3DE6075EF7A /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
+		766249862D814DF2C6786AF4 /* LiveShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveShelfViews.swift; sourceTree = "<group>"; };
 		7A1F2D0451F66503C9B600AF /* libbz2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libbz2.tbd; path = usr/lib/libbz2.tbd; sourceTree = SDKROOT; };
 		857825645808317F48AB50AA /* StreamRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamRelay.swift; sourceTree = "<group>"; };
 		8781972F0C4836EB0FCF2A63 /* Onboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Onboarding.swift; sourceTree = "<group>"; };
@@ -267,6 +272,7 @@
 		C8BBE98FBA505A36A33CB129 /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 		CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libswscale.xcframework; path = Vendor/Libswscale.xcframework; sourceTree = "<group>"; };
 		CC1500ACB77AA629F7F047BF /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
+		CF29F5EC9640222904218E1B /* LiveOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveOrganizer.swift; sourceTree = "<group>"; };
 		D277F32EC509804119BFFFC4 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
 		D5B1B94210411D81E015B0B6 /* Libass.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libass.xcframework; path = Vendor/Libass.xcframework; sourceTree = "<group>"; };
 		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
@@ -494,6 +500,7 @@
 			children = (
 				B7ED05298F5A207B9C71BE5A /* AreaPicker.swift */,
 				9B28084FA0D3D9F051788F09 /* HomeView.swift */,
+				766249862D814DF2C6786AF4 /* LiveShelfViews.swift */,
 				66D066C9DD9FC2285C24EF35 /* LiveView.swift */,
 				E895C7A337E5874B38A8020C /* MovieView.swift */,
 				8781972F0C4836EB0FCF2A63 /* Onboarding.swift */,
@@ -572,6 +579,7 @@
 			children = (
 				B878EE2EE283C3772241FCF0 /* Guide.swift */,
 				5CF28B344CA01BCD1800A4E3 /* LiveModels.swift */,
+				CF29F5EC9640222904218E1B /* LiveOrganizer.swift */,
 				58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */,
 				9F9B9AD0C2539A2BABA83C97 /* M3UProvider.swift */,
 				A01633BC141A3C9A9B66CFBB /* StalkerProvider.swift */,
@@ -759,7 +767,9 @@
 				C2B3A024AC7BEF379F2E4C4A /* ImagePipeline.swift in Sources */,
 				53650932E226B2B55FA992A1 /* Keychain.swift in Sources */,
 				84F1C24A345749B9277FDA29 /* LiveModels.swift in Sources */,
+				6D5968936DF5594E32D6D529 /* LiveOrganizer.swift in Sources */,
 				976B05916C747916000E1666 /* LivePlayerView.swift in Sources */,
+				244127A393B955C4418AEB4A /* LiveShelfViews.swift in Sources */,
 				A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */,
 				C4B8046237E84B860469F18F /* LocalArea.swift in Sources */,
 				330A2AE3555A65DCFB5FD0A9 /* M3UProvider.swift in Sources */,
@@ -809,7 +819,9 @@
 				507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */,
 				4209B928261B700D9F0978FA /* Keychain.swift in Sources */,
 				1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */,
+				6AAED15590593E71877BC43A /* LiveOrganizer.swift in Sources */,
 				9F06D59EE7F81D0590BE65AE /* LivePlayerView.swift in Sources */,
+				0F5DA94E3A68E664F7B7DDFD /* LiveShelfViews.swift in Sources */,
 				9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */,
 				10E6DBCB2E85AE6FC761AF98 /* LocalArea.swift in Sources */,
 				808B66520C8C418D89B0EC89 /* M3UProvider.swift in Sources */,

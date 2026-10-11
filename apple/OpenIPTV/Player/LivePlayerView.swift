@@ -40,6 +40,9 @@ struct LivePlayerView: View {
     /// Zapping quickly: the screen changes at once, and the stream opens
     /// once the presses stop (the provider allows one stream at a time).
     @State private var lastStep = Date.distantPast
+    /// Copies of this channel already tried (the provider often lists one
+    /// channel several times; if one won't start, the next is tried).
+    @State private var tried: Set<String> = []
 
     struct Window: Equatable {
         var start: Double
@@ -48,6 +51,8 @@ struct LivePlayerView: View {
     }
 
     private var channel: LiveChannel { model.current(channels[index]) }
+    /// "TLC" rather than "US: TLC HD".
+    private var displayName: String { model.title(of: channel) }
 
     var body: some View {
         ZStack {
@@ -56,7 +61,7 @@ struct LivePlayerView: View {
                 VideoSurface(player: player)
                     .ignoresSafeArea()
                     .accessibilityElement()
-                    .accessibilityLabel(channel.name)
+                    .accessibilityLabel(displayName)
                     .accessibilityHint("Shows the player controls")
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { showControls() }
@@ -106,8 +111,8 @@ struct LivePlayerView: View {
     private var tuning: some View {
         let showing = recording ?? model.nowNext[channel.id]?.now
         return VStack(spacing: 10) {
-            ChannelLogo(url: channel.logo, name: channel.name)
-            Text(channel.name).font(.title3.weight(.semibold)).lineLimit(1)
+            ChannelLogo(url: channel.logo, name: displayName)
+            Text(displayName).font(.title3.weight(.semibold)).lineLimit(1)
             if let showing {
                 Text(recording == nil ? showing.title : "\(showing.title) · from the start")
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
@@ -129,7 +134,7 @@ struct LivePlayerView: View {
                     GlassIconButton(systemName: "xmark", label: "Close player") { dismiss() }
                     #endif
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(channel.name).font(.headline).lineLimit(1)
+                        Text(displayName).font(.headline).lineLimit(1)
                         Text(error ?? status)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(error == nil ? (recording == nil ? .green : .secondary) : .red)
@@ -213,6 +218,12 @@ struct LivePlayerView: View {
                 Text(recording.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 Text("Recorded · \(recording.start.clock)–\(recording.stop.clock)")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } else if let event = model.event(of: channel) {
+                // A game: its own name says what and when.
+                Text(event.league).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text([event.start.map { ($0 <= Date() ? "Started " : "Starts ") + $0.formatted(date: .omitted, time: .shortened) },
+                      event.detail].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             } else if let now = info?.now {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(now.title).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -234,7 +245,7 @@ struct LivePlayerView: View {
             } else {
                 Text(info == nil ? "Loading guide…" : "No guide data").font(.subheadline).foregroundStyle(.secondary)
             }
-            if recording == nil, let next = info?.next {
+            if recording == nil, model.event(of: channel) == nil, let next = info?.next {
                 Text("Next \(next.start.clock) · \(next.title)")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -370,7 +381,14 @@ struct LivePlayerView: View {
     private func play(after delay: Double = 0) {
         reset()
         recording = nil
-        let channel = channel
+        tried = [channel.id]
+        open(channel, after: delay)
+        showAround()
+        showControls()
+    }
+
+    /// Opens one copy of the channel.
+    private func open(_ copy: LiveChannel, after delay: Double = 0) {
         loadTask?.cancel()
         loadTask = Task {
             if delay > 0 {
@@ -378,18 +396,31 @@ struct LivePlayerView: View {
                 guard !Task.isCancelled else { return }
             }
             do {
-                let stream = try await model.playable(channel)
+                let stream = try await model.playable(copy)
                 guard !Task.isCancelled else { return }
                 player?.load(stream.url, headers: stream.headers)
             } catch {
                 guard !Task.isCancelled else { return }
-                fail(SourceError.wrap(error).localizedDescription)
+                if !fallBack() { fail(SourceError.wrap(error).localizedDescription) }
             }
         }
+    }
+
+    /// The next copy of this channel, if one hasn't been tried; false when
+    /// there's none left.
+    private func fallBack() -> Bool {
+        guard recording == nil, !started,
+              let next = model.copies(of: channel).first(where: { !tried.contains($0.id) }) else { return false }
+        tried.insert(next.id)
+        timing = "Trying another copy…"
+        open(next)
+        return true
+    }
+
+    private func showAround() {
         // What's on here and either side, so zapping shows it at once.
         let around = [-1, 0, 1].map { model.current(channels[(index + $0 + channels.count) % channels.count]) }
         Task { await model.ensureNowNext(around) }
-        showControls()
     }
 
     /// A recorded programme from its start.
@@ -447,11 +478,11 @@ struct LivePlayerView: View {
             window = Window(start: start, end: end, seekable: seekable)
             track()
         case let .failed(message):
-            fail("Couldn't play: \(message)")
+            if !fallBack() { fail("Couldn't play: \(message)") }
         case .ended:
             // A recording finished, or the provider closed the stream (a long
             // pause can outlast what it holds): carry on live.
-            if started { play() } else { fail("The channel stopped before it started.") }
+            if started { play() } else if !fallBack() { fail("The channel stopped before it started.") }
         default:
             break
         }
