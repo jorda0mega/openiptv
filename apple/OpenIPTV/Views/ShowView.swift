@@ -41,7 +41,10 @@ struct ShowView: View {
 
     /// The episode the main button plays: the one being resumed, or next.
     private var upNext: EmbyItem? {
-        if let id = route.episodeId, let episode = data?.episodes.first(where: { $0.id == id }) { return episode }
+        // The list's copy: it has the running time, and what you just
+        // watched is applied to it straight away.
+        if let id = route.episodeId ?? data?.nextUp?.id,
+           let episode = data?.episodes.first(where: { $0.id == id }) { return episode }
         return data?.nextUp
     }
 
@@ -164,7 +167,7 @@ struct ShowView: View {
                       logo: show.flatMap { model.emby?.logoURL(for: $0, width: 800) },
                       title: route.title, line: showLine, height: 0.95) {
                 PlayCapsule(label: loadingItem == mainId ? "Starting…" : mainLabel,
-                            progress: upNext?.userData?.playedPercentage.map { $0 / 100 },
+                            progress: upNext?.resumeFraction, left: upNext?.timeLeft,
                             loading: loadingItem == mainId) { playMain() }
             }
             if let overview = show?.overview, !overview.isEmpty {
@@ -229,16 +232,11 @@ struct ShowView: View {
 
     private var mainId: String { upNext?.id ?? route.episodeId ?? route.id }
 
+    /// "Continue S4 E2" partway through, else "Play S4 E3".
     private var mainLabel: String {
         guard let upNext else { return "Play" }
-        let code = upNext.parentIndexNumber.flatMap { s in upNext.indexNumber.map { "S\(s):E\($0)" } } ?? "episode"
-        if let ticks = upNext.userData?.playbackPositionTicks, ticks > 0, upNext.userData?.played != true {
-            if let total = upNext.runTimeTicks, total > ticks {
-                return "Resume \(code) · \(max(1, Int((total - ticks) / 600_000_000))) min left"
-            }
-            return "Resume \(code)"
-        }
-        return "Play \(code)"
+        let verb = upNext.resumeTicks == nil ? "Play" : "Continue"
+        return upNext.episodeCode.map { "\(verb) \($0)" } ?? verb
     }
 
     static func seasonName(_ number: Int) -> String { number == 0 ? "Specials" : "Season \(number)" }
@@ -411,9 +409,9 @@ private struct EpisodeRow: View {
             CoverImage(images: card?.images ?? [], title: episode.name)
                 .frame(width: Layout.searchThumbWide * 1.25, height: Layout.searchThumbWide * 1.25 * 9 / 16)
                 .overlay(alignment: .bottom) {
-                    if let progress = episode.userData?.playedPercentage, progress > 0, progress < 100 {
+                    if let progress = episode.resumeFraction {
                         GeometryReader { geo in
-                            Capsule().fill(.white).frame(width: geo.size.width * progress / 100, height: 3)
+                            Capsule().fill(.white).frame(width: geo.size.width * progress, height: 3)
                         }
                         .frame(height: 3)
                         .padding(4)

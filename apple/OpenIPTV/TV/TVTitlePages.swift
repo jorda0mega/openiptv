@@ -69,8 +69,8 @@ struct TVMovieView: View {
                     }
                     .buttonStyle(.glass)
                     .disabled(loading)
-                    if let progress = item?.userData?.playedPercentage, progress > 0, progress < 100, item?.userData?.played != true {
-                        ProgressBar(value: progress / 100).frame(width: 220)
+                    if let progress = item?.resumeFraction {
+                        ProgressBar(value: progress).frame(width: 220)
                     }
                 }
                 if let item, !(item.people ?? []).isEmpty {
@@ -106,11 +106,8 @@ struct TVMovieView: View {
     @State private var selected: Card?
 
     private var playLabel: String {
-        guard let data = item?.userData, data.played != true, let ticks = data.playbackPositionTicks, ticks > 0 else { return "Play" }
-        if let total = item?.runTimeTicks, total > ticks {
-            return "Resume · \(max(1, Int((total - ticks) / 600_000_000))) min left"
-        }
-        return "Resume"
+        guard item?.resumeTicks != nil else { return "Play" }
+        return item?.timeLeft.map { "Continue · \($0)" } ?? "Continue"
     }
 
     private func load() async {
@@ -157,7 +154,10 @@ struct TVShowView: View {
     @State private var selected: Card?
 
     private var upNext: EmbyItem? {
-        if let id = route.episodeId, let episode = data?.episodes.first(where: { $0.id == id }) { return episode }
+        // The list's copy: it has the running time, and what you just
+        // watched is applied to it straight away.
+        if let id = route.episodeId ?? data?.nextUp?.id,
+           let episode = data?.episodes.first(where: { $0.id == id }) { return episode }
         return data?.nextUp
     }
 
@@ -255,11 +255,8 @@ struct TVShowView: View {
 
     private var mainLabel: String {
         guard let upNext else { return "Play" }
-        let code = upNext.parentIndexNumber.flatMap { s in upNext.indexNumber.map { "S\(s), E\($0)" } } ?? "Episode"
-        if let ticks = upNext.userData?.playbackPositionTicks, ticks > 0, upNext.userData?.played != true {
-            return "Resume \(code)"
-        }
-        return "Play \(code)"
+        let verb = upNext.resumeTicks == nil ? "Play" : "Continue"
+        return upNext.episodeCode.map { "\(verb) \($0)" } ?? verb
     }
 
     private func load() async {
@@ -311,8 +308,8 @@ private struct TVEpisodeCard: View {
                 CoverImage(images: card?.images ?? [], title: episode.name)
                     .frame(width: 440, height: 248)
                     .overlay(alignment: .bottom) {
-                        if let progress = episode.userData?.playedPercentage, progress > 0, episode.userData?.played != true {
-                            ProgressBar(value: progress / 100).padding(14)
+                        if let progress = episode.resumeFraction {
+                            ProgressBar(value: progress).padding(14)
                         }
                     }
                     .overlay(alignment: .topTrailing) {

@@ -224,3 +224,32 @@ struct EmbyConnectSession {
     let accessToken: String
     let servers: [EmbyConnectServer]
 }
+
+extension EmbyItem {
+    /// Where to pick up. Any saved spot counts, even on something watched
+    /// before (a rewatch keeps Played but saves the spot), as Emby's own
+    /// apps do.
+    var resumeTicks: Int64? {
+        userData?.playbackPositionTicks.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// How far in (0…1), for the bar under Continue.
+    var resumeFraction: Double? {
+        guard let ticks = resumeTicks else { return nil }
+        if let total = runTimeTicks, total > 0 { return min(Double(ticks) / Double(total), 1) }
+        return userData?.playedPercentage.map { min($0 / 100, 1) }
+    }
+
+    /// "18 min left", "1 h 5 min left".
+    var timeLeft: String? {
+        guard let ticks = resumeTicks, let total = runTimeTicks, total > ticks else { return nil }
+        let minutes = max(1, Int((total - ticks) / 600_000_000))
+        if minutes < 60 { return "\(minutes) min left" }
+        return minutes % 60 == 0 ? "\(minutes / 60) h left" : "\(minutes / 60) h \(minutes % 60) min left"
+    }
+
+    /// "S4 E2"
+    var episodeCode: String? {
+        parentIndexNumber.flatMap { season in indexNumber.map { "S\(season) E\($0)" } }
+    }
+}

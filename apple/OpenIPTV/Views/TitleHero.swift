@@ -48,38 +48,57 @@ struct TitleHero<Buttons: View>: View {
     }
 }
 
-/// The white Play capsule (Resume when partway through), with a spinner
-/// while it opens.
+/// The white Play capsule ("Continue S4 E2" when partway through), with a
+/// spinner while it opens. Like Disney+, Prime Video and Netflix, the
+/// button holds only the words; how far in and the time left sit on a
+/// thin bar under it.
 struct PlayCapsule: View {
     let label: String
     var progress: Double? = nil
+    /// "18 min left", beside the bar.
+    var left: String? = nil
     let loading: Bool
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
+        VStack(spacing: 12) {
+            Button(action: action) {
                 Label(label, systemImage: "play.fill")
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
-                if let progress, progress > 0 {
-                    Capsule().fill(.black.opacity(0.15))
-                        .frame(width: 120, height: 3)
-                        .overlay(alignment: .leading) {
-                            Capsule().fill(.black).frame(width: 120 * min(progress, 1), height: 3)
-                        }
-                }
+                    .padding(.horizontal, 20)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .opacity(loading ? 0 : 1)
+                    .overlay { if loading { ProgressView().tint(.black) } }
+                    .contentShape(.capsule)
             }
-            .frame(minWidth: 200)
-            .padding(.horizontal, 24)
-            .frame(height: 50)
-            .opacity(loading ? 0 : 1)
-            .overlay { if loading { ProgressView().tint(.black) } }
+            .buttonStyle(.plain)
+            .foregroundStyle(.black)
+            .background(.white, in: .capsule)
+            .disabled(loading)
+            if let progress, progress > 0 {
+                HStack(spacing: 10) {
+                    Capsule().fill(.white.opacity(0.25))
+                        .frame(height: 3)
+                        .overlay(alignment: .leading) {
+                            GeometryReader { bar in
+                                Capsule().fill(.white).frame(width: bar.size.width * min(progress, 1))
+                            }
+                        }
+                    if let left {
+                        Text(left)
+                            .font(.caption.weight(.medium).monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.75))
+                            .fixedSize()
+                    }
+                }
+                .frame(height: 16)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(left ?? "\(Int(min(progress, 1) * 100))% watched")
+            }
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.black)
-        .background(.white, in: .capsule)
-        .disabled(loading)
+        .frame(maxWidth: 300)
     }
 }
 

@@ -517,8 +517,7 @@ struct EmbyClient {
     }
 
     private static func resumePoint(_ item: EmbyItem) -> Double? {
-        item.userData?.played == true ? nil
-            : item.userData?.playbackPositionTicks.flatMap { $0 > 0 ? Double($0) / 1e7 : nil }
+        item.resumeTicks.map { Double($0) / 1e7 }
     }
 
     /// The item to play (a show's next episode) and, when it could be asked

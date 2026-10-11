@@ -30,7 +30,8 @@ struct MovieView: View {
                 TitleHero(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: 1280) },
                           logo: item.flatMap { model.emby?.logoURL(for: $0, width: 800) },
                           title: route.title, line: genreLine) {
-                    PlayCapsule(label: loading ? "Starting…" : playLabel, progress: resumeFraction, loading: loading, action: play)
+                    PlayCapsule(label: loading ? "Starting…" : playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
+                                loading: loading, action: play)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     if let overview = item?.overview, !overview.isEmpty {
@@ -94,18 +95,7 @@ struct MovieView: View {
         return [item.productionYear.map(String.init), length, rating].compactMap(\.self).joined(separator: " · ")
     }
 
-    private var resumeFraction: Double? {
-        guard let percent = item?.userData?.playedPercentage, percent > 0, percent < 100, item?.userData?.played != true else { return nil }
-        return percent / 100
-    }
-
-    private var playLabel: String {
-        guard let data = item?.userData, data.played != true, let ticks = data.playbackPositionTicks, ticks > 0 else { return "Play" }
-        if let total = item?.runTimeTicks, total > ticks {
-            return "Resume · \(max(1, Int((total - ticks) / 600_000_000))) min left"
-        }
-        return "Resume"
-    }
+    private var playLabel: String { item?.resumeTicks == nil ? "Play" : "Continue" }
 
 
     @ViewBuilder private func moreLikeThis(_ card: Card) -> some View {
