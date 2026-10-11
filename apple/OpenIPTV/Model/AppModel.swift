@@ -44,6 +44,14 @@ final class AppModel {
     private var providerEPG: [String: (until: Int64, list: [Programme])] = [:]
 
     init() {
+        #if DEBUG
+        // Simulator testing with a real account: a temporary session passed
+        // in by the launcher, kept in memory only. Not in release builds.
+        if let raw = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_EMBY"],
+           let account = try? JSONDecoder().decode(EmbyAccount.self, from: Data(raw.utf8)) {
+            sources.useTemporaryEmby(account)
+        }
+        #endif
         selectedCategory = UserDefaults.standard.string(forKey: "category")
         rows = AppCache.read("home.json") ?? []
         Task { await guide.loadCache(); guideState = await guide.state }

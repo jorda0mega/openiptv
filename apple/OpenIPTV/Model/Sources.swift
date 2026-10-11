@@ -82,6 +82,13 @@ final class SourceStore {
         Keychain.save(account, for: "emby")
     }
 
+    #if DEBUG
+    /// Debug builds only: use a session for this run without saving it.
+    func useTemporaryEmby(_ account: EmbyAccount) {
+        emby = account
+    }
+    #endif
+
     /// Adding a subscription that's already here updates it in place (new
     /// password, say) and keeps its id, so favourites still point at it.
     func add(_ source: IPTVSource) {

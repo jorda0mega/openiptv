@@ -69,6 +69,28 @@ if let portal = value("OPENIPTV_STALKER_PORTAL").flatMap(StalkerProvider.normali
 
 let deviceId = "openiptv-smoke"
 var emby: EmbyAccount?
+
+// Dev-only modes for testing the app with a real account without its
+// password ever reaching the app or disk: `session` signs in with Emby
+// Connect and writes the session (JSON) to stdout for a pipe; `logout`
+// reads that session from stdin and ends it on the server.
+if value("OPENIPTV_SMOKE_MODE") == "logout" {
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    if let account = try? JSONDecoder().decode(EmbyAccount.self, from: data) {
+        await EmbyClient(account: account, deviceId: deviceId).logout()
+    }
+    exit(0)
+}
+if value("OPENIPTV_SMOKE_MODE") == "session" {
+    guard let user = value("OPENIPTV_EMBY_CONNECT_USER"), let pass = value("OPENIPTV_EMBY_CONNECT_PASS"),
+          let session = try? await EmbyClient.connectLogin(email: user, password: pass),
+          let server = session.servers.first,
+          let account = try? await EmbyClient.exchange(server, session: session, deviceId: deviceId),
+          let json = try? JSONEncoder().encode(account)
+    else { exit(1) }
+    FileHandle.standardOutput.write(json)
+    exit(0)
+}
 do {
     if let user = value("OPENIPTV_EMBY_CONNECT_USER"), let pass = value("OPENIPTV_EMBY_CONNECT_PASS") {
         print("\n== Emby Connect")

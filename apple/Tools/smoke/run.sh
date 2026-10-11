@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build and run the provider smoke test (macOS). See main.swift for the
-# environment variables it reads.
+# environment variables it reads. `run.sh --build-only PATH` just builds.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out=$(mktemp -d)
@@ -13,4 +13,5 @@ swiftc -O -target arm64-apple-macos14 -o "$out/smoke" \
   "$src/Emby/EmbyModels.swift" "$src/Emby/Artwork.swift" "$src/Emby/EmbyClient.swift" \
   "$src/Search/SearchIndex.swift" \
   Tools/smoke/main.swift
+if [[ "${1:-}" == "--build-only" ]]; then cp "$out/smoke" "${2:?path}"; exit 0; fi
 "$out/smoke"
