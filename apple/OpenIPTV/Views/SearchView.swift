@@ -82,9 +82,13 @@ struct SearchView: View {
                         }
                     }
                 }
-                if model.library.indexing, model.library.count == 0, !query.isEmpty {
-                    Text("Your library is still loading in the background; these results come from the server.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                if let progress = model.library.progress {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ProgressView(value: Double(progress.loaded), total: Double(max(progress.total, 1)))
+                        Text("Loading your library: \(progress.loaded.formatted()) of \(progress.total.formatted()) titles. Search covers what's loaded so far.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
                 }
             }
             .listStyle(.plain)
@@ -148,17 +152,22 @@ struct SearchView: View {
         let libraryCorpus = model.library.corpus
         let channelCorpus = model.channelCorpus
         let previousLibrary = libraryMatch, previousChannels = channelMatch
-        let (lm, cm) = await Task.detached(priority: .userInitiated) {
-            (libraryCorpus.search(q, refining: previousLibrary), channelCorpus.search(q, refining: previousChannels))
+        let (lm, cm, typoLibrary, typoChannels) = await Task.detached(priority: .userInitiated) {
+            let lm = libraryCorpus.search(q, refining: previousLibrary)
+            let cm = channelCorpus.search(q, refining: previousChannels)
+            // Few exact matches: also look for near-misses (typos).
+            let fl = lm.ranked.count < 8 ? libraryCorpus.fuzzy(q).filter { !Set(lm.ranked.prefix(40)).contains($0) } : []
+            let fc = cm.ranked.count < 8 ? channelCorpus.fuzzy(q, limit: 30).filter { !Set(cm.ranked.prefix(60)).contains($0) } : []
+            return (lm, cm, fl, fc)
         }.value
         guard !Task.isCancelled else { return }
         libraryMatch = lm
         channelMatch = cm
-        library = lm.ranked.prefix(40).compactMap { model.card(for: libraryCorpus.items[$0], width: thumbWidth) }
-        channels = cm.ranked.prefix(60).map { channelCorpus.items[$0] }
+        library = (Array(lm.ranked.prefix(40)) + typoLibrary).compactMap { model.card(for: libraryCorpus.items[$0], width: thumbWidth) }
+        channels = (Array(cm.ranked.prefix(60)) + typoChannels).map { channelCorpus.items[$0] }
         completions = Self.completions(for: q,
-                                       names: lm.ranked.prefix(12).map { libraryCorpus.items[$0].name }
-                                           + cm.ranked.prefix(6).map { channelCorpus.items[$0].name })
+                                       names: (Array(lm.ranked.prefix(12)) + typoLibrary.prefix(6)).map { libraryCorpus.items[$0].name }
+                                           + (Array(cm.ranked.prefix(6)) + typoChannels.prefix(3)).map { channelCorpus.items[$0].name })
         serverDone = false
 
         let trimmed = q.trimmingCharacters(in: .whitespaces)
@@ -167,7 +176,7 @@ struct SearchView: View {
             serverDone = true
             return
         }
-        try? await Task.sleep(for: .milliseconds(220))
+        try? await Task.sleep(for: .milliseconds(150))
         guard !Task.isCancelled else { return }
         let cards = await model.serverSearch(trimmed, cardWidth: thumbWidth)
         guard !Task.isCancelled else { return }

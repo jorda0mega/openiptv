@@ -263,9 +263,16 @@ class Handler(BaseHTTPRequestHandler):
             names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
             shows = [{"Id": f"s{i}", "Name": n, "Type": "Series", "ProductionYear": 2000 + i,
                       "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
-            everything = shows + [movie(i) for i in range(40)]
+            # Big enough to page: real libraries run to 100k+ titles.
+            extra = [{"Id": f"x{i}", "Name": f"Library Title {i:05d}", "Type": "Movie", "ProductionYear": 2000 + i % 25,
+                      "ImageTags": {"Primary": f"t{i % 40}"}} for i in range(23000)]
+            everything = shows + [movie(i) for i in range(40)] + extra
             start, limit = int(q.get("StartIndex", 0)), int(q.get("Limit", 100))
-            return self.send({"Items": everything[start:start + limit]})
+            time.sleep(0.5)  # a page takes a while on a real server
+            body = {"Items": everything[start:start + limit]}
+            if q.get("EnableTotalRecordCount") == "true":
+                body["TotalRecordCount"] = len(everything)
+            return self.send(body)
         if path == "/Users/U1/Items" and "SearchTerm" in q:
             term = q["SearchTerm"].lower()
             found = [episode(i) for i in range(3) if term in "episode"] + \

@@ -207,53 +207,62 @@ struct EmbyClient {
     // MARK: Search
 
     /// Movies and shows (name, year, poster tag) for instant on-device
-    /// search, in pages sorted by name: everything, or only what was added
-    /// or changed since `changedSince`.
+    /// search: everything, or only what was added or changed since
+    /// `changedSince`, page by page.
     func libraryIndex(changedSince: Date? = nil, pageSize: Int = 5000, cap: Int = 250_000) async throws -> [LibraryEntry] {
+        var out: [LibraryEntry] = []
+        var start = 0
+        while start < cap {
+            let page = try await libraryPage(start: start, limit: pageSize, changedSince: changedSince)
+            out += page.entries
+            if page.entries.count < pageSize { break }
+            start += pageSize
+        }
+        return out
+    }
+
+    /// One page of the catalog, sorted by name; `total` when asked for.
+    func libraryPage(start: Int, limit: Int, changedSince: Date? = nil, withTotal: Bool = false) async throws
+        -> (entries: [LibraryEntry], total: Int?) {
         struct Entry: Decodable {
             let id: String
             let name: String?
             let kind: String?
             let year: Int?
             let tags: [String: String]?
-            let aspect: Double?
             enum CodingKeys: String, CodingKey {
-                case id = "Id", name = "Name", kind = "Type", year = "ProductionYear"
-                case tags = "ImageTags", aspect = "PrimaryImageAspectRatio"
+                case id = "Id", name = "Name", kind = "Type", year = "ProductionYear", tags = "ImageTags"
             }
         }
-        struct Page: Decodable { let Items: [Lenient<Entry>]? }
-        var out: [LibraryEntry] = []
-        var start = 0
-        while start < cap {
-            var parts = URLComponents(url: Self.api(account.serverURL, "Users/\(account.userId)/Items"), resolvingAgainstBaseURL: false)!
-            parts.queryItems = [
-                .init(name: "Recursive", value: "true"), .init(name: "IncludeItemTypes", value: "Movie,Series"),
-                .init(name: "Fields", value: "ProductionYear,PrimaryImageAspectRatio"),
-                .init(name: "EnableImageTypes", value: "Primary"), .init(name: "ImageTypeLimit", value: "1"),
-                .init(name: "EnableUserData", value: "false"), .init(name: "EnableTotalRecordCount", value: "false"),
-                .init(name: "SortBy", value: "SortName"), .init(name: "SortOrder", value: "Ascending"),
-                .init(name: "StartIndex", value: String(start)), .init(name: "Limit", value: String(pageSize)),
-            ]
-            if let changedSince {
-                parts.queryItems?.append(.init(name: "MinDateLastSaved", value: ISO8601DateFormatter().string(from: changedSince)))
-            }
-            var request = URLRequest(url: parts.url!)
-            request.timeoutInterval = 60
-            authorize(&request)
-            let data = try await HTTP.data(request)
-            let page = try await Task.detached(priority: .utility) {
-                (try JSONDecoder().decode(Page.self, from: data).Items ?? []).compactMap(\.value)
-            }.value
-            out += page.compactMap { entry in
+        struct Page: Decodable {
+            let Items: [Lenient<Entry>]?
+            let TotalRecordCount: Int?
+        }
+        var parts = URLComponents(url: Self.api(account.serverURL, "Users/\(account.userId)/Items"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [
+            .init(name: "Recursive", value: "true"), .init(name: "IncludeItemTypes", value: "Movie,Series"),
+            .init(name: "Fields", value: "ProductionYear"),
+            .init(name: "EnableImageTypes", value: "Primary"), .init(name: "ImageTypeLimit", value: "1"),
+            .init(name: "EnableUserData", value: "false"), .init(name: "EnableTotalRecordCount", value: withTotal ? "true" : "false"),
+            .init(name: "SortBy", value: "SortName"), .init(name: "SortOrder", value: "Ascending"),
+            .init(name: "StartIndex", value: String(start)), .init(name: "Limit", value: String(limit)),
+        ]
+        if let changedSince {
+            parts.queryItems?.append(.init(name: "MinDateLastSaved", value: ISO8601DateFormatter().string(from: changedSince)))
+        }
+        var request = URLRequest(url: parts.url!)
+        request.timeoutInterval = 60
+        authorize(&request)
+        let data = try await HTTP.data(request)
+        return try await Task.detached(priority: .utility) {
+            let page = try JSONDecoder().decode(Page.self, from: data)
+            let entries: [LibraryEntry] = (page.Items ?? []).compactMap(\.value).compactMap { entry in
                 guard let name = entry.name, !name.isEmpty else { return nil }
                 return LibraryEntry(id: entry.id, name: name, kind: entry.kind ?? "Movie", year: entry.year,
-                                    imageTag: entry.tags?["Primary"], aspect: entry.aspect)
+                                    imageTag: entry.tags?["Primary"], aspect: nil)
             }
-            if page.count < pageSize { break }
-            start += pageSize
-        }
-        return out
+            return (entries, page.TotalRecordCount)
+        }.value
     }
 
     /// The server's own search, for episodes (which the on-device index
