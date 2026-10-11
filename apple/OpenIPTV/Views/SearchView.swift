@@ -11,6 +11,9 @@ struct SearchView: View {
     @Binding var playing: PlayerItem?
 
     @State private var query = ""
+    #if os(iOS)
+    @FocusState private var fieldFocused: Bool
+    #endif
     @State private var library: [Card] = []
     @State private var channels: [LiveChannel] = []
     @State private var completions: [String] = []
@@ -96,8 +99,17 @@ struct SearchView: View {
             .overlay { emptyState }
             .navigationTitle("Search")
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
+            #if os(iOS)
+            // One field with one clear button, instead of the system bar's
+            // clear and close buttons side by side. Scrolling the results
+            // or the keyboard's Search key puts the keyboard away.
+            .scrollDismissesKeyboard(.immediately)
+            .safeAreaInset(edge: .bottom) { searchField }
+            .onAppear { if query.isEmpty { fieldFocused = true } }
+            #else
             .searchable(text: $query, prompt: "Movies, shows, channels")
             .autocorrectionDisabled()
+            #endif
             // Re-run when the text changes or an index finishes loading.
             .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") { await search() }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
@@ -107,6 +119,37 @@ struct SearchView: View {
             }
         }
     }
+
+    #if os(iOS)
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Movies, shows, people, channels", text: $query)
+                .focused($fieldFocused)
+                .submitLabel(.search)
+                .onSubmit { fieldFocused = false }
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                    fieldFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+        .contentShape(.capsule)
+        .onTapGesture { fieldFocused = true }
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+    #endif
 
     @ViewBuilder private var emptyState: some View {
         let q = query.trimmingCharacters(in: .whitespaces)
