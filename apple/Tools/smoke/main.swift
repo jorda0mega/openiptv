@@ -81,6 +81,125 @@ if value("OPENIPTV_SMOKE_MODE") == "logout" {
     }
     exit(0)
 }
+// `perf`: what a tap and a seek cost on the real server, using a session
+// from `session` (stdin). Titles to try in OPENIPTV_SMOKE_TITLES, separated
+// by ";". Prints timings, sizes and bitrates only.
+if value("OPENIPTV_SMOKE_MODE") == "perf" {
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    guard let account = try? JSONDecoder().decode(EmbyAccount.self, from: data) else { print("perf: no session"); exit(1) }
+    let client = EmbyClient(account: account, deviceId: deviceId)
+
+    /// Time to the first byte and to `length` bytes of a range, plus the file size.
+    func fetch(_ url: URL, headers: [String], from offset: Int64, length: Int64, session: URLSession) async
+        -> (first: Double, all: Double, bytes: Int, total: Int64?, status: Int)? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.setValue("bytes=\(offset)-\(offset + length - 1)", forHTTPHeaderField: "Range")
+        for header in headers {
+            let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            if pair.count == 2 { request.setValue(pair[1], forHTTPHeaderField: pair[0]) }
+        }
+        let start = Date()
+        guard let (stream, response) = try? await session.bytes(for: request) else { return nil }
+        var first: Double?
+        var count = 0
+        do {
+            for try await _ in stream {
+                if first == nil { first = Date().timeIntervalSince(start) }
+                count += 1
+                if count >= length { break }
+            }
+        } catch {}
+        let http = response as? HTTPURLResponse
+        let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
+        return (first ?? 0, Date().timeIntervalSince(start), count, total, http?.statusCode ?? 0)
+    }
+    func s(_ seconds: Double) -> String { String(format: "%.2f s", seconds) }
+
+    for title in (value("OPENIPTV_SMOKE_TITLES") ?? "The Goonies").split(separator: ";").map(String.init) {
+        print("\n== \(title)")
+        var t = Date()
+        let found = (try? await client.search(title, cardWidth: 300)) ?? []
+        print("  search          \(found.count) results in \(ms(t))")
+        guard let card = found.first(where: { $0.kind == "Movie" }) ?? found.first(where: { $0.kind == "Episode" }) ?? found.first
+        else { continue }
+        t = Date()
+        guard let playback = try? await client.playback(itemId: card.id, kind: card.kind) else { print("  resolve failed"); continue }
+        print("  resolve         \(playback.method) in \(ms(t)) · \(card.kind) · bitrate \(playback.bitrate.map { String(format: "%.1f Mbps", Double($0) / 1e6) } ?? "?")")
+        t = Date()
+        let info = try? await client.playbackInfo(playback.itemId, startSeconds: nil)
+        let width = info?.MediaSources?.first?.videoWidth
+        print("  playbackinfo    alone in \(ms(t)) · video width \(width.map(String.init) ?? "?") · container \(info?.MediaSources?.first?.Container ?? "?")")
+
+        // Opening: a new connection (DNS, TCP, TLS) for the first 512 KB.
+        let fresh = URLSession(configuration: .ephemeral)
+        guard let open = await fetch(playback.url, headers: playback.headers, from: 0, length: 524_288, session: fresh) else {
+            print("  open            failed"); continue
+        }
+        let size = open.total ?? 0
+        print("  open            HTTP \(open.status) first byte \(s(open.first)), 512 KB in \(s(open.all)) · file \(String(format: "%.2f GB", Double(size) / 1e9))")
+        // Throughput: 16 MB from the start, same connection.
+        if let speed = await fetch(playback.url, headers: playback.headers, from: 524_288, length: 16_777_216, session: fresh) {
+            print("  throughput      \(String(format: "%.0f Mbps", Double(speed.bytes) * 8 / max(speed.all, 0.001) / 1e6)) (16 MB in \(s(speed.all)))")
+        }
+        // Seeks: a range far into the file, reusing the connection, then on a new one.
+        var reused: [Double] = [], newConnection: [Double] = []
+        for _ in 0..<5 where size > 50_000_000 {
+            let at = Int64.random(in: 10_000_000...(size - 10_000_000))
+            if let r = await fetch(playback.url, headers: playback.headers, from: at, length: 2_097_152, session: fresh) { reused.append(r.first) }
+            if let r = await fetch(playback.url, headers: playback.headers, from: at, length: 2_097_152, session: URLSession(configuration: .ephemeral)) {
+                newConnection.append(r.first)
+            }
+        }
+        func summary(_ values: [Double]) -> String {
+            values.isEmpty ? "—" : "median \(s(values.sorted()[values.count / 2])), worst \(s(values.max()!))"
+        }
+        print("  seek, same conn first byte \(summary(reused))")
+        print("  seek, new conn  first byte \(summary(newConnection))")
+        // The stream without a media source id (could start before PlaybackInfo answers).
+        if var parts = URLComponents(url: playback.url, resolvingAgainstBaseURL: false) {
+            parts.queryItems = parts.queryItems?.filter { $0.name != "MediaSourceId" && $0.name != "PlaySessionId" }
+            if let url = parts.url, let r = await fetch(url, headers: playback.headers, from: 0, length: 65_536, session: fresh) {
+                print("  no source id    HTTP \(r.status), first byte \(s(r.first))")
+            }
+        }
+        // ffmpeg (inside libmpv) opening it: headers, index, first video packet.
+        if let ffprobe = value("OPENIPTV_SMOKE_FFPROBE") {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: ffprobe)
+            let headerArg = playback.headers.map { $0 + "\r\n" }.joined()
+            task.arguments = ["-v", "error", "-headers", headerArg, "-select_streams", "v:0", "-show_entries", "stream=codec_name,width",
+                              "-read_intervals", "%+#1", "-of", "csv=p=0", playback.url.absoluteString]
+            task.standardOutput = Pipe()
+            task.standardError = Pipe()
+            let begun = Date()
+            try? task.run()
+            task.waitUntilExit()
+            print("  ffprobe open    \(s(Date().timeIntervalSince(begun))) (exit \(task.terminationStatus))")
+        }
+        // A server-converted version: how long until its first video segment.
+        let converted = client.hlsURL(playback.itemId, mediaSourceId: playback.mediaSourceId ?? playback.itemId,
+                                      playSessionId: playback.playSessionId, start: 600, bitrate: 8_000_000)
+        t = Date()
+        var request = URLRequest(url: converted)
+        request.timeoutInterval = 60
+        if let (master, _) = try? await fresh.data(for: request),
+           let variant = String(decoding: master, as: UTF8.self).split(separator: "\n").first(where: { !$0.hasPrefix("#") && !$0.isEmpty }),
+           let variantURL = URL(string: String(variant), relativeTo: converted) {
+            var vr = URLRequest(url: variantURL)
+            vr.timeoutInterval = 60
+            if let (list, _) = try? await fresh.data(for: vr),
+               let segment = String(decoding: list, as: UTF8.self).split(separator: "\n").first(where: { !$0.hasPrefix("#") && !$0.isEmpty }),
+               let segmentURL = URL(string: String(segment), relativeTo: variantURL) {
+                var sr = URLRequest(url: segmentURL)
+                sr.timeoutInterval = 60
+                let ok = (try? await fresh.data(for: sr)) != nil
+                print("  converted       first segment \(ok ? "after" : "failed after") \(ms(t))")
+            } else { print("  converted       no segment list after \(ms(t))") }
+        } else { print("  converted       no playlist after \(ms(t))") }
+    }
+    exit(0)
+}
 if value("OPENIPTV_SMOKE_MODE") == "session" {
     guard let user = value("OPENIPTV_EMBY_CONNECT_USER"), let pass = value("OPENIPTV_EMBY_CONNECT_PASS"),
           let session = try? await EmbyClient.connectLogin(email: user, password: pass),

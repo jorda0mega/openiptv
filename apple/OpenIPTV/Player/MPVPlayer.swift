@@ -27,6 +27,8 @@ final class MPVPlayer: @unchecked Sendable {
         /// Seconds buffered ahead and the current download speed (bytes/s),
         /// about once a second.
         case network(buffer: Double, bytesPerSecond: Double)
+        /// A jump landed and playback carried on; seconds since it was asked.
+        case seeked(Double)
         case ended
     }
 
@@ -39,6 +41,8 @@ final class MPVPlayer: @unchecked Sendable {
     /// When the file was open (headers read), for the start-up breakdown.
     private(set) var openedAfter: Double?
     private var reportedStart = false
+    /// When the last explicit jump was asked for (not scrubbing previews).
+    private var seekStarted: CFAbsoluteTime?
     /// The first frame is ready (a warmed-up player may already be there).
     var hasStarted: Bool { queue.sync { reportedStart } }
     private var duration: Double?
@@ -181,18 +185,27 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     func seek(by seconds: Double) {
-        queue.async { [self] in command(["seek", String(seconds), "relative"]) }
+        queue.async { [self] in
+            seekStarted = CFAbsoluteTimeGetCurrent()
+            command(["seek", String(seconds), "relative"])
+        }
     }
 
     /// `exact: false` lands on the nearest keyframe: quick enough to follow
     /// a finger while scrubbing.
     func seek(to seconds: Double, exact: Bool = true) {
-        queue.async { [self] in command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"]) }
+        queue.async { [self] in
+            seekStarted = exact ? CFAbsoluteTimeGetCurrent() : nil
+            command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
+        }
     }
 
-    /// Stops playback and frees libmpv; the network connection closes with it.
+    /// Stops playback and frees libmpv; the network connection closes with
+    /// it. Returns at once: closing a connection mid-download can take a
+    /// moment, and the screen mustn't wait for it.
     func shutdown() {
-        queue.sync {
+        onEvent = nil
+        queue.async { [self] in
             guard let mpv else { return }
             mpv_set_wakeup_callback(mpv, nil, nil)
             mpv_terminate_destroy(mpv)
@@ -226,8 +239,14 @@ final class MPVPlayer: @unchecked Sendable {
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
         case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:
             reportedStart = true
+            seekStarted = nil
             if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
             emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted))
+        case MPV_EVENT_PLAYBACK_RESTART:
+            if let asked = seekStarted {
+                seekStarted = nil
+                emit(.seeked(CFAbsoluteTimeGetCurrent() - asked))
+            }
         case MPV_EVENT_END_FILE:
             guard let data = event.data else { return }
             let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee

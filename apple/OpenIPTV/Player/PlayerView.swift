@@ -447,19 +447,12 @@ struct MoviePlayerView: View {
             let player = makePlayer(prefs: prefs)
             player.onEvent = { event in handle(event) }
             self.player = player
-            // On a connection too slow for this file last time, start at a
-            // quality it can keep up with instead of stalling first.
-            let startAt = prefs.adaptiveQuality
-                ? QualityGovernor.startingQuality(original: playback.bitrate, knownSpeed: model.knownSpeed) : nil
-            if let startAt, let url = model.convertedURL(for: playback, bitrate: startAt, start: position) {
-                governor = QualityGovernor(original: playback.bitrate, current: startAt)
-                lastConverted = startAt
-                offset = position
-                player.load(url, headers: playback.fallbackHeaders, file: false)
-            } else {
-                player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
-                            readahead: NetworkStatus.shared.fileReadahead)
-            }
+            // Always the original file first: it's on screen in about a
+            // second, while a server-converted version takes 5-15 s to
+            // begin (and every seek restarts it). Quality only drops if the
+            // original actually stalls.
+            player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
+                        readahead: NetworkStatus.shared.fileReadahead)
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
@@ -507,6 +500,15 @@ struct MoviePlayerView: View {
         }
     }
 
+    /// Shows a timing under the title for a few seconds.
+    private func showTiming(_ text: String, for seconds: Double) {
+        timing = text
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            if timing == text { timing = nil }
+        }
+    }
+
     private func note(_ text: String) {
         qualityNote = text
         showControls()
@@ -534,12 +536,17 @@ struct MoviePlayerView: View {
                 timing = String(format: "Started in %.1f s · server %.1f · setup %.1f · open %.1f · first frame %.1f",
                                 total, playback.resolvedIn, setup, opened, playerSeconds - opened)
             }
-            Task {
-                try? await Task.sleep(for: .seconds(5))
-                timing = nil
-            }
+            showTiming(timing ?? "", for: 5)
+            #if DEBUG
+            print("PERF start " + (timing ?? ""))
+            #endif
             if controlsVisible { showControls() }
             Task { await model.report(playback, seconds: position, event: .started) }
+        case let .seeked(seconds):
+            showTiming(String(format: "Jumped in %.1f s", seconds), for: 3)
+            #if DEBUG
+            print(String(format: "PERF seek %.3f", seconds))
+            #endif
         case let .buffering(isBuffering):
             buffering = isBuffering
             // A stall: drop quality straight away rather than wait it out.
