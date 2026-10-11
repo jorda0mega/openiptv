@@ -44,10 +44,10 @@ struct MovieView: View {
                         Text(overview).font(.callout).foregroundStyle(.secondary)
                     }
                     if let cast = names("Actor", limit: 5) {
-                        Text("Starring ").foregroundStyle(.secondary) + Text(cast)
+                        Text("\(Text("Starring ").foregroundStyle(.secondary))\(cast)")
                     }
                     if let directors = names("Director", limit: 2) {
-                        Text("Directed by ").foregroundStyle(.secondary) + Text(directors)
+                        Text("\(Text("Directed by ").foregroundStyle(.secondary))\(directors)")
                     }
                 }
                 .font(.callout)

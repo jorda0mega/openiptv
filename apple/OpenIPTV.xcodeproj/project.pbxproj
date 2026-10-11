@@ -35,6 +35,7 @@
 		1FFCAB2944137C5D0E16CC38 /* gmp.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 363AD3E84AD3778E05926FBC /* gmp.xcframework */; };
 		21102DA03C0F276A1F777950 /* XtreamProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B14B5E25BA30ECE2BD6E701 /* XtreamProvider.swift */; };
 		21673D3FCC00E6AAD2482428 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9272170531EC055784C91DD9 /* SearchView.swift */; };
+		2174A08ABD27777FA42CA50C /* ChannelGuideSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */; };
 		23168F779200D94FECA8F7DF /* Libmpv.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */; };
 		23B67B05DCEB22C87EDA490A /* StalkerProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01633BC141A3C9A9B66CFBB /* StalkerProvider.swift */; };
 		240BD0211D4FCFCF292DBB40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA8AA4353609B682F3F99884 /* Assets.xcassets */; };
@@ -116,12 +117,14 @@
 		91F2A548D81B99D0F53961DA /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
 		9259FCFBEFAD1A28D4C6ECB0 /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
 		972CFEF9670619E14A53FC6D /* QualityGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */; };
+		976B05916C747916000E1666 /* LivePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */; };
 		9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
 		99DE67411BE1E03903160C2B /* Libswresample.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D7286B5ED1C79D8A2625EBC /* Libswresample.xcframework */; };
 		9D020ADB81802B4D285D41DE /* Libswscale.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */; };
 		9D12F9249C18D8868CB560E6 /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BBE98FBA505A36A33CB129 /* libresolv.tbd */; };
 		9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D066C9DD9FC2285C24EF35 /* LiveView.swift */; };
 		9E2304F19B2CE1A0B3B0FE59 /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 188FE6D60C2DA8B042E0772F /* libc++.tbd */; };
+		9F06D59EE7F81D0590BE65AE /* LivePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */; };
 		A2006EE70586F43CED61C5E4 /* Libdav1d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */; };
 		A49929AB5718F330A7BBDB8C /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
 		A4C285B27BC4A5193F7D2399 /* SmartSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D955785FF1529F49B082EE5 /* SmartSearch.swift */; };
@@ -159,6 +162,7 @@
 		CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
 		D01B9761AC76010F22918EFD /* Libuavs3d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */; };
 		D23BC078C762E09CCD49BD29 /* nettle.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57788799C7CF36103C03E61C /* nettle.xcframework */; };
+		D74D0C1558A8A17859D625AE /* ChannelGuideSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */; };
 		D9ADA4B59CE9DE2921B38B77 /* Libuchardet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */; };
 		DAFF7B46995143828A4E0CF1 /* Libavutil.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */; };
 		DB9631F047A88625F86A6031 /* Libssl.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00EF07025216C13B1F3C7908 /* Libssl.xcframework */; };
@@ -232,6 +236,7 @@
 		857825645808317F48AB50AA /* StreamRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamRelay.swift; sourceTree = "<group>"; };
 		8781972F0C4836EB0FCF2A63 /* Onboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Onboarding.swift; sourceTree = "<group>"; };
 		8A0C07B0687D27055C5D787B /* Libavfilter.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavfilter.xcframework; path = Vendor/Libavfilter.xcframework; sourceTree = "<group>"; };
+		8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelGuideSheet.swift; sourceTree = "<group>"; };
 		8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libharfbuzz.xcframework; path = Vendor/Libharfbuzz.xcframework; sourceTree = "<group>"; };
 		9007B25996DDA88FE40D727B /* TMDbPopularity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TMDbPopularity.swift; sourceTree = "<group>"; };
 		9236570FD5D04A7FE5B59AB8 /* Artwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Artwork.swift; sourceTree = "<group>"; };
@@ -266,6 +271,7 @@
 		D5B1B94210411D81E015B0B6 /* Libass.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libass.xcframework; path = Vendor/Libass.xcframework; sourceTree = "<group>"; };
 		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
 		DB4C4ECAD884618771521E44 /* MPVPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MPVPlayer.swift; sourceTree = "<group>"; };
+		E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePlayerView.swift; sourceTree = "<group>"; };
 		E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libmpv.xcframework; path = Vendor/Libmpv.xcframework; sourceTree = "<group>"; };
 		E6BB902BA3158069CE35BE75 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		E895C7A337E5874B38A8020C /* MovieView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieView.swift; sourceTree = "<group>"; };
@@ -389,6 +395,8 @@
 		03EBA60F67C7DE2879FBE5FA /* Player */ = {
 			isa = PBXGroup;
 			children = (
+				8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */,
+				E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */,
 				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
 				F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */,
 				098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */,
@@ -738,6 +746,7 @@
 				3E9B707F4696C5845239813A /* AppModel.swift in Sources */,
 				6174F7217B1972C035E19B29 /* AreaPicker.swift in Sources */,
 				F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */,
+				D74D0C1558A8A17859D625AE /* ChannelGuideSheet.swift in Sources */,
 				5274B2DEB0C7389DA1D68536 /* EmbyClient.swift in Sources */,
 				A836B9DAC9566FBE6B593F57 /* EmbyLive.swift in Sources */,
 				E40A99A7F0AB7CF0C2BEC24E /* EmbyModels.swift in Sources */,
@@ -750,6 +759,7 @@
 				C2B3A024AC7BEF379F2E4C4A /* ImagePipeline.swift in Sources */,
 				53650932E226B2B55FA992A1 /* Keychain.swift in Sources */,
 				84F1C24A345749B9277FDA29 /* LiveModels.swift in Sources */,
+				976B05916C747916000E1666 /* LivePlayerView.swift in Sources */,
 				A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */,
 				C4B8046237E84B860469F18F /* LocalArea.swift in Sources */,
 				330A2AE3555A65DCFB5FD0A9 /* M3UProvider.swift in Sources */,
@@ -786,6 +796,7 @@
 				B641DA8A97E206CE72401932 /* AppModel.swift in Sources */,
 				C296F7829BEFC8DEE6E19B75 /* AreaPicker.swift in Sources */,
 				AA86629D3DF58B7575BE0703 /* Artwork.swift in Sources */,
+				2174A08ABD27777FA42CA50C /* ChannelGuideSheet.swift in Sources */,
 				70DBA9993C5650094FE7CCDD /* EmbyClient.swift in Sources */,
 				5412E25247B36394D2775B17 /* EmbyLive.swift in Sources */,
 				FFA65B87FDAD93B66C25DE91 /* EmbyModels.swift in Sources */,
@@ -798,6 +809,7 @@
 				507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */,
 				4209B928261B700D9F0978FA /* Keychain.swift in Sources */,
 				1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */,
+				9F06D59EE7F81D0590BE65AE /* LivePlayerView.swift in Sources */,
 				9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */,
 				10E6DBCB2E85AE6FC761AF98 /* LocalArea.swift in Sources */,
 				808B66520C8C418D89B0EC89 /* M3UProvider.swift in Sources */,

@@ -26,12 +26,16 @@ struct LiveChannel: Codable, Hashable, Identifiable {
     /// Provider id used for its own short-EPG lookups.
     let nativeId: String
     let stream: StreamRef
+    /// Days of programmes the provider keeps to watch again (catch-up).
+    var archiveDays: Int? = nil
 }
 
 struct Programme: Codable, Hashable {
     let start: Int64
     let stop: Int64
     let title: String
+    /// The provider keeps a recording to watch from the start (catch-up).
+    var archived: Bool? = nil
 
     func progress(at date: Date = .now) -> Double {
         guard stop > start else { return 0 }
@@ -109,11 +113,18 @@ protocol LiveProvider: Sendable {
     /// Quick per-channel now/next straight from the provider, if it has one.
     func shortEPG(for channel: LiveChannel) async -> [Programme]
     func playable(_ channel: LiveChannel) async throws -> PlayableStream
+    /// The channel's schedule, days back and ahead, marking what can be
+    /// watched again (empty when the provider has no per-channel guide).
+    func schedule(for channel: LiveChannel) async -> [Programme]
+    /// A recorded programme from its start (nil without catch-up).
+    func catchup(_ channel: LiveChannel, programme: Programme) async throws -> PlayableStream?
 }
 
 extension LiveProvider {
     func shortEPG(for channel: LiveChannel) async -> [Programme] { [] }
     func channels(inCategory categoryId: String) async throws -> [LiveChannel]? { nil }
+    func schedule(for channel: LiveChannel) async -> [Programme] { [] }
+    func catchup(_ channel: LiveChannel, programme: Programme) async throws -> PlayableStream? { nil }
 }
 
 enum Providers {

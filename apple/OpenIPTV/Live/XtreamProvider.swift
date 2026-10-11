@@ -66,7 +66,10 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
             return LiveCategory(id: id, name: raw.name, channels: count)
         }
         var xmltv = URLComponents(url: server.appending(path: "xmltv.php"), resolvingAgainstBaseURL: false)!
-        xmltv.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password)]
+        // Today and tomorrow only, a quarter smaller than everything; a
+        // channel's earlier programmes come from its own schedule.
+        xmltv.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password),
+                            .init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")]
         return LiveLineup(categories: categories, channels: channels, guideURLs: [xmltv.url!])
     }
 
@@ -88,8 +91,54 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
             id: "\(source.id.uuidString)|\(id)", sourceId: source.id, number: raw.num, name: raw.name,
             logo: raw.stream_icon.flatMap { $0.hasPrefix("http") ? URL(string: $0) : nil },
             categoryId: raw.category_id.map { "\(source.id.uuidString)|\($0)" }, epgId: raw.epg_channel_id,
-            nativeId: String(id), stream: .xtream(streamId: id)
+            nativeId: String(id), stream: .xtream(streamId: id), archiveDays: raw.archiveDays
         )
+    }
+
+    /// The channel's own schedule (Xtream's get_simple_data_table: days
+    /// back and ahead, about 80 KB), marking programmes kept for catch-up.
+    func schedule(for channel: LiveChannel) async -> [Programme] {
+        guard let data = try? await HTTP.data(api([
+            .init(name: "action", value: "get_simple_data_table"), .init(name: "stream_id", value: channel.nativeId),
+        ])), let table = try? JSONDecoder().decode(ShortEPG.self, from: data) else { return [] }
+        return table.listings.compactMap { l in
+            guard let start = l.start, let stop = l.stop else { return nil }
+            return Programme(start: start, stop: stop, title: Self.decodeText(l.title), archived: l.archived)
+        }.sorted { $0.start < $1.start }
+    }
+
+    /// A recorded programme from its start: /timeshift/user/pass/minutes/
+    /// yyyy-MM-dd:HH-mm/id.ts, the start in the panel's own time zone.
+    func catchup(_ channel: LiveChannel, programme: Programme) async throws -> PlayableStream? {
+        guard case let .xtream(id) = channel.stream, channel.archiveDays != nil else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd:HH-mm"
+        formatter.timeZone = await serverTimeZone()
+        let minutes = max(1, Int((programme.stop - programme.start + 59) / 60))
+        var url = server
+        for segment in ["timeshift", username, password, String(minutes),
+                        formatter.string(from: Date(timeIntervalSince1970: TimeInterval(programme.start))), "\(id).ts"] {
+            url.append(path: segment)
+        }
+        return PlayableStream(url: url)
+    }
+
+    private static let zones = Locked<[String: TimeZone]>([:])
+
+    /// The panel's own time zone, asked once.
+    private func serverTimeZone() async -> TimeZone {
+        let key = server.absoluteString
+        if let known = Self.zones.value[key] { return known }
+        struct Info: Decodable {
+            struct Server: Decodable { let timezone: String? }
+            let server_info: Server?
+        }
+        let data = try? await HTTP.data(api([]))
+        let name = data.flatMap { try? JSONDecoder().decode(Info.self, from: $0) }?.server_info?.timezone
+        let zone = name.flatMap(TimeZone.init(identifier:)) ?? TimeZone(identifier: "UTC")!
+        Self.zones.mutate { $0[key] = zone }
+        return zone
     }
 
     func shortEPG(for channel: LiveChannel) async -> [Programme] {
@@ -160,7 +209,10 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
         let stream_icon: String?
         let epg_channel_id: String?
         let category_id: String?
-        enum CodingKeys: String, CodingKey { case stream_id, num, name, stream_icon, epg_channel_id, category_id }
+        let archiveDays: Int?
+        enum CodingKeys: String, CodingKey {
+            case stream_id, num, name, stream_icon, epg_channel_id, category_id, tv_archive, tv_archive_duration
+        }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             stream_id = c.flexInt(.stream_id)
@@ -169,6 +221,8 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
             stream_icon = c.flexString(.stream_icon)
             epg_channel_id = c.flexString(.epg_channel_id)?.trimmingCharacters(in: .whitespaces)
             category_id = c.flexString(.category_id)
+            let days = c.flexInt(.tv_archive_duration).map(Int.init) ?? 0
+            archiveDays = c.flexInt(.tv_archive) == 1 && days > 0 ? days : nil
         }
     }
 
@@ -177,12 +231,14 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
             let title: String
             let start: Int64?
             let stop: Int64?
-            enum CodingKeys: String, CodingKey { case title, start_timestamp, stop_timestamp, end_timestamp }
+            let archived: Bool
+            enum CodingKeys: String, CodingKey { case title, start_timestamp, stop_timestamp, end_timestamp, has_archive }
             init(from decoder: Decoder) throws {
                 let c = try decoder.container(keyedBy: CodingKeys.self)
                 title = c.flexString(.title) ?? ""
                 start = c.flexInt(.start_timestamp)
                 stop = c.flexInt(.stop_timestamp) ?? c.flexInt(.end_timestamp)
+                archived = c.flexInt(.has_archive) == 1
             }
         }
         let listings: [Listing]

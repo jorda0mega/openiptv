@@ -688,7 +688,8 @@ final class AppModel {
             .contains { upper.contains($0) }
     }
 
-    private static let lineupFile = "live-lineup.v1.json"
+    // v2: channels say how many days the provider records.
+    private nonisolated static let lineupFile = "live-lineup.v2.json"
 
     private func applyLineup(categories cats: [LiveCategory], channels: [LiveChannel]) async {
         categories = cats
@@ -788,6 +789,33 @@ final class AppModel {
                 }
         }
         return (refined, people)
+    }
+
+    /// The channel as last loaded (the player may hold an older copy).
+    func current(_ channel: LiveChannel) -> LiveChannel {
+        channelById[channel.id] ?? channel
+    }
+
+    /// A channel's schedule with what can be watched again: the
+    /// provider's own (days back and ahead), else the guide's.
+    func schedule(for channel: LiveChannel) async -> [Programme] {
+        let channel = channelById[channel.id] ?? channel
+        let own = await provider(for: channel)?.schedule(for: channel) ?? []
+        if !own.isEmpty { return own }
+        guard let id = channel.epgId else { return [] }
+        return await guide.programmes(id)
+    }
+
+    /// A recorded programme from its start.
+    func catchup(_ channel: LiveChannel, programme: Programme) async throws -> PlayableStream {
+        guard let stream = try await provider(for: channel)?.catchup(channelById[channel.id] ?? channel, programme: programme) else {
+            throw SourceError.unexpected("This channel can't be watched from the start.")
+        }
+        return stream
+    }
+
+    private func provider(for channel: LiveChannel) -> LiveProvider? {
+        providers[channel.sourceId] ?? sources.iptv.first(where: { $0.id == channel.sourceId }).map(Providers.make)
     }
 
     func playable(_ channel: LiveChannel) async throws -> PlayableStream {

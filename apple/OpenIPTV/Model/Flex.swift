@@ -124,3 +124,12 @@ enum HTTP {
         try await data(URLRequest(url: url))
     }
 }
+
+/// A value guarded by a lock, for small caches shared across threads.
+final class Locked<Value>: @unchecked Sendable {
+    private var stored: Value
+    private let lock = NSLock()
+    init(_ value: Value) { stored = value }
+    var value: Value { lock.lock(); defer { lock.unlock() }; return stored }
+    func mutate(_ change: (inout Value) -> Void) { lock.lock(); change(&stored); lock.unlock() }
+}

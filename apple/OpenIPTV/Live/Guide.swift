@@ -85,6 +85,11 @@ actor GuideStore {
         return NowNext.from([current, upcoming].compactMap { $0 }, at: now, source: .guide)
     }
 
+    /// Everything kept for one channel (from 2 h ago), in order.
+    func programmes(_ epgId: String) -> [Programme] {
+        programmes[epgId] ?? []
+    }
+
     func clear() {
         programmes = [:]
         fetchedAt = nil

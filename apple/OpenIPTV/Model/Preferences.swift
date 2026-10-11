@@ -118,6 +118,6 @@ extension LiveChannel {
         guard case .url = stream else { return self }
         return LiveChannel(id: id, sourceId: sourceId, number: number, name: name, logo: logo,
                            categoryId: categoryId, epgId: epgId, nativeId: nativeId,
-                           stream: .url(URL(string: "about:blank")!, userAgent: nil, referrer: nil))
+                           stream: .url(URL(string: "about:blank")!, userAgent: nil, referrer: nil), archiveDays: archiveDays)
     }
 }

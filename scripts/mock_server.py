@@ -13,6 +13,8 @@ have something to find.
 
 import base64
 import hashlib
+import shutil
+import subprocess
 import json
 import threading
 import os
@@ -104,6 +106,21 @@ def title(ch, start):
 
 def xmltv_time(ts):
     return datetime.fromtimestamp(ts, PANEL_TZ).strftime("%Y%m%d%H%M%S +0100")
+
+
+_RECORDED = None
+
+
+def recorded_ts():
+    """The test video as MPEG-TS (made once), served as catch-up."""
+    global _RECORDED
+    source = os.environ.get("OPENIPTV_MOCK_VIDEO")
+    if _RECORDED is None and source and shutil.which("ffmpeg"):
+        target = os.path.splitext(source)[0] + ".ts"
+        if not os.path.exists(target):
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", source, "-c", "copy", "-f", "mpegts", target], check=False)
+        _RECORDED = target if os.path.exists(target) else ""
+    return _RECORDED or None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -220,8 +237,20 @@ class Handler(BaseHTTPRequestHandler):
             return self.stalker(q)
         if path == "/xmltv.php":
             return self.xmltv()
+        if path.startswith(("/timeshift/u/p/", "/streaming/timeshift.php")):
+            # Catch-up: /timeshift/u/p/{minutes}/{yyyy-MM-dd:HH-mm}/{id}.ts,
+            # the start in the panel's time zone.
+            parts = path.split("/")
+            if os.environ.get("OPENIPTV_MOCK_LOG"):
+                print(f"{time.time():.2f} TIMESHIFT minutes={parts[4] if len(parts) > 6 else '?'} start={parts[5] if len(parts) > 6 else '?'}", flush=True)
+            recording = recorded_ts()
+            if recording:
+                return self.send_file(recording, "video/mp2t")
+            return self.send(b"\x47" * 188 * 64, "video/mp2t")
         if path.startswith("/live/u/p/"):
             name = path.rsplit("/", 1)[1]
+            if name.endswith(".ts") and os.environ.get("OPENIPTV_MOCK_VIDEO") and shutil.which("ffmpeg"):
+                return self.live_video()
             if name.endswith(".m3u8"):
                 segs = "\n".join(f"#EXTINF:6.0,\n/seg/{i}.ts" for i in range(5))
                 return self.send(f"#EXTM3U\n#EXT-X-TARGETDURATION:6\n{segs}\n", "application/vnd.apple.mpegurl")
@@ -259,6 +288,18 @@ class Handler(BaseHTTPRequestHandler):
                 for i in range(1, CHANNELS + 1)
             ] + [{"num": 900 + n, "name": name, "stream_id": str(900 + n), "stream_icon": "", "epg_channel_id": None,
                   "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0} for n, (name, cat) in enumerate(local)])
+        if action == "get_simple_data_table":
+            # A channel's schedule two days back to a day ahead; channels with
+            # archives mark what's recorded.
+            ch = int(q["stream_id"])
+            archived = ch < 900 and ch % 2 == 1
+            first = now - now % SLOT - 2 * 86400
+            return self.send({"epg_listings": [
+                {"id": str(s), "epg_id": f"ch{ch}.uk", "title": b64(title(ch, s)), "description": b64("About it."),
+                 "start": wall(s), "end": wall(s + SLOT), "start_timestamp": str(s), "stop_timestamp": str(s + SLOT),
+                 "now_playing": 1 if s <= now < s + SLOT else 0, "has_archive": 1 if archived and s < now else 0}
+                for s in range(first, now + 86400, SLOT)
+            ]})
         if action == "get_short_epg":
             ch = int(q["stream_id"])
             time.sleep(0.02)
@@ -323,7 +364,31 @@ class Handler(BaseHTTPRequestHandler):
         parts.append("</tv>")
         self.send("\n".join(parts), "application/xml")
 
-    def send_file(self, file_path):
+    def live_video(self):
+        """A real live channel: the test video looped and sent at its own
+        pace as MPEG-TS, endlessly, like a provider's stream."""
+        time.sleep(0.3)
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        ffmpeg = subprocess.Popen(
+            ["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
+             "-c", "copy", "-f", "mpegts", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            while True:
+                chunk = ffmpeg.stdout.read(65536)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            ffmpeg.kill()
+            ffmpeg.wait()
+        self.close_connection = True
+
+    def send_file(self, file_path, ctype="video/x-matroska"):
         """A real video with Range support, like Emby's static stream, slowed
         to roughly a home connection (~200 ms per request, ~10 MB/s)."""
         size = os.path.getsize(file_path)
@@ -335,7 +400,7 @@ class Handler(BaseHTTPRequestHandler):
             end = min(int(last), size - 1) if last else size - 1
         time.sleep(0.2)
         self.send_response(206 if rng else 200)
-        self.send_header("Content-Type", "video/x-matroska")
+        self.send_header("Content-Type", ctype)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(end - start + 1))
         if rng:

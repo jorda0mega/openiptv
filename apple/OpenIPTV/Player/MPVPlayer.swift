@@ -29,6 +29,10 @@ final class MPVPlayer: @unchecked Sendable {
         case network(buffer: Double, bytesPerSecond: Double)
         /// A jump landed and playback carried on; seconds since it was asked.
         case seeked(Double)
+        /// Streams (not files), about once a second: the stretch kept to
+        /// rewind into, in the stream's own seconds, and whether the server
+        /// also lets it jump outside that stretch.
+        case window(start: Double, end: Double, seekable: Bool)
         case ended
     }
 
@@ -49,12 +53,13 @@ final class MPVPlayer: @unchecked Sendable {
     private var buffered: Double = 0
     private var downloadSpeed: Double = 0
     private var lastNetworkReport: CFAbsoluteTime = 0
+    private var reportsWindow = false
 
     /// How far ahead to download. Files on an unmetered connection are
     /// fetched to the end into a temporary file, so any seek ahead (or back
     /// over what's been played) is instant.
     enum Readahead: Equatable {
-        /// Live streams: the profile's small buffer, in memory.
+        /// Live streams: everything since tuning in, on disk, to rewind.
         case live
         /// Opened in the background before a tap: a minute, on disk.
         case warm
@@ -109,8 +114,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// read in bounded ranges over one kept-alive connection, so the jumps
     /// to the end of a Matroska file and back (index, tags) and the resume
     /// seek don't each pay for a new HTTPS handshake. Live streams can't be
-    /// range-requested, so they're read as one stream.
-    func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, readahead: Readahead = .live) {
+    /// range-requested, so they're read as one stream. `sequential` reads
+    /// a stream straight through even if the server could jump (an IPTV
+    /// recording: opening one jumps to its end and back, extra connections
+    /// a one-connection provider may refuse); jumps stay within what's
+    /// downloaded.
+    func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, sequential: Bool = false,
+              readahead: Readahead = .live) {
         // Files go through the in-app relay, which keeps one warm HTTP/2
         // connection to the server instead of a new one per seek.
         var url = url, headers = headers
@@ -122,13 +132,14 @@ final class MPVPlayer: @unchecked Sendable {
             guard let mpv else { return }
             apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
+            reportsWindow = !file
             openedAfter = nil
             reportedStart = false
             duration = nil
             mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
             mpv_set_property_string(mpv, "stream-lavf-o", file
                 ? "multiple_requests=1,initial_request_size=524288,request_size=8388608,short_seek_size=1048576"
-                : "")
+                : sequential ? "seekable=0" : "")
             mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
             // Resume at the nearest keyframe instead of decoding up to the
             // exact second; precise seeking comes back once it's playing.
@@ -150,9 +161,13 @@ final class MPVPlayer: @unchecked Sendable {
         func set(_ name: String, _ value: String) { mpv_set_property_string(mpv, name, value) }
         switch readahead {
         case .live:
-            if opening { set("cache-on-disk", "no") }
-            set("demuxer-max-bytes", "150MiB")
-            set("demuxer-max-back-bytes", "50MiB")
+            // Keeps what's been watched (on disk, up to about an hour of a
+            // typical channel) so live TV can be paused and rewound, and
+            // keeps downloading while paused.
+            if opening { set("cache-on-disk", "yes") }
+            set("demuxer-readahead-secs", "7200")
+            set("demuxer-max-bytes", "1GiB")
+            set("demuxer-max-back-bytes", "1GiB")
         case .warm:
             if opening { set("cache-on-disk", "yes") }
             set("demuxer-readahead-secs", "60")
@@ -313,6 +328,34 @@ final class MPVPlayer: @unchecked Sendable {
         guard now - lastNetworkReport >= 1 else { return }
         lastNetworkReport = now
         emit(.network(buffer: buffered, bytesPerSecond: downloadSpeed))
+        if reportsWindow, let mpv, let window = Self.keptWindow(mpv) {
+            var seekable: Int32 = 0
+            mpv_get_property(mpv, "seekable", MPV_FORMAT_FLAG, &seekable)
+            emit(.window(start: window.start, end: window.end, seekable: seekable != 0))
+        }
+    }
+
+    /// The span of the demuxer cache that can be jumped to
+    /// (demuxer-cache-state's seekable ranges; the newest one, which a
+    /// stream read straight through only ever has).
+    private static func keptWindow(_ mpv: OpaquePointer) -> (start: Double, end: Double)? {
+        var state = mpv_node()
+        guard mpv_get_property(mpv, "demuxer-cache-state", MPV_FORMAT_NODE, &state) >= 0 else { return nil }
+        defer { mpv_free_node_contents(&state) }
+        func field(_ node: mpv_node, _ name: String) -> mpv_node? {
+            guard node.format == MPV_FORMAT_NODE_MAP, let map = node.u.list?.pointee else { return nil }
+            for i in 0..<Int(map.num) where map.keys[i].map({ String(cString: $0) }) == name { return map.values[i] }
+            return nil
+        }
+        guard let ranges = field(state, "seekable-ranges"), ranges.format == MPV_FORMAT_NODE_ARRAY,
+              let list = ranges.u.list?.pointee else { return nil }
+        var best: (start: Double, end: Double)?
+        for i in 0..<Int(list.num) {
+            guard let start = field(list.values[i], "start"), start.format == MPV_FORMAT_DOUBLE,
+                  let end = field(list.values[i], "end"), end.format == MPV_FORMAT_DOUBLE else { continue }
+            if end.u.double_ > best?.end ?? -.infinity { best = (start.u.double_, end.u.double_) }
+        }
+        return best
     }
 
     private func emit(_ event: Event) {
