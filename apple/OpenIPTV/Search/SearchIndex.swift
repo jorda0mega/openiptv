@@ -254,6 +254,19 @@ struct LibraryEntry: Codable, Hashable, Identifiable, Sendable {
     let aspect: Double?
     /// IMDb title id ("tt0076759"), when the server knows it.
     var imdb: String? = nil
+    /// TMDb id, when the server knows it.
+    var tmdb: Int? = nil
+
+    /// The same for every copy of a title in different libraries (an HD and
+    /// a 4K film, say): its IMDb or TMDb id, else its name and year.
+    var titleKey: String { Self.titleKey(kind: kind, name: name, year: year, imdb: imdb, tmdb: tmdb) }
+
+    static func titleKey(kind: String, name: String, year: Int?, imdb: String?, tmdb: Int?) -> String {
+        if let imdb { return "i:" + imdb }
+        let k = kind == "Series" ? "s" : "m"
+        if let tmdb { return "t:\(k):\(tmdb)" }
+        return "n:\(k):\(year ?? 0):" + String(decoding: SearchCorpus<String>.fold(name), as: UTF8.self)
+    }
 }
 
 /// Every movie and show on the Emby server, cached on the device so search
@@ -262,11 +275,18 @@ struct LibraryEntry: Codable, Hashable, Identifiable, Sendable {
 /// interruption), then kept current with only what changed since the last
 /// sync, plus a weekly full pass to drop deleted items (search keeps the
 /// old pages until each is replaced). Runs in the background from app
-/// launch. IMDb ratings, downloaded weekly, rank it by popularity.
+/// launch. Each title is listed once however many libraries hold a copy
+/// (the copies are its versions). IMDb ratings and TMDb popularity,
+/// downloaded weekly, rank search and pick what's trending.
 @Observable
 @MainActor
 final class LibraryIndex {
     private(set) var corpus = SearchCorpus<LibraryEntry>(name: \.name)
+    /// Every copy's id → all copies of that title (only titles with more
+    /// than one), the one listed first.
+    private(set) var versions: [String: [String]] = [:]
+    /// The most popular titles on the server right now, most popular first.
+    private(set) var trending: [LibraryEntry] = []
     private(set) var indexing = false
     /// Titles loaded so far and the total, while the full catalog loads.
     private(set) var progress: (loaded: Int, total: Int)?
@@ -280,7 +300,8 @@ final class LibraryIndex {
     /// fetch them all again, searching the old ones meanwhile.
     private var outdated = false
     private(set) var ratings: IMDbRatings?
-    private var ratingsTask: Task<Void, Never>?
+    private(set) var popularity: TMDbPopularity?
+    private var chartsTask: Task<Void, Never>?
 
     private struct Cache: Codable {
         var version: Int?
@@ -291,8 +312,8 @@ final class LibraryIndex {
         let pages: [Int: [LibraryEntry]]
     }
 
-    /// 2: entries carry IMDb ids.
-    private nonisolated static let version = 2
+    /// 2: entries carry IMDb ids. 3: and TMDb ids.
+    private nonisolated static let version = 3
     private nonisolated static let file = "library-index.json"
     private nonisolated static let pageSize = 5000
     private nonisolated static let parallel = 4
@@ -307,24 +328,8 @@ final class LibraryIndex {
     }
 
     func prepare(_ emby: EmbyClient) async {
-        let server = emby.account.serverURL.absoluteString + "|" + emby.account.userId
-        if self.server != server {
-            self.server = server
-            pages = [:]
-            total = nil
-            syncedAt = nil
-            fullSyncAt = nil
-            outdated = false
-            corpus = SearchCorpus(name: \.name)
-            if let cache = await Self.readCache(), cache.server == server {
-                pages = cache.pages
-                total = cache.total
-                syncedAt = cache.syncedAt
-                fullSyncAt = cache.fullSyncAt
-                outdated = (cache.version ?? 1) < Self.version
-                corpus = await Self.build(ordered(), ratings)
-            }
-        }
+        await open(emby)
+        guard let server else { return }
         guard !indexing else { return }
         let now = Date()
         let needsFull = !complete || outdated || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
@@ -347,33 +352,91 @@ final class LibraryIndex {
                 let all = await Self.merge(ordered(), changed)
                 pages = Self.paged(all)
                 total = all.count
-                corpus = await Self.build(all, ratings)
+                await publish(all)
             }
             save()
         }
     }
 
-    /// Loads IMDb ratings from the device, and downloads a fresh copy when
-    /// it's over a week old (on Wi-Fi; on any connection after a month or
-    /// if there's none yet). Search re-ranks when they arrive.
-    func refreshRatings(unmetered: Bool) {
-        guard ratingsTask == nil else { return }
-        ratingsTask = Task {
-            defer { ratingsTask = nil }
-            if ratings == nil, let cached = await Task.detached(priority: .utility, operation: { IMDbRatings.cached() }).value {
-                await apply(cached)
+    /// The index saved on the device for this server, ready to search
+    /// (without syncing).
+    func open(_ emby: EmbyClient) async {
+        let server = emby.account.serverURL.absoluteString + "|" + emby.account.userId
+        if self.server != server {
+            self.server = server
+            pages = [:]
+            total = nil
+            syncedAt = nil
+            fullSyncAt = nil
+            outdated = false
+            corpus = SearchCorpus(name: \.name)
+            if let cache = await Self.readCache(), cache.server == server {
+                pages = cache.pages
+                total = cache.total
+                syncedAt = cache.syncedAt
+                fullSyncAt = cache.fullSyncAt
+                outdated = (cache.version ?? 1) < Self.version
+                await publish(ordered())
             }
-            let age = IMDbRatings.age()
-            guard age.map({ $0 > 7 * 24 * 3600 && (unmetered || $0 > 30 * 24 * 3600) }) ?? true else { return }
-            if let fresh = try? await Task.detached(priority: .utility, operation: { try await IMDbRatings.download() }).value {
+        }
+    }
+
+    /// Loads IMDb ratings and TMDb popularity from the device, and
+    /// downloads fresh copies when they're over a week old (on Wi-Fi; on any
+    /// connection after a month, or if there are none yet). Search re-ranks
+    /// and the trending list updates as they arrive.
+    func refreshCharts(unmetered: Bool) async {
+        if let running = chartsTask { return await running.value }
+        func due(_ age: TimeInterval?) -> Bool {
+            age.map { $0 > 7 * 24 * 3600 && (unmetered || $0 > 30 * 24 * 3600) } ?? true
+        }
+        let task = Task {
+            await loadCachedCharts()
+            if due(IMDbRatings.age()),
+               let fresh = try? await Task.detached(priority: .utility, operation: { try await IMDbRatings.download() }).value {
                 await apply(fresh)
             }
+            if due(TMDbPopularity.age()),
+               let fresh = try? await Task.detached(priority: .utility, operation: { try await TMDbPopularity.download() }).value {
+                await apply(fresh)
+            }
+        }
+        chartsTask = task
+        await task.value
+        chartsTask = nil
+    }
+
+    /// Ratings and popularity saved on the device, if not loaded yet.
+    func loadCachedCharts() async {
+        if ratings == nil, let cached = await Task.detached(priority: .utility, operation: { IMDbRatings.cached() }).value {
+            await apply(cached)
+        }
+        if popularity == nil, let cached = await Task.detached(priority: .utility, operation: { TMDbPopularity.cached() }).value {
+            await apply(cached)
         }
     }
 
     private func apply(_ ratings: IMDbRatings) async {
         self.ratings = ratings
         corpus = await Self.boost(corpus, ratings)
+    }
+
+    private func apply(_ popularity: TMDbPopularity) async {
+        self.popularity = popularity
+        trending = await Self.trending(corpus.items, popularity)
+    }
+
+    /// Search and the trending list from these entries, each title once.
+    private func publish(_ entries: [LibraryEntry]) async {
+        let (corpus, versions) = await Self.build(entries, ratings)
+        self.corpus = corpus
+        self.versions = versions
+        if let popularity { trending = await Self.trending(corpus.items, popularity) }
+    }
+
+    /// Every copy of the title with this id (just the id when there's one).
+    func versions(of id: String) -> [String] {
+        versions[id] ?? [id]
     }
 
     /// IMDb's score and votes for a title, once ratings are loaded.
@@ -414,7 +477,7 @@ final class LibraryIndex {
                 // Search covers what's loaded so far.
                 if sincePublish >= Self.parallel {
                     sincePublish = 0
-                    corpus = await Self.build(ordered(), ratings)
+                    await publish(ordered())
                     save()
                 }
                 if let next = queue.popFirst() {
@@ -428,7 +491,7 @@ final class LibraryIndex {
             syncedAt = fullSyncAt
             outdated = false
         }
-        corpus = await Self.build(ordered(), ratings)
+        await publish(ordered())
         save()
     }
 
@@ -440,6 +503,8 @@ final class LibraryIndex {
 
     func clear() {
         corpus = SearchCorpus(name: \.name)
+        versions = [:]
+        trending = []
         pages = [:]
         total = nil
         syncedAt = nil
@@ -486,14 +551,44 @@ final class LibraryIndex {
         }.value
     }
 
-    /// The search corpus, each title once (pages can overlap mid-refresh),
-    /// ranked by IMDb popularity when ratings are loaded.
-    private nonisolated static func build(_ entries: [LibraryEntry], _ ratings: IMDbRatings?) async -> SearchCorpus<LibraryEntry> {
+    /// The search corpus with each title once (copies in other libraries,
+    /// and pages overlapping mid-refresh, folded in), ranked by IMDb
+    /// popularity when ratings are loaded, and the copies of each title.
+    private nonisolated static func build(_ entries: [LibraryEntry], _ ratings: IMDbRatings?) async
+        -> (SearchCorpus<LibraryEntry>, [String: [String]]) {
         await Task.detached(priority: .userInitiated) {
-            var seen = Set<String>()
-            seen.reserveCapacity(entries.count)
-            let corpus = SearchCorpus(entries.filter { seen.insert($0.id).inserted }, name: \.name)
-            return ratings.map { boosted(corpus, $0) } ?? corpus
+            var seenIds = Set<String>()
+            seenIds.reserveCapacity(entries.count)
+            var groupOf: [String: Int] = [:]
+            groupOf.reserveCapacity(entries.count)
+            var titles: [LibraryEntry] = []
+            var copies: [[String]] = []
+            for entry in entries where seenIds.insert(entry.id).inserted {
+                let key = entry.titleKey
+                if let group = groupOf[key] {
+                    copies[group].append(entry.id)
+                } else {
+                    groupOf[key] = titles.count
+                    titles.append(entry)
+                    copies.append([entry.id])
+                }
+            }
+            var versions: [String: [String]] = [:]
+            for ids in copies where ids.count > 1 {
+                for id in ids { versions[id] = ids }
+            }
+            let corpus = SearchCorpus(titles, name: \.name)
+            return (ratings.map { boosted(corpus, $0) } ?? corpus, versions)
+        }.value
+    }
+
+    /// The 300 most popular titles right now.
+    private nonisolated static func trending(_ entries: [LibraryEntry], _ popularity: TMDbPopularity) async -> [LibraryEntry] {
+        await Task.detached(priority: .utility) {
+            entries.compactMap { entry in popularity.popularity(entry).map { (entry, $0) } }
+                .sorted { $0.1 > $1.1 }
+                .prefix(300)
+                .map(\.0)
         }.value
     }
 

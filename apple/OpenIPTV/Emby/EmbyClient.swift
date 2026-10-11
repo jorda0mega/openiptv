@@ -11,7 +11,7 @@ struct EmbyClient {
     let deviceId: String
 
     private static let cardQuery: [URLQueryItem] = [
-        .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,BasicSyncInfo"),
+        .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,BasicSyncInfo,ProviderIds,DateCreated"),
         .init(name: "ImageTypeLimit", value: "1"),
         .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
         .init(name: "EnableUserData", value: "true"),
@@ -113,63 +113,87 @@ struct EmbyClient {
 
     // MARK: Home
 
-    func home(cardWidth: Int) async throws -> [HomeRow] {
-        let views: [EmbyItem] = try await items("Users/\(account.userId)/Views", [])
-        let libraries = views.filter { ["movies", "tvshows"].contains($0.collectionType ?? "") }.prefix(8)
+    /// What Home is built from, fetched at once.
+    struct HomeSources {
+        /// Partly watched, most recent first.
+        var watching: [EmbyItem]
+        /// The next episode of each show being watched.
+        var nextUp: [EmbyItem]
+        /// Recently finished, most recent first.
+        var played: [EmbyItem]
+        /// Recently added across every library, newest first.
+        var added: [EmbyItem]
+    }
 
-        async let resume = items("Users/\(account.userId)/Items", Self.cardQuery + [
+    func homeSources() async throws -> HomeSources {
+        let views: [EmbyItem] = try await items("Users/\(account.userId)/Views", [])
+        let libraries = views.filter { ["movies", "tvshows"].contains($0.collectionType ?? "") }.prefix(12)
+        async let watching = items("Users/\(account.userId)/Items", Self.cardQuery + [
             .init(name: "Filters", value: "IsResumable"), .init(name: "Recursive", value: "true"),
             .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
             .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "30"),
         ])
         async let nextUp = items("Shows/NextUp", Self.cardQuery + [
-            .init(name: "UserId", value: account.userId), .init(name: "Limit", value: "12"),
+            .init(name: "UserId", value: account.userId), .init(name: "Limit", value: "16"),
         ])
-        let latest = await withTaskGroup(of: (Int, [EmbyItem]?).self) { group in
-            for (index, library) in libraries.enumerated() {
+        async let played = items("Users/\(account.userId)/Items", Self.cardQuery + [
+            .init(name: "Filters", value: "IsPlayed"), .init(name: "Recursive", value: "true"),
+            .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
+            .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "40"),
+        ])
+        // Per library: much faster than one query across all of them.
+        let added = await withTaskGroup(of: [EmbyItem].self) { group in
+            for library in libraries {
                 group.addTask {
-                    let rows = try? await items("Users/\(account.userId)/Items/Latest", Self.cardQuery + [
-                        .init(name: "ParentId", value: library.id), .init(name: "Limit", value: "16"),
-                    ])
-                    return (index, rows)
+                    (try? await items("Users/\(account.userId)/Items/Latest", Self.cardQuery + [
+                        .init(name: "ParentId", value: library.id), .init(name: "Limit", value: "30"),
+                    ])) ?? []
                 }
             }
-            var out = [[EmbyItem]?](repeating: nil, count: libraries.count)
-            for await (index, rows) in group { out[index] = rows }
-            return out
+            var out: [EmbyItem] = []
+            for await items in group { out += items }
+            return out.sorted { ($0.dateCreated ?? "") > ($1.dateCreated ?? "") }
         }
+        return HomeSources(watching: try await watching, nextUp: (try? await nextUp) ?? [],
+                           played: (try? await played) ?? [], added: added)
+    }
 
-        var rows: [HomeRow] = []
-        let watching = try await resume
-        if let row = showRow("Continue Watching", watching, cardWidth) { rows.append(row) }
-        // Next Up without the shows already in Continue Watching.
-        let inProgress = Set(watching.compactMap(\.seriesId))
-        let inProgressNames = Set(watching.compactMap { $0.seriesName?.lowercased() })
-        let upNext = ((try? await nextUp) ?? []).filter {
-            !inProgress.contains($0.seriesId ?? "") && !inProgressNames.contains($0.seriesName?.lowercased() ?? "")
-        }
-        if let row = showRow("Next Up", upNext, cardWidth) { rows.append(row) }
-        for (library, items) in zip(libraries, latest) {
-            if let items, let row = row("Latest in \(library.name)", items, .poster, cardWidth) { rows.append(row) }
-        }
-        return rows
+    /// Titles like this one (genre, cast, director), as Emby judges it.
+    func similar(to id: String, limit: Int = 24) async -> [EmbyItem] {
+        (try? await items("Items/\(id)/Similar", Self.cardQuery + [
+            .init(name: "UserId", value: account.userId), .init(name: "Limit", value: String(limit)),
+        ])) ?? []
+    }
+
+    /// These titles with what this user has watched of them, plus overview
+    /// and backdrop.
+    func items(ids: [String]) async -> [EmbyItem] {
+        guard !ids.isEmpty else { return [] }
+        let found = (try? await items("Users/\(account.userId)/Items", [
+            .init(name: "Ids", value: ids.joined(separator: ",")),
+            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,ProviderIds,DateCreated,Overview"),
+            .init(name: "ImageTypeLimit", value: "1"), .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
+            .init(name: "EnableUserData", value: "true"), .init(name: "EnableTotalRecordCount", value: "false"),
+        ])) ?? []
+        let order = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return found.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
     }
 
     /// One card per show (Netflix-style), carrying the episode to resume;
     /// movies stay as they are.
-    private func showRow(_ title: String, _ items: [EmbyItem], _ width: Int) -> HomeRow? {
+    func showRow(_ title: String, _ items: [EmbyItem], _ width: Int) -> HomeRow? {
         // By show, and by show name too: the same show in two libraries (HD
-        // and 4K, say) has two ids but should be one card.
+        // and 4K, say) has two ids but should be one card. Films by title.
         var seen = Set<String>()
         let unique = items.filter { item in
-            guard item.kind == "Episode" else { return seen.insert(item.id).inserted }
+            guard item.kind == "Episode" else { return seen.insert(item.titleKey).inserted }
             let byName = "name:" + (item.seriesName ?? "").lowercased()
             let byId = "id:" + (item.seriesId ?? item.id)
             let fresh = !seen.contains(byName) && !seen.contains(byId)
             seen.insert(byName)
             seen.insert(byId)
             return fresh
-        }.prefix(12)
+        }.prefix(20)
         guard !unique.isEmpty else { return nil }
         let shape = Artwork.Shape.landscape
         let cards = unique.map { item -> Card in
@@ -183,14 +207,14 @@ struct EmbyClient {
         return HomeRow(title: title, shape: shape.rawValue, aspect: shape.aspect, cards: Array(cards))
     }
 
-    private func row(_ title: String, _ items: [EmbyItem], _ context: Artwork.Context, _ width: Int) -> HomeRow? {
+    func row(_ title: String, _ items: [EmbyItem], _ context: Artwork.Context, _ width: Int) -> HomeRow? {
         guard !items.isEmpty else { return nil }
         let shape = Artwork.listShape(items, context: context)
         let cards = items.map { card($0, context: context, shape: shape, width: width) }
         return HomeRow(title: title, shape: shape.rawValue, aspect: shape.aspect, cards: cards)
     }
 
-    private func card(_ item: EmbyItem, context: Artwork.Context, shape: Artwork.Shape, width: Int) -> Card {
+    func card(_ item: EmbyItem, context: Artwork.Context, shape: Artwork.Shape, width: Int) -> Card {
         let pixelWidth = shape == .landscape ? width * 16 / 10 : width
         let images = Artwork.candidates(item, context: context).map { candidate in
             CardImage(url: imageURL(candidate, width: pixelWidth, shape: shape).absoluteString,
@@ -295,7 +319,8 @@ struct EmbyClient {
             let entries: [LibraryEntry] = (page.Items ?? []).compactMap(\.value).compactMap { entry in
                 guard let name = entry.name, !name.isEmpty else { return nil }
                 return LibraryEntry(id: entry.id, name: name, kind: entry.kind ?? "Movie", year: entry.year,
-                                    imageTag: entry.tags?["Primary"], aspect: nil, imdb: EmbyItem.imdb(in: entry.providers))
+                                    imageTag: entry.tags?["Primary"], aspect: nil,
+                                    imdb: EmbyItem.imdb(in: entry.providers), tmdb: EmbyItem.tmdb(in: entry.providers))
             }
             return (entries, page.TotalRecordCount)
         }.value
@@ -363,6 +388,44 @@ struct EmbyClient {
     /// watched items resume. With `kind` known, the item and how to play it
     /// are fetched at the same time instead of one after the other.
     func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
+        let (item, info) = try await resolve(itemId, kind: kind)
+        return await assemble(item, info: info, resume: Self.resumePoint(item))
+    }
+
+    /// One title with copies in several libraries (HD and 4K, say): the
+    /// copy that suits this screen (the sharpest, or the sharpest up to
+    /// `maxWidth`), resuming from whichever copy was watched last.
+    func playback(versions ids: [String], kind: String?, maxWidth: Int?) async throws -> EmbyPlayback {
+        guard ids.count > 1, kind != "Series" else { return try await playback(itemId: ids[0], kind: kind) }
+        let copies = await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
+            for (order, id) in ids.enumerated() {
+                group.addTask { (try? await resolve(id, kind: kind)).map { (order, $0.0, $0.1) } }
+            }
+            var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
+            for await copy in group { if let copy { out.append(copy) } }
+            return out.sorted { $0.order < $1.order }
+        }
+        guard !copies.isEmpty else { return try await playback(itemId: ids[0], kind: kind) }
+        func width(_ info: PlaybackInfo?) -> Int { info?.MediaSources?.first?.videoWidth ?? 0 }
+        let fitting = copies.filter { maxWidth == nil || width($0.info) <= maxWidth! }
+        let chosen = fitting.max { width($0.info) < width($1.info) }
+            ?? copies.min { width($0.info) < width($1.info) }!
+        // Resume where any copy was left off most recently.
+        let resume = copies
+            .filter { Self.resumePoint($0.item) != nil }
+            .max { ($0.item.userData?.lastPlayedDate ?? "") < ($1.item.userData?.lastPlayedDate ?? "") }
+            .flatMap { Self.resumePoint($0.item) }
+        return await assemble(chosen.item, info: chosen.info, resume: resume)
+    }
+
+    private static func resumePoint(_ item: EmbyItem) -> Double? {
+        item.userData?.played == true ? nil
+            : item.userData?.playbackPositionTicks.flatMap { $0 > 0 ? Double($0) / 1e7 : nil }
+    }
+
+    /// The item to play (a show's next episode) and, when it could be asked
+    /// at the same time, how to play it.
+    private func resolve(_ itemId: String, kind: String?) async throws -> (EmbyItem, PlaybackInfo?) {
         let item: EmbyItem
         var prefetchedInfo: PlaybackInfo?
         if kind == "Series" {
@@ -386,8 +449,10 @@ struct EmbyClient {
             }
             item = fetched
         }
-        let resume = (item.userData?.played == true) ? nil
-            : item.userData?.playbackPositionTicks.flatMap { $0 > 0 ? Double($0) / 1e7 : nil }
+        return (item, prefetchedInfo)
+    }
+
+    private func assemble(_ item: EmbyItem, info prefetchedInfo: PlaybackInfo?, resume: Double?) async -> EmbyPlayback {
         let (title, subtitle) = Self.titles(item)
         var playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle,
                                     url: directStreamURL(item.id, mediaSourceId: item.id, playSessionId: nil),
@@ -533,6 +598,13 @@ struct EmbyClient {
             let SupportsDirectStream: Bool?
             let TranscodingUrl: String?
             let RequiredHttpHeaders: [String: String]?
+            let MediaStreams: [Stream]?
+
+            var videoWidth: Int? { MediaStreams?.first { $0.Type == "Video" }?.Width }
+        }
+        struct Stream: Decodable {
+            let `Type`: String?
+            let Width: Int?
         }
         let MediaSources: [Source]?
         let PlaySessionId: String?

@@ -11,6 +11,8 @@ enum Layout {
     static let searchThumb: CGFloat = 80
     static let searchThumbWide: CGFloat = 170
     static let scrubPreviewWidth: CGFloat = 400
+    /// Home's featured pick: cinema-wide on a TV.
+    static let featuredAspect: CGFloat = 21 / 9
     #else
     static let posterWidth: CGFloat = 118
     static let rowSpacing: CGFloat = 24
@@ -19,6 +21,7 @@ enum Layout {
     static let searchThumb: CGFloat = 46
     static let searchThumbWide: CGFloat = 96
     static let scrubPreviewWidth: CGFloat = 200
+    static let featuredAspect: CGFloat = 4 / 3
     #endif
 }
 

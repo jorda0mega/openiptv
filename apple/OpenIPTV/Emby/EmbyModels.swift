@@ -6,10 +6,13 @@ struct EmbyItem: Decodable, Hashable {
         var playbackPositionTicks: Int64?
         var playedPercentage: Double?
         var played: Bool?
+        /// ISO 8601, as the server sends it (sorts as text).
+        var lastPlayedDate: String?
         enum CodingKeys: String, CodingKey {
             case playbackPositionTicks = "PlaybackPositionTicks"
             case playedPercentage = "PlayedPercentage"
             case played = "Played"
+            case lastPlayedDate = "LastPlayedDate"
         }
     }
 
@@ -40,12 +43,25 @@ struct EmbyItem: Decodable, Hashable {
     var userData: UserData?
     var overview: String?
     var providerIds: [String: String]?
+    /// ISO 8601: when the server added it.
+    var dateCreated: String?
 
     /// IMDb title id ("tt…"), when the server has matched one.
     var imdb: String? { Self.imdb(in: providerIds) }
+    var tmdb: Int? { Self.tmdb(in: providerIds) }
+
+    /// The same for every copy of a title in different libraries.
+    var titleKey: String {
+        guard kind == "Movie" || kind == "Series" else { return "id:" + id }
+        return LibraryEntry.titleKey(kind: kind, name: name, year: productionYear, imdb: imdb, tmdb: tmdb)
+    }
 
     static func imdb(in providers: [String: String]?) -> String? {
         providers?.first { $0.key.caseInsensitiveCompare("Imdb") == .orderedSame && $0.value.hasPrefix("tt") }?.value
+    }
+
+    static func tmdb(in providers: [String: String]?) -> Int? {
+        providers?.first { $0.key.caseInsensitiveCompare("Tmdb") == .orderedSame }.flatMap { Int($0.value) }
     }
 
     enum CodingKeys: String, CodingKey {
@@ -64,6 +80,7 @@ struct EmbyItem: Decodable, Hashable {
         case userData = "UserData"
         case overview = "Overview"
         case providerIds = "ProviderIds"
+        case dateCreated = "DateCreated"
     }
 
     init(from decoder: Decoder) throws {
@@ -95,6 +112,7 @@ struct EmbyItem: Decodable, Hashable {
         userData = try? c.decodeIfPresent(UserData.self, forKey: .userData)
         overview = try? c.decodeIfPresent(String.self, forKey: .overview)
         providerIds = try? c.decodeIfPresent([String: String].self, forKey: .providerIds)
+        dateCreated = try? c.decodeIfPresent(String.self, forKey: .dateCreated)
     }
 }
 

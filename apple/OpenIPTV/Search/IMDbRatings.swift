@@ -1,4 +1,3 @@
-import Compression
 import Foundation
 
 /// IMDb's rating and vote count for every title with at least ten votes,
@@ -111,19 +110,10 @@ struct IMDbRatings: Sendable {
     /// sorted by title number, decompressing as it goes. (IMDb sorts as
     /// text, so tt10000000 comes before tt1000001.)
     private static func convert(gzip: Data) throws -> Data {
-        var offset = try deflateStart(gzip)
-        let filter = try InputFilter(.decompress, using: .zlib, bufferCapacity: 1 << 16) { (length: Int) -> Data? in
-            let end = min(offset + length, gzip.count)
-            defer { offset = end }
-            return end > offset ? gzip.subdata(in: offset..<end) : nil
-        }
         // Title number, score and votes packed so sorting orders by title.
         var packed: [UInt64] = []
         packed.reserveCapacity(1_500_000)
-        var line: [UInt8] = []
-        line.reserveCapacity(64)
-
-        func record(_ line: [UInt8]) {
+        try Gzip.lines(gzip) { line in
             // "tt" digits TAB score TAB votes
             guard line.count > 6, line[0] == 116, line[1] == 116 else { return }
             var i = 2, id: UInt32 = 0
@@ -140,18 +130,6 @@ struct IMDbRatings: Sendable {
             guard votes >= 10, score <= 100 else { return }
             packed.append(UInt64(id) << 32 | UInt64(score) << 24 | UInt64(min(votes, 0xFF_FFFF)))
         }
-
-        while let chunk = try filter.readData(ofLength: 1 << 20), !chunk.isEmpty {
-            for byte in chunk {
-                if byte == 10 {
-                    record(line)
-                    line.removeAll(keepingCapacity: true)
-                } else {
-                    line.append(byte)
-                }
-            }
-        }
-        record(line)
         guard packed.count > 100_000 else { throw URLError(.cannotDecodeContentData) }
         packed.sort()
 
@@ -164,23 +142,5 @@ struct IMDbRatings: Sendable {
             out.append(UInt8(value >> 24 & 0xFF))
         }
         return out
-    }
-
-    /// Where the compressed data starts after the gzip header.
-    private static func deflateStart(_ gzip: Data) throws -> Int {
-        let bytes = [UInt8](gzip.prefix(10))
-        guard bytes.count == 10, bytes[0] == 0x1f, bytes[1] == 0x8b, bytes[2] == 8 else { throw URLError(.cannotDecodeContentData) }
-        let flags = bytes[3]
-        var at = 10
-        if flags & 4 != 0, gzip.count > at + 2 {
-            at += 2 + Int(gzip[gzip.startIndex + at]) + Int(gzip[gzip.startIndex + at + 1]) << 8
-        }
-        for flag: UInt8 in [8, 16] where flags & flag != 0 {
-            while at < gzip.count, gzip[gzip.startIndex + at] != 0 { at += 1 }
-            at += 1
-        }
-        if flags & 2 != 0 { at += 2 }
-        guard at < gzip.count else { throw URLError(.cannotDecodeContentData) }
-        return at
     }
 }

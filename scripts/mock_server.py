@@ -28,6 +28,33 @@ SLOT = 1800
 # Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
 SHOW_IMDB = {"Forensic Files": "tt0247882", "Forensic Files II": "tt11840612",
              "The Office": "tt0290978", "The Office (US)": "tt0386676"}
+SHOW_TMDB = {"Forensic Files": "11105", "Forensic Files II": "99751", "The Office": "2996", "The Office (US)": "2316"}
+# Real titles with real IMDb and TMDb ids, so search ranking, popularity and
+# Home's rows can be checked against the real public datasets. k-ids are 4K
+# copies (same ids, another library) that must show as one title.
+KNOWN_TITLES = [
+    ("a0", "Animals", "Movie", 2019, "tt4426738", "513340"), ("a1", "Animals", "Movie", 2009, "tt1056036", "25713"),
+    ("a2", "Animal House", "Movie", 1978, "tt0077975", "8469"), ("a3", "Nocturnal Animals", "Movie", 2016, "tt4550098", "340666"),
+    ("a4", "Animals", "Movie", 2026, "tt31049299", "1236045"), ("a5", "American Animals", "Movie", 2018, "tt6212478", "489931"),
+    ("a6", "Dangerous Animals", "Movie", 2025, "tt32299316", "1285965"), ("a7", "Animals.", "Series", 2016, "tt4953128", "65228"),
+    ("a8", "Dune: Part Two", "Movie", 2024, "tt15239678", "693134"), ("a9", "Oppenheimer", "Movie", 2023, "tt15398776", "872585"),
+    ("a10", "Inception", "Movie", 2010, "tt1375666", "27205"), ("a11", "Weapons", "Movie", 2025, "tt26581740", "1078605"),
+    ("a12", "F1", "Movie", 2025, "tt16311594", "911430"), ("a13", "Caught Stealing", "Movie", 2025, None, "1245993"),
+    ("k8", "Dune: Part Two", "Movie", 2024, "tt15239678", "693134"), ("k10", "Inception", "Movie", 2010, "tt1375666", "27205"),
+]
+
+
+def known_item(entry, played=False):
+    id_, name, kind, year, imdb, tmdb = entry
+    providers = {"Tmdb": tmdb} | ({"Imdb": imdb} if imdb else {})
+    return {"Id": id_, "Name": name, "Type": kind, "ProductionYear": year, "ProviderIds": providers,
+            "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{len(id_) * 7 + int(id_[1:])}"},
+            "BackdropImageTags": [f"b{id_}"], "Overview": f"{name} ({year}), a title from the test library.",
+            "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
+            "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None}}
+
+
+KNOWN_BY_ID = {entry[0]: entry for entry in KNOWN_TITLES}
 
 
 def png(seed, w=60, h=90):
@@ -92,10 +119,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"", status=204)
         if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == "tok":
             return self.send(b"", status=204)
+        if os.environ.get("OPENIPTV_MOCK_LOG"):
+            print(f"{time.time():.2f} POST {self.path.split('?')[0]}", flush=True)
         if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == "tok":
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
+            width = 3840 if item.startswith("k") else 1920
             return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": 8000000,
-                                                "SupportsDirectPlay": True, "SupportsDirectStream": True}],
+                                                "SupportsDirectPlay": True, "SupportsDirectStream": True,
+                                                "MediaStreams": [{"Type": "Video", "Width": width}]}],
                               "PlaySessionId": "ps1"})
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})
@@ -106,6 +137,8 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         path = url.path
         if path.startswith("/emby/"):
+            if os.environ.get("OPENIPTV_MOCK_LOG") and "/Images/" not in path:
+                print(f"{time.time():.2f} GET {path}", flush=True)
             return self.emby(path[len("/emby"):], q)
         if path == "/player_api.php":
             return self.xtream(q)
@@ -260,12 +293,15 @@ class Handler(BaseHTTPRequestHandler):
                              "UserData": {"PlaybackPositionTicks": 6000000000, "PlayedPercentage": 40.0}}
         if path == "/Users/U1/Views":
             return self.send({"Items": [{"Id": "v1", "Name": "Movies", "Type": "CollectionFolder", "CollectionType": "movies"},
-                                        {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"}]
+                                        {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"},
+                                        {"Id": "v9", "Name": "Movies 4K", "Type": "CollectionFolder", "CollectionType": "movies"}]
                                        # A long home page, like a real server with many libraries.
                                        + [{"Id": f"v{n}", "Name": f"Library {n}", "Type": "CollectionFolder", "CollectionType": "movies"}
                                           for n in range(3, 3 + int(os.environ.get("OPENIPTV_MOCK_EXTRA_LIBRARIES", "0")))]})
         if path.startswith("/Users/U1/Items/") and path.count("/") == 4 and not path.endswith(("/Latest", "/Resume")):
             item_id = path.rsplit("/", 1)[1]
+            if item_id in KNOWN_BY_ID:
+                return self.send(known_item(KNOWN_BY_ID[item_id], played=item_id == "a9"))
             if item_id.startswith("s"):
                 names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
                 n = int(item_id[1:]) if item_id[1:].isdigit() and int(item_id[1:]) < len(names) else 1
@@ -302,6 +338,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path.startswith("/Videos/") and "/stream" in path:
+            print(f"{time.time():.2f} stream {path.split('/')[2]}", flush=True)
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")
             if video and os.path.exists(video):
                 return self.send_file(video)
@@ -310,16 +347,11 @@ class Handler(BaseHTTPRequestHandler):
             # The library index: movies plus a few real-looking show names.
             names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office", "The Office (US)"]
             shows = [{"Id": f"s{i}", "Name": n, "Type": "Series", "ProductionYear": 2000 + i,
-                      "ProviderIds": {"Imdb": SHOW_IMDB.get(n, "")}, "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
+                      "ProviderIds": {"Imdb": SHOW_IMDB.get(n, ""), "Tmdb": SHOW_TMDB.get(n, "")},
+                      "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
             # Same-named and similar titles with real IMDb ids, to check
             # that search ranks by popularity (the 2026 "Animals" first).
-            known = [{"Id": f"a{i}", "Name": n, "Type": t, "ProductionYear": y, "ProviderIds": {"Imdb": imdb},
-                      "ImageTags": {"Primary": f"t{i}"}}
-                     for i, (n, t, y, imdb) in enumerate([
-                         ("Animals", "Movie", 2019, "tt4426738"), ("Animals", "Movie", 2009, "tt1056036"),
-                         ("Animal House", "Movie", 1978, "tt0077975"), ("Nocturnal Animals", "Movie", 2016, "tt4550098"),
-                         ("Animals", "Movie", 2026, "tt31049299"), ("American Animals", "Movie", 2018, "tt6212478"),
-                         ("Dangerous Animals", "Movie", 2025, "tt32299316"), ("Animals.", "Series", 2016, "tt4953128")])]
+            known = [known_item(entry) for entry in KNOWN_TITLES]
             # Big enough to page: real libraries run to 100k+ titles.
             extra = [{"Id": f"x{i}", "Name": f"Library Title {i:05d}", "Type": "Movie", "ProductionYear": 2000 + i % 25,
                       "ImageTags": {"Primary": f"t{i % 40}"}} for i in range(23000)]
@@ -335,6 +367,15 @@ class Handler(BaseHTTPRequestHandler):
             found = [episode(i) for i in range(3) if term in "episode"] + \
                     [movie(i) for i in range(40) if term in f"movie {i}"]
             return self.send({"Items": found[: int(q.get("Limit", 40))]})
+        if path == "/Users/U1/Items" and q.get("Filters") == "IsPlayed":
+            return self.send({"Items": [known_item(KNOWN_BY_ID["a9"], played=True)]})
+        if path == "/Users/U1/Items" and "Ids" in q:
+            items = [known_item(KNOWN_BY_ID[i], played=i == "a9") for i in q["Ids"].split(",") if i in KNOWN_BY_ID]
+            return self.send({"Items": items})
+        if path.startswith("/Items/") and path.endswith("/Similar"):
+            like = ["a8", "a10", "a3", "a11", "a12", "a13", "a5", "a9"] if path.split("/")[2].startswith("a") \
+                else ["a7", "a6", "a2", "a0", "a1", "a3"]
+            return self.send({"Items": [known_item(KNOWN_BY_ID[i], played=i == "a9") for i in like]})
         if path == "/Users/U1/Items" and q.get("Filters") == "IsResumable":
             # Several episodes of one show (shown as one card) and a movie.
             ep = lambda s, i: episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
@@ -349,6 +390,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
         if path == "/Users/U1/Items/Latest":
+            if q.get("ParentId") == "v9":
+                return self.send([known_item(KNOWN_BY_ID[i]) for i in ("k8", "k10")])
+            if q.get("ParentId") == "v1":
+                return self.send([known_item(KNOWN_BY_ID[i]) for i in ("a4", "a11", "a12", "a6", "a13", "a8")]
+                                 + [movie(i) | {"DateCreated": "2026-09-01T00:00:00.0000000Z"} for i in range(10)])
             return self.send([movie(i) for i in range(int(q.get("Limit", 16)))])
         if path.startswith("/Items/") and "/Images/" in path:
             if q.get("tag", "").startswith("stale"):

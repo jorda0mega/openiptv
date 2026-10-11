@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Continue Watching, Next Up and Latest per library. Rows render from the
-/// on-device cache immediately; card boxes are sized before images load.
-/// Selecting a card plays it (series start their next unwatched episode).
+/// A featured pick, Continue Watching, what's popular on the server, titles
+/// like the ones just watched, and what's new and worth it (see HomeFeed).
+/// Rows render from the on-device cache immediately; card boxes are sized
+/// before images load. Shows open their page; everything else plays.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
@@ -20,7 +21,10 @@ struct HomeView: View {
                 // itself), and a lazy stack adding a row as the page slides
                 // back after pull to refresh stops it halfway, stuck down.
                 VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                    if visibleRows.isEmpty { emptyState }
+                    if let featured = model.featured {
+                        FeaturedView(featured: featured, loading: loadingCard == featured.card.id) { play(featured.card) }
+                    }
+                    if visibleRows.isEmpty, model.featured == nil { emptyState }
                     ForEach(visibleRows) { row in
                         RowView(row: row, loadingCard: loadingCard) { card in play(card) }
                     }
@@ -94,6 +98,60 @@ struct HomeView: View {
                 playError = error.localizedDescription
             }
         }
+    }
+}
+
+/// The featured pick: a large backdrop with the title, why it's worth it,
+/// and one button to start.
+private struct FeaturedView: View {
+    let featured: Featured
+    let loading: Bool
+    let action: () -> Void
+
+    private var isShow: Bool { featured.card.kind == "Series" }
+
+    var body: some View {
+        Button(action: action) {
+            Color.clear
+                .aspectRatio(Layout.featuredAspect, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    CoverImage(images: [CardImage(url: featured.backdrop, contain: false)], title: featured.card.title)
+                }
+                .overlay {
+                    LinearGradient(stops: [.init(color: .clear, location: 0.3), .init(color: .black.opacity(0.92), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(featured.card.title).font(.title2.weight(.bold)).lineLimit(2)
+                        Text(featured.details).font(.subheadline).foregroundStyle(.white.opacity(0.75))
+                        if let overview = featured.overview, !overview.isEmpty {
+                            Text(overview).font(.footnote).foregroundStyle(.white.opacity(0.8)).lineLimit(2)
+                        }
+                        Label(isShow ? "Watch" : "Play", systemImage: isShow ? "rectangle.stack.fill" : "play.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 9)
+                            .background(.white, in: .capsule)
+                            .padding(.top, 4)
+                    }
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.leading)
+                    .padding(18)
+                }
+                .overlay {
+                    if loading { ProgressView().padding(12).glassEffect(.regular, in: .circle) }
+                }
+                .clipShape(.rect(cornerRadius: 20))
+        }
+        .cardButtonStyle()
+        .padding(.horizontal)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(featured.card.title), \(featured.details)")
+        .accessibilityHint(isShow ? "Opens the show" : "Plays it")
+        .accessibilityAddTraits(.isButton)
     }
 }
 

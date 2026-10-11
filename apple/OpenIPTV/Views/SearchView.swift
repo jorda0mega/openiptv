@@ -34,7 +34,8 @@ struct SearchView: View {
     private var episodes: [Card] { serverFiltered.filter { $0.kind == "Episode" } }
 
     private var moviesAndShows: [Card] {
-        let known = Set(library.map(\.id))
+        // Every copy of the titles already listed (HD and 4K are one title).
+        let known = Set(library.flatMap { model.library.versions(of: $0.id) })
         return library + serverFiltered.filter { $0.kind != "Episode" && !known.contains($0.id) }
     }
 

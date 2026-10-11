@@ -14,6 +14,7 @@ final class AppModel {
     // MARK: Home (Emby)
 
     var rows: [HomeRow] = []
+    var featured: Featured?
     var homeError: String?
     private var lastCardWidth = 360
 
@@ -56,9 +57,11 @@ final class AppModel {
         }
         #endif
         selectedCategory = UserDefaults.standard.string(forKey: "category")
-        // v2: shows grouped into one card; older caches listed episodes.
-        AppCache.remove("home.json")
-        rows = AppCache.read("home.v2.json") ?? []
+        // v3: personal Home; older caches had a row per library.
+        for old in ["home.json", "home.v2.json"] { AppCache.remove(old) }
+        let home: HomeContent? = AppCache.read("home.v3.json")
+        rows = home?.rows ?? []
+        featured = home?.featured
         Task { await guide.loadCache(); guideState = await guide.state }
     }
 
@@ -68,25 +71,43 @@ final class AppModel {
 
     // MARK: Home
 
-    func loadHome(cardWidth: Int) async {
+    func loadHome(cardWidth: Int, sync: Bool = true) async {
         lastCardWidth = cardWidth
         guard let emby else {
             rows = []
+            featured = nil
             return
         }
+        // Trending and versions come from the index and charts on the device.
+        await library.open(emby)
+        await library.loadCachedCharts()
         do {
-            let fresh = try await emby.home(cardWidth: cardWidth)
-            if fresh != rows { rows = fresh }
+            let fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
+                                                backdropWidth: Self.backdropWidth)
+            if fresh.rows != rows { rows = fresh.rows }
+            if fresh.featured != featured { featured = fresh.featured }
             homeError = nil
-            AppCache.write("home.v2.json", fresh)
+            AppCache.write("home.v3.json", fresh)
             // The first few things you'd tap on Home are ready before you do.
-            let likely = fresh.prefix(2).flatMap { $0.cards.prefix(3) }
+            let likely = (fresh.featured.map { [$0.card] } ?? []) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(3) }
             prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
-            Task { await syncLibrary(emby) }
+            if sync { Task { await syncLibrary(emby) } }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
         }
     }
+
+    /// Wide enough for Home's featured backdrop on any screen.
+    private static let backdropWidth = 1920
+
+    /// Which copy of a title to play when there are several: the sharpest
+    /// on Apple TV; on iPhone and iPad up to 1080p, which looks the same on
+    /// their screens and starts sooner.
+    #if os(tvOS)
+    private static let maxWidth: Int? = nil
+    #else
+    private static let maxWidth: Int? = 1920
+    #endif
 
     func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
         let started = Date()
@@ -95,7 +116,8 @@ final class AppModel {
             task = ready.task
         } else {
             guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
-            task = Task { try await emby.playback(itemId: itemId, kind: kind) }
+            let versions = library.versions(of: itemId)
+            task = Task { try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth) }
         }
         prepared[itemId] = nil
         var playback = try await task.value
@@ -196,7 +218,10 @@ final class AppModel {
     func prepare(_ items: [(id: String, kind: String?)]) {
         guard let emby else { return }
         for (id, kind) in items where prepared[id].map({ Date().timeIntervalSince($0.at) >= 180 }) ?? true {
-            prepared[id] = (Date(), Task(priority: .utility) { try await emby.playback(itemId: id, kind: kind) })
+            let versions = library.versions(of: id)
+            prepared[id] = (Date(), Task(priority: .utility) {
+                try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth)
+            })
         }
     }
 
@@ -240,8 +265,12 @@ final class AppModel {
     }
 
     private func syncLibrary(_ emby: EmbyClient) async {
-        library.refreshRatings(unmetered: NetworkStatus.shared.unmetered)
+        let before = library.trending.prefix(40).map(\.id)
+        async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
         await library.prepare(emby)
+        await charts
+        // Popularity or the catalog arrived: Home's popular titles changed.
+        if library.trending.prefix(40).map(\.id) != before { await loadHome(cardWidth: lastCardWidth, sync: false) }
     }
 
     func playback(for card: Card) async throws -> EmbyPlayback {
@@ -272,7 +301,8 @@ final class AppModel {
         await emby?.logout()
         sources.setEmby(nil)
         rows = []
-        AppCache.remove("home.v2.json")
+        featured = nil
+        AppCache.remove("home.v3.json")
         library.clear()
         serverSearchCache = [:]
     }
@@ -295,6 +325,8 @@ final class AppModel {
         serverSearchCache = [:]
         channelCorpus = SearchCorpus(name: \.name)
         rows = []
+        featured = nil
+        AppCache.remove("home.v3.json")
         categories = []
         allChannels = []
         channelsByCategory = [:]

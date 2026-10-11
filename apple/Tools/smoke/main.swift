@@ -111,13 +111,17 @@ do {
     if let emby {
         let client = EmbyClient(account: emby, deviceId: deviceId)
         let started = Date()
-        let rows = try await client.home(cardWidth: 360)
-        print("  home          \(rows.count) rows in \(ms(started))")
-        for row in rows.prefix(4) {
-            let covers = row.cards.filter { !$0.images.isEmpty }.count
-            print("    \(row.title.prefix(30).padding(toLength: 30, withPad: " ", startingAt: 0)) \(row.cards.count) cards, \(covers) with covers, \(row.shape)")
+        let home = try await client.homeSources()
+        print("  home          \(home.watching.count) watching, \(home.nextUp.count) next up, \(home.played.count) played, \(home.added.count) added in \(ms(started))")
+        let withIds = (home.watching + home.added).filter { $0.kind == "Movie" || $0.kind == "Series" }
+        print("    provider ids  \(withIds.filter { $0.imdb != nil }.count) IMDb, \(withIds.filter { $0.tmdb != nil }.count) TMDb of \(withIds.count) movies/shows")
+        if let seed = (home.played + home.watching).first.map({ $0.seriesId ?? $0.id }) {
+            let similarStart = Date()
+            let similar = await client.similar(to: seed)
+            print("  similar       \(similar.count) titles in \(ms(similarStart))")
         }
-        if let card = rows.flatMap(\.cards).first(where: \.playable) {
+        let homeCards = (home.watching + home.added).map { client.card(for: $0, landscape: false, width: 360) }
+        if let card = homeCards.first(where: \.playable) {
             let playStart = Date()
             let playback = try await client.playback(itemId: card.id)
             print("  playback      \(playback.title) from \(playback.startSeconds.map { "\(Int($0)) s" } ?? "start") via \(playback.url.host() ?? "?") (\(playback.method), \(playback.url.scheme ?? "?")) in \(ms(playStart))")
