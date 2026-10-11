@@ -1,12 +1,14 @@
-<p align="center"><img src="favicon.svg" width="96" height="96" alt="OpenIPTV logo"></p>
+<p align="center"><img src="favicon.svg" width="96" height="96" alt="Openreel logo"></p>
 
-# OpenIPTV
+# Openreel
+
+(Formerly OpenIPTV; the code, bundle ID and repository keep that name.)
 
 One fast app for your Emby library and your live TV, on iPhone, iPad and
 Apple TV (native SwiftUI, Liquid Glass), plus a self-hosted web version.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-OpenIPTV is a player only. It ships no channels, playlists or media: you
+Openreel is a player only. It ships no channels, playlists or media: you
 bring your own Emby server and an IPTV subscription you're entitled to use.
 
 ## What it connects to
@@ -27,7 +29,7 @@ Sign in inside the app, like TiviMate or Emby's own apps:
   "this device only": not synced to iCloud, not in backups.
 - For Emby only the session token is kept, never the password.
 - Nothing goes anywhere except to your own Emby server and IPTV providers.
-  OpenIPTV has no servers, no analytics, and logs nothing; error messages
+  Openreel has no servers, no analytics, and logs nothing; error messages
   never include URLs (IPTV URLs contain logins); the player's logging is off.
 - Settings → *Forget everything on this device* wipes it all.
 

@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-pub const USER_AGENT: &str = concat!("OpenIPTV/", env!("CARGO_PKG_VERSION"));
+pub const USER_AGENT: &str = concat!("Openreel/", env!("CARGO_PKG_VERSION"));
 
 /// Per-request deadline for metadata calls. Streams are not subject to it.
 pub const API_TIMEOUT: Duration = Duration::from_secs(15);

@@ -100,7 +100,7 @@ enum HTTP {
         config.httpCookieAcceptPolicy = .never
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.httpAdditionalHeaders = ["User-Agent": "OpenIPTV/\(appVersion)"]
+        config.httpAdditionalHeaders = ["User-Agent": "Openreel/\(appVersion)"]
         return URLSession(configuration: config)
     }()
 

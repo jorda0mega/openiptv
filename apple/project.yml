@@ -110,7 +110,7 @@ targets:
     info:
       path: OpenIPTV/Info.plist
       properties:
-        CFBundleDisplayName: OpenIPTV
+        CFBundleDisplayName: Openreel
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
@@ -129,7 +129,7 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: OpenIPTV connects to Emby servers and IPTV sources on your local network.
+        NSLocalNetworkUsageDescription: Openreel connects to Emby servers and IPTV sources on your local network.
         # Dark everywhere, including UIKit-backed fields in sheets.
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
@@ -151,7 +151,7 @@ targets:
     info:
       path: OpenIPTV-tvOS/Info.plist
       properties:
-        CFBundleDisplayName: OpenIPTV
+        CFBundleDisplayName: Openreel
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
@@ -159,7 +159,7 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: OpenIPTV connects to Emby servers and IPTV sources on your local network.
+        NSLocalNetworkUsageDescription: Openreel connects to Emby servers and IPTV sources on your local network.
         # Dark everywhere, including UIKit-backed fields in sheets.
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
