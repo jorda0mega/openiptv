@@ -98,7 +98,24 @@ do {
         if let card = rows.flatMap(\.cards).first(where: \.playable) {
             let playStart = Date()
             let playback = try await client.playback(itemId: card.id)
-            print("  playback      \(playback.title) from \(playback.startSeconds.map { "\(Int($0)) s" } ?? "start") via \(playback.url.host() ?? "?") in \(ms(playStart))")
+            print("  playback      \(playback.title) from \(playback.startSeconds.map { "\(Int($0)) s" } ?? "start") via \(playback.url.host() ?? "?") (\(playback.method), \(playback.url.scheme ?? "?")) in \(ms(playStart))")
+            // Open the stream like the player would and read the first bytes.
+            var probe = URLRequest(url: playback.url)
+            probe.setValue("bytes=0-65535", forHTTPHeaderField: "Range")
+            for header in playback.headers {
+                let parts = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                if parts.count == 2 { probe.setValue(parts[1], forHTTPHeaderField: parts[0]) }
+            }
+            let probeStart = Date()
+            do {
+                let (bytes, response) = try await URLSession.shared.data(for: probe)
+                let http = response as? HTTPURLResponse
+                let type = http?.value(forHTTPHeaderField: "Content-Type") ?? "?"
+                print("  stream        HTTP \(http?.statusCode ?? 0), \(type), \(bytes.count) bytes from \(response.url?.host() ?? "?") in \(ms(probeStart))")
+            } catch {
+                failures += 1
+                print("  ✗ stream      \(SourceError.wrap(error).localizedDescription)")
+            }
         }
         let indexStart = Date()
         let entries = try await client.libraryIndex()

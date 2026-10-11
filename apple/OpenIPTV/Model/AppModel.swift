@@ -78,7 +78,8 @@ final class AppModel {
     }
 
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
-        await emby?.report(event, itemId: playback.itemId, seconds: seconds)
+        await emby?.report(event, itemId: playback.itemId, seconds: seconds,
+                           mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
         if event == .stopped { await loadHome(cardWidth: lastCardWidth) }
     }
 

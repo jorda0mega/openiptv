@@ -273,6 +273,10 @@ struct MoviePlayerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var lastReport: Double = 0
     @State private var scrubbing: Double?
+    /// How many fallback streams have been tried after the first failed.
+    @State private var attempt = 0
+    /// Where a server-converted (HLS) fallback starts, since its clock starts at 0.
+    @State private var offset: Double = 0
 
     var body: some View {
         ZStack {
@@ -370,7 +374,7 @@ struct MoviePlayerView: View {
                 in: 0...max(total, 1),
                 onEditingChanged: { editing in
                     if !editing, let target = scrubbing {
-                        player?.seek(to: target)
+                        player?.seek(to: max(0, target - offset))
                         position = target
                         scrubbing = nil
                     }
@@ -397,7 +401,7 @@ struct MoviePlayerView: View {
         let player = makePlayer(prefs: prefs)
         player.onEvent = { event in handle(event) }
         self.player = player
-        player.load(playback.url, start: playback.startSeconds)
+        player.load(playback.url, headers: playback.headers, start: playback.startSeconds)
         position = playback.startSeconds ?? 0
         showControls()
     }
@@ -412,11 +416,21 @@ struct MoviePlayerView: View {
         case let .buffering(isBuffering):
             buffering = isBuffering
         case let .failed(message):
+            if !started, attempt < playback.fallbacks.count {
+                // The original didn't open; try the next way Emby offers.
+                let next = playback.fallbacks[attempt]
+                attempt += 1
+                let converted = next.path().hasSuffix(".m3u8")
+                offset = converted ? (playback.startSeconds ?? 0) : 0
+                player?.load(next, start: converted ? nil : playback.startSeconds)
+                return
+            }
             error = "Couldn't play: \(message)"
             showControls(autoHide: false)
-        case let .time(newPosition, newDuration):
+        case let .time(rawPosition, newDuration):
+            let newPosition = rawPosition + offset
             position = newPosition
-            if let newDuration { duration = newDuration }
+            if let newDuration, offset == 0 { duration = newDuration }
             if abs(newPosition - lastReport) >= 10 {
                 lastReport = newPosition
                 Task { await model.report(playback, seconds: newPosition, event: .progress) }

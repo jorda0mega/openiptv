@@ -115,8 +115,16 @@ struct EmbyPlayback: Hashable, Identifiable {
     let title: String
     let subtitle: String?
     let url: URL
+    /// "Name: value" headers the source needs (remote sources only).
+    var headers: [String] = []
     let startSeconds: Double?
     let durationSeconds: Double?
+    var mediaSourceId: String?
+    var playSessionId: String?
+    /// How it plays, for diagnostics: "direct stream", "remote file" or "transcode".
+    var method = "direct stream"
+    /// Tried in order if `url` fails to open (Emby's direct stream, then HLS).
+    var fallbacks: [URL] = []
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {

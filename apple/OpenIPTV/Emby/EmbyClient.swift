@@ -285,14 +285,115 @@ struct EmbyClient {
         }
         let resume = (item.userData?.played == true) ? nil
             : item.userData?.playbackPositionTicks.flatMap { $0 > 0 ? Double($0) / 1e7 : nil }
-        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(item.id)/stream"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [
-            .init(name: "static", value: "true"), .init(name: "MediaSourceId", value: item.id),
-            .init(name: "api_key", value: account.accessToken),
-        ]
         let (title, subtitle) = Self.titles(item)
-        return EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle, url: parts.url!,
-                            startSeconds: resume, durationSeconds: item.runTimeTicks.map { Double($0) / 1e7 })
+        var playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle,
+                                    url: directStreamURL(item.id, mediaSourceId: item.id, playSessionId: nil),
+                                    startSeconds: resume, durationSeconds: item.runTimeTicks.map { Double($0) / 1e7 },
+                                    fallbacks: [hlsURL(item.id, mediaSourceId: item.id, playSessionId: nil, start: resume)])
+        // Ask the server how to play it, like Emby's own apps do: the media
+        // source id can differ from the item id, and some sources are remote
+        // files to open directly. Fall back to direct stream if this fails.
+        if let info = try? await playbackInfo(item.id, startSeconds: resume), let source = info.MediaSources?.first {
+            playback.mediaSourceId = source.Id
+            playback.playSessionId = info.PlaySessionId
+            if source.Protocol == "Http", let path = source.Path, let remote = URL(string: path),
+               remote.scheme?.hasPrefix("http") == true {
+                playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle, url: remote,
+                                        headers: (source.RequiredHttpHeaders ?? [:]).map { "\($0.key): \($0.value)" },
+                                        startSeconds: resume, durationSeconds: playback.durationSeconds,
+                                        mediaSourceId: source.Id, playSessionId: info.PlaySessionId, method: "remote file",
+                                        fallbacks: [directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId),
+                                                    hlsURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId, start: resume)])
+            } else if source.SupportsDirectStream == false, let transcode = source.TranscodingUrl,
+                      let url = URL(string: Self.api(account.serverURL, "").absoluteString + transcode.drop(while: { $0 == "/" })) {
+                playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle, url: url,
+                                        startSeconds: nil, durationSeconds: playback.durationSeconds,
+                                        mediaSourceId: source.Id, playSessionId: info.PlaySessionId, method: "transcode")
+            } else {
+                playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle,
+                                        url: directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId,
+                                                             container: source.Container),
+                                        startSeconds: resume, durationSeconds: playback.durationSeconds,
+                                        mediaSourceId: source.Id, playSessionId: info.PlaySessionId,
+                                        fallbacks: [hlsURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId, start: resume)])
+            }
+        }
+        return playback
+    }
+
+    private func directStreamURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, container: String? = nil) -> URL {
+        // A file extension helps the player pick the demuxer straight away.
+        let ext = container.flatMap { $0.split(separator: ",").first.map { ".\($0)" } } ?? ""
+        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/stream\(ext)"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [
+            .init(name: "Static", value: "true"), .init(name: "MediaSourceId", value: mediaSourceId),
+            .init(name: "api_key", value: account.accessToken),
+        ] + (playSessionId.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
+        return parts.url!
+    }
+
+    /// Emby's HLS stream, converted on the server: the last resort when the
+    /// original file won't open. Starts at `start` because seeking in a
+    /// live-converted stream is limited.
+    private func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?) -> URL {
+        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/master.m3u8"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [
+            .init(name: "MediaSourceId", value: mediaSourceId), .init(name: "api_key", value: account.accessToken),
+            .init(name: "DeviceId", value: deviceId),
+            .init(name: "VideoCodec", value: "h264"), .init(name: "AudioCodec", value: "aac"),
+            .init(name: "TranscodingMaxAudioChannels", value: "2"), .init(name: "SegmentContainer", value: "ts"),
+            .init(name: "MinSegments", value: "1"), .init(name: "BreakOnNonKeyFrames", value: "True"),
+            .init(name: "MaxStreamingBitrate", value: "20000000"),
+            .init(name: "StartTimeTicks", value: String(Int64((start ?? 0) * 1e7))),
+        ] + (playSessionId.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
+        return parts.url!
+    }
+
+    struct PlaybackInfo: Decodable {
+        struct Source: Decodable {
+            let Id: String
+            let `Protocol`: String?
+            let Path: String?
+            let Container: String?
+            let SupportsDirectPlay: Bool?
+            let SupportsDirectStream: Bool?
+            let TranscodingUrl: String?
+            let RequiredHttpHeaders: [String: String]?
+        }
+        let MediaSources: [Source]?
+        let PlaySessionId: String?
+        let ErrorCode: String?
+    }
+
+    /// The server's view of how this device can play the item. The profile
+    /// says "anything plays directly" (libmpv handles every common format)
+    /// with HLS transcoding only as a last resort.
+    func playbackInfo(_ itemId: String, startSeconds: Double?) async throws -> PlaybackInfo {
+        var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(itemId)/PlaybackInfo"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [
+            .init(name: "UserId", value: account.userId), .init(name: "IsPlayback", value: "true"),
+            .init(name: "AutoOpenLiveStream", value: "true"), .init(name: "MaxStreamingBitrate", value: "200000000"),
+            .init(name: "StartTimeTicks", value: String(Int64((startSeconds ?? 0) * 1e7))),
+        ]
+        var request = URLRequest(url: parts.url!)
+        request.httpMethod = "POST"
+        authorize(&request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["DeviceProfile": [
+            "MaxStreamingBitrate": 200_000_000, "MaxStaticBitrate": 200_000_000,
+            "DirectPlayProfiles": [["Type": "Video"], ["Type": "Audio"]],
+            "TranscodingProfiles": [[
+                "Container": "ts", "Type": "Video", "Protocol": "hls", "Context": "Streaming",
+                "VideoCodec": "h264,hevc", "AudioCodec": "aac,ac3,eac3,mp3", "MaxAudioChannels": "6",
+                "BreakOnNonKeyFrames": true,
+            ]],
+            "ContainerProfiles": [], "CodecProfiles": [],
+            "SubtitleProfiles": [["Format": "srt", "Method": "Embed"], ["Format": "ass", "Method": "Embed"],
+                                 ["Format": "subrip", "Method": "Embed"], ["Format": "pgssub", "Method": "Embed"]],
+        ]])
+        let info = try JSONDecoder().decode(PlaybackInfo.self, from: try await HTTP.data(request))
+        if let code = info.ErrorCode { throw SourceError.unexpected("Emby can't play this (\(code)).") }
+        return info
     }
 
     private func episodeToPlay(series: String, season: String?) async throws -> EmbyItem? {
@@ -312,7 +413,8 @@ struct EmbyClient {
     enum PlaybackEvent: String { case started = "Sessions/Playing", progress = "Sessions/Playing/Progress", stopped = "Sessions/Playing/Stopped" }
 
     /// Keeps Continue Watching right on every device.
-    func report(_ event: PlaybackEvent, itemId: String, seconds: Double) async {
+    func report(_ event: PlaybackEvent, itemId: String, seconds: Double,
+                mediaSourceId: String? = nil, playSessionId: String? = nil) async {
         var request = URLRequest(url: Self.api(account.serverURL, event.rawValue))
         request.httpMethod = "POST"
         authorize(&request)
@@ -320,6 +422,7 @@ struct EmbyClient {
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "ItemId": itemId, "PositionTicks": Int64(max(0, seconds) * 1e7),
             "PlayMethod": "DirectStream", "CanSeek": true,
+            "MediaSourceId": mediaSourceId ?? itemId, "PlaySessionId": playSessionId ?? "",
         ])
         _ = try? await HTTP.data(request)
     }

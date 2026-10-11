@@ -88,6 +88,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"", status=204)
         if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == "tok":
             return self.send(b"", status=204)
+        if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == "tok":
+            item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
+            return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv",
+                                                "SupportsDirectPlay": True, "SupportsDirectStream": True}],
+                              "PlaySessionId": "ps1"})
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})
         self.send({"error": "unauthorized"}, status=401)
@@ -206,7 +211,8 @@ class Handler(BaseHTTPRequestHandler):
     def emby(self, path, q):
         if path == "/System/Info/Public":
             return self.send({"ServerName": "Mock Emby", "Version": "4.10.1.0", "Id": "srv"})
-        if self.headers.get("X-Emby-Token") != "tok" and not path.startswith("/Items/"):
+        # Like Emby: the token can come as a header or as ?api_key= (players).
+        if self.headers.get("X-Emby-Token") != "tok" and q.get("api_key") != "tok" and not path.startswith("/Items/"):
             return self.send({"error": "unauthorized"}, status=401)
         movie = lambda i: {"Id": f"m{i}", "Name": f"Movie {i}", "Type": "Movie", "ProductionYear": 2020,
                            "PrimaryImageAspectRatio": 0.6667,
@@ -229,7 +235,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Shows/NextUp":
             items = [episode(3)] if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
             return self.send({"Items": items, "TotalRecordCount": len(items)})
-        if path.startswith("/Videos/") and path.endswith("/stream"):
+        if path.startswith("/Videos/") and path.endswith("/master.m3u8"):
+            # Server-converted HLS: hand off to Apple's public test stream so a
+            # fallback can be seen playing real video.
+            self.send_response(302)
+            self.send_header("Location", "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path.startswith("/Videos/") and "/stream" in path:
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
         if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q:
             # The library index: movies plus a few real-looking show names.
