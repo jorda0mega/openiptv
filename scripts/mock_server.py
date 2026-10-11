@@ -49,7 +49,14 @@ KNOWN_TITLES = [
     ("z0", "The Mask of Zorro", "Movie", 1998, "tt0120746", "9342"), ("z1", "The Legend of Zorro", "Movie", 2005, "tt0386140", "1656"),
     ("z2", "Zorro", "Series", 1990, "tt0098957", None), ("z3", "Zorro", "Movie", 1975, "tt0072448", "18450"),
     ("z4", "The Mark of Zorro", "Movie", 1940, "tt0032762", None),
+    # Recent and well rated on IMDb, for New & notable.
+    ("n0", "Sinners", "Movie", 2025, "tt31193180", "1233413"), ("n1", "Superman", "Movie", 2025, "tt5950044", "1061474"),
+    ("n2", "The Fantastic Four: First Steps", "Movie", 2025, "tt10676052", "617126"),
+    ("n3", "Thunderbolts*", "Movie", 2025, "tt20969586", "986056"),
 ]
+# Release dates (fixtures, not the real ones, except Weapons): New & notable
+# keeps the last year's, so Weapons (August 2025) drops out.
+PREMIERES = {"n0": "2025-12-05", "n1": "2026-01-16", "n2": "2026-02-20", "n3": "2026-03-13", "a11": "2025-08-08"}
 # Genres and cast (searching "zorro antonio", "zorro comedy", "antonio banderas").
 GENRES = {"z0": ["Action", "Adventure"], "z1": ["Action", "Adventure", "Western"], "z2": ["Action", "Adventure"],
           "z3": ["Adventure", "Western"], "z4": ["Adventure", "Romance"], "a9": ["Drama", "History"], "a10": ["Action", "Science Fiction"],
@@ -71,7 +78,8 @@ def known_item(entry, played=False):
             "BackdropImageTags": [f"b{id_}"], "Overview": f"{name} ({year}), a title from the test library.",
             "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
             "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None},
-            "Genres": GENRES.get(id_, [])}
+            "Genres": GENRES.get(id_, [])} | (
+            {"PremiereDate": f"{PREMIERES[id_]}T00:00:00.0000000Z"} if id_ in PREMIERES else {})
 
 
 KNOWN_BY_ID = {entry[0]: entry for entry in KNOWN_TITLES}

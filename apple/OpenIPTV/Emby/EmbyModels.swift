@@ -45,6 +45,8 @@ struct EmbyItem: Codable, Hashable {
     var providerIds: [String: String]?
     /// ISO 8601: when the server added it.
     var dateCreated: String?
+    /// ISO 8601: when it came out (a show: its first episode).
+    var premiereDate: String?
     /// Cast and crew, when asked for (`Fields=People`).
     var people: [Person]?
     var genres: [String]?
@@ -97,6 +99,7 @@ struct EmbyItem: Codable, Hashable {
         case overview = "Overview"
         case providerIds = "ProviderIds"
         case dateCreated = "DateCreated"
+        case premiereDate = "PremiereDate"
         case people = "People"
         case genres = "Genres"
     }
@@ -132,6 +135,7 @@ struct EmbyItem: Codable, Hashable {
         // Values can be null on some servers; keep the ones that are there.
         providerIds = (try? c.decodeIfPresent([String: String?].self, forKey: .providerIds))?.compactMapValues { $0 }
         dateCreated = try? c.decodeIfPresent(String.self, forKey: .dateCreated)
+        premiereDate = try? c.decodeIfPresent(String.self, forKey: .premiereDate)
         people = (try? c.decodeIfPresent([Lenient<Person>].self, forKey: .people))?.compactMap(\.value)
         genres = try? c.decodeIfPresent([String].self, forKey: .genres)
     }

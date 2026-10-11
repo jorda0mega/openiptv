@@ -30,8 +30,10 @@ struct HomeContent: Codable, Hashable {
 ///   resuming is quickest);
 /// - Top picks for you: one row of titles like your last five watches,
 ///   taken from each in turn so it stays varied;
-/// - Trending now: what's popular this week (TMDb) on the server, unwatched;
-/// - New & notable: recently added, keeping the popular and well rated.
+/// - Trending now: titles on the server that are popular worldwide this
+///   week (TMDb), unwatched;
+/// - New & notable: titles on the server released in the last year that
+///   IMDb voters rate 6.5 or more, most voted first.
 /// A few rows that each do one job, like Netflix and IMDb's homes. Movies
 /// and shows mix, and each title appears once on the page however many
 /// libraries hold a copy (HD and 4K are one title). Top picks choose
@@ -71,13 +73,12 @@ enum HomeFeed {
         // you've seen of them.
         let trendingIds = library.trending.prefix(100).map(\.id)
         async let trendingItems = emby.items(ids: trendingIds)
+        let notableIds = library.notable.prefix(100).map(\.id)
+        async let notableItems = emby.items(ids: notableIds)
         let sources = try await emby.homeSources()
-        let ratings = library.ratings, popularity = library.popularity
+        let ratings = library.ratings
         let thisYear = Calendar.current.component(.year, from: Date())
 
-        func trend(_ item: EmbyItem) -> Double? {
-            popularity?.popularity(item.tmdb, item.kind == "Series" ? .show : .movie)
-        }
         func details(_ item: EmbyItem) -> String {
             [item.kind == "Series" ? "Show" : "Movie", item.productionYear.map(String.init),
              ratings?.rating(item.imdb).map(IMDbRatings.label)].compactMap(\.self).joined(separator: " · ")
@@ -119,20 +120,22 @@ enum HomeFeed {
         // Trending titles on the server, with what this user has seen of them.
         let popular = await trendingItems.filter { !watched($0) && !isShown($0) && worthIt($0) }
 
-        // New & notable candidates, needed for the featured pick when
+        // New & notable: out within the last year (by release date when the
+        // server has it, else this year's and last year's), well rated on
+        // IMDb, most voted first. Also the featured pick's pool when
         // popularity hasn't downloaded yet.
-        func notable(_ item: EmbyItem) -> Bool {
-            if ratings == nil, popularity == nil { return true }
-            if let score = trend(item), score >= 5 { return true }
-            if let rating = ratings?.rating(item.imdb), rating.votes >= 5_000, rating.score >= 6 { return true }
-            return false
+        let yearAgo = Calendar.current.date(byAdding: .year, value: -1, to: Date()).map {
+            $0.formatted(.iso8601.year().month().day())
+        } ?? ""
+        let today = Date().formatted(.iso8601.year().month().day())
+        func outLastYear(_ item: EmbyItem) -> Bool {
+            guard let date = item.premiereDate?.prefix(10) else { return true }
+            return date >= yearAgo && date <= today
         }
-        let added = sources.added.filter {
-            ($0.kind == "Movie" || $0.kind == "Series") && !watched($0) && notable($0) && worthIt($0)
-        }
+        let fresh = await notableItems.filter { !watched($0) && outLastYear($0) }
 
         // Featured: popular and recent, with a backdrop to show.
-        let pool = popular.isEmpty ? Array(added.prefix(20)) : popular
+        let pool = popular.isEmpty ? Array(fresh.prefix(20)) : popular
         let withBackdrop = pool.filter { emby.backdropURL(for: $0, width: backdropWidth) != nil }
         // The same pick all day (one of the top few recent ones, by date),
         // so refreshing doesn't swap the top of the screen.
@@ -180,7 +183,7 @@ enum HomeFeed {
         }
 
         var newRow: [EmbyItem] = []
-        for item in added where newRow.count < 20 && !isShown(item) {
+        for item in fresh where newRow.count < 20 && !isShown(item) {
             newRow.append(item)
             show(item)
         }

@@ -477,6 +477,7 @@ final class AppModel {
 
     private func syncLibrary(_ emby: EmbyClient) async {
         let before = library.trending.prefix(40).map(\.id)
+        let hadNotable = !library.notable.isEmpty
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
         await library.prepare(emby)
         await charts
@@ -485,10 +486,12 @@ final class AppModel {
             await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
             return
         }
-        // Trending arrived for the first time (Home was built without it):
-        // rebuild once. Otherwise the next visit or refresh picks it up,
-        // rather than the page changing under you.
-        if before.isEmpty, !library.trending.isEmpty { await loadHome(cardWidth: lastCardWidth, sync: false) }
+        // Trending or New & notable arrived for the first time (Home was
+        // built without them): rebuild once. Otherwise the next visit or
+        // refresh picks them up, rather than the page changing under you.
+        if (before.isEmpty && !library.trending.isEmpty) || (!hadNotable && !library.notable.isEmpty) {
+            await loadHome(cardWidth: lastCardWidth, sync: false)
+        }
     }
 
     func playback(for card: Card) async throws -> EmbyPlayback {

@@ -121,32 +121,14 @@ struct EmbyClient {
         var nextUp: [EmbyItem]
         /// Recently finished, most recent first.
         var played: [EmbyItem]
-        /// Recently added across every library, newest first.
-        var added: [EmbyItem]
     }
 
     func homeSources() async throws -> HomeSources {
-        async let viewList: [EmbyItem] = items("Users/\(account.userId)/Views", [])
         async let watching = watching()
         async let nextUp = nextUp()
         async let played = played()
-        let views = try await viewList
-        let libraries = views.filter { ["movies", "tvshows"].contains($0.collectionType ?? "") }.prefix(12)
-        // Per library: much faster than one query across all of them.
-        let added = await withTaskGroup(of: [EmbyItem].self) { group in
-            for library in libraries {
-                group.addTask {
-                    (try? await items("Users/\(account.userId)/Items/Latest", Self.cardQuery + [
-                        .init(name: "ParentId", value: library.id), .init(name: "Limit", value: "30"),
-                    ])) ?? []
-                }
-            }
-            var out: [EmbyItem] = []
-            for await items in group { out += items }
-            return out.sorted { ($0.dateCreated ?? "") > ($1.dateCreated ?? "") }
-        }
         return HomeSources(watching: try await watching, nextUp: (try? await nextUp) ?? [],
-                           played: (try? await played) ?? [], added: added)
+                           played: (try? await played) ?? [])
     }
 
     /// Partly watched, most recent first.

@@ -308,6 +308,9 @@ final class LibraryIndex {
     private(set) var versions: [String: [String]] = [:]
     /// The most popular titles on the server right now, most popular first.
     private(set) var trending: [LibraryEntry] = []
+    /// This year's and last year's titles that IMDb voters rate well, most
+    /// voted first: New & notable.
+    private(set) var notable: [LibraryEntry] = []
     private(set) var indexing = false
     /// Titles loaded so far and the total, while the full catalog loads.
     private(set) var progress: (loaded: Int, total: Int)?
@@ -323,6 +326,9 @@ final class LibraryIndex {
     private(set) var ratings: IMDbRatings?
     private(set) var popularity: TMDbPopularity?
     private var chartsTask: Task<Void, Never>?
+    /// Bumped whenever the entries change, so a ranking made from older
+    /// entries (the index loaded meanwhile) is redone, not kept.
+    private var generation = 0
 
     private struct Cache: Codable {
         var version: Int?
@@ -398,6 +404,7 @@ final class LibraryIndex {
             fullSyncAt = nil
             outdated = false
             corpus = SearchCorpus(name: \.name)
+            generation += 1
             if let cache = await Self.readCache(), cache.server == server {
                 pages = cache.pages
                 total = cache.total
@@ -446,20 +453,30 @@ final class LibraryIndex {
 
     private func apply(_ ratings: IMDbRatings) async {
         self.ratings = ratings
-        corpus = await Self.boost(corpus, ratings)
+        let start = generation
+        let boosted = await Self.boost(corpus, ratings)
+        let notable = await Self.notable(boosted.items, ratings)
+        guard generation == start else { return await apply(ratings) }
+        corpus = boosted
+        self.notable = notable
     }
 
     private func apply(_ popularity: TMDbPopularity) async {
         self.popularity = popularity
-        trending = await Self.trending(corpus.items, popularity)
+        let start = generation
+        let trending = await Self.trending(corpus.items, popularity)
+        guard generation == start else { return await apply(popularity) }
+        self.trending = trending
     }
 
     /// Search and the trending list from these entries, each title once.
     private func publish(_ entries: [LibraryEntry]) async {
         let (corpus, versions) = await Self.build(entries, ratings)
+        generation += 1
         self.corpus = corpus
         self.versions = versions
         if let popularity { trending = await Self.trending(corpus.items, popularity) }
+        if let ratings { notable = await Self.notable(corpus.items, ratings) }
     }
 
     /// Every copy of the title with this id (just the id when there's one).
@@ -531,8 +548,10 @@ final class LibraryIndex {
 
     func clear() {
         corpus = SearchCorpus(name: \.name)
+        generation += 1
         versions = [:]
         trending = []
+        notable = []
         pages = [:]
         total = nil
         syncedAt = nil
@@ -615,6 +634,20 @@ final class LibraryIndex {
         await Task.detached(priority: .utility) {
             entries.compactMap { entry in popularity.popularity(entry).map { (entry, $0) } }
                 .sorted { $0.1 > $1.1 }
+                .prefix(300)
+                .map(\.0)
+        }.value
+    }
+
+    /// Released this year or last, rated 6.5 or more by at least a
+    /// thousand IMDb voters; the 300 most voted.
+    private nonisolated static func notable(_ entries: [LibraryEntry], _ ratings: IMDbRatings) async -> [LibraryEntry] {
+        let year = Calendar.current.component(.year, from: Date())
+        return await Task.detached(priority: .utility) {
+            entries.filter { ($0.kind == "Movie" || $0.kind == "Series") && ($0.year ?? 0) >= year - 1 }
+                .compactMap { entry in ratings.rating(entry.imdb).map { (entry, $0) } }
+                .filter { $0.1.score >= 6.5 && $0.1.votes >= 1_000 }
+                .sorted { $0.1.votes > $1.1.votes }
                 .prefix(300)
                 .map(\.0)
         }.value
