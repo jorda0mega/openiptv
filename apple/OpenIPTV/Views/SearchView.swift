@@ -11,8 +11,17 @@ struct SearchView: View {
     @Binding var playing: PlayerItem?
 
     @State private var query = ""
+    @State private var scope: Scope = .all
+
+    /// What the results show: everything, or one kind. Episodes come under
+    /// Shows (an episode is part of a show).
+    enum Scope: String, CaseIterable, Identifiable {
+        case all = "All", movies = "Movies", shows = "Shows", live = "Live TV"
+        var id: Self { self }
+    }
     #if os(iOS)
     @FocusState private var fieldFocused: Bool
+    @Namespace private var scopeUnderline
     #endif
     @State private var library: [Card] = []
     @State private var channels: [LiveChannel] = []
@@ -42,10 +51,23 @@ struct SearchView: View {
         return library + serverFiltered.filter { $0.kind != "Episode" && !known.contains($0.id) }
     }
 
+    private var movies: [Card] { moviesAndShows.filter { $0.kind != "Series" } }
+    private var shows: [Card] { moviesAndShows.filter { $0.kind == "Series" } }
+
+    /// Whether a filter has anything for what's typed (empty ones are dimmed).
+    private func hasResults(_ scope: Scope) -> Bool {
+        switch scope {
+        case .all: true
+        case .movies: !movies.isEmpty
+        case .shows: !shows.isEmpty || !episodes.isEmpty
+        case .live: !channels.isEmpty
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                if !completions.isEmpty {
+                if scope == .all, !completions.isEmpty {
                     Section {
                         ForEach(completions, id: \.self) { completion in
                             Button { query = completion } label: {
@@ -56,17 +78,28 @@ struct SearchView: View {
                         }
                     }
                 }
-                if !moviesAndShows.isEmpty {
+                switch scope {
+                case .all where !moviesAndShows.isEmpty:
                     Section("Movies & Shows") {
                         ForEach(moviesAndShows) { card in result(card, wide: false) }
                     }
+                case .movies where !movies.isEmpty:
+                    Section("Movies") {
+                        ForEach(movies) { card in result(card, wide: false) }
+                    }
+                case .shows where !shows.isEmpty:
+                    Section("Shows") {
+                        ForEach(shows) { card in result(card, wide: false) }
+                    }
+                default:
+                    EmptyView()
                 }
-                if !episodes.isEmpty {
+                if scope == .all || scope == .shows, !episodes.isEmpty {
                     Section("Episodes") {
                         ForEach(episodes) { card in result(card, wide: true) }
                     }
                 }
-                if !channels.isEmpty {
+                if scope == .all || scope == .live, !channels.isEmpty {
                     Section("Channels") {
                         ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
                             Button {
@@ -105,6 +138,9 @@ struct SearchView: View {
             // or the keyboard's Search key puts the keyboard away.
             .scrollDismissesKeyboard(.immediately)
             .safeAreaInset(edge: .bottom) { searchField }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty { scopeBar }
+            }
             .onAppear { if query.isEmpty { fieldFocused = true } }
             #else
             .searchable(text: $query, prompt: "Movies, shows, channels")
@@ -121,6 +157,44 @@ struct SearchView: View {
     }
 
     #if os(iOS)
+    /// All · Movies · Shows · Live TV, the chosen one underlined.
+    private var scopeBar: some View {
+        HStack(spacing: 24) {
+            ForEach(Scope.allCases) { option in
+                let selected = option == scope
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { scope = option }
+                } label: {
+                    Text(option.rawValue)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(selected ? Color.primary : Color.secondary)
+                        .opacity(hasResults(option) || selected ? 1 : 0.4)
+                        .padding(.vertical, 12)
+                        .overlay(alignment: .bottom) {
+                            if selected {
+                                Capsule().fill(.tint).frame(height: 3).padding(.bottom, 6)
+                                    .matchedGeometryEffect(id: "scope", in: scopeUnderline)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .background {
+            Color.black
+                .overlay(alignment: .bottom) {
+                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 16)
+                        .offset(y: 16)
+                }
+                .allowsHitTesting(false)
+        }
+    }
+
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -158,6 +232,14 @@ struct SearchView: View {
                                    description: Text("Movies, shows, episodes and live channels. Results appear as you type."))
         } else if serverDone, moviesAndShows.isEmpty, episodes.isEmpty, channels.isEmpty {
             ContentUnavailableView.search(text: q)
+        } else if scope != .all, !hasResults(scope), serverDone {
+            let what = switch scope {
+            case .movies: "movies"
+            case .shows: "shows or episodes"
+            default: "channels"
+            }
+            ContentUnavailableView("No \(what)", systemImage: "line.3.horizontal.decrease",
+                                   description: Text("No \(what) match “\(q)”. Try All."))
         }
     }
 
