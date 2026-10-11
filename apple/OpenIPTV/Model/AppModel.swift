@@ -79,7 +79,7 @@ final class AppModel {
             AppCache.write("home.json", fresh)
             // The first few things you'd tap on Home are ready before you do.
             let likely = fresh.prefix(2).flatMap { $0.cards.prefix(3) }
-            prepare(likely.map { (id: $0.id, kind: Optional($0.kind)) })
+            prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
             Task { await library.prepare(emby) }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription

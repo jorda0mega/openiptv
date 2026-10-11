@@ -120,7 +120,7 @@ struct EmbyClient {
         async let resume = items("Users/\(account.userId)/Items", Self.cardQuery + [
             .init(name: "Filters", value: "IsResumable"), .init(name: "Recursive", value: "true"),
             .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
-            .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "12"),
+            .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "30"),
         ])
         async let nextUp = items("Shows/NextUp", Self.cardQuery + [
             .init(name: "UserId", value: account.userId), .init(name: "Limit", value: "12"),
@@ -140,12 +140,34 @@ struct EmbyClient {
         }
 
         var rows: [HomeRow] = []
-        if let row = row("Continue Watching", try await resume, .landscape, cardWidth) { rows.append(row) }
-        if let row = row("Next Up", (try? await nextUp) ?? [], .landscape, cardWidth) { rows.append(row) }
+        let watching = try await resume
+        if let row = showRow("Continue Watching", watching, cardWidth) { rows.append(row) }
+        // Next Up without the shows already in Continue Watching.
+        let inProgress = Set(watching.compactMap(\.seriesId))
+        let upNext = ((try? await nextUp) ?? []).filter { !inProgress.contains($0.seriesId ?? "") }
+        if let row = showRow("Next Up", upNext, cardWidth) { rows.append(row) }
         for (library, items) in zip(libraries, latest) {
             if let items, let row = row("Latest in \(library.name)", items, .poster, cardWidth) { rows.append(row) }
         }
         return rows
+    }
+
+    /// One card per show (Netflix-style), carrying the episode to resume;
+    /// movies stay as they are.
+    private func showRow(_ title: String, _ items: [EmbyItem], _ width: Int) -> HomeRow? {
+        var seen = Set<String>()
+        let unique = items.filter { seen.insert($0.kind == "Episode" ? ($0.seriesId ?? $0.id) : $0.id).inserted }.prefix(12)
+        guard !unique.isEmpty else { return nil }
+        let shape = Artwork.Shape.landscape
+        let cards = unique.map { item -> Card in
+            let base = card(item, context: .landscape, shape: shape, width: width)
+            guard item.kind == "Episode", let series = item.seriesId else { return base }
+            var code = ""
+            if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s):E\(e) · " }
+            return Card(id: series, kind: "Series", title: item.seriesName ?? base.title, subtitle: code + item.name,
+                        images: base.images, progress: base.progress, playable: true, episodeId: item.id)
+        }
+        return HomeRow(title: title, shape: shape.rawValue, aspect: shape.aspect, cards: Array(cards))
     }
 
     private func row(_ title: String, _ items: [EmbyItem], _ context: Artwork.Context, _ width: Int) -> HomeRow? {
@@ -530,6 +552,11 @@ struct EmbyClient {
         let info = try JSONDecoder().decode(PlaybackInfo.self, from: try await HTTP.data(request))
         if let code = info.ErrorCode { throw SourceError.unexpected("Emby can't play this (\(code)).") }
         return info
+    }
+
+    /// The episode Play starts for a show: the next unwatched one.
+    func nextEpisode(of series: String) async throws -> EmbyItem? {
+        try await episodeToPlay(series: series, season: nil)
     }
 
     private func episodeToPlay(series: String, season: String?) async throws -> EmbyItem? {

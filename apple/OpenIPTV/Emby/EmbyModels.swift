@@ -101,6 +101,8 @@ struct Card: Codable, Hashable, Identifiable {
     let images: [CardImage]
     let progress: Double?
     let playable: Bool
+    /// For a show in Continue Watching / Next Up: the episode to resume.
+    var episodeId: String? = nil
 }
 
 struct HomeRow: Codable, Hashable, Identifiable {

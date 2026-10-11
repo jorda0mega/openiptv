@@ -240,13 +240,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"Items": [{"Id": f"season{n}", "Name": f"Season {n}", "Type": "Season", "IndexNumber": n,
                                          "UserData": {"Played": n == 1}} for n in (1, 2)]})
         if path.startswith("/Shows/") and path.endswith("/Episodes"):
-            season = q.get("SeasonId", "season1")
-            return self.send({"Items": [episode(i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": int(season[-1]),
-                                                      "RunTimeTicks": 13200000000, "Overview": "A small-town mystery.",
-                                                      "UserData": {"Played": i < 2, "PlayedPercentage": 40 if i == 2 else None}}
-                                         for i in range(1, 7)]})
+            seasons = [int(q["SeasonId"][-1])] if "SeasonId" in q else [1, 2, 3]
+            return self.send({"Items": [episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
+                                                                "RunTimeTicks": 13200000000, "Overview": "A small-town mystery.",
+                                                                "UserData": {"Played": s == 1 or (s == 2 and i < 3),
+                                                                             "PlayedPercentage": 40 if (s, i) == (2, 3) else None,
+                                                                             "PlaybackPositionTicks": 5280000000 if (s, i) == (2, 3) else 0}}
+                                         for s in seasons for i in range(1, 9)]})
         if path == "/Shows/NextUp":
-            items = [episode(3)] if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
+            items = [episode(203) | {"Name": "Case 3", "IndexNumber": 3, "ParentIndexNumber": 2,
+                                     "UserData": {"PlaybackPositionTicks": 5280000000, "PlayedPercentage": 40}}] \
+                if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
             return self.send({"Items": items, "TotalRecordCount": len(items)})
         if path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             # Server-converted HLS: hand off to Apple's public test stream so a
@@ -279,7 +283,10 @@ class Handler(BaseHTTPRequestHandler):
                     [movie(i) for i in range(40) if term in f"movie {i}"]
             return self.send({"Items": found[: int(q.get("Limit", 40))]})
         if path == "/Users/U1/Items" and q.get("Filters") == "IsResumable":
-            return self.send({"Items": [episode(i) for i in range(3)]})
+            # Several episodes of one show (shown as one card) and a movie.
+            ep = lambda s, i: episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
+                                                    "UserData": {"PlaybackPositionTicks": 5280000000, "PlayedPercentage": 40}}
+            return self.send({"Items": [ep(2, 3), movie(5) | {"UserData": {"PlayedPercentage": 25}}, ep(1, 4), ep(1, 2)]})
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
         if path == "/Users/U1/Items/Latest":

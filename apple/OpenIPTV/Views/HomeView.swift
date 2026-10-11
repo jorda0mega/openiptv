@@ -64,15 +64,18 @@ struct HomeView: View {
     }
 
     private func warmFirst() {
-        guard let card = (model.rows.first { $0.title == "Continue Watching" } ?? model.rows.first)?.cards.first,
-              card.kind != "Series" else { return }
-        model.warmUp(card.id, kind: card.kind, options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+        guard let card = (model.rows.first { $0.title == "Continue Watching" } ?? model.rows.first)?.cards.first else { return }
+        if let episode = card.episodeId {
+            model.warmUp(episode, kind: "Episode", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+        } else if card.kind != "Series" {
+            model.warmUp(card.id, kind: card.kind, options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+        }
     }
 
     /// Shows open their page; everything else plays.
     private func play(_ card: Card) {
         if card.kind == "Series" {
-            path.append(ShowRoute(id: card.id, title: card.title))
+            path.append(ShowRoute(id: card.id, title: card.title, episodeId: card.episodeId))
             return
         }
         guard card.playable, loadingCard == nil else { return }
