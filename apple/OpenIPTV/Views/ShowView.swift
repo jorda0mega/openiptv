@@ -11,9 +11,9 @@ struct ShowRoute: Hashable {
 
 /// A show: artwork and overview, one button to resume or start the right
 /// episode, then every episode in one list with a heading per season. A
-/// filter bar (Unwatched, Newest first, a button per season) scrolls up
-/// under the header and then stays pinned; the season in view is
-/// highlighted and tapping one jumps straight to it. Everything is local,
+/// season bar scrolls up under the header and then stays pinned: the
+/// season you're in is underlined and kept in view, tapping one jumps
+/// straight to it, and a filter menu sits at its end. Everything is local,
 /// so filtering and jumping are instant.
 struct ShowView: View {
     @Environment(AppModel.self) private var model
@@ -31,6 +31,11 @@ struct ShowView: View {
     @State private var newestFirst = false
     /// Episodes currently on screen, to highlight the season in view.
     @State private var onScreen: Set<String> = []
+    /// The season just jumped to: highlighted until you scroll yourself,
+    /// even when it's too short to fill the screen.
+    @State private var jumpedTo: Int?
+    /// Where the season bar pins (the bottom of the navigation bar).
+    @State private var pinY: CGFloat = 0
 
     private var thumbWidth: Int { Int(Layout.searchThumbWide * 2 * displayScale) }
 
@@ -58,7 +63,8 @@ struct ShowView: View {
     /// The season with the most episodes on screen (rows peeking out from
     /// under the bars shouldn't win).
     private func seasonInView(_ seasons: [(number: Int, episodes: [EmbyItem])]) -> Int? {
-        seasons
+        if let jumpedTo, seasons.contains(where: { $0.number == jumpedTo }) { return jumpedTo }
+        return seasons
             .map { season in (season.number, season.episodes.filter { onScreen.contains($0.id) }.count) }
             .filter { $0.1 > 0 }
             .max { $0.1 < $1.1 }?.0
@@ -97,7 +103,15 @@ struct ShowView: View {
                     }
                 } header: {
                     if data != nil {
+                        #if os(iOS)
+                        SeasonBar(seasons: seasons.map(\.number), current: seasonInView(seasons), pinY: pinY,
+                                  unwatchedOnly: $unwatchedOnly, newestFirst: $newestFirst) { number in
+                            jumpedTo = number
+                            proxy.scrollTo("season-\(number)", anchor: .top)
+                        }
+                        #else
                         filterBar(proxy, seasons: seasons)
+                        #endif
                     }
                 }
                 if data == nil, error == nil {
@@ -105,6 +119,10 @@ struct ShowView: View {
                 }
             }
             .listStyle(.plain)
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting { jumpedTo = nil }
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, top in pinY = top }
             .onChange(of: data?.episodes.count) { _, _ in
                 // Open at the episode you're up to.
                 guard let id = upNext?.id, !scrolledToUpNext else { return }
@@ -170,49 +188,47 @@ struct ShowView: View {
         }
     }
 
-    /// Pinned under the navigation bar once scrolled to: filters, then a
-    /// button per season (the one in view highlighted). Jumps are instant.
+    #if os(tvOS)
+    /// Apple TV: filters, then a button per season (the one in view
+    /// highlighted and kept in view). Jumps are instant.
     private func filterBar(_ proxy: ScrollViewProxy, seasons: [(number: Int, episodes: [EmbyItem])]) -> some View {
         let current = seasonInView(seasons)
-        return ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                chip(unwatchedOnly ? "Unwatched ✓" : "Unwatched", selected: unwatchedOnly) {
-                    unwatchedOnly.toggle()
-                }
-                chip(newestFirst ? "Newest first ✓" : "Newest first", selected: newestFirst) {
-                    newestFirst.toggle()
-                }
-                if seasons.count > 1 {
-                    Divider().frame(height: 24)
-                    ForEach(seasons, id: \.number) { season in
-                        chip(Self.shortSeasonName(season.number), selected: season.number == current) {
-                            proxy.scrollTo("season-\(season.number)", anchor: .top)
+        return ScrollViewReader { strip in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    chip(unwatchedOnly ? "Unwatched ✓" : "Unwatched", selected: unwatchedOnly) {
+                        unwatchedOnly.toggle()
+                    }
+                    chip(newestFirst ? "Newest first ✓" : "Newest first", selected: newestFirst) {
+                        newestFirst.toggle()
+                    }
+                    if seasons.count > 1 {
+                        Divider().frame(height: 24)
+                        ForEach(seasons, id: \.number) { season in
+                            chip(Self.shortSeasonName(season.number), selected: season.number == current) {
+                                proxy.scrollTo("season-\(season.number)", anchor: .top)
+                            }
+                            .id(season.number)
                         }
                     }
                 }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .scrollIndicators(.hidden)
+            .scrollClipDisabled()
+            .onChange(of: current) { _, now in
+                if let now { withAnimation { strip.scrollTo(now, anchor: .center) } }
+            }
         }
-        .scrollIndicators(.hidden)
-        #if os(tvOS)
-        .scrollClipDisabled()
-        #endif
         .background(.regularMaterial)
         .listRowInsets(EdgeInsets())
     }
 
-    @ViewBuilder private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        #if os(tvOS)
+    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(title, action: action).buttonStyle(TVChipStyle(selected: selected))
-        #else
-        if selected {
-            Button(title, action: action).buttonStyle(.glassProminent)
-        } else {
-            Button(title, action: action).buttonStyle(.glass)
-        }
-        #endif
     }
+    #endif
 
     private var mainId: String { upNext?.id ?? route.episodeId ?? route.id }
 
@@ -252,6 +268,119 @@ struct ShowView: View {
         }
     }
 }
+
+#if os(iOS)
+/// Pinned under the navigation bar: the seasons as tabs, the one you're in
+/// underlined and slid into view as you scroll, and a filter menu at the
+/// end. As it reaches the top the area behind the navigation bar darkens
+/// with it into one black header, and episodes fade out softly beneath.
+private struct SeasonBar: View {
+    let seasons: [Int]
+    let current: Int?
+    /// Where the bar pins: the list's top inset (the list starts at the
+    /// top of the screen, under the navigation bar).
+    let pinY: CGFloat
+    @Binding var unwatchedOnly: Bool
+    @Binding var newestFirst: Bool
+    var jump: (Int) -> Void
+    @Namespace private var underline
+    /// 0 while the bar is well down the page, 1 once pinned.
+    @State private var docked: CGFloat = 0
+
+    private var filtered: Bool { unwatchedOnly || newestFirst }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollViewReader { strip in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 26) {
+                        ForEach(seasons, id: \.self) { number in
+                            tab(number)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .animation(.snappy(duration: 0.3), value: current)
+                }
+                .scrollIndicators(.hidden)
+                .mask {
+                    // Tabs fade at the edges instead of being cut off; the
+                    // padding keeps the first and last clear of the fade.
+                    HStack(spacing: 0) {
+                        LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 16)
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 16)
+                    }
+                }
+                .onAppear {
+                    if let current { strip.scrollTo(current, anchor: .center) }
+                }
+                .onChange(of: current) { _, now in
+                    guard let now else { return }
+                    withAnimation(.snappy(duration: 0.35)) { strip.scrollTo(now, anchor: .center) }
+                }
+            }
+            filterMenu
+        }
+        .background {
+            Color.black
+                .overlay(alignment: .top) {
+                    // Up behind the navigation bar, fading in as the bar
+                    // arrives so the two become one header.
+                    Color.black.frame(height: pinY).offset(y: -pinY).opacity(docked)
+                }
+                .overlay(alignment: .bottom) {
+                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 22)
+                        .offset(y: 22)
+                }
+                .allowsHitTesting(false)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in
+            docked = min(max(1 - (y - pinY) / 90, 0), 1)
+        }
+        .listRowInsets(EdgeInsets())
+    }
+
+    private func tab(_ number: Int) -> some View {
+        let selected = number == current
+        return Button { jump(number) } label: {
+            Text(ShowView.seasonName(number))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(selected ? Color.primary : Color.secondary) // not the header's grey
+                .padding(.vertical, 14)
+                .overlay(alignment: .bottom) {
+                    if selected {
+                        Capsule()
+                            .fill(.tint)
+                            .frame(height: 3)
+                            .padding(.bottom, 6)
+                            .matchedGeometryEffect(id: "current", in: underline)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .id(number)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Toggle("Unwatched Only", systemImage: "eye.slash", isOn: $unwatchedOnly)
+            Toggle("Newest First", systemImage: "arrow.up.arrow.down", isOn: $newestFirst)
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(filtered ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.primary))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .padding(.trailing, 12)
+        .accessibilityLabel(filtered ? "Filters, on" : "Filters")
+    }
+}
+#endif
 
 /// "Season 2 · 8 episodes · 3 watched" between seasons.
 private struct SeasonHeading: View {

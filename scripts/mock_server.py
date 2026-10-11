@@ -273,7 +273,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"Items": [{"Id": f"season{n}", "Name": f"Season {n}", "Type": "Season", "IndexNumber": n,
                                          "UserData": {"Played": n == 1}} for n in (1, 2)]})
         if path.startswith("/Shows/") and path.endswith("/Episodes"):
-            seasons = [int(q["SeasonId"][-1])] if "SeasonId" in q else [1, 2, 3]
+            # Specials plus ten seasons, like a long-running show.
+            seasons = [int(q["SeasonId"][-1])] if "SeasonId" in q else list(range(0, 11))
             return self.send({"Items": [episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
                                                                 "RunTimeTicks": 13200000000, "Overview": "A small-town mystery.",
                                                                 "UserData": {"Played": s == 1 or (s == 2 and i < 3),
