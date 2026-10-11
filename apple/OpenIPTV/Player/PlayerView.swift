@@ -26,7 +26,7 @@ struct PlayerScreen: View {
             }
         }
         #if os(iOS)
-        .onAppear { PlayerOrientation.shared.playerAppeared(followTilt: prefs.rotateWithPhone) }
+        .onAppear { PlayerOrientation.shared.playerAppeared() }
         .onDisappear { PlayerOrientation.shared.playerDisappeared() }
         #endif
     }
@@ -146,85 +146,41 @@ struct MoviePlayerView: View {
         .onDisappear { finish() }
     }
 
+    /// Minimal, like the streaming apps (see PlayerChrome): the episode and
+    /// show at the bottom over one bar with the times; rotate at the top.
     private var controls: some View {
-        VStack {
-            GlassEffectContainer(spacing: 12) {
-                HStack(spacing: 12) {
-                    #if os(iOS)
-                    GlassIconButton(systemName: "xmark", label: "Close player") { dismiss() }
-                    #endif
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(playback.title).font(.headline).lineLimit(1)
-                        if let error {
-                            Text(error).font(.caption).foregroundStyle(.red).lineLimit(6)
-                        } else if let qualityNote {
-                            Text(qualityNote).font(.caption).foregroundStyle(.yellow).lineLimit(1)
-                        } else if let timing {
-                            Text(timing).font(.caption.monospacedDigit()).foregroundStyle(.green).lineLimit(1)
-                        } else if let subtitle = playback.subtitle {
-                            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassEffect(.regular, in: .capsule)
-                    #if os(iOS)
-                    GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
-                    #endif
-                }
-            }
-            Spacer()
+        PlayerChrome(caption: playback.subtitle, title: playback.title, note: note, paused: paused,
+                     close: { dismiss() }, back: { player?.seek(by: -10) },
+                     playPause: { player?.togglePause() }, forward: { player?.seek(by: 10) }) {
             #if os(iOS)
-            GlassEffectContainer(spacing: 24) {
-                HStack(spacing: 24) {
-                    GlassIconButton(systemName: "gobackward.10", label: "Back 10 seconds", size: 56) { player?.seek(by: -10) }
-                    GlassIconButton(systemName: paused ? "play.fill" : "pause.fill", label: paused ? "Play" : "Pause", size: 72) {
-                        player?.togglePause()
-                    }
-                    GlassIconButton(systemName: "goforward.10", label: "Forward 10 seconds", size: 56) { player?.seek(by: 10) }
-                }
-            }
-            Spacer()
+            GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
             #endif
-            #if DEBUG
-            if !stats.isEmpty {
-                Text(stats).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
-            }
-            #endif
-            scrubber
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .glassEffect(.regular, in: .rect(cornerRadius: 22))
-                .overlay(alignment: .topLeading) { scrubPreview }
+        } accessory: {
+            EmptyView()
+        } bar: {
+            scrubber.overlay(alignment: .topLeading) { scrubPreview }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+    }
+
+    /// An error, a quality change, or how fast it started (briefly).
+    private var note: (text: String, color: Color)? {
+        if let error { return (error, .red) }
+        if let qualityNote { return (qualityNote, .yellow) }
+        if let timing { return (timing, .white.opacity(0.6)) }
+        return nil
     }
 
     private var total: Double { duration ?? playback.durationSeconds ?? 0 }
 
     @ViewBuilder private var scrubber: some View {
-        VStack(spacing: 6) {
+        TimeBar(leading: timeString(scrubbing ?? position),
+                trailing: "-" + timeString(max(0, total - (scrubbing ?? position)))) {
             #if os(iOS)
             Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
                      onChanged: liveScrub, onCommit: commitScrub)
             #else
-            ProgressView(value: min(position, max(total, 1)), total: max(total, 1)).tint(.white)
+            ProgressView(value: min(scrubbing ?? position, max(total, 1)), total: max(total, 1))
             #endif
-            HStack {
-                Text(timeString(scrubbing ?? position))
-                Spacer()
-                #if os(tvOS)
-                Text(paused ? "Paused · swipe ◀︎ ▶︎ to seek" : "Swipe ◀︎ ▶︎ to seek 10 s").foregroundStyle(.tertiary)
-                Spacer()
-                #endif
-                Text("-" + timeString(max(0, total - (scrubbing ?? position))))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
         }
     }
 

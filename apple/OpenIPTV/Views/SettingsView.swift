@@ -53,9 +53,6 @@ struct SettingsView: View {
                     }
                     Toggle(isOn: $prefs.hardwareDecoding) { Text("Hardware decoding").rowForeground() }
                     Toggle(isOn: $prefs.adaptiveQuality) { Text("Lower quality instead of buffering").rowForeground() }
-                    #if os(iOS)
-                    Toggle(isOn: $prefs.rotateWithPhone) { Text("Turn videos with the phone, even with Rotation Lock on").rowForeground() }
-                    #endif
                 } header: {
                     Text("Playback")
                 } footer: {

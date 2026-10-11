@@ -37,9 +37,12 @@ struct LivePlayerView: View {
     /// A recorded programme playing from its start instead of live.
     @State private var recording: Programme?
     @State private var showGuide = false
+    @State private var showMore = false
     /// Zapping quickly: the screen changes at once, and the stream opens
     /// once the presses stop (the provider allows one stream at a time).
     @State private var lastStep = Date.distantPast
+    /// "Started in 0.6 s" shows until then.
+    @State private var timingUntil = Date.distantPast
     /// Copies of this channel already tried (the provider often lists one
     /// channel several times; if one won't start, the next is tried).
     @State private var tried: Set<String> = []
@@ -126,69 +129,32 @@ struct LivePlayerView: View {
         .allowsHitTesting(false)
     }
 
+    /// Minimal, like the streaming apps (see PlayerChrome): what's on and
+    /// the channel at the bottom over one bar (everything kept since tuning
+    /// in, or the whole recording) with LIVE beside it; rotate and a "…"
+    /// menu (guide, start over, channels) at the top. Swipe up or down on
+    /// the picture to change channel.
     private var controls: some View {
-        VStack {
-            GlassEffectContainer(spacing: 12) {
-                HStack(spacing: 12) {
-                    #if os(iOS)
-                    GlassIconButton(systemName: "xmark", label: "Close player") { dismiss() }
-                    #endif
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(displayName).font(.headline).lineLimit(1)
-                        Text(error ?? status)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(error == nil ? (recording == nil ? .green : .secondary) : .red)
-                            .lineLimit(error == nil ? 1 : 2)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassEffect(.regular, in: .capsule)
-                    #if os(iOS)
-                    GlassIconButton(systemName: "list.bullet.rectangle", label: "Guide") { showGuide = true }
-                    GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
-                    if error != nil {
-                        GlassIconButton(systemName: "arrow.clockwise", label: "Try again") { retry() }
-                    }
-                    #endif
-                }
-            }
-            picture
-            // Not one glass container: buttons inside a panel's glass there
-            // don't get their taps.
-            VStack(spacing: 10) {
-                    HStack(spacing: 12) {
-                        #if os(iOS)
-                        GlassIconButton(systemName: "chevron.up", label: "Previous channel", size: 52) { step(-1) }
-                        #endif
-                        shows
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 22))
-                        #if os(iOS)
-                        GlassIconButton(systemName: "chevron.down", label: "Next channel", size: 52) { step(1) }
-                        #endif
-                    }
-                    #if os(iOS)
-                    if started, error == nil {
-                        transport
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background {
-                                Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 22))
-                            }
-                    }
-                    #endif
-            }
+        let info = model.nowNext[channel.id]
+        let event = recording == nil ? model.event(of: channel) : nil
+        return PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
+                            note: note, paused: paused, canGoForward: !(recording == nil && atLive),
+                            close: { dismiss() }, back: { skip(-10) },
+                            playPause: { error == nil ? togglePause() : retry() }, forward: { skip(10) }) {
+            #if os(iOS)
+            GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
+            more(info: info)
+            #endif
+        } accessory: {
+            if started, error == nil { liveButton }
+        } bar: {
+            bar
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+        .background { picture }
     }
 
     /// Taps and swipes on the picture: the whole screen while the controls
-    /// are hidden, the space between them otherwise. Never under the
-    /// controls: a tap there would reach it instead of their buttons.
+    /// are hidden, behind them otherwise.
     private var picture: some View {
         Color.clear
             .contentShape(Rectangle())
@@ -204,6 +170,33 @@ struct LivePlayerView: View {
             .accessibilityHidden(true)
     }
 
+    /// The small line over the title: the channel, a game's league and
+    /// start, or when a recording started.
+    private func caption(info: NowNext?, event: LiveOrganizer.Event?) -> String? {
+        if let recording { return "\(displayName) · from \(recording.start.clock)" }
+        if let event {
+            let start = event.start.map { ($0 <= Date() ? "Started " : "Starts ") + $0.formatted(date: .omitted, time: .shortened) }
+            return [event.league, start].compactMap { $0 }.joined(separator: " · ")
+        }
+        return info?.now == nil ? nil : displayName
+    }
+
+    /// What's on (or the game, or the recording); the channel when the
+    /// guide has nothing.
+    private func heading(info: NowNext?, event: LiveOrganizer.Event?) -> String {
+        if let recording { return recording.title }
+        if event != nil { return displayName }
+        return info?.now?.title ?? displayName
+    }
+
+    /// An error; paused or how far behind; how fast it started, briefly.
+    private var note: (text: String, color: Color)? {
+        if let error { return (error, .red) }
+        if recording == nil, paused || !atLive { return (status, .white.opacity(0.75)) }
+        if started, Date() < timingUntil { return (timing, .white.opacity(0.6)) }
+        return nil
+    }
+
     private var status: String {
         if let recording { return "From the start · \(recording.start.clock)" }
         if paused { return behind >= 3 ? "Paused · \(Self.time(behind)) behind live" : "Paused" }
@@ -211,101 +204,66 @@ struct LivePlayerView: View {
         return timing
     }
 
-    @ViewBuilder private var shows: some View {
-        let info = model.nowNext[channel.id]
-        VStack(alignment: .leading, spacing: 4) {
-            if let recording {
-                Text(recording.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text("Recorded · \(recording.start.clock)–\(recording.stop.clock)")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            } else if let event = model.event(of: channel) {
-                // A game: its own name says what and when.
-                Text(event.league).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text([event.start.map { ($0 <= Date() ? "Started " : "Starts ") + $0.formatted(date: .omitted, time: .shortened) },
-                      event.detail].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            } else if let now = info?.now {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(now.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Spacer(minLength: 0)
-                    #if os(iOS)
-                    if channel.archiveDays != nil {
-                        Button { watch(now) } label: {
-                            Label("Start over", systemImage: "backward.end.fill")
-                                .font(.caption.weight(.semibold))
-                                .labelStyle(.titleAndIcon)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.white)
-                        .fixedSize()
-                    }
-                    #endif
-                }
-                ProgressView(value: now.progress()).tint(.white)
-            } else {
-                Text(info == nil ? "Loading guide…" : "No guide data").font(.subheadline).foregroundStyle(.secondary)
+    /// LIVE: red while at the live picture; tap to catch up when behind (or
+    /// to leave a recording).
+    @ViewBuilder private var liveButton: some View {
+        let live = recording == nil && atLive
+        #if os(iOS)
+        Button(action: goLive) {
+            HStack(spacing: 6) {
+                Circle().fill(live ? Color.red : Color.white.opacity(0.6)).frame(width: 8, height: 8)
+                Text("LIVE").font(.footnote.weight(.bold))
             }
-            if recording == nil, model.event(of: channel) == nil, let next = info?.next {
-                Text("Next \(next.start.clock) · \(next.title)")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            .padding(.horizontal, 4)
+        }
+        .buttonStyle(.glass)
+        .tint(.white)
+        .accessibilityLabel(live ? "Live" : "Go to live")
+        #else
+        HStack(spacing: 8) {
+            Circle().fill(live ? Color.red : Color.white.opacity(0.6)).frame(width: 12, height: 12)
+            Text("LIVE").font(.callout.weight(.bold))
+        }
+        #endif
+    }
+
+    /// The scrubber: everything kept since tuning in (or the recording),
+    /// with where it starts and how far behind live.
+    @ViewBuilder private var bar: some View {
+        if started, error == nil, let span, let position {
+            TimeBar(leading: leftLabel, trailing: scrubSpeed ?? rightLabel) {
+                #if os(iOS)
+                Scrubber(position: position - span.lower, total: span.upper - span.lower,
+                         scrubbing: $scrubbing, speedLabel: $scrubSpeed,
+                         onChanged: scrubMoved, onCommit: scrubEnded)
+                #else
+                ProgressView(value: min(max(position - span.lower, 0), span.upper - span.lower), total: max(span.upper - span.lower, 1))
+                #endif
             }
-            #if os(tvOS)
-            Text(error == nil
-                 ? "Swipe up or down to change channel · ◀︎ ▶︎ 10 seconds · Play/Pause"
-                 : "Press Play to try again · swipe up or down to change channel")
-                .font(.caption2).foregroundStyle(.tertiary)
-            #endif
+        } else {
+            TimeBar(leading: "", trailing: "") {
+                Capsule().fill(.white.opacity(0.25)).frame(height: 4).frame(maxWidth: .infinity)
+            }
         }
     }
 
     #if os(iOS)
-    /// Pause, 10 seconds either way, the bar (everything kept since tuning
-    /// in, or the whole recording) and LIVE.
-    private var transport: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Button { skip(-10) } label: { icon("gobackward.10") }
-                    .accessibilityLabel("Back 10 seconds")
-                Button { togglePause() } label: { icon(paused ? "play.fill" : "pause.fill") }
-                    .accessibilityLabel(paused ? "Play" : "Pause")
-                Button { skip(10) } label: { icon("goforward.10") }
-                    .accessibilityLabel("Forward 10 seconds")
-                    .disabled(recording == nil && atLive)
-                if let span, let position {
-                    Scrubber(position: position - span.lower, total: span.upper - span.lower,
-                             scrubbing: $scrubbing, speedLabel: $scrubSpeed,
-                             onChanged: scrubMoved, onCommit: scrubEnded)
-                } else {
-                    Spacer()
-                }
-                Button(action: goLive) {
-                    HStack(spacing: 5) {
-                        Circle().fill(atLive ? Color.red : Color.white.opacity(0.55)).frame(width: 7, height: 7)
-                        Text("LIVE").font(.caption.weight(.bold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.white.opacity(atLive ? 0 : 0.18), in: .capsule)
-                }
-                .accessibilityLabel(atLive ? "Live" : "Go to live")
-            }
-            .padding(.horizontal, -6)
-            .font(.title3.weight(.semibold))
-            .tint(.white)
-            HStack {
-                Text(leftLabel)
-                Spacer()
-                Text(scrubSpeed ?? rightLabel)
-            }
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(.secondary)
+    private func more(info: NowNext?) -> some View {
+        GlassIconButton(systemName: "ellipsis", label: "More") {
+            showMore = true
+            showControls(autoHide: false)
         }
-    }
-
-    private func icon(_ name: String) -> some View {
-        Image(systemName: name)
-            .frame(width: 36, height: 36)
-            .contentShape(Rectangle())
+        .confirmationDialog(displayName, isPresented: $showMore, titleVisibility: .hidden) {
+            Button("Guide") { showGuide = true }
+            if recording == nil, channel.archiveDays != nil, let now = info?.now {
+                Button("Start Over") { watch(now) }
+            }
+            if recording != nil {
+                Button("Back to Live") { play() }
+            }
+            Button("Previous Channel") { step(-1) }
+            Button("Next Channel") { step(1) }
+        }
     }
     #endif
 
@@ -315,7 +273,7 @@ struct LivePlayerView: View {
         if recording != nil { return Self.time(at - span.lower) }
         // The wall-clock time the bar starts at (its end is now).
         let start = Date().addingTimeInterval(-(span.upper - span.lower))
-        return "From " + start.formatted(date: .omitted, time: .shortened)
+        return start.formatted(date: .omitted, time: .shortened)
     }
 
     private var rightLabel: String {
@@ -465,6 +423,7 @@ struct LivePlayerView: View {
             started = true
             buffering = false
             timing = String(format: "Started in %.1f s", seconds)
+            timingUntil = Date().addingTimeInterval(3)
             if controlsVisible { showControls() }
         case let .buffering(isBuffering):
             buffering = isBuffering
@@ -579,7 +538,7 @@ struct LivePlayerView: View {
         guard autoHide, started, error == nil, !paused else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))
-            guard !Task.isCancelled, started, error == nil, !paused, scrubbing == nil, !showGuide else { return }
+            guard !Task.isCancelled, started, error == nil, !paused, scrubbing == nil, !showGuide, !showMore else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
         }
     }
