@@ -68,6 +68,7 @@
 		60B2D8D9A75B0585552C69E7 /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */; };
 		6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
 		62FC945DE2AA99B3AFD08224 /* Libfribidi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */; };
+		631B418BC637AAF1204B020B /* NetworkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */; };
 		65E5DDEBE26E74B78CA34AB4 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DE7D9201148434BE2E8348A /* CoreVideo.framework */; };
 		668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
 		673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
@@ -129,6 +130,7 @@
 		C2FA9C8739B0E46A8270DC84 /* Flex.swift in Sources */ = {isa = PBXBuildFile; fileRef = F54AA14367E83C43E1A0457D /* Flex.swift */; };
 		C48EE2D7F8B58042DF260BD4 /* hogweed.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4962C0F389044958A1E2BE4 /* hogweed.xcframework */; };
 		C7655AEC73FDEB4B56A49695 /* Libdav1d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */; };
+		C833AF2FFF051FF67BD0B769 /* NetworkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */; };
 		CBB6BCA84516D445B5F74E8A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
 		CBE34968B8E97EBD13B63FB1 /* OpenIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */; };
 		CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
@@ -234,6 +236,7 @@
 		EC69C2183749D6C420FF3721 /* OpenIPTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenIPTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF2BBFCF82049D6D6605B135 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		EF2DE48775D87FC33EDCE40F /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatus.swift; sourceTree = "<group>"; };
 		F539FC96776F18A52123D17E /* Trickplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trickplay.swift; sourceTree = "<group>"; };
 		F54AA14367E83C43E1A0457D /* Flex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Flex.swift; sourceTree = "<group>"; };
 		FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libuchardet.xcframework; path = Vendor/Libuchardet.xcframework; sourceTree = "<group>"; };
@@ -351,6 +354,7 @@
 			isa = PBXGroup;
 			children = (
 				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
+				F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */,
 				00376995EF16ADF89BDF9B03 /* PlayerView.swift */,
 				B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */,
 				0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */,
@@ -696,6 +700,7 @@
 				A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */,
 				330A2AE3555A65DCFB5FD0A9 /* M3UProvider.swift in Sources */,
 				7E8E70B831C4BE5F7BEBC6F6 /* MPVPlayer.swift in Sources */,
+				631B418BC637AAF1204B020B /* NetworkStatus.swift in Sources */,
 				10831580B6F72D43D2609FD1 /* Onboarding.swift in Sources */,
 				0DE6D69F6DA84444642E07C3 /* OpenIPTVApp.swift in Sources */,
 				EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */,
@@ -731,6 +736,7 @@
 				9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */,
 				808B66520C8C418D89B0EC89 /* M3UProvider.swift in Sources */,
 				FFB2BF63F71C83887DFCC92F /* MPVPlayer.swift in Sources */,
+				C833AF2FFF051FF67BD0B769 /* NetworkStatus.swift in Sources */,
 				673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */,
 				CBE34968B8E97EBD13B63FB1 /* OpenIPTVApp.swift in Sources */,
 				461BF742965E3E5A547A1485 /* Platform.swift in Sources */,

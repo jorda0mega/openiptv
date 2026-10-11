@@ -46,6 +46,20 @@ final class MPVPlayer: @unchecked Sendable {
     private var downloadSpeed: Double = 0
     private var lastNetworkReport: CFAbsoluteTime = 0
 
+    /// How far ahead to download. Files on an unmetered connection are
+    /// fetched to the end into a temporary file, so any seek ahead (or back
+    /// over what's been played) is instant.
+    enum Readahead: Equatable {
+        /// Live streams: the profile's small buffer, in memory.
+        case live
+        /// Opened in the background before a tap: a minute, on disk.
+        case warm
+        /// Cellular / low space: five minutes, in memory.
+        case modest
+        /// Wi-Fi: the whole rest of the file, on disk, up to `bytes`.
+        case whole(bytes: Int64)
+    }
+
     init(options: [(String, String)], hardwareDecoding: Bool) {
         layer.framebufferOnly = true
         layer.backgroundColor = UIColor.black.cgColor
@@ -64,6 +78,12 @@ final class MPVPlayer: @unchecked Sendable {
         set("keep-open", "no")
         set("cache", "yes")
         set("demuxer-mkv-probe-start-time", "no")
+        // Carry on quickly after a seek or a short stall.
+        set("cache-pause-wait", "0.3")
+        set("demuxer-seekable-cache", "yes")
+        let cacheDir = FileManager.default.temporaryDirectory.appending(path: "player-cache")
+        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        set("demuxer-cache-dir", cacheDir.path())
         // No log output at all: stream URLs carry credentials.
         set("msg-level", "all=no")
         for (name, value) in options { set(name, value) }
@@ -86,9 +106,10 @@ final class MPVPlayer: @unchecked Sendable {
     /// to the end of a Matroska file and back (index, tags) and the resume
     /// seek don't each pay for a new HTTPS handshake. Live streams can't be
     /// range-requested, so they're read as one stream.
-    func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false) {
+    func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, readahead: Readahead = .live) {
         queue.async { [self] in
             guard let mpv else { return }
+            apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
             openedAfter = nil
             reportedStart = false
@@ -102,6 +123,40 @@ final class MPVPlayer: @unchecked Sendable {
             // exact second; precise seeking comes back once it's playing.
             mpv_set_property_string(mpv, "hr-seek", start == nil ? "default" : "no")
             command(["loadfile", url.absoluteString, "replace"])
+        }
+    }
+
+    /// Changes how far ahead the current file downloads (a warmed-up player
+    /// switches to the whole file once it's actually being watched).
+    func setReadahead(_ readahead: Readahead) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            apply(readahead, mpv, opening: false)
+        }
+    }
+
+    private func apply(_ readahead: Readahead, _ mpv: OpaquePointer, opening: Bool = true) {
+        func set(_ name: String, _ value: String) { mpv_set_property_string(mpv, name, value) }
+        switch readahead {
+        case .live:
+            if opening { set("cache-on-disk", "no") }
+            set("demuxer-max-bytes", "150MiB")
+            set("demuxer-max-back-bytes", "50MiB")
+        case .warm:
+            if opening { set("cache-on-disk", "yes") }
+            set("demuxer-readahead-secs", "60")
+            set("demuxer-max-bytes", "1GiB")
+            set("demuxer-max-back-bytes", "1GiB")
+        case .modest:
+            if opening { set("cache-on-disk", "no") }
+            set("demuxer-readahead-secs", "300")
+            set("demuxer-max-bytes", "300MiB")
+            set("demuxer-max-back-bytes", "100MiB")
+        case let .whole(bytes):
+            if opening { set("cache-on-disk", "yes") }
+            set("demuxer-readahead-secs", "86400")
+            set("demuxer-max-bytes", String(bytes))
+            set("demuxer-max-back-bytes", String(bytes))
         }
     }
 

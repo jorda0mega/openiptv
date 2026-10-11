@@ -438,6 +438,8 @@ struct MoviePlayerView: View {
             warmPlayer.onEvent = { event in handle(event) }
             self.player = warmPlayer
             if warmPlayer.hasStarted { handle(.started(0)) }
+            // Now it's being watched: download the rest of it.
+            warmPlayer.setReadahead(NetworkStatus.shared.fileReadahead)
             warmPlayer.setPaused(false)
         } else {
             let player = makePlayer(prefs: prefs)
@@ -453,7 +455,8 @@ struct MoviePlayerView: View {
                 offset = position
                 player.load(url, headers: playback.fallbackHeaders, file: false)
             } else {
-                player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true)
+                player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
+                            readahead: NetworkStatus.shared.fileReadahead)
             }
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
@@ -496,7 +499,8 @@ struct MoviePlayerView: View {
         case .original:
             revertTo = lastConverted
             offset = 0
-            player.load(playback.url, headers: playback.headers, start: at, file: true)
+            player.load(playback.url, headers: playback.headers, start: at, file: true,
+                        readahead: NetworkStatus.shared.fileReadahead)
             note("Back to full quality")
         }
     }

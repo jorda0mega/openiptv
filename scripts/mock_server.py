@@ -13,6 +13,7 @@ have something to find.
 
 import base64
 import json
+import os
 import struct
 import zlib
 import sys
@@ -208,6 +209,38 @@ class Handler(BaseHTTPRequestHandler):
         parts.append("</tv>")
         self.send("\n".join(parts), "application/xml")
 
+    def send_file(self, file_path):
+        """A real video with Range support, like Emby's static stream, slowed
+        to roughly a home connection (~200 ms per request, ~10 MB/s)."""
+        size = os.path.getsize(file_path)
+        start, end = 0, size - 1
+        rng = self.headers.get("Range", "")
+        if rng.startswith("bytes="):
+            first, _, last = rng[6:].partition("-")
+            start = int(first or 0)
+            end = min(int(last), size - 1) if last else size - 1
+        time.sleep(0.2)
+        self.send_response(206 if rng else 200)
+        self.send_header("Content-Type", "video/x-matroska")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if rng:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            left = end - start + 1
+            try:
+                while left > 0:
+                    chunk = f.read(min(262144, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+                    time.sleep(0.025)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
     def emby(self, path, q):
         if path == "/System/Info/Public":
             return self.send({"ServerName": "Mock Emby", "Version": "4.10.1.0", "Id": "srv"})
@@ -261,6 +294,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path.startswith("/Videos/") and "/stream" in path:
+            video = os.environ.get("OPENIPTV_MOCK_VIDEO")
+            if video and os.path.exists(video):
+                return self.send_file(video)
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
         if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q:
             # The library index: movies plus a few real-looking show names.

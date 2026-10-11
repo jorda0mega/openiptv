@@ -170,6 +170,17 @@ struct SearchView: View {
                                            + (Array(cm.ranked.prefix(6)) + typoChannels.prefix(3)).map { channelCorpus.items[$0].name })
         serverDone = false
 
+        // Results settled: treat the top title as intent and get it ready,
+        // so tapping it starts at once.
+        if let top = library.first {
+            Task {
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !Task.isCancelled, query == q else { return }
+                model.warmUp(top.id, kind: top.kind, options: prefs.playerProfile.mpvOptions,
+                             hardwareDecoding: prefs.hardwareDecoding)
+            }
+        }
+
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2, model.sources.emby != nil else {
             serverCards = []

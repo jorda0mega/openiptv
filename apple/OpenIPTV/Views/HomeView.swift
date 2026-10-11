@@ -31,6 +31,7 @@ struct HomeView: View {
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             // The first thing in Continue Watching opens the moment it's tapped.
             .task(id: model.rows.first?.cards.first?.id) { warmFirst() }
+            .onAppear { warmFirst() }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
