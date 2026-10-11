@@ -99,23 +99,41 @@ do {
             let playStart = Date()
             let playback = try await client.playback(itemId: card.id)
             print("  playback      \(playback.title) from \(playback.startSeconds.map { "\(Int($0)) s" } ?? "start") via \(playback.url.host() ?? "?") (\(playback.method), \(playback.url.scheme ?? "?")) in \(ms(playStart))")
-            // Open the stream like the player would and read the first bytes.
-            var probe = URLRequest(url: playback.url)
-            probe.setValue("bytes=0-65535", forHTTPHeaderField: "Range")
-            for header in playback.headers {
-                let parts = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-                if parts.count == 2 { probe.setValue(parts[1], forHTTPHeaderField: parts[0]) }
+            // Diagnose: what the server says about this item, and how each
+            // way of opening it answers (status and type only, never URLs).
+            if let info = try? await client.playbackInfo(playback.itemId, startSeconds: nil), let source = info.MediaSources?.first {
+                let remote = source.Path.map { $0.hasPrefix("http") ? "http path" : "local path" } ?? "no path"
+                print("  playbackinfo  protocol \(source.Protocol ?? "?"), container \(source.Container ?? "?"), \(remote), directPlay \(source.SupportsDirectPlay.map(String.init) ?? "?"), directStream \(source.SupportsDirectStream.map(String.init) ?? "?"), transcodeUrl \(source.TranscodingUrl == nil ? "no" : "yes"), sourceId \(source.Id == playback.itemId ? "= item" : "differs")")
+            } else {
+                print("  playbackinfo  failed")
             }
-            let probeStart = Date()
-            do {
-                let (bytes, response) = try await URLSession.shared.data(for: probe)
-                let http = response as? HTTPURLResponse
-                let type = http?.value(forHTTPHeaderField: "Content-Type") ?? "?"
-                print("  stream        HTTP \(http?.statusCode ?? 0), \(type), \(bytes.count) bytes from \(response.url?.host() ?? "?") in \(ms(probeStart))")
-            } catch {
-                failures += 1
-                print("  ✗ stream      \(SourceError.wrap(error).localizedDescription)")
+            func probe(_ label: String, _ url: URL, _ headers: [String: String]) async {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 20
+                request.setValue("bytes=0-65535", forHTTPHeaderField: "Range")
+                for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+                let start = Date()
+                do {
+                    let (bytes, response) = try await URLSession.shared.data(for: request)
+                    let http = response as? HTTPURLResponse
+                    let body = (http?.statusCode ?? 0) >= 400 ? " body: " + String(decoding: bytes.prefix(120), as: UTF8.self).replacingOccurrences(of: "\n", with: " ") : ""
+                    print("  \(label.padding(toLength: 22, withPad: " ", startingAt: 0)) HTTP \(http?.statusCode ?? 0), \(http?.value(forHTTPHeaderField: "Content-Type") ?? "?"), \(bytes.count) bytes, \(response.url?.host() == url.host() ? "same host" : "redirected") in \(ms(start))\(body)")
+                } catch {
+                    print("  \(label.padding(toLength: 22, withPad: " ", startingAt: 0)) \(SourceError.wrap(error).localizedDescription)")
+                }
             }
+            let token = ["X-Emby-Token": playback.url.query()?.components(separatedBy: "&").first { $0.hasPrefix("api_key=") }?.replacingOccurrences(of: "api_key=", with: "") ?? ""]
+            let headerDict = Dictionary(uniqueKeysWithValues: playback.headers.compactMap { h -> (String, String)? in
+                let p = h.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                return p.count == 2 ? (p[0], p[1]) : nil
+            })
+            await probe("chosen (\(playback.method))", playback.url, headerDict)
+            await probe("chosen + token header", playback.url, headerDict.merging(token) { a, _ in a })
+            let ms0 = playback.mediaSourceId ?? playback.itemId
+            await probe("plain stream", client.directStreamURL(playback.itemId, mediaSourceId: ms0, playSessionId: nil), [:])
+            await probe("plain stream + header", client.directStreamURL(playback.itemId, mediaSourceId: ms0, playSessionId: nil), token)
+            await probe("hls master", client.hlsURL(playback.itemId, mediaSourceId: ms0, playSessionId: playback.playSessionId, start: nil), [:])
+            await probe("hls master + header", client.hlsURL(playback.itemId, mediaSourceId: ms0, playSessionId: playback.playSessionId, start: nil), token)
         }
         let indexStart = Date()
         let entries = try await client.libraryIndex()

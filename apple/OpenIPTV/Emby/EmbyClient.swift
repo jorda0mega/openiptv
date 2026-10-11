@@ -168,11 +168,48 @@ struct EmbyClient {
                     images: images, progress: progress, playable: playable)
     }
 
+    // MARK: Shows
+
+    /// A show with its overview and artwork.
+    func item(_ id: String) async throws -> EmbyItem {
+        try await get("Users/\(account.userId)/Items/\(id)", [
+            .init(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProductionYear"),
+        ])
+    }
+
+    func seasons(of series: String) async throws -> [EmbyItem] {
+        try await items("Shows/\(series)/Seasons", [
+            .init(name: "UserId", value: account.userId), .init(name: "EnableUserData", value: "true"),
+            .init(name: "Fields", value: "PrimaryImageAspectRatio"),
+        ])
+    }
+
+    func episodes(of series: String, season: String?) async throws -> [EmbyItem] {
+        var query: [URLQueryItem] = [
+            .init(name: "UserId", value: account.userId), .init(name: "EnableUserData", value: "true"),
+            .init(name: "Fields", value: "Overview,PrimaryImageAspectRatio"),
+            .init(name: "ImageTypeLimit", value: "1"), .init(name: "EnableImageTypes", value: "Primary,Thumb,Backdrop"),
+        ]
+        if let season { query.append(.init(name: "SeasonId", value: season)) }
+        return try await items("Shows/\(series)/Episodes", query)
+    }
+
+    /// Card for any item: landscape art for episodes and backdrops, posters
+    /// otherwise.
+    func card(for item: EmbyItem, landscape: Bool, width: Int) -> Card {
+        card(item, context: landscape ? .landscape : .poster, shape: landscape ? .landscape : .portrait, width: width)
+    }
+
+    func backdropURL(for item: EmbyItem, width: Int) -> URL? {
+        Artwork.candidates(item, context: .backdrop).first.map { imageURL($0, width: width, shape: .landscape) }
+    }
+
     // MARK: Search
 
-    /// Every movie and show (name, year, poster tag) for instant on-device
-    /// search, fetched in pages sorted by name.
-    func libraryIndex(pageSize: Int = 5000, cap: Int = 250_000) async throws -> [LibraryEntry] {
+    /// Movies and shows (name, year, poster tag) for instant on-device
+    /// search, in pages sorted by name: everything, or only what was added
+    /// or changed since `changedSince`.
+    func libraryIndex(changedSince: Date? = nil, pageSize: Int = 5000, cap: Int = 250_000) async throws -> [LibraryEntry] {
         struct Entry: Decodable {
             let id: String
             let name: String?
@@ -198,6 +235,9 @@ struct EmbyClient {
                 .init(name: "SortBy", value: "SortName"), .init(name: "SortOrder", value: "Ascending"),
                 .init(name: "StartIndex", value: String(start)), .init(name: "Limit", value: String(pageSize)),
             ]
+            if let changedSince {
+                parts.queryItems?.append(.init(name: "MinDateLastSaved", value: ISO8601DateFormatter().string(from: changedSince)))
+            }
             var request = URLRequest(url: parts.url!)
             request.timeoutInterval = 60
             authorize(&request)
@@ -318,10 +358,59 @@ struct EmbyClient {
                                         fallbacks: [hlsURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId, start: resume)])
             }
         }
+        // Some servers only honour the token as a header; send it both ways
+        // for Emby's own stream addresses (not for remote files).
+        let auth = ["X-Emby-Token: \(account.accessToken)"]
+        if playback.method != "remote file" { playback.headers += auth }
+        playback.fallbackHeaders = auth
         return playback
     }
 
-    private func directStreamURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, container: String? = nil) -> URL {
+    /// When nothing would play: how the server answers each address, in
+    /// words (no addresses or tokens), so the cause is visible on screen.
+    func diagnose(_ playback: EmbyPlayback) async -> String {
+        var attempts: [(String, URL, [String])] = [(Self.label(playback.method), playback.url, playback.headers)]
+        for url in playback.fallbacks {
+            attempts.append((url.path().hasSuffix(".m3u8") ? "Converted" : "Direct", url, playback.fallbackHeaders))
+        }
+        var parts: [String] = []
+        for (label, url, headers) in attempts {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+            request.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+            for header in headers {
+                let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                if pair.count == 2 { request.setValue(pair[1], forHTTPHeaderField: pair[0]) }
+            }
+            do {
+                let (data, response) = try await HTTP.session.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let type = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? "?"
+                var text = "\(label): HTTP \(status)"
+                if status >= 400 {
+                    let message = String(decoding: data.prefix(80), as: UTF8.self)
+                        .components(separatedBy: .newlines).joined(separator: " ")
+                    if !message.contains("http"), !message.contains(account.accessToken) { text += " \(message)" }
+                } else {
+                    text += " (\(type))"
+                }
+                parts.append(text)
+            } catch {
+                parts.append("\(label): \(SourceError.wrap(error).localizedDescription)")
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func label(_ method: String) -> String {
+        switch method {
+        case "remote file": "Remote file"
+        case "transcode": "Converted"
+        default: "Direct"
+        }
+    }
+
+    func directStreamURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, container: String? = nil) -> URL {
         // A file extension helps the player pick the demuxer straight away.
         let ext = container.flatMap { $0.split(separator: ",").first.map { ".\($0)" } } ?? ""
         var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/stream\(ext)"), resolvingAgainstBaseURL: false)!
@@ -335,7 +424,7 @@ struct EmbyClient {
     /// Emby's HLS stream, converted on the server: the last resort when the
     /// original file won't open. Starts at `start` because seeking in a
     /// live-converted stream is limited.
-    private func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?) -> URL {
+    func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?) -> URL {
         var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/master.m3u8"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [
             .init(name: "MediaSourceId", value: mediaSourceId), .init(name: "api_key", value: account.accessToken),

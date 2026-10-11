@@ -120,55 +120,98 @@ struct LibraryEntry: Codable, Hashable, Identifiable, Sendable {
 }
 
 /// Every movie and show on the Emby server, cached on the device so search
-/// doesn't wait for the network. Refreshed in the background.
+/// never waits for the network. The full catalog is fetched once; after that
+/// only what changed since the last sync, plus a weekly full pass to drop
+/// deleted items. Starts when the app opens, in the background.
 @Observable
 @MainActor
 final class LibraryIndex {
     private(set) var corpus = SearchCorpus<LibraryEntry>(name: \.name)
     private(set) var indexing = false
-    private var fetchedAt: Date?
+    private var entries: [LibraryEntry] = []
+    private var syncedAt: Date?
+    private var fullSyncAt: Date?
     private var server: String?
 
     private struct Cache: Codable {
         let server: String
-        let fetchedAt: Date
+        let syncedAt: Date
+        let fullSyncAt: Date
         let entries: [LibraryEntry]
     }
 
     private nonisolated static let file = "library-index.json"
-    private nonisolated static let maxAge: TimeInterval = 6 * 3600
+    private nonisolated static let changesEvery: TimeInterval = 10 * 60
+    private nonisolated static let fullEvery: TimeInterval = 7 * 24 * 3600
 
     var count: Int { corpus.items.count }
 
-    /// Loads the cached index for this server (if any), then refreshes it
-    /// in the background when it's missing or old.
     func prepare(_ emby: EmbyClient) async {
         let server = emby.account.serverURL.absoluteString + "|" + emby.account.userId
         if self.server != server {
             self.server = server
+            entries = []
+            corpus = SearchCorpus(name: \.name)
+            syncedAt = nil
+            fullSyncAt = nil
             if let cache = await Self.readCache(), cache.server == server {
-                corpus = await Self.build(cache.entries)
-                fetchedAt = cache.fetchedAt
-            } else {
-                corpus = SearchCorpus(name: \.name)
-                fetchedAt = nil
+                entries = cache.entries
+                syncedAt = cache.syncedAt
+                fullSyncAt = cache.fullSyncAt
+                corpus = await Self.build(entries)
             }
         }
-        guard !indexing, fetchedAt.map({ Date().timeIntervalSince($0) > Self.maxAge }) ?? true else { return }
+        guard !indexing else { return }
+        let now = Date()
+        let needsFull = entries.isEmpty || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
+        let needsChanges = syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
+        guard needsFull || needsChanges else { return }
         indexing = true
         defer { indexing = false }
-        guard let entries = try? await emby.libraryIndex(), self.server == server else { return }
+        do {
+            if needsFull {
+                entries = try await emby.libraryIndex()
+                fullSyncAt = now
+            } else if let since = syncedAt {
+                // A little overlap so nothing saved during the last sync is missed.
+                let changed = try await emby.libraryIndex(changedSince: since.addingTimeInterval(-300))
+                guard !changed.isEmpty else {
+                    syncedAt = now
+                    save()
+                    return
+                }
+                entries = await Self.merge(entries, changed)
+            }
+        } catch {
+            return
+        }
+        guard self.server == server else { return }
+        syncedAt = now
         corpus = await Self.build(entries)
-        fetchedAt = Date()
-        let cache = Cache(server: server, fetchedAt: fetchedAt!, entries: entries)
-        Task.detached(priority: .utility) { AppCache.write(Self.file, cache) }
+        save()
     }
 
     func clear() {
         corpus = SearchCorpus(name: \.name)
-        fetchedAt = nil
+        entries = []
+        syncedAt = nil
+        fullSyncAt = nil
         server = nil
         AppCache.remove(Self.file)
+    }
+
+    private func save() {
+        guard let server, let syncedAt, let fullSyncAt else { return }
+        let cache = Cache(server: server, syncedAt: syncedAt, fullSyncAt: fullSyncAt, entries: entries)
+        Task.detached(priority: .utility) { AppCache.write(Self.file, cache) }
+    }
+
+    private nonisolated static func merge(_ old: [LibraryEntry], _ changed: [LibraryEntry]) async -> [LibraryEntry] {
+        await Task.detached(priority: .utility) {
+            var byId = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            for entry in changed { byId[entry.id] = entry }
+            return byId.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }.value
     }
 
     private nonisolated static func build(_ entries: [LibraryEntry]) async -> SearchCorpus<LibraryEntry> {

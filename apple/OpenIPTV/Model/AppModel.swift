@@ -72,6 +72,21 @@ final class AppModel {
         }
     }
 
+    func playback(itemId: String) async throws -> EmbyPlayback {
+        guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
+        return try await emby.playback(itemId: itemId)
+    }
+
+    func diagnose(_ playback: EmbyPlayback) async -> String {
+        await emby?.diagnose(playback) ?? ""
+    }
+
+    /// Loads (or quietly updates) the on-device library index. Called when
+    /// the app opens; never blocks the UI.
+    func prepareLibrary() async {
+        if let emby { await library.prepare(emby) }
+    }
+
     func playback(for card: Card) async throws -> EmbyPlayback {
         guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
         return try await emby.playback(itemId: card.id)

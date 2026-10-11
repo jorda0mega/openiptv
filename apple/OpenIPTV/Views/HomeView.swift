@@ -11,9 +11,10 @@ struct HomeView: View {
     @State private var loadingCard: String?
     @State private var playError: String?
     @State private var addingEmby = false
+    @State private var path: [ShowRoute] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Layout.rowSpacing) {
                     if visibleRows.isEmpty { emptyState }
@@ -27,6 +28,7 @@ struct HomeView: View {
             .refreshableOnPhone { await model.loadHome(cardWidth: pixelWidth) }
             .task { await model.loadHome(cardWidth: pixelWidth) }
             .sheet(isPresented: $addingEmby) { AddEmbyView() }
+            .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -59,7 +61,12 @@ struct HomeView: View {
         }
     }
 
+    /// Shows open their page; everything else plays.
     private func play(_ card: Card) {
+        if card.kind == "Series" {
+            path.append(ShowRoute(id: card.id, title: card.title))
+            return
+        }
         guard card.playable, loadingCard == nil else { return }
         loadingCard = card.id
         Task {

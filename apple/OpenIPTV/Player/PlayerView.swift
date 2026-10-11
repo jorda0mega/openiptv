@@ -331,7 +331,7 @@ struct MoviePlayerView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(playback.title).font(.headline).lineLimit(1)
                         if let error {
-                            Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
+                            Text(error).font(.caption).foregroundStyle(.red).lineLimit(6)
                         } else if let subtitle = playback.subtitle {
                             Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
@@ -422,11 +422,16 @@ struct MoviePlayerView: View {
                 attempt += 1
                 let converted = next.path().hasSuffix(".m3u8")
                 offset = converted ? (playback.startSeconds ?? 0) : 0
-                player?.load(next, start: converted ? nil : playback.startSeconds)
+                player?.load(next, headers: playback.fallbackHeaders, start: converted ? nil : playback.startSeconds)
                 return
             }
             error = "Couldn't play: \(message)"
             showControls(autoHide: false)
+            // Say why: how the server answered each way of opening it.
+            Task {
+                let why = await model.diagnose(playback)
+                if !why.isEmpty, error != nil { error = "Couldn't play. \(why)" }
+            }
         case let .time(rawPosition, newDuration):
             let newPosition = rawPosition + offset
             position = newPosition

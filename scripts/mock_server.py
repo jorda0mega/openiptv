@@ -227,11 +227,24 @@ class Handler(BaseHTTPRequestHandler):
                                         {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"}]})
         if path.startswith("/Users/U1/Items/") and path.count("/") == 4 and not path.endswith(("/Latest", "/Resume")):
             item_id = path.rsplit("/", 1)[1]
-            if item_id == "s1":
-                return self.send({"Id": "s1", "Name": "Show", "Type": "Series"})
+            if item_id.startswith("s"):
+                names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
+                n = int(item_id[1:]) if item_id[1:].isdigit() and int(item_id[1:]) < len(names) else 1
+                return self.send({"Id": item_id, "Name": names[n], "Type": "Series", "ProductionYear": 2000 + n,
+                                  "Overview": "Real cases solved with forensic science.",
+                                  "ImageTags": {"Primary": "p"}, "BackdropImageTags": ["b"]})
             if item_id.startswith("e"):
                 return self.send(episode(int(item_id[1:])) | {"RunTimeTicks": 18000000000})
             return self.send(movie(int(item_id[1:])) | {"RunTimeTicks": 72000000000})
+        if path.startswith("/Shows/") and path.endswith("/Seasons"):
+            return self.send({"Items": [{"Id": f"season{n}", "Name": f"Season {n}", "Type": "Season", "IndexNumber": n,
+                                         "UserData": {"Played": n == 1}} for n in (1, 2)]})
+        if path.startswith("/Shows/") and path.endswith("/Episodes"):
+            season = q.get("SeasonId", "season1")
+            return self.send({"Items": [episode(i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": int(season[-1]),
+                                                      "RunTimeTicks": 13200000000, "Overview": "A small-town mystery.",
+                                                      "UserData": {"Played": i < 2, "PlayedPercentage": 40 if i == 2 else None}}
+                                         for i in range(1, 7)]})
         if path == "/Shows/NextUp":
             items = [episode(3)] if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
             return self.send({"Items": items, "TotalRecordCount": len(items)})

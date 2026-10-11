@@ -82,17 +82,17 @@ struct SearchView: View {
                         }
                     }
                 }
-                if model.library.indexing, model.library.count == 0, model.sources.emby != nil {
-                    Label("Getting your library ready for instant search…", systemImage: "hourglass")
+                if model.library.indexing, model.library.count == 0, !query.isEmpty {
+                    Text("Your library is still loading in the background; these results come from the server.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .listStyle(.plain)
             .overlay { emptyState }
             .navigationTitle("Search")
+            .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .searchable(text: $query, prompt: "Movies, shows, channels")
             .autocorrectionDisabled()
-            .task { if let emby = model.emby { await model.library.prepare(emby) } }
             // Re-run when the text changes or an index finishes loading.
             .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") { await search() }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
@@ -113,8 +113,17 @@ struct SearchView: View {
         }
     }
 
-    private func result(_ card: Card, wide: Bool) -> some View {
-        Button { play(card) } label: {
+    /// Shows open their page; movies and episodes play.
+    @ViewBuilder private func result(_ card: Card, wide: Bool) -> some View {
+        if card.kind == "Series" {
+            NavigationLink(value: ShowRoute(id: card.id, title: card.title)) { resultLabel(card, wide: wide) }
+        } else {
+            Button { play(card) } label: { resultLabel(card, wide: wide) }
+                .buttonStyle(.plain)
+        }
+    }
+
+    private func resultLabel(_ card: Card, wide: Bool) -> some View {
             HStack(spacing: 12) {
                 let width = wide ? Layout.searchThumbWide : Layout.searchThumb
                 CoverImage(images: card.images, title: card.title)
@@ -131,8 +140,6 @@ struct SearchView: View {
             }
             .rowForeground()
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     /// Local matches straight away, then the server's after a short pause.

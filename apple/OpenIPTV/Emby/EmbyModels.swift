@@ -38,6 +38,7 @@ struct EmbyItem: Decodable, Hashable {
     var channelId: String?
     var channelPrimaryImageTag: String?
     var userData: UserData?
+    var overview: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id", name = "Name", kind = "Type", collectionType = "CollectionType"
@@ -53,6 +54,7 @@ struct EmbyItem: Decodable, Hashable {
         case albumId = "AlbumId", albumPrimaryImageTag = "AlbumPrimaryImageTag"
         case channelId = "ChannelId", channelPrimaryImageTag = "ChannelPrimaryImageTag"
         case userData = "UserData"
+        case overview = "Overview"
     }
 
     init(from decoder: Decoder) throws {
@@ -82,6 +84,7 @@ struct EmbyItem: Decodable, Hashable {
         channelId = try? c.decodeIfPresent(String.self, forKey: .channelId)
         channelPrimaryImageTag = try? c.decodeIfPresent(String.self, forKey: .channelPrimaryImageTag)
         userData = try? c.decodeIfPresent(UserData.self, forKey: .userData)
+        overview = try? c.decodeIfPresent(String.self, forKey: .overview)
     }
 }
 
@@ -125,6 +128,9 @@ struct EmbyPlayback: Hashable, Identifiable {
     var method = "direct stream"
     /// Tried in order if `url` fails to open (Emby's direct stream, then HLS).
     var fallbacks: [URL] = []
+    /// Headers for the fallbacks (Emby's token, in case a server ignores it
+    /// in the address).
+    var fallbackHeaders: [String] = []
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {
