@@ -309,6 +309,24 @@ struct EmbyClient {
         Artwork.candidates(item, context: .backdrop).first.map { imageURL($0, width: width, shape: .landscape) }
     }
 
+    /// The title's logo (transparent title art), when the server has one.
+    func logoURL(for item: EmbyItem, width: Int) -> URL? {
+        guard let tag = item.imageTags["Logo"] else { return nil }
+        var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(item.id)/Images/Logo"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "tag", value: tag), .init(name: "maxWidth", value: String(Artwork.bucket(width))),
+                            .init(name: "quality", value: "90")]
+        return parts.url
+    }
+
+    /// A cast or crew member's photo.
+    func personImageURL(_ person: EmbyItem.Person, width: Int) -> URL? {
+        guard let id = person.id, let tag = person.primaryImageTag else { return nil }
+        var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(id)/Images/Primary"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "tag", value: tag), .init(name: "maxWidth", value: String(Artwork.bucket(width))),
+                            .init(name: "quality", value: "90")]
+        return parts.url
+    }
+
     // MARK: Search
 
     /// Movies and shows (name, year, poster tag) for instant on-device

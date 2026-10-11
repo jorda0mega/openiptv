@@ -15,6 +15,8 @@ final class AppModel {
 
     var rows: [HomeRow] = []
     var featured: Featured?
+    /// Apple TV's hero titles (see HomeContent.spotlight).
+    var spotlight: [Featured] = []
     var homeError: String?
     private var lastCardWidth = 360
 
@@ -84,6 +86,7 @@ final class AppModel {
         let home: HomeContent? = AppCache.read("home.v4.json")
         rows = home?.rows ?? []
         featured = home?.featured
+        spotlight = home?.spotlight ?? []
         homeBuiltAt = home?.builtAt
         homeHistory = home?.history ?? []
         live.onChange = { [weak self] change in self?.apply(change) }
@@ -133,6 +136,7 @@ final class AppModel {
             }
             if fresh.rows != rows { rows = fresh.rows }
             if fresh.featured != featured { featured = fresh.featured }
+            if (fresh.spotlight ?? []) != spotlight { spotlight = fresh.spotlight ?? [] }
             homeBuiltAt = fresh.builtAt
             homeHistory = fresh.history ?? []
             homeError = nil
@@ -304,7 +308,8 @@ final class AppModel {
         }.filter { !$0.cards.isEmpty }
         if let row { updated.insert(row, at: 0) }
         if updated != rows { rows = updated }
-        AppCache.write("home.v4.json", HomeContent(featured: featured, rows: rows, builtAt: homeBuiltAt, history: homeHistory))
+        AppCache.write("home.v4.json", HomeContent(featured: featured, rows: rows, builtAt: homeBuiltAt, history: homeHistory,
+                                                   spotlight: spotlight))
         prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
         return false
     }

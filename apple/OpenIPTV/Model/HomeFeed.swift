@@ -7,6 +7,8 @@ struct Featured: Codable, Hashable {
     /// "Movie · 2026 · IMDb 7.1"
     let details: String
     let overview: String?
+    /// The title's logo (the server's "Logo" art), for Apple TV's hero.
+    var logo: String? = nil
 }
 
 struct HomeContent: Codable, Hashable {
@@ -16,6 +18,8 @@ struct HomeContent: Codable, Hashable {
     /// launch rebuilds the other rows only when these are out of date.
     var builtAt: Date?
     var history: [String]?
+    /// Apple TV's hero: the featured pick and a few more like it, in turn.
+    var spotlight: [Featured]?
 }
 
 /// Home, personal and current rather than one row per library:
@@ -136,12 +140,20 @@ enum HomeFeed {
         let choices = Array((recent.isEmpty ? withBackdrop : recent).prefix(5))
         let day = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
         let pick = choices.isEmpty ? nil : choices[day % choices.count]
-        var featured: Featured?
-        if let pick, let backdrop = emby.backdropURL(for: pick, width: backdropWidth) {
-            let poster = emby.card(pick, context: .poster, shape: .portrait, width: cardWidth)
-            featured = Featured(card: poster, backdrop: backdrop.absoluteString, details: details(pick), overview: pick.overview)
-            show(pick)
+        func featuring(_ item: EmbyItem) -> Featured? {
+            guard let backdrop = emby.backdropURL(for: item, width: backdropWidth) else { return nil }
+            let poster = emby.card(item, context: .poster, shape: .portrait, width: cardWidth)
+            return Featured(card: poster, backdrop: backdrop.absoluteString, details: details(item), overview: item.overview,
+                            logo: emby.logoURL(for: item, width: 900)?.absoluteString)
         }
+        let featured = pick.flatMap(featuring)
+        if let pick, featured != nil { show(pick) }
+        // The hero's turn: today's pick first, then the other recent
+        // popular titles with a backdrop.
+        let others = (recent.isEmpty ? withBackdrop : recent).prefix(6)
+        let rotation = choices.isEmpty ? [] : (0..<choices.count).map { choices[(day + $0) % choices.count] }
+        var spotlightIds = Set<String>()
+        let spotlight = (rotation + others).filter { spotlightIds.insert($0.id).inserted }.prefix(6).compactMap(featuring)
 
         // Top picks: titles like the five you watched last, one from each in
         // turn (Emby's own ranking of what's most alike within each).
@@ -182,6 +194,6 @@ enum HomeFeed {
         if picks.count >= 4, let row = posterRow("Top picks for you", picks) { rows.append(row) }
         if let row = posterRow("Trending now", popularRow) { rows.append(row) }
         if newRow.count >= 4, let row = posterRow("New & notable", newRow) { rows.append(row) }
-        return HomeContent(featured: featured, rows: rows, builtAt: Date(), history: seeds.map(\.id))
+        return HomeContent(featured: featured, rows: rows, builtAt: Date(), history: seeds.map(\.id), spotlight: Array(spotlight))
     }
 }

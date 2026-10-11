@@ -28,6 +28,10 @@ struct RootView: View {
             if model.sources.isEmpty {
                 WelcomeView()
             } else {
+                #if os(tvOS)
+                // Laid out like Apple's TV app: a sidebar over full-screen pages.
+                TVRootView(playing: $playing)
+                #else
                 TabView {
                     Tab("Home", systemImage: "house.fill") {
                         HomeView(playing: $playing)
@@ -42,7 +46,6 @@ struct RootView: View {
                         SearchView(playing: $playing)
                     }
                 }
-                #if os(iOS)
                 .tabBarMinimizeBehavior(.onScrollDown)
                 #endif
             }

@@ -53,7 +53,13 @@ struct EmbyItem: Codable, Hashable {
         var name: String
         /// "Actor", "Director", "Writer", "GuestStar", …
         var type: String?
-        enum CodingKeys: String, CodingKey { case name = "Name", type = "Type" }
+        var id: String?
+        /// The part they play.
+        var role: String?
+        var primaryImageTag: String?
+        enum CodingKeys: String, CodingKey {
+            case name = "Name", type = "Type", id = "Id", role = "Role", primaryImageTag = "PrimaryImageTag"
+        }
     }
 
     /// IMDb title id ("tt…"), when the server has matched one.
