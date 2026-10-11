@@ -106,7 +106,7 @@ struct SearchView: View {
                             Button {
                                 playing = .live(channels, index)
                             } label: {
-                                ChannelRow(channel: channel, info: model.nowNext[channel.id], favorite: prefs.isFavorite(channel))
+                                ChannelRow(channel: channel, slot: model.slot(channel.id), favorite: prefs.isFavorite(channel))
                             }
                             .buttonStyle(.plain)
                             .contextMenu {

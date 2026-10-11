@@ -3,9 +3,12 @@ import SwiftUI
 /// Live TV: category tabs (Favourites and Local first) over a channel list.
 /// The lineup saved on the device shows at once and refreshes in the
 /// background, so there's no pull to refresh (which also made the page
-/// jump while swiping the tabs). Now/next is fetched for visible rows only
-/// and refreshed when a programme ends. Long-press a channel to favourite
-/// it, a category to hide it.
+/// jump while swiping the tabs). Now/next is fetched for the rows on
+/// screen and the 30 below them (with their logos), and refreshed when a
+/// programme ends; rows keep one height while it loads, so scrolling never
+/// jumps. Long-press a channel to favourite it, a category to hide it.
+/// Each row watches only its own now/next, so details arriving redraw that
+/// row, not the list.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
@@ -52,11 +55,12 @@ struct LiveView: View {
                 ForEach(model.liveErrors, id: \.self) { message in
                     Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
                 }
-                ForEach(Array(displayed.enumerated()), id: \.element.id) { index, channel in
+                let channels = displayed
+                ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
                     Button {
-                        playing = .live(displayed, index)
+                        playing = .live(channels, index)
                     } label: {
-                        ChannelRow(channel: channel, info: model.nowNext[channel.id], favorite: prefs.isFavorite(channel))
+                        ChannelRow(channel: channel, slot: model.slot(channel.id), favorite: prefs.isFavorite(channel))
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -65,7 +69,7 @@ struct LiveView: View {
                             prefs.toggleFavorite(channel)
                         }
                     }
-                    .onAppear { model.appeared(channel.id) }
+                    .onAppear { model.appeared(channel.id, ahead: channels[(index + 1)...].prefix(30)) }
                     .onDisappear { model.disappeared(channel.id) }
                 }
             }
@@ -218,12 +222,17 @@ struct LiveView: View {
     }
 }
 
+/// A channel with what's on now and next. Always the same lines (grey
+/// placeholders until the details arrive, blanks when there are none), so
+/// the row never changes height as you scroll.
 struct ChannelRow: View {
     let channel: LiveChannel
-    let info: NowNext?
+    let slot: NowNextSlot
     var favorite = false
 
     var body: some View {
+        let info = slot.value
+        let now = info?.now
         HStack(spacing: 12) {
             ChannelLogo(url: channel.logo, name: channel.name)
             VStack(alignment: .leading, spacing: 3) {
@@ -234,24 +243,25 @@ struct ChannelRow: View {
                             .accessibilityLabel("Favourite")
                     }
                 }
-                // Re-render every 30 s so progress bars move.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
-                    if let now = info?.now {
+                Group {
+                    // Re-render every 30 s so progress bars move.
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(now.title) · until \(now.stop.clock)")
-                                .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                            ProgressView(value: now.progress(at: context.date))
+                            Text(now.map { "\($0.title) · until \($0.stop.clock)" }
+                                 ?? (info == nil ? "Programme title · until 9:00 PM" : "No guide data"))
+                                .font(.subheadline)
+                                .foregroundStyle(now == nil && info != nil ? .tertiary : .secondary)
+                                .lineLimit(1)
+                            ProgressView(value: now?.progress(at: context.date) ?? 0)
                                 .frame(maxWidth: 220)
+                                .opacity(now == nil ? 0 : 1)
                         }
-                    } else {
-                        Text(info == nil ? "…" : "No guide data")
-                            .font(.subheadline).foregroundStyle(.tertiary)
                     }
-                }
-                if let next = info?.next {
-                    Text("Next \(next.start.clock) · \(next.title)")
+                    Text(info?.next.map { "Next \($0.start.clock) · \($0.title)" } ?? (info == nil ? "Next 9:30 PM · Programme" : " "))
                         .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
                 }
+                .redacted(reason: info == nil ? .placeholder : [])
+                .accessibilityHidden(info == nil)
             }
             Spacer(minLength: 0)
         }
@@ -268,9 +278,11 @@ struct ChannelLogo: View {
     @State private var image: UIImage?
 
     var body: some View {
+        // Already decoded (scrolling back, or fetched ahead): shown at once.
+        let shown = image ?? url.flatMap(ImagePipeline.shared.cached)
         ZStack {
             RoundedRectangle(cornerRadius: 10).fill(.quaternary)
-            if let image {
+            if let image = shown {
                 Image(uiImage: image).resizable().scaledToFit().padding(5)
             } else {
                 Text(String(name.prefix(2)).uppercased()).font(.caption.weight(.bold)).foregroundStyle(.secondary)
@@ -278,7 +290,7 @@ struct ChannelLogo: View {
         }
         .frame(width: 56, height: 40)
         .task(id: url) {
-            guard let url else { return }
+            guard let url, ImagePipeline.shared.cached(url) == nil else { return }
             image = try? await ImagePipeline.shared.image(for: url)
         }
     }

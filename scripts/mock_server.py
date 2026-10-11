@@ -302,7 +302,7 @@ class Handler(BaseHTTPRequestHandler):
             ]})
         if action == "get_short_epg":
             ch = int(q["stream_id"])
-            time.sleep(0.02)
+            time.sleep(float(os.environ.get("OPENIPTV_MOCK_EPG_DELAY", "0.02")))
             return self.send({"epg_listings": [
                 {"title": b64(title(ch, s) + (" (repeat)" if ch == 5 else "")), "description": b64("About it."),
                  "start": wall(s), "end": wall(e), "start_timestamp": str(s), "stop_timestamp": str(e)}

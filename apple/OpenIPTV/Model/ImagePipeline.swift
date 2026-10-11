@@ -6,7 +6,8 @@ import UIKit
 actor ImagePipeline {
     static let shared = ImagePipeline()
 
-    private let memory = NSCache<NSURL, UIImage>()
+    // NSCache is thread-safe; read directly for images already decoded.
+    private nonisolated(unsafe) let memory = NSCache<NSURL, UIImage>()
     private let session: URLSession
 
     init() {
@@ -30,6 +31,11 @@ actor ImagePipeline {
                 if let url = queue.popFirst() { group.addTask { _ = try? await self.image(for: url) } }
             }
         }
+    }
+
+    /// An image already decoded, without waiting (rows scrolling back in).
+    nonisolated func cached(_ url: URL) -> UIImage? {
+        memory.object(forKey: url as NSURL)
     }
 
     func image(for url: URL) async throws -> UIImage {

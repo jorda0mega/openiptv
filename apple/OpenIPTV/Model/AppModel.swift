@@ -45,6 +45,13 @@ final class AppModel {
     /// open show), so selecting it goes straight to the player.
     private var prepared: [String: (at: Date, task: Task<EmbyPlayback, Error>)] = [:]
     private var visible: Set<String> = []
+    /// The rows just below the last one scrolled to, fetched ahead.
+    private var lookahead: [String] = []
+    private var resolving: Set<String> = []
+    private var nowNextScheduled = false
+    private var nowNextForced = false
+    @ObservationIgnored private var slots: [String: NowNextSlot] = [:]
+    @ObservationIgnored private var localCache: (area: LocalArea, channels: [LiveChannel])?
     private var nowNextTask: Task<Void, Never>?
     private var boundaryTask: Task<Void, Never>?
     private var providerEPG: [String: (until: Int64, list: [Programme])] = [:]
@@ -528,7 +535,8 @@ final class AppModel {
         allChannels = []
         channelsByCategory = [:]
         channelById = [:]
-        nowNext = [:]
+        clearNowNext()
+        localCache = nil
         providers = [:]
         providerEPG = [:]
         selectedCategory = nil
@@ -548,6 +556,7 @@ final class AppModel {
             categories = []
             allChannels = []
             channelsByCategory = [:]
+            localCache = nil
             liveErrors = []
             return
         }
@@ -617,10 +626,10 @@ final class AppModel {
 
     private func guideDidUpdate() async {
         guideState = await guide.state
-        // Re-evaluate visible rows against the new guide.
-        nowNext = [:]
+        // Re-evaluate the rows on screen against the new guide, keeping
+        // what they show until the new details are in (no flicker).
         providerEPG = [:]
-        scheduleNowNext()
+        scheduleNowNext(force: true)
     }
 
     func channels(in category: String?, favorites: [LiveChannel], area: LocalArea? = nil) -> [LiveChannel] {
@@ -638,8 +647,9 @@ final class AppModel {
             let upper = name.uppercased()
             return networks.firstIndex { upper.contains($0) } ?? networks.count
         }
+        if let cache = localCache, cache.area == area { return cache.channels }
         let city = area.city?.lowercased()
-        return allChannels
+        let channels = allChannels
             .filter { local.contains($0.categoryId ?? "") && area.includes($0.name) }
             .sorted { first, second in
                 let a = city.map { first.name.lowercased().contains($0) } ?? false
@@ -648,6 +658,9 @@ final class AppModel {
                 let na = network(first.name), nb = network(second.name)
                 return na != nb ? na < nb : first.name.localizedStandardCompare(second.name) == .orderedAscending
             }
+        // Worked out once per lineup and area, not on every redraw.
+        localCache = (area, channels)
+        return channels
     }
 
     // MARK: Saved lineup
@@ -694,6 +707,7 @@ final class AppModel {
     private func applyLineup(categories cats: [LiveCategory], channels: [LiveChannel]) async {
         categories = cats
         allChannels = channels
+        localCache = nil
         channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
         channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
         channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -814,8 +828,15 @@ final class AppModel {
         return stream
     }
 
+    /// The channel's provider, connected on first use: a lineup saved
+    /// within the hour is shown without connecting, and its rows still need
+    /// their short EPG.
     private func provider(for channel: LiveChannel) -> LiveProvider? {
-        providers[channel.sourceId] ?? sources.iptv.first(where: { $0.id == channel.sourceId }).map(Providers.make)
+        if let known = providers[channel.sourceId] { return known }
+        guard let source = sources.iptv.first(where: { $0.id == channel.sourceId }) else { return nil }
+        let made = Providers.make(source)
+        providers[source.id] = made
+        return made
     }
 
     func playable(_ channel: LiveChannel) async throws -> PlayableStream {
@@ -823,9 +844,7 @@ final class AppModel {
         if case let .url(url, _, _) = channel.stream, url.scheme == "about" {
             throw SourceError.unexpected("Channels are still loading; try again in a moment.")
         }
-        let provider = providers[channel.sourceId]
-            ?? sources.iptv.first(where: { $0.id == channel.sourceId }).map(Providers.make)
-        guard let provider else { throw SourceError.unexpected("This channel's source was removed.") }
+        guard let provider = provider(for: channel) else { throw SourceError.unexpected("This channel's source was removed.") }
         do {
             return try await provider.playable(channel)
         } catch {
@@ -835,9 +854,34 @@ final class AppModel {
 
     // MARK: Now / next
 
-    func appeared(_ id: String) {
+    /// A row scrolled into view; `ahead` are the rows below it, fetched
+    /// now so they're filled in before they're seen.
+    func appeared(_ id: String, ahead: some Collection<LiveChannel> = [LiveChannel]()) {
         visible.insert(id)
+        if !ahead.isEmpty {
+            lookahead = ahead.map(\.id)
+            let logos = ahead.compactMap(\.logo).filter { ImagePipeline.shared.cached($0) == nil }
+            if !logos.isEmpty { Task.detached(priority: .utility) { await ImagePipeline.shared.prefetch(logos) } }
+        }
         scheduleNowNext()
+    }
+
+    /// The now/next a row watches (see NowNextSlot).
+    func slot(_ id: String) -> NowNextSlot {
+        if let slot = slots[id] { return slot }
+        let slot = NowNextSlot(nowNext[id])
+        slots[id] = slot
+        return slot
+    }
+
+    private func setNowNext(_ id: String, _ value: NowNext) {
+        nowNext[id] = value
+        if let slot = slots[id], slot.value != value { slot.value = value }
+    }
+
+    private func clearNowNext() {
+        nowNext = [:]
+        for slot in slots.values where slot.value != nil { slot.value = nil }
     }
 
     func disappeared(_ id: String) {
@@ -848,12 +892,22 @@ final class AppModel {
         await resolveNowNext(channels.filter { nowNext[$0.id].map(\.isStale) ?? true })
     }
 
-    private func scheduleNowNext() {
-        nowNextTask?.cancel()
+    /// Fetches what rows on screen and just below them are missing, a
+    /// tenth of a second after asked: while scrolling it keeps fetching
+    /// (rather than waiting for the scroll to stop), in batches.
+    private func scheduleNowNext(force: Bool = false) {
+        if force { nowNextForced = true }
+        guard !nowNextScheduled else { return }
+        nowNextScheduled = true
         nowNextTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
+            try? await Task.sleep(for: .milliseconds(100))
             guard let self, !Task.isCancelled else { return }
-            let stale = self.visible.compactMap { self.channelById[$0] }.filter { self.nowNext[$0.id].map(\.isStale) ?? true }
+            self.nowNextScheduled = false
+            let force = self.nowNextForced
+            self.nowNextForced = false
+            var seen = Set<String>()
+            let wanted = (Array(self.visible) + self.lookahead).filter { seen.insert($0).inserted }.compactMap { self.channelById[$0] }
+            let stale = force ? wanted : wanted.filter { self.nowNext[$0.id].map(\.isStale) ?? true }
             await self.resolveNowNext(stale)
             self.scheduleBoundary()
         }
@@ -862,13 +916,17 @@ final class AppModel {
     /// Full guide first (placeholder titles don't count), then the
     /// provider's own short EPG, cached until it expires.
     private func resolveNowNext(_ channels: [LiveChannel]) async {
+        // Each channel once at a time (scrolling asks again while fetching).
+        let channels = channels.filter { !resolving.contains($0.id) }
         guard !channels.isEmpty else { return }
+        resolving.formUnion(channels.map(\.id))
+        defer { resolving.subtract(channels.map(\.id)) }
         let now = Int64(Date().timeIntervalSince1970)
         var needProvider: [LiveChannel] = []
         for channel in channels {
             if let id = channel.epgId, let fromGuide = await guide.nowNext(id, at: now),
                let title = fromGuide.now?.title, !NowNext.isPlaceholder(title) {
-                nowNext[channel.id] = fromGuide
+                setNowNext(channel.id, fromGuide)
             } else {
                 needProvider.append(channel)
             }
@@ -876,8 +934,8 @@ final class AppModel {
         var fetch: [(LiveChannel, any LiveProvider)] = []
         for channel in needProvider {
             if let cached = providerEPG[channel.id], now < cached.until {
-                nowNext[channel.id] = .from(cached.list, at: now, source: .provider)
-            } else if let provider = providers[channel.sourceId] {
+                setNowNext(channel.id, .from(cached.list, at: now, source: .provider))
+            } else if let provider = provider(for: channel) {
                 fetch.append((channel, provider))
             }
         }
@@ -888,7 +946,7 @@ final class AppModel {
             for await (id, list) in group {
                 let value = NowNext.from(list, at: now, source: .provider)
                 providerEPG[id] = (value.refreshAt ?? now + 300, list)
-                nowNext[id] = value
+                setNowNext(id, value)
             }
         }
     }

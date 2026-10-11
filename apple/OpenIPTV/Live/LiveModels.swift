@@ -45,6 +45,15 @@ struct Programme: Codable, Hashable {
 
 /// What's on now and next, plus the second this stops being true, so the UI
 /// updates exactly at programme boundaries instead of polling.
+/// One channel's now/next for its row to watch: details arriving for one
+/// channel redraw that row alone, not the whole list.
+@Observable
+@MainActor
+final class NowNextSlot {
+    var value: NowNext?
+    init(_ value: NowNext?) { self.value = value }
+}
+
 struct NowNext: Hashable {
     enum Source: String { case guide, provider, none }
 
