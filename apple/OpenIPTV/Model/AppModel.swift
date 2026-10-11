@@ -102,6 +102,48 @@ final class AppModel {
         return playback
     }
 
+    // MARK: Shows
+
+    /// A show page's data, kept so reopening (or opening something prepared
+    /// ahead) draws at once; refreshed quietly behind.
+    struct ShowData {
+        let show: EmbyItem
+        let episodes: [EmbyItem]
+        let nextUp: EmbyItem?
+        let loadedAt: Date
+    }
+
+    private(set) var shows: [String: ShowData] = [:]
+    private var showLoads: [String: Task<ShowData?, Never>] = [:]
+
+    /// The show's details, every episode and the next one to watch.
+    func loadShow(_ id: String) async -> ShowData? {
+        if let running = showLoads[id] { return await running.value }
+        guard let emby else { return nil }
+        let task = Task<ShowData?, Never> {
+            async let item = emby.item(id)
+            async let list = emby.episodes(of: id, season: nil)
+            async let next = emby.nextEpisode(of: id)
+            guard let show = try? await item, let episodes = try? await list else { return nil }
+            return ShowData(show: show, episodes: episodes, nextUp: try? await next, loadedAt: Date())
+        }
+        showLoads[id] = task
+        let data = await task.value
+        showLoads[id] = nil
+        if let data {
+            if shows.count > 12 { shows.removeAll() }
+            shows[id] = data
+        }
+        return data
+    }
+
+    /// Loads shows the user is likely to open next, in the background.
+    func prefetchShows(_ ids: [String]) {
+        for id in ids where shows[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
+            Task(priority: .utility) { _ = await loadShow(id) }
+        }
+    }
+
     // MARK: Warm start
 
     /// The item most likely to be played next, already opened and paused at
@@ -206,6 +248,8 @@ final class AppModel {
         if event == .stopped {
             prepared = [:]
             coolDown()
+            // Watched marks and progress changed; reload in the background.
+            if let series = playback.seriesId { shows[series] = nil; prefetchShows([series]) }
         }
         if event == .stopped { await loadHome(cardWidth: lastCardWidth) }
     }

@@ -408,6 +408,7 @@ struct EmbyClient {
             }
         }
         playback.bitrate = info?.MediaSources?.first?.Bitrate
+        playback.seriesId = item.seriesId
         // Some servers only honour the token as a header; send it both ways
         // for Emby's own stream addresses (not for remote files).
         let auth = ["X-Emby-Token: \(account.accessToken)"]

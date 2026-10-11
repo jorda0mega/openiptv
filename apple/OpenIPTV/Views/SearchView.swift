@@ -178,6 +178,7 @@ struct SearchView: View {
                 guard !Task.isCancelled, query == q else { return }
                 model.warmUp(top.id, kind: top.kind, options: prefs.playerProfile.mpvOptions,
                              hardwareDecoding: prefs.hardwareDecoding)
+                if top.kind == "Series" { model.prefetchShows([top.id]) }
             }
         }
 

@@ -140,6 +140,8 @@ struct EmbyPlayback: Hashable, Identifiable {
     var requestedAt = Date()
     /// Bitrate of the original file (bits/s), when the server knows it.
     var bitrate: Int?
+    /// The show an episode belongs to.
+    var seriesId: String?
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {
