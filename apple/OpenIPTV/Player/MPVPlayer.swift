@@ -223,10 +223,12 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in command(["cycle", "pause"]) }
     }
 
+    /// Exact: a relative seek otherwise lands on a keyframe, and with
+    /// keyframes 10 s or more apart, "forward 10" could land where it was.
     func seek(by seconds: Double) {
         queue.async { [self] in
             seekStarted = CFAbsoluteTimeGetCurrent()
-            command(["seek", String(seconds), "relative"])
+            command(["seek", String(seconds), "relative+exact"])
         }
     }
 

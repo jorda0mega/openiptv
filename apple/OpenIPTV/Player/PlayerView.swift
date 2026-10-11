@@ -49,7 +49,8 @@ func makePlayer(prefs: Preferences) -> MPVPlayer {
 
 /// Plays an Emby item from its resume point and reports progress back so
 /// Continue Watching stays right on every device. iPhone: glass transport
-/// controls and a scrubber. Apple TV: left/right seek 10 s, Play/Pause.
+/// controls and a scrubber. Apple TV: the Siri Remote as in Apple's own
+/// player (see `remote(_:)`).
 struct MoviePlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
@@ -76,8 +77,15 @@ struct MoviePlayerView: View {
     @State private var warmStart = false
     /// Scrubbing thumbnails, if the server has them.
     @State private var thumbnails: TrickplayImages?
-    /// Apple TV: presses add up into one seek, applied after a short pause.
-    @State private var pendingSeek: Task<Void, Never>?
+    #if os(tvOS)
+    /// Where the current swipe started from.
+    @State private var swipeFrom: Double?
+    /// Rewinding or fast-forwarding while left or right is held.
+    @State private var holdTask: Task<Void, Never>?
+    /// Play, pause or a skip, shown big in the middle for a moment.
+    @State private var flashSymbol: String?
+    @State private var flashTask: Task<Void, Never>?
+    #endif
     /// iPhone scrubbing: speed label, and live seeks so the picture follows.
     @State private var scrubSpeed: String?
     @State private var lastLiveSeek = Date.distantPast
@@ -121,26 +129,27 @@ struct MoviePlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
+            #if os(tvOS)
+            if let flashSymbol {
+                Image(systemName: flashSymbol)
+                    .font(.system(size: 60, weight: .semibold))
+                    .frame(width: 150, height: 150)
+                    .background(.ultraThinMaterial, in: .circle)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                    .allowsHitTesting(false)
+            }
+            // On top and see-through: it takes the remote.
+            TVRemoteSurface { remote($0) }
+                .ignoresSafeArea()
+            #endif
         }
+        #if os(tvOS)
+        .onExitCommand { remote(.menu) }
+        #endif
+        #if os(iOS)
         .contentShape(Rectangle())
         .onTapGesture { toggleControls() }
-        #if os(iOS)
         .statusBarHidden(!controlsVisible)
-        #else
-        .focusable()
-        .onMoveCommand { direction in
-            switch direction {
-            case .left: scrub(by: -10)
-            case .right: scrub(by: 10)
-            default: break
-            }
-            showControls()
-        }
-        .onPlayPauseCommand {
-            player?.togglePause()
-            showControls()
-        }
-        .onExitCommand { dismiss() }
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
@@ -156,7 +165,11 @@ struct MoviePlayerView: View {
                      playPause: { player?.togglePause() }, forward: { player?.seek(by: 10) }) {
             EmptyView()
         } bar: {
+            #if os(iOS)
             scrubber.overlay(alignment: .topLeading) { scrubPreview }
+            #else
+            scrubber
+            #endif
         }
     }
 
@@ -177,7 +190,15 @@ struct MoviePlayerView: View {
             Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
                      onChanged: liveScrub, onCommit: commitScrub)
             #else
-            ProgressView(value: min(scrubbing ?? position, max(total, 1)), total: max(total, 1))
+            // Playing or paused, then the bar (with where a jump would land).
+            HStack(spacing: 20) {
+                Image(systemName: paused ? "pause.fill" : "play.fill")
+                    .font(.title3)
+                    .frame(width: 32)
+                    .accessibilityLabel(paused ? "Paused" : "Playing")
+                TVProgressBar(position: position, total: max(total, 1), target: scrubbing)
+                    .overlay(alignment: .topLeading) { scrubPreview }
+            }
             #endif
         }
     }
@@ -483,25 +504,110 @@ struct MoviePlayerView: View {
         showControls()
     }
 
-    /// Apple TV: each press moves the target; the seek happens once the
-    /// presses stop, so holding skips far without stuttering.
-    private func scrub(by seconds: Double) {
-        if scrubOrigin == nil { scrubOrigin = position }
-        let target = min(max((scrubbing ?? position) + seconds, 0), max(total, 1))
-        scrubbing = target
-        pendingSeek?.cancel()
-        pendingSeek = Task {
-            try? await Task.sleep(for: .milliseconds(700))
-            guard !Task.isCancelled else { return }
-            // Far jumps land on the keyframe just before (no waiting to
-            // download and decode up to the second).
-            let near = abs(target - (scrubOrigin ?? position)) < 30
-            player?.seek(to: max(0, target - offset), exact: near, report: true)
-            position = target
-            scrubbing = nil
-            scrubOrigin = nil
+    #if os(tvOS)
+    /// The Siri Remote, as in Apple's player:
+    /// - click left or right: back or forward 10 seconds, straight away;
+    /// - hold left or right: rewind or fast-forward, faster the longer it's
+    ///   held, jumping there on release;
+    /// - swipe on the touch surface: the picture pauses and follows to where
+    ///   it would jump (a thumbnail when the server has them); click to jump
+    ///   there, Menu to stay;
+    /// - click the centre or Play/Pause: pause or play;
+    /// - Menu: stop choosing, then hide the controls, then leave.
+    private func remote(_ input: TVRemoteSurface.Input) {
+        switch input {
+        case let .click(direction):
+            guard started else { return }
+            if let target = scrubbing {
+                preview(target + direction * 10)
+            } else {
+                player?.seek(by: direction * 10)
+                position = min(max(position + direction * 10, 0), max(total, 1))
+                flash(direction < 0 ? "gobackward.10" : "goforward.10")
+                showControls(autoHide: !paused)
+            }
+        case let .hold(direction):
+            guard started else { return }
+            holdTask?.cancel()
+            holdTask = Task {
+                var step = 10.0
+                while !Task.isCancelled {
+                    preview((scrubbing ?? position) + direction * step)
+                    try? await Task.sleep(for: .milliseconds(250))
+                    // 40 s a second at first, up to 4 minutes a second.
+                    step = min(step * 1.12, 60)
+                }
+            }
+        case .released:
+            holdTask?.cancel()
+            holdTask = nil
+            if let target = scrubbing { commitScrub(target) }
+        case let .swipe(began, distance, ended):
+            guard started else { return }
+            if began { swipeFrom = scrubbing ?? position }
+            guard let from = swipeFrom else { return }
+            if distance != 0 { preview(from + Double(distance) * secondsPerPoint) }
+            if ended { swipeFrom = nil }
+        case .select, .playPause:
+            if let target = scrubbing {
+                commitScrub(target)
+            } else {
+                togglePlay()
+            }
+        case .menu:
+            if scrubbing != nil {
+                cancelScrub()
+            } else if controlsVisible, !paused, started {
+                hideTask?.cancel()
+                withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
+            } else {
+                dismiss()
+            }
         }
     }
+
+    /// A swipe across the whole touch surface (about the screen's width)
+    /// moves a quarter of the film, at least two and a half minutes.
+    private var secondsPerPoint: Double { max(total, 600) / 4 / 1920 }
+
+    /// Moves where a jump would land; the picture pauses and follows.
+    private func preview(_ target: Double) {
+        let clamped = min(max(target, 0), max(total - 1, 0))
+        scrubbing = clamped
+        liveScrub(clamped)
+    }
+
+    /// Menu while choosing: back to where it was, playing if it was.
+    private func cancelScrub() {
+        settleSeek?.cancel()
+        if let origin = scrubOrigin { player?.seek(to: max(0, origin - offset), exact: true) }
+        scrubbing = nil
+        scrubOrigin = nil
+        settledAt = nil
+        if resumeAfterScrub {
+            resumeAfterScrub = false
+            player?.setPaused(false)
+        }
+        showControls()
+    }
+
+    private func togglePlay() {
+        let pausing = !paused
+        player?.togglePause()
+        flash(pausing ? "pause.fill" : "play.fill")
+        showControls(autoHide: !pausing)
+    }
+
+    private func flash(_ symbol: String) {
+        flashTask?.cancel()
+        withAnimation(.easeOut(duration: 0.12)) { flashSymbol = symbol }
+        flashTask = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.25)) { flashSymbol = nil }
+        }
+    }
+    #endif
 
     private func timeString(_ seconds: Double) -> String {
         let s = Int(seconds.rounded())

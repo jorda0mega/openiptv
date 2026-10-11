@@ -11,7 +11,14 @@ struct SearchView: View {
     @Environment(\.displayScale) private var displayScale
     @Binding var playing: PlayerItem?
 
-    @State private var query = ""
+    /// Debug builds: `-debugSearch "text"` at launch starts with a search.
+    @State private var query: String = {
+        #if DEBUG
+        UserDefaults.standard.string(forKey: "debugSearch") ?? ""
+        #else
+        ""
+        #endif
+    }()
     @State private var scope: Scope = .all
     @State private var path = NavigationPath()
 
@@ -38,24 +45,35 @@ struct SearchView: View {
 
     private var thumbWidth: Int { Int(Layout.searchThumbWide * displayScale) }
 
-    /// Server results that still fit what's typed now (no flicker while the
-    /// next request is in flight).
-    private var serverFiltered: [Card] {
-        guard !serverCards.isEmpty else { return [] }
-        let corpus = SearchCorpus(serverCards) { "\($0.title) \($0.subtitle ?? "")" }
-        return corpus.search(query).ranked.sorted().map { corpus.items[$0] }
+    /// Titles and episodes for what's typed, worked out once when results
+    /// arrive, not on every redraw (a filter tap redraws the page).
+    private struct Titles {
+        var all: [Card] = []
+        var movies: [Card] = []
+        var shows: [Card] = []
+        var episodes: [Card] = []
     }
+    @State private var titles = Titles()
 
-    private var episodes: [Card] { serverFiltered.filter { $0.kind == "Episode" } }
+    private var episodes: [Card] { titles.episodes }
+    private var moviesAndShows: [Card] { titles.all }
+    private var movies: [Card] { titles.movies }
+    private var shows: [Card] { titles.shows }
 
-    private var moviesAndShows: [Card] {
-        // Every copy of the titles already listed (HD and 4K are one title).
+    /// The library's matches, then the server's that still fit what's typed
+    /// now (no flicker while the next request is in flight) and aren't
+    /// another copy of one already listed (HD and 4K are one title).
+    private func publishTitles() {
+        var server: [Card] = []
+        if !serverCards.isEmpty {
+            let corpus = SearchCorpus(serverCards) { "\($0.title) \($0.subtitle ?? "")" }
+            server = corpus.search(query).ranked.sorted().map { corpus.items[$0] }
+        }
         let known = Set(library.flatMap { model.library.versions(of: $0.id) })
-        return library + serverFiltered.filter { $0.kind != "Episode" && !known.contains($0.id) }
+        let all = library + server.filter { $0.kind != "Episode" && !known.contains($0.id) }
+        titles = Titles(all: all, movies: all.filter { $0.kind != "Series" }, shows: all.filter { $0.kind == "Series" },
+                        episodes: server.filter { $0.kind == "Episode" })
     }
-
-    private var movies: [Card] { moviesAndShows.filter { $0.kind != "Series" } }
-    private var shows: [Card] { moviesAndShows.filter { $0.kind == "Series" } }
 
     /// Whether a filter has anything for what's typed (empty ones are dimmed).
     private func hasResults(_ scope: Scope) -> Bool {
@@ -68,6 +86,15 @@ struct SearchView: View {
     }
 
     var body: some View {
+        #if os(tvOS)
+        tvBody
+        #else
+        phoneBody
+        #endif
+    }
+
+    #if os(iOS)
+    private var phoneBody: some View {
         NavigationStack(path: $path) {
             List {
                 if scope == .all, !completions.isEmpty {
@@ -82,21 +109,13 @@ struct SearchView: View {
                         }
                     }
                 }
-                switch scope {
-                case .all where !moviesAndShows.isEmpty:
-                    Section("Movies & Shows") {
-                        ForEach(moviesAndShows) { card in result(card, wide: false) }
+                // One section whatever the filter, so a title shown before
+                // and after a filter tap keeps its row instead of a new one.
+                let shown = scope == .movies ? movies : scope == .shows ? shows : scope == .all ? moviesAndShows : []
+                if !shown.isEmpty {
+                    Section(scope == .movies ? "Movies" : scope == .shows ? "Shows" : "Movies & Shows") {
+                        ForEach(shown) { card in result(card, wide: false) }
                     }
-                case .movies where !movies.isEmpty:
-                    Section("Movies") {
-                        ForEach(movies) { card in result(card, wide: false) }
-                    }
-                case .shows where !shows.isEmpty:
-                    Section("Shows") {
-                        ForEach(shows) { card in result(card, wide: false) }
-                    }
-                default:
-                    EmptyView()
                 }
                 if scope == .all || scope == .shows, !episodes.isEmpty {
                     Section("Episodes") {
@@ -147,11 +166,7 @@ struct SearchView: View {
             }
             .listStyle(.plain)
             .overlay { emptyState }
-            #if os(iOS)
-            // Apple TV: no title; the keyboard row is the top of the page,
-            // as in Apple's TV app (a title there sits on the letters).
             .navigationTitle("Search")
-            #endif
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             #if os(iOS)
@@ -164,9 +179,6 @@ struct SearchView: View {
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty { scopeBar }
             }
             .onAppear { if query.isEmpty { fieldFocused = true } }
-            #else
-            .searchable(text: $query, prompt: "Movies, shows, channels, what's on")
-            .autocorrectionDisabled()
             #endif
             // Re-run when the text changes or an index finishes loading.
             .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") { await search() }
@@ -177,6 +189,101 @@ struct SearchView: View {
             }
         }
     }
+    #endif
+
+    #if os(tvOS)
+    @Namespace private var tvFocus
+    @Environment(\.resetFocus) private var resetFocus
+
+    /// Up from the top row of results: back to the keyboard (the remote
+    /// won't cross from SwiftUI into the UIKit keyboard by itself).
+    private func upToKeyboard(_ direction: MoveCommandDirection) {
+        if direction == .up { resetFocus(in: tvFocus) }
+    }
+
+    /// Which row is at the top of the results.
+    private var topRow: Int {
+        !moviesAndShows.isEmpty ? 0 : !episodes.isEmpty ? 1 : !onTV.isEmpty ? 2 : 3
+    }
+
+    /// Apple TV, like Apple's TV app: the keyboard row across the top, then
+    /// the results as rows of cards: titles, episodes, what's on, channels.
+    /// Titles open their page; episodes, programmes and channels play.
+    private var tvBody: some View {
+        NavigationStack(path: $path) {
+            VStack(spacing: 0) {
+                TVSearchContainer(query: $query, prompt: "Movies, shows, channels, what's on")
+                    // The field and the keyboard row; UIKit keeps its own
+                    // side margins (the hint at the field's end ran off the
+                    // screen inside SwiftUI's).
+                    .frame(height: 300)
+                    .ignoresSafeArea(edges: .horizontal)
+                    .prefersDefaultFocus(in: tvFocus)
+                tvResults
+            }
+            .focusScope(tvFocus)
+            .navigationDestination(for: ShowRoute.self) { TVShowView(route: $0, playing: $playing) }
+            .navigationDestination(for: MovieRoute.self) { TVMovieView(route: $0, playing: $playing) }
+        }
+        .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") { await search() }
+        .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(playError ?? "")
+        }
+    }
+
+    private var tvResults: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 30) {
+                if !moviesAndShows.isEmpty {
+                    TVPosterRow(title: "Movies & Shows", cards: moviesAndShows) { openDetails($0) }
+                        .onMoveCommand(perform: topRow == 0 ? upToKeyboard : nil)
+                }
+                if !episodes.isEmpty {
+                    TVContinueRow(row: HomeRow(title: "Episodes", shape: "landscape", aspect: 16.0 / 9, cards: episodes),
+                                  loadingCard: loadingCard, play: { play($0) }, open: { openDetails($0) })
+                        .onMoveCommand(perform: topRow == 1 ? upToKeyboard : nil)
+                }
+                if !onTV.isEmpty {
+                    TVShelf(title: "On TV") {
+                        let tuned = onTV.map(\.channel)
+                        ForEach(Array(onTV.enumerated()), id: \.element.id) { index, hit in
+                            Button { playing = .live(tuned, index) } label: {
+                                GuideHitRow(hit: hit)
+                                    .padding(.horizontal, 24)
+                                    .frame(width: 640, height: 150, alignment: .leading)
+                            }
+                            .buttonStyle(.card)
+                        }
+                    }
+                    .onMoveCommand(perform: topRow == 2 ? upToKeyboard : nil)
+                }
+                if !channels.isEmpty {
+                    TVShelf(title: "Channels") {
+                        ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
+                            Button { playing = .live(channels, index) } label: {
+                                ChannelRow(channel: channel, slot: model.slot(channel.id), favorite: prefs.isFavorite(channel))
+                                    .padding(.horizontal, 24)
+                                    .frame(width: 640, height: 150, alignment: .leading)
+                            }
+                            .buttonStyle(.card)
+                            .onAppear { model.appeared(channel.id) }
+                            .onDisappear { model.disappeared(channel.id) }
+                        }
+                    }
+                    .onMoveCommand(perform: topRow == 3 ? upToKeyboard : nil)
+                }
+            }
+            .padding(.vertical, 20)
+            .environment(\.rowInvertsOnFocus, false)
+        }
+        .scrollClipDisabled()
+        // Rows line up with Home's, 90 points in from the screen's edge.
+        .ignoresSafeArea(edges: .horizontal)
+        .overlay { emptyState }
+    }
+    #endif
 
     #if os(iOS)
     /// All · Movies · Shows · Live TV, the chosen one underlined.
@@ -184,9 +291,9 @@ struct SearchView: View {
         HStack(spacing: 8) {
             ForEach(Scope.allCases) { option in
                 let selected = option == scope
-                Button {
-                    withAnimation(.snappy(duration: 0.25)) { scope = option }
-                } label: {
+                // No animation for the results: they change at once; only
+                // the pill slides (below).
+                Button { scope = option } label: {
                     Text(option.rawValue)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(selected ? Color.black : Color.white)
@@ -207,6 +314,7 @@ struct SearchView: View {
             }
             Spacer(minLength: 0)
         }
+        .animation(.snappy(duration: 0.25), value: scope)
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
         .background {
@@ -288,23 +396,7 @@ struct SearchView: View {
             .accessibilityHint("Shows details")
         }
         .rowForeground()
-        #else
-        if card.kind == "Series" {
-            NavigationLink(value: ShowRoute(id: card.id, title: card.title)) { resultLabel(card, wide: wide) }
-        } else {
-            Button { play(card) } label: { resultLabel(card, wide: wide) }
-                .buttonStyle(.plain)
-        }
         #endif
-    }
-
-    private func resultLabel(_ card: Card, wide: Bool) -> some View {
-        HStack(spacing: 12) {
-            thumbnail(card, wide: wide, playBadge: false)
-            info(card)
-        }
-        .rowForeground()
-        .contentShape(Rectangle())
     }
 
     private func thumbnail(_ card: Card, wide: Bool, playBadge: Bool) -> some View {
@@ -377,6 +469,7 @@ struct SearchView: View {
         channelMatch = cm
         let typos = typoLibrary.map { SearchHit(entry: $0, pending: []) }
         library = cards(hits + typos)
+        publishTitles()
         channels = (Array(cm.ranked.prefix(60)) + typoChannels).map { channelCorpus.items[$0] }
         // What's on: the guide and today's games, by name.
         let guideHits = await model.searchGuide(q, area: prefs.area)
@@ -402,6 +495,7 @@ struct SearchView: View {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2, model.sources.emby != nil else {
             serverCards = []
+            publishTitles()
             serverDone = true
             return
         }
@@ -422,6 +516,7 @@ struct SearchView: View {
                                                + people.prefix(6).map(\.item.name) + channels.prefix(3).map(\.name))
         }
         serverCards = found
+        publishTitles()
         serverDone = true
     }
 

@@ -57,10 +57,17 @@ extension View {
     }
 }
 
+extension EnvironmentValues {
+    /// Rows go black under Apple TV's white focus platter in lists; on
+    /// cards, whose platter stays dark, they stay white.
+    @Entry var rowInvertsOnFocus = true
+}
+
 private struct RowForeground: ViewModifier {
     #if os(tvOS)
     @Environment(\.isFocused) private var focused
-    func body(content: Content) -> some View { content.foregroundStyle(focused ? Color.black : Color.white) }
+    @Environment(\.rowInvertsOnFocus) private var inverts
+    func body(content: Content) -> some View { content.foregroundStyle(focused && inverts ? Color.black : Color.white) }
     #else
     func body(content: Content) -> some View { content }
     #endif

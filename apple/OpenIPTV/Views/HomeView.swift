@@ -390,6 +390,16 @@ struct CoverImage: View {
     @State private var contain = false
     @State private var failed = false
 
+    init(images: [CardImage], title: String) {
+        self.images = images
+        self.title = title
+        // Already decoded (a row coming back, a filter switched): drawn at
+        // once, not blank and then faded in.
+        let hit = images.first.flatMap { URL(string: $0.url) }.flatMap { ImagePipeline.shared.cached($0) }
+        _image = State(initialValue: hit)
+        _contain = State(initialValue: hit != nil && images.first?.contain == true)
+    }
+
     var body: some View {
         ZStack {
             Rectangle().fill(.quaternary)
@@ -410,6 +420,11 @@ struct CoverImage: View {
         .task(id: images.first?.url) {
             for candidate in images {
                 guard let url = URL(string: candidate.url) else { continue }
+                if let hit = ImagePipeline.shared.cached(url) {
+                    contain = candidate.contain
+                    image = hit
+                    return
+                }
                 if let loaded = try? await ImagePipeline.shared.image(for: url) {
                     contain = candidate.contain
                     withAnimation(.easeOut(duration: 0.15)) { image = loaded }
