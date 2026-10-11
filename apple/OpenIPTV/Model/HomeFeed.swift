@@ -18,14 +18,17 @@ struct HomeContent: Codable, Hashable {
 /// - a featured pick: the most popular title you haven't seen, preferring
 ///   this year's and last year's;
 /// - Continue Watching: what you're partway through, then the next episode
-///   of each show you're watching;
-/// - Popular on your server: what's trending this week (TMDb), unwatched;
-/// - Because you watched …: up to three rows of titles like your latest;
+///   of each show you're watching (right under the featured pick, where
+///   resuming is quickest);
+/// - Top picks for you: one row of titles like your last five watches,
+///   taken from each in turn so it stays varied;
+/// - Trending now: what's popular this week (TMDb) on the server, unwatched;
 /// - New & notable: recently added, keeping the popular and well rated.
-/// Movies and shows mix, and each title appears once on the page however
-/// many libraries hold a copy (HD and 4K are one title). The personal rows
-/// pick first, then New & notable, and Popular fills from what's left of
-/// the week's trending titles, so no row is emptied by another.
+/// A few rows that each do one job, like Netflix and IMDb's homes. Movies
+/// and shows mix, and each title appears once on the page however many
+/// libraries hold a copy (HD and 4K are one title). Top picks choose
+/// first, then New & notable, and Trending fills from what's left of the
+/// week's trending titles, so no row is emptied by another.
 @MainActor
 enum HomeFeed {
     static func load(_ emby: EmbyClient, library: LibraryIndex, cardWidth: Int, backdropWidth: Int) async throws -> HomeContent {
@@ -108,7 +111,8 @@ enum HomeFeed {
             show(pick)
         }
 
-        // Because you watched: titles like the three you watched last.
+        // Top picks: titles like the five you watched last, one from each in
+        // turn (Emby's own ranking of what's most alike within each).
         let history = (sources.watching + sources.played)
             .sorted { ($0.userData?.lastPlayedDate ?? "") > ($1.userData?.lastPlayedDate ?? "") }
         var seeds: [(id: String, name: String)] = []
@@ -118,7 +122,7 @@ enum HomeFeed {
             let name = item.kind == "Episode" ? item.seriesName : item.name
             guard let id, let name, seedNames.insert(name.lowercased()).inserted else { continue }
             seeds.append((id, name))
-            if seeds.count == 3 { break }
+            if seeds.count == 5 { break }
         }
         let similar = await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
             for (order, seed) in seeds.enumerated() {
@@ -128,14 +132,17 @@ enum HomeFeed {
             for await (order, items) in group { out[order] = items }
             return out
         }
-        var because: [HomeRow] = []
-        for (seed, items) in zip(seeds, similar) {
-            var picked: [EmbyItem] = []
-            for item in items where picked.count < 16 && !watched(item) && !isShown(item) && worthIt(item) {
-                picked.append(item)
-                show(item)
+        var picks: [EmbyItem] = []
+        var queues = similar.map { $0.filter { !watched($0) && worthIt($0) }[...] }
+        while picks.count < 20, queues.contains(where: { !$0.isEmpty }) {
+            for i in queues.indices where picks.count < 20 {
+                while let item = queues[i].popFirst() {
+                    guard !isShown(item) else { continue }
+                    picks.append(item)
+                    show(item)
+                    break
+                }
             }
-            if picked.count >= 4, let row = posterRow("Because you watched \(seed.name)", picked) { because.append(row) }
         }
 
         var newRow: [EmbyItem] = []
@@ -150,8 +157,8 @@ enum HomeFeed {
             show(item)
         }
 
-        if let row = posterRow("Popular on your server", popularRow) { rows.append(row) }
-        rows += because
+        if picks.count >= 4, let row = posterRow("Top picks for you", picks) { rows.append(row) }
+        if let row = posterRow("Trending now", popularRow) { rows.append(row) }
         if newRow.count >= 4, let row = posterRow("New & notable", newRow) { rows.append(row) }
         return HomeContent(featured: featured, rows: rows)
     }
