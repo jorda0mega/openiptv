@@ -129,6 +129,30 @@ do {
             })
             await probe("chosen (\(playback.method))", playback.url, headerDict)
             await probe("chosen + token header", playback.url, headerDict.merging(token) { a, _ in a })
+            // Open the chosen stream with ffmpeg (the engine inside libmpv)
+            // and list its tracks: proof it decodes, not just that it answers.
+            if let ffprobe = value("OPENIPTV_SMOKE_FFPROBE") {
+                func tracks(_ label: String, _ url: URL, _ headers: [String]) {
+                    let task = Process()
+                    task.executableURL = URL(fileURLWithPath: ffprobe)
+                    var args = ["-v", "error", "-rw_timeout", "15000000", "-show_entries", "stream=codec_type,codec_name,width,height", "-of", "csv=p=0"]
+                    if !headers.isEmpty { args += ["-headers", headers.joined(separator: "\r\n") + "\r\n"] }
+                    task.arguments = args + [url.absoluteString]
+                    let out = Pipe(), err = Pipe()
+                    task.standardOutput = out
+                    task.standardError = err
+                    let start = Date()
+                    do { try task.run() } catch { print("  ffprobe       couldn't start"); return }
+                    task.waitUntilExit()
+                    let found = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                        .split(separator: "\n").map { $0.replacingOccurrences(of: ",", with: " ") }.prefix(3).joined(separator: "; ")
+                    let failed = task.terminationStatus != 0
+                    print("  \(label.padding(toLength: 22, withPad: " ", startingAt: 0)) \(failed ? "✗ couldn't open (exit \(task.terminationStatus))" : found) in \(ms(start))")
+                    if failed { failures += 1 }
+                }
+                tracks("decode (\(playback.method))", playback.url, playback.headers)
+                if let hls = playback.fallbacks.last { tracks("decode converted hls", hls, playback.fallbackHeaders) }
+            }
             let ms0 = playback.mediaSourceId ?? playback.itemId
             await probe("plain stream", client.directStreamURL(playback.itemId, mediaSourceId: ms0, playSessionId: nil), [:])
             await probe("plain stream + header", client.directStreamURL(playback.itemId, mediaSourceId: ms0, playSessionId: nil), token)
