@@ -9,7 +9,7 @@ import SwiftUI
 /// jump while swiping the tabs). Now/next is fetched for the rows on
 /// screen and the 30 below them (with their logos), and refreshed when a
 /// programme ends; rows keep one height while it loads, so scrolling never
-/// jumps. Long-press a channel to favourite it, a category to hide it.
+/// jumps. Long-press a channel to favorite it, a category to hide it.
 /// Each row watches only its own now/next, so details arriving redraw that
 /// row, not the list.
 struct LiveView: View {
@@ -40,7 +40,7 @@ struct LiveView: View {
                         Button("Add subscription") { addingSource = true }.buttonStyle(.glassProminent)
                     }
                 } else if showingFavorites, prefs.favorites.isEmpty {
-                    ContentUnavailableView("No favourites yet", systemImage: "star",
+                    ContentUnavailableView("No favorites yet", systemImage: "star",
                                            description: Text("Press and hold a channel to add it."))
                 } else if showingLocal, prefs.area == nil {
                     ContentUnavailableView {
@@ -71,7 +71,7 @@ struct LiveView: View {
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
-                        Button(prefs.isFavorite(channel) ? "Remove from Favourites" : "Add to Favourites",
+                        Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
                                systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
                             prefs.toggleFavorite(channel)
                         }
@@ -133,16 +133,16 @@ struct LiveView: View {
     }
 
     private var selectedName: String {
-        if showingFavorites { return "Favourites" }
+        if showingFavorites { return "Favorites" }
         if showingLocal { return prefs.area.map { "Local · \($0.label)" } ?? "Local" }
         if let shelf { return shelf.title }
         return model.categories.first(where: { $0.id == model.selectedCategory })?.name ?? "Live TV"
     }
 
-    /// Favourites, then the shelves with Local after Sports, then the
+    /// Favorites, then the shelves with Local after Sports, then the
     /// provider category being browsed, if any.
     private var tabs: [(id: String, title: String)] {
-        var items: [(id: String, title: String)] = prefs.favorites.isEmpty ? [] : [(AppModel.favoritesID, "Favourites")]
+        var items: [(id: String, title: String)] = prefs.favorites.isEmpty ? [] : [(AppModel.favoritesID, "Favorites")]
         let shelves = model.liveLibrary.shelves.map { (id: $0.id, title: $0.title) }
         let local = (id: AppModel.localID, title: "Local")
         if let first = shelves.first, first.id == LiveOrganizer.sportsID {
@@ -181,7 +181,7 @@ struct LiveView: View {
                     .buttonStyle(.glass)
                     #endif
                     ForEach(tabs, id: \.id) { tab in
-                        chip(id: tab.id, title: tab.id == AppModel.favoritesID ? "★ Favourites" : tab.title)
+                        chip(id: tab.id, title: tab.id == AppModel.favoritesID ? "★ Favorites" : tab.title)
                     }
                 }
                 .padding(.horizontal)
@@ -297,7 +297,7 @@ struct ChannelRow: View {
                     Text(now?.title ?? title).font(.body.weight(.semibold)).lineLimit(1)
                     if favorite {
                         Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
-                            .accessibilityLabel("Favourite")
+                            .accessibilityLabel("Favorite")
                     }
                 }
                 // Re-render every 30 s so the bars move.

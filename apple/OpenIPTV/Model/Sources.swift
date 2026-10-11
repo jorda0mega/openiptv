@@ -90,7 +90,7 @@ final class SourceStore {
     #endif
 
     /// Adding a subscription that's already here updates it in place (new
-    /// password, say) and keeps its id, so favourites still point at it.
+    /// password, say) and keeps its id, so favorites still point at it.
     func add(_ source: IPTVSource) {
         if let index = iptv.firstIndex(where: { $0.isSameSubscription(as: source) }) {
             iptv[index].kind = source.kind

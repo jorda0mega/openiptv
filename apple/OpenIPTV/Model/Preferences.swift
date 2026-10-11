@@ -63,7 +63,7 @@ final class Preferences {
         var area: LocalArea?
     }
 
-    // Favourites hold channel names, logos and stream references. Xtream and
+    // Favorites hold channel names, logos and stream references. Xtream and
     // Stalker references carry no credentials; M3U stream URLs can, so those
     // are stored without their URL and re-resolved from the live lineup.
     private static let key = "preferences.v2"

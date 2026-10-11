@@ -36,7 +36,7 @@ struct EntrySections: View {
 }
 
 /// Entries as rows: tap plays the best copy (up and down in the player go
-/// through the same list); long-press to favourite.
+/// through the same list); long-press to favorite.
 struct EntryRows: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
@@ -58,7 +58,7 @@ struct EntryRows: View {
             .buttonStyle(.plain)
             .contextMenu {
                 let channel = entry.channels[0]
-                Button(prefs.isFavorite(channel) ? "Remove from Favourites" : "Add to Favourites",
+                Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
                        systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
                     prefs.toggleFavorite(channel)
                 }

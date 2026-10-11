@@ -147,7 +147,7 @@ final class M3UProvider: LiveProvider, @unchecked Sendable {
         return (attributes, name)
     }
 
-    /// FNV-1a; stable across launches so favourites survive playlist reloads.
+    /// FNV-1a; stable across launches so favorites survive playlist reloads.
     static func stableHash(_ s: String) -> String {
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in s.utf8 {

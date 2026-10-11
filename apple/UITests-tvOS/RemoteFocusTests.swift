@@ -99,19 +99,42 @@ final class RemoteFocusTests: XCTestCase {
         press(.menu, "menu 2")
     }
 
-    /// Live TV: from the tab bar to the shelf row, pick another shelf, down
-    /// into its channels, and back up to the row.
-    func testLiveShelves() {
+    /// Live TV: into the page, Left opens the slide-out list on the chosen
+    /// shelf, down to another shelf, Select picks it and closes the list;
+    /// then Left and Right (close without changing), and Left and Menu.
+    func testLiveList() {
         // No -tvLiveTab: a launch argument would pin the shelf.
         app.launchArguments = ["-tvTab", "live"]
         app.launch()
         sleep(6)
-        press(.down, "to shelf row")
-        press(.right, "next shelf")
-        press(.select, "choose it")
-        press(.down, "into channels")
-        press(.down, "further down")
-        press(.up, "up")
-        press(.up, "up to row")
+        press(.down, "into the page")
+        // Left until focus leaves the cards: the list opens on the shelf.
+        for _ in 0..<5 { press(.left, "left") }
+        shot("list open")
+        press(.down, "down in list")
+        press(.select, "pick")
+        shot("after pick")
+        for _ in 0..<5 { press(.left, "left again") }
+        press(.right, "right closes")
+        for _ in 0..<5 { press(.left, "left once more") }
+        press(.menu, "menu closes")
+        press(.menu, "menu to tab bar")
+    }
+
+    /// Sports in the list: Select opens its leagues (with live counts), and
+    /// a league opens its games.
+    func testLiveListSports() {
+        app.launchArguments = ["-tvTab", "live"]
+        app.launch()
+        sleep(8)
+        press(.down, "into the page")
+        for _ in 0..<5 { press(.left, "left") }
+        for _ in 0..<12 where !focused().contains("Sports") { press(.up, "up to Sports") }
+        press(.select, "open Sports")
+        press(.down, "first league choice")
+        press(.down, "second")
+        shot("sports list")
+        press(.select, "pick league")
+        shot("league page")
     }
 }

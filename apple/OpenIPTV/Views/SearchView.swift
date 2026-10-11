@@ -145,7 +145,7 @@ struct SearchView: View {
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
-                                Button(prefs.isFavorite(channel) ? "Remove from Favourites" : "Add to Favourites",
+                                Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
                                        systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
                                     prefs.toggleFavorite(channel)
                                 }

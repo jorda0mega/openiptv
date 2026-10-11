@@ -40,7 +40,7 @@ targets need the nightly toolchain; the logic is small and mirrored.
 - Credentials: Keychain only, `AfterFirstUnlockThisDeviceOnly`, not
   synchronizable (no iCloud, no backups). Emby passwords are never kept.
 - Caches hold display data only (home rows with tag-based image URLs, the
-  parsed guide); never credentials or stream URLs. Favourites drop playlist
+  parsed guide); never credentials or stream URLs. Favorites drop playlist
   stream URLs before saving and re-resolve them from the live lineup.
 - No logging: libmpv `msg-level=all=no`; user-facing errors come from
   `SourceError`, which never includes URLs (IPTV URLs carry logins).

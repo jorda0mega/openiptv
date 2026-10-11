@@ -75,7 +75,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Favourite channels") {
+                Section("Favorite channels") {
                     if prefs.favorites.isEmpty {
                         Text("Press and hold a channel to add it.").foregroundStyle(.secondary)
                     }
@@ -142,7 +142,7 @@ struct SettingsView: View {
                     }
                 }
             } message: {
-                Text("Signs out of Emby and removes every subscription, favourite, setting and cached guide from this device.")
+                Text("Signs out of Emby and removes every subscription, favorite, setting and cached guide from this device.")
             }
         }
     }

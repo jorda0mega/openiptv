@@ -1,11 +1,12 @@
 #if os(tvOS)
 import SwiftUI
 
-/// Live TV: a row of shelves at the top (Favourites, Sports, Local, News…,
-/// the provider's own categories last), then the chosen one as grids of
-/// cards like the TV app's: a channel shows its logo, name and what's on
-/// now; a game its title, league and time, LIVE once it's started. The row
-/// scrolls away with the page; Up brings it back.
+/// Live TV: the chosen shelf as grids of cards like the TV app's (a
+/// channel shows its logo, name and what's on now; a game its title,
+/// league and time, LIVE once it's started), under its name. The shelves
+/// are in a list that slides out from the left, like tvOS's own sidebar:
+/// Left from the first card (or the ‹ by the name) opens it, with Sports'
+/// leagues under Sports; choosing one closes it, and so do Right and Menu.
 struct TVLiveView: View {
     static let categoriesID = "tv:categories"
 
@@ -13,25 +14,55 @@ struct TVLiveView: View {
     @Environment(Preferences.self) private var prefs
     @Binding var playing: PlayerItem?
     @AppStorage("tvLiveTab") private var chosen = ""
-    @FocusState private var focusedShelf: String?
+    /// Sports: Top, All, a league, or Channels.
+    @AppStorage("tvSportsFilter") private var sportsFilter = ""
+    @State private var listOpen = false
+    @State private var sportsExpanded = false
+    /// Briefly off after the list closes, so focus landing at the left
+    /// edge doesn't open it again.
+    @State private var edgeOn = true
+    @FocusState private var listFocus: String?
+    @FocusState private var edgeFocused: Bool
 
     /// The chosen shelf, or the first while none is (or it's gone).
     private var id: String {
         tabs.contains { $0.id == chosen } ? chosen : tabs.first?.id ?? ""
     }
 
+    private var sports: TVSports.Choices? {
+        model.shelf(LiveOrganizer.sportsID).map(TVSports.choices)
+    }
+
+    /// The chosen Sports filter, or the first.
+    private var league: String {
+        guard let choices = sports?.all else { return "" }
+        return choices.contains(sportsFilter) ? sportsFilter : choices.first ?? ""
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 50) {
-                    shelfRow
-                    content
-                        .id(id)
+            ZStack(alignment: .leading) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 50) {
+                        header
+                        content
+                            .id(id + league)
+                    }
+                    .padding(.vertical, 40)
                 }
-                .padding(.vertical, 40)
+                .scrollClipDisabled()
+                .disabled(listOpen)
+                .overlay {
+                    if listOpen { Color.black.opacity(0.55).ignoresSafeArea().allowsHitTesting(false) }
+                }
+                if edgeOn, !listOpen { edge }
+                if listOpen {
+                    list.transition(.move(edge: .leading).combined(with: .opacity))
+                }
             }
-            .scrollClipDisabled()
             .background(Color.black.ignoresSafeArea())
+            .toolbarVisibility(listOpen ? .hidden : .automatic, for: .tabBar)
+            .onExitCommand(perform: listOpen ? { close() } : nil)
             .navigationDestination(for: LiveCountry.self) { country in
                 TVSectionsPage(title: "\(LiveOrganizer.flag(country.code)) \(LiveOrganizer.countryName(country.code))",
                                sections: model.shelf(LiveOrganizer.internationalID)?.sections.filter { $0.country == country.code } ?? [],
@@ -48,10 +79,40 @@ struct TVLiveView: View {
         }
     }
 
+    // MARK: The page
+
+    /// "‹ NFL" with "Sports" above it: where you are, and that Left opens
+    /// the list.
+    private var header: some View {
+        let shelf = tabs.first { $0.id == id }?.title ?? "Live TV"
+        let isSports = id == LiveOrganizer.sportsID
+        return HStack(spacing: 24) {
+            Button { open() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 56, height: 56)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.circle)
+            .accessibilityLabel("Live TV sections")
+            VStack(alignment: .leading, spacing: 2) {
+                if isSports {
+                    Text(shelf.uppercased())
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                Text(isSports ? TVSports.title(league) : shelf)
+                    .font(.title2.weight(.heavy))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 90)
+    }
+
     @ViewBuilder private var content: some View {
         switch id {
         case AppModel.favoritesID:
-            TVChannelGrid(title: "Favourites", entries: entries(prefs.favorites.map { model.current($0) }), playing: $playing)
+            TVChannelGrid(title: "Favorites", entries: entries(prefs.favorites.map { model.current($0) }), playing: $playing)
         case AppModel.localID:
             if let area = prefs.area {
                 TVChannelGrid(title: "Local · \(area.label)", entries: entries(model.localChannels(area)), playing: $playing)
@@ -62,7 +123,7 @@ struct TVLiveView: View {
         case Self.categoriesID:
             TVCategoryList()
         case LiveOrganizer.sportsID:
-            if let shelf = model.shelf(id) { TVSports(shelf: shelf, playing: $playing) }
+            if let shelf = model.shelf(id) { TVSports(shelf: shelf, filter: league, playing: $playing) }
         case LiveOrganizer.internationalID:
             if let shelf = model.shelf(id) { TVCountryGrid(shelf: shelf) }
         default:
@@ -81,34 +142,106 @@ struct TVLiveView: View {
         channels.map { LiveOrganizer.Entry(title: model.title(of: $0), channels: [$0]) }
     }
 
-    private var shelfRow: some View {
-        let current = id
-        return ScrollView(.horizontal) {
-            HStack(spacing: 16) {
-                ForEach(tabs, id: \.id) { tab in
-                    Button { chosen = tab.id } label: {
-                        Label(tab.title, systemImage: tab.icon)
-                    }
-                    .buttonStyle(TVChipStyle(selected: tab.id == current))
-                    .focused($focusedShelf, equals: tab.id)
-                }
-            }
-            .padding(.horizontal, 90)
-            .padding(.vertical, 12)
-        }
-        .scrollClipDisabled()
-        .scrollIndicators(.hidden)
-        // Up from any card comes back to the row, not just the card above,
-        // and lands on the chosen shelf (from the tab bar too).
-        .focusSection()
-        .defaultFocus($focusedShelf, current, priority: .userInitiated)
+    /// An invisible strip at the left edge: Left from the first card lands
+    /// here, which opens the list.
+    private var edge: some View {
+        Color.white.opacity(0.001)
+            .frame(width: 40)
+            .frame(maxHeight: .infinity)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($edgeFocused)
+            .onChange(of: edgeFocused) { _, focused in if focused { open() } }
+            .accessibilityHidden(true)
     }
 
-    /// Favourites, the shelves with Local after Sports, and the provider's
+    // MARK: The list
+
+    private func open() {
+        // Sports' leagues show when you're in Sports; otherwise they'd push
+        // the shelf you're on out of view.
+        sportsExpanded = id == LiveOrganizer.sportsID
+        withAnimation(.snappy(duration: 0.3)) { listOpen = true }
+        let target = id == LiveOrganizer.sportsID ? "league:" + league : id
+        Task { listFocus = target }
+    }
+
+    private func close() {
+        edgeOn = false
+        withAnimation(.snappy(duration: 0.25)) { listOpen = false }
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            edgeOn = true
+        }
+    }
+
+    /// A floating glass panel like tvOS 26's sidebar: each shelf with its
+    /// symbol, Sports opening to its leagues (with how many games are on
+    /// now), the provider's own categories last.
+    private var list: some View {
+        let current = id == LiveOrganizer.sportsID ? "league:" + league : id
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Live TV")
+                    .font(.system(size: 32, weight: .heavy))
+                    .padding(.leading, 22)
+                    .padding(.bottom, 14)
+                ForEach(tabs, id: \.id) { tab in
+                    if tab.id == Self.categoriesID {
+                        Divider().padding(.horizontal, 22).padding(.vertical, 8)
+                    }
+                    if tab.id == LiveOrganizer.sportsID, let sports {
+                        Button {
+                            withAnimation(.snappy(duration: 0.25)) { sportsExpanded.toggle() }
+                        } label: {
+                            TVListRow(icon: tab.icon, title: tab.title,
+                                      trailing: sportsExpanded ? "chevron.up" : "chevron.down")
+                        }
+                        .buttonStyle(TVListStyle(selected: id == tab.id && !sportsExpanded))
+                        .focused($listFocus, equals: tab.id)
+                        if sportsExpanded {
+                            ForEach(sports.all, id: \.self) { choice in
+                                Button { pick(LiveOrganizer.sportsID, league: choice) } label: {
+                                    TVListRow(title: TVSports.title(choice), live: sports.live[choice] ?? 0, indent: true)
+                                }
+                                .buttonStyle(TVListStyle(selected: current == "league:" + choice))
+                                .focused($listFocus, equals: "league:" + choice)
+                            }
+                        }
+                    } else {
+                        Button { pick(tab.id) } label: {
+                            TVListRow(icon: tab.icon, title: tab.title)
+                        }
+                        .buttonStyle(TVListStyle(selected: current == tab.id))
+                        .focused($listFocus, equals: tab.id)
+                    }
+                }
+            }
+            .padding(.vertical, 36)
+            .padding(.horizontal, 26)
+        }
+        .scrollIndicators(.hidden)
+        .frame(width: 560)
+        .frame(maxHeight: .infinity)
+        .glassEffect(.regular, in: .rect(cornerRadius: 48))
+        .padding(.leading, 40)
+        .padding(.vertical, 40)
+        .focusSection()
+        .defaultFocus($listFocus, current)
+        .onMoveCommand { if $0 == .right { close() } }
+    }
+
+    private func pick(_ shelf: String, league: String? = nil) {
+        chosen = shelf
+        if let league { sportsFilter = league }
+        close()
+    }
+
+    /// Favorites, the shelves with Local after Sports, and the provider's
     /// own categories last.
     private var tabs: [(id: String, title: String, icon: String)] {
         var tabs: [(id: String, title: String, icon: String)] = []
-        if !prefs.favorites.isEmpty { tabs.append((AppModel.favoritesID, "Favourites", "star")) }
+        if !prefs.favorites.isEmpty { tabs.append((AppModel.favoritesID, "Favorites", "star")) }
         for shelf in model.liveLibrary.shelves {
             tabs.append((shelf.id, shelf.title, Self.icon(shelf.id)))
             if shelf.id == LiveOrganizer.sportsID { tabs.append((AppModel.localID, "Local", "antenna.radiowaves.left.and.right")) }
@@ -132,6 +265,70 @@ struct TVLiveView: View {
         case "shelf:radio": "radio"
         case LiveOrganizer.internationalID: "globe"
         default: "ellipsis.circle"
+        }
+    }
+}
+
+/// One row of the slide-out list: a symbol and a name, a red dot and a
+/// count for games on now, or a chevron for a group that opens.
+private struct TVListRow: View {
+    var icon: String?
+    let title: String
+    var live = 0
+    var trailing: String?
+    var indent = false
+
+    var body: some View {
+        HStack(spacing: 20) {
+            if let icon {
+                Image(systemName: icon).font(.system(size: 26, weight: .semibold)).frame(width: 34)
+            }
+            Text(title)
+                .font(.system(size: indent ? 25 : 28, weight: indent ? .medium : .semibold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if live > 0 {
+                HStack(spacing: 8) {
+                    Circle().fill(.red).frame(width: 11, height: 11)
+                    Text("\(live)").font(.system(size: 21, weight: .semibold)).opacity(0.6)
+                }
+                .accessibilityLabel("\(live) live")
+            }
+            if let trailing {
+                Image(systemName: trailing).font(.system(size: 20, weight: .bold)).opacity(0.6)
+            }
+        }
+        .padding(.leading, indent ? 74 : 22)
+        .padding(.trailing, 22)
+        .frame(height: indent ? 48 : 58)
+    }
+}
+
+/// tvOS's list look: white with dark text under focus (a little larger),
+/// a soft fill for the chosen one.
+private struct TVListStyle: ButtonStyle {
+    let selected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Styled(label: configuration.label, selected: selected, pressed: configuration.isPressed)
+    }
+
+    private struct Styled: View {
+        let label: Configuration.Label
+        let selected: Bool
+        let pressed: Bool
+        @Environment(\.isFocused) private var focused
+
+        var body: some View {
+            label
+                .foregroundStyle(focused ? Color.black : Color.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    Capsule().fill(focused ? Color.white : selected ? Color.white.opacity(0.14) : Color.clear)
+                }
+                .scaleEffect(focused ? (pressed ? 1.0 : 1.04) : 1)
+                .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: 18, y: 10)
+                .animation(.snappy(duration: 0.2), value: focused)
         }
     }
 }
@@ -193,7 +390,7 @@ struct TVChannelGrid: View {
                         }
                         .contextMenu {
                             let channel = entry.channels[0]
-                            Button(prefs.isFavorite(channel) ? "Remove from Favourites" : "Add to Favourites",
+                            Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
                                    systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
                                 prefs.toggleFavorite(channel)
                             }
@@ -332,20 +529,43 @@ private struct TVLogo: View {
 
 /// Games by league (Top first) and by when they're on; the sports channels
 /// under Channels.
-private struct TVSports: View {
+struct TVSports: View {
     let shelf: LiveOrganizer.Shelf
+    /// Top, All, a league, or Channels (chosen in the slide-out list).
+    let filter: String
     @Binding var playing: PlayerItem?
-    @State private var filter: String?
 
-    var body: some View {
-        let now = Date()
-        let events = (shelf.sections.first { $0.id == "events" }?.entries ?? []).filter { entry in
+    /// What Sports can show, in order, and how many games each has on now.
+    struct Choices {
+        let all: [String]
+        let live: [String: Int]
+    }
+
+    /// Games from the last four hours on; older ones are over.
+    private static func events(_ shelf: LiveOrganizer.Shelf, now: Date) -> [LiveOrganizer.Entry] {
+        (shelf.sections.first { $0.id == "events" }?.entries ?? []).filter { entry in
             guard let start = entry.event?.start else { return true }
             return now.timeIntervalSince(start) < 4 * 3600
         }
+    }
+
+    /// Top (the big leagues) when any are on, All, each league (the big
+    /// ones first, then the busiest), then the sports channels.
+    static func choices(_ shelf: LiveOrganizer.Shelf) -> Choices {
+        let now = Date()
+        let events = events(shelf, now: now)
         let featured = Set(LiveOrganizer.featuredLeagues)
         var counts: [String: Int] = [:]
-        let _ = events.forEach { counts[$0.event?.league ?? "", default: 0] += 1 }
+        var live: [String: Int] = [:]
+        for entry in events {
+            let league = entry.event?.league ?? ""
+            counts[league, default: 0] += 1
+            if let start = entry.event?.start, start <= now {
+                live[league, default: 0] += 1
+                live["All", default: 0] += 1
+                if featured.contains(league) { live["Top", default: 0] += 1 }
+            }
+        }
         let order = Dictionary(uniqueKeysWithValues: LiveOrganizer.featuredLeagues.enumerated().map { ($1, $0) })
         let leagues = counts.keys.filter { !$0.isEmpty }.sorted { a, b in
             switch (order[a], order[b]) {
@@ -356,20 +576,25 @@ private struct TVSports: View {
             }
         }
         let hasTop = events.contains { featured.contains($0.event?.league ?? "") }
-        let choices = (hasTop ? ["Top"] : []) + ["All"] + leagues + ["Channels"]
-        let chosen = filter.flatMap { choices.contains($0) ? $0 : nil } ?? choices[0]
+        return Choices(all: (hasTop ? ["Top"] : []) + ["All"] + leagues + ["Channels"], live: live)
+    }
 
-        ScrollView(.horizontal) {
-            HStack(spacing: 12) {
-                ForEach(choices, id: \.self) { choice in
-                    Button(choice) { filter = choice }.buttonStyle(TVChipStyle(selected: choice == chosen))
-                }
-            }
-            .padding(.horizontal, 90)
-            .padding(.vertical, 10)
+    /// The name shown for a choice.
+    static func title(_ choice: String) -> String {
+        switch choice {
+        case "Top": "Top Games"
+        case "All": "All Games"
+        case "Channels": "Sports Channels"
+        case "": "Sports"
+        default: choice
         }
-        .scrollClipDisabled()
-        .scrollIndicators(.hidden)
+    }
+
+    var body: some View {
+        let now = Date()
+        let events = Self.events(shelf, now: now)
+        let featured = Set(LiveOrganizer.featuredLeagues)
+        let chosen = filter
 
         if chosen == "Channels" {
             ForEach(shelf.sections.filter { $0.id != "events" }) { section in

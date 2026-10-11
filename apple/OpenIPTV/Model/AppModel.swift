@@ -751,7 +751,7 @@ final class AppModel {
         channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
         channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
         channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        // A shelf, Favourites or Local; a provider category only while it's
+        // A shelf, Favorites or Local; a provider category only while it's
         // being browsed from the full list.
         let shelves = liveLibrary.shelves
         let valid = selectedCategory.map { id in
