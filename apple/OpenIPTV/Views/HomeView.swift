@@ -32,7 +32,7 @@ struct HomeView: View {
                 .padding(.vertical, 12)
             }
             .navigationTitle("Home")
-            .refreshableOnPhone { await model.loadHome(cardWidth: pixelWidth) }
+            .refreshableOnPhone { await model.loadHome(cardWidth: pixelWidth, full: true) }
             .task { await model.loadHome(cardWidth: pixelWidth) }
             .sheet(isPresented: $addingEmby) { AddEmbyView() }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }

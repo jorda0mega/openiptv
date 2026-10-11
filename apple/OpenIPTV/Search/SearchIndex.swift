@@ -348,13 +348,19 @@ final class LibraryIndex {
         return stride(from: 0, to: total, by: Self.pageSize).allSatisfy { pages[$0] != nil }
     }
 
-    func prepare(_ emby: EmbyClient) async {
+    /// When the catalog last changed (titles added, edited or gone), as
+    /// seen by this app; Home rebuilds its other rows after it.
+    private(set) var changedAt: Date?
+
+    /// `now`: the server said something changed; check at once rather than
+    /// on the ten-minute schedule.
+    func prepare(_ emby: EmbyClient, now urgent: Bool = false) async {
         await open(emby)
         guard let server else { return }
         guard !indexing else { return }
         let now = Date()
         let needsFull = !complete || outdated || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
-        let needsChanges = syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
+        let needsChanges = urgent || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
         guard needsFull || needsChanges else { return }
         indexing = true
         #if canImport(UIKit)
@@ -374,6 +380,7 @@ final class LibraryIndex {
                 pages = Self.paged(all)
                 total = all.count
                 await publish(all)
+                changedAt = now
             }
             save()
         }

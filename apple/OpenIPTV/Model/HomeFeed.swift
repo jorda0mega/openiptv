@@ -12,6 +12,10 @@ struct Featured: Codable, Hashable {
 struct HomeContent: Codable, Hashable {
     var featured: Featured?
     var rows: [HomeRow]
+    /// When it was built, and the recent watches Top picks came from: a
+    /// launch rebuilds the other rows only when these are out of date.
+    var builtAt: Date?
+    var history: [String]?
 }
 
 /// Home, personal and current rather than one row per library:
@@ -31,6 +35,22 @@ struct HomeContent: Codable, Hashable {
 /// week's trending titles, so no row is emptied by another.
 @MainActor
 enum HomeFeed {
+    /// The titles watched most recently (a show for an episode), newest
+    /// first: what Top picks are like.
+    static func seeds(watching: [EmbyItem], played: [EmbyItem], limit: Int = 5) -> [(id: String, name: String)] {
+        let history = (watching + played).sorted { ($0.userData?.lastPlayedDate ?? "") > ($1.userData?.lastPlayedDate ?? "") }
+        var seeds: [(id: String, name: String)] = []
+        var names = Set<String>()
+        for item in history {
+            let id = item.kind == "Episode" ? item.seriesId : item.id
+            let name = item.kind == "Episode" ? item.seriesName : item.name
+            guard let id, let name, names.insert(name.lowercased()).inserted else { continue }
+            seeds.append((id, name))
+            if seeds.count == limit { break }
+        }
+        return seeds
+    }
+
     /// What's partway through, then the next episode of each show being
     /// watched that isn't already there.
     static func continueItems(watching: [EmbyItem], nextUp: [EmbyItem]) -> [EmbyItem] {
@@ -125,17 +145,7 @@ enum HomeFeed {
 
         // Top picks: titles like the five you watched last, one from each in
         // turn (Emby's own ranking of what's most alike within each).
-        let history = (sources.watching + sources.played)
-            .sorted { ($0.userData?.lastPlayedDate ?? "") > ($1.userData?.lastPlayedDate ?? "") }
-        var seeds: [(id: String, name: String)] = []
-        var seedNames = Set<String>()
-        for item in history {
-            let id = item.kind == "Episode" ? item.seriesId : item.id
-            let name = item.kind == "Episode" ? item.seriesName : item.name
-            guard let id, let name, seedNames.insert(name.lowercased()).inserted else { continue }
-            seeds.append((id, name))
-            if seeds.count == 5 { break }
-        }
+        let seeds = seeds(watching: sources.watching, played: sources.played)
         let similar = await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
             for (order, seed) in seeds.enumerated() {
                 group.addTask { (order, await emby.similar(to: seed.id)) }
@@ -172,6 +182,6 @@ enum HomeFeed {
         if picks.count >= 4, let row = posterRow("Top picks for you", picks) { rows.append(row) }
         if let row = posterRow("Trending now", popularRow) { rows.append(row) }
         if newRow.count >= 4, let row = posterRow("New & notable", newRow) { rows.append(row) }
-        return HomeContent(featured: featured, rows: rows)
+        return HomeContent(featured: featured, rows: rows, builtAt: Date(), history: seeds.map(\.id))
     }
 }

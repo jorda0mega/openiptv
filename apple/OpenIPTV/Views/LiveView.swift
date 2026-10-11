@@ -86,6 +86,8 @@ struct LiveView: View {
             .sheet(isPresented: $showingAllCategories) { categoryPicker }
             .sheet(isPresented: $addingSource) { AddIPTVView() }
             .sheet(isPresented: $choosingArea) { NavigationStack { AreaPicker() } }
+            // Event and PPV categories change names per game: fresh on open.
+            .task(id: model.selectedCategory) { await model.refreshCategory(model.selectedCategory) }
             .task {
                 if model.selectedCategory == nil, !prefs.favorites.isEmpty {
                     model.selectedCategory = AppModel.favoritesID

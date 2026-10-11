@@ -57,20 +57,7 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
 
         let rawCategories = JSONDecoder().lenientList(RawCategory.self, from: try await categoryData)
         let hidden = Set(rawCategories.filter { AccountInfoFilter.looksLikeAccountInfo($0.name) }.map(\.id))
-        let secrets = [username, password]
-        let channels = JSONDecoder().lenientList(RawChannel.self, from: try await channelData).compactMap { raw -> LiveChannel? in
-            guard let id = raw.stream_id,
-                  !AccountInfoFilter.looksLikeAccountInfo(raw.name),
-                  !AccountInfoFilter.mentions(raw.name, secrets: secrets),
-                  raw.category_id.map({ !hidden.contains($0) }) ?? true
-            else { return nil }
-            return LiveChannel(
-                id: "\(source.id.uuidString)|\(id)", sourceId: source.id, number: raw.num, name: raw.name,
-                logo: raw.stream_icon.flatMap { $0.hasPrefix("http") ? URL(string: $0) : nil },
-                categoryId: raw.category_id.map { "\(source.id.uuidString)|\($0)" }, epgId: raw.epg_channel_id,
-                nativeId: String(id), stream: .xtream(streamId: id)
-            )
-        }
+        let channels = JSONDecoder().lenientList(RawChannel.self, from: try await channelData).compactMap { channel($0, hidden: hidden) }
         var counts: [String: Int] = [:]
         for c in channels { if let cat = c.categoryId { counts[cat, default: 0] += 1 } }
         let categories = rawCategories.compactMap { raw -> LiveCategory? in
@@ -81,6 +68,28 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
         var xmltv = URLComponents(url: server.appending(path: "xmltv.php"), resolvingAgainstBaseURL: false)!
         xmltv.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password)]
         return LiveLineup(categories: categories, channels: channels, guideURLs: [xmltv.url!])
+    }
+
+    /// One category's channels: event and PPV channels are renamed for each
+    /// game, and one category is a sliver of the whole lineup.
+    func channels(inCategory categoryId: String) async throws -> [LiveChannel]? {
+        let raw = String(categoryId.split(separator: "|", maxSplits: 1).last ?? "")
+        let data = try await HTTP.data(api([.init(name: "action", value: "get_live_streams"), .init(name: "category_id", value: raw)]))
+        return JSONDecoder().lenientList(RawChannel.self, from: data).compactMap { channel($0, hidden: []) }
+    }
+
+    private func channel(_ raw: RawChannel, hidden: Set<String>) -> LiveChannel? {
+        guard let id = raw.stream_id,
+              !AccountInfoFilter.looksLikeAccountInfo(raw.name),
+              !AccountInfoFilter.mentions(raw.name, secrets: [username, password]),
+              raw.category_id.map({ !hidden.contains($0) }) ?? true
+        else { return nil }
+        return LiveChannel(
+            id: "\(source.id.uuidString)|\(id)", sourceId: source.id, number: raw.num, name: raw.name,
+            logo: raw.stream_icon.flatMap { $0.hasPrefix("http") ? URL(string: $0) : nil },
+            categoryId: raw.category_id.map { "\(source.id.uuidString)|\($0)" }, epgId: raw.epg_channel_id,
+            nativeId: String(id), stream: .xtream(streamId: id)
+        )
     }
 
     func shortEPG(for channel: LiveChannel) async -> [Programme] {

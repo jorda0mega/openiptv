@@ -12,7 +12,9 @@ have something to find.
 """
 
 import base64
+import hashlib
 import json
+import threading
 import os
 import struct
 import zlib
@@ -25,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 PANEL_TZ = timezone(timedelta(hours=1))
 CHANNELS = 40
 SLOT = 1800
+SOCKETS = set()
 # Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
 SHOW_IMDB = {"Forensic Files": "tt0247882", "Forensic Files II": "tt11840612",
              "The Office": "tt0290978", "The Office (US)": "tt0386676"}
@@ -106,6 +109,43 @@ def xmltv_time(ts):
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def websocket(self):
+        key = self.headers.get("Sec-WebSocket-Key", "")
+        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+        self.send_response(101)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self.ws_lock = threading.Lock()
+        SOCKETS.add(self)
+        print(f"{time.time():.2f} websocket connected", flush=True)
+        try:
+            while True:
+                head = self.rfile.read(2)
+                if len(head) < 2:
+                    break
+                length = head[1] & 0x7F
+                if length == 126:
+                    length = struct.unpack(">H", self.rfile.read(2))[0]
+                elif length == 127:
+                    length = struct.unpack(">Q", self.rfile.read(8))[0]
+                mask = self.rfile.read(4) if head[1] & 0x80 else b"\0\0\0\0"
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(self.rfile.read(length)))
+                if head[0] & 0x0F == 8:
+                    break
+                print(f"{time.time():.2f} websocket got {payload.decode(errors='replace')[:60]}", flush=True)
+        finally:
+            SOCKETS.discard(self)
+            self.close_connection = True
+
+    def send_ws(self, text):
+        data = text.encode()
+        head = bytes([0x81, len(data)]) if len(data) < 126 else bytes([0x81, 126]) + struct.pack(">H", len(data))
+        with self.ws_lock:
+            self.wfile.write(head + data)
+            self.wfile.flush()
+
     def log_message(self, *args):
         pass
 
@@ -151,6 +191,23 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         path = url.path
+        if path == "/embywebsocket" and q.get("api_key") == "tok":
+            return self.websocket()
+        if path == "/mock/push":
+            # Announce a change to connected apps, like Emby does.
+            if q.get("type") == "library":
+                message = {"MessageType": "LibraryChanged", "Data": {"ItemsAdded": [q.get("item", "a4")], "ItemsUpdated": [], "ItemsRemoved": []}}
+            else:
+                message = {"MessageType": "UserDataChanged", "Data": {"UserId": "U1", "UserDataList": [
+                    {"ItemId": q.get("item", "e203"), "PlaybackPositionTicks": 0, "Played": True}]}}
+            sent = 0
+            for client in list(SOCKETS):
+                try:
+                    client.send_ws(json.dumps(message))
+                    sent += 1
+                except OSError:
+                    SOCKETS.discard(client)
+            return self.send({"sent": sent})
         if path.startswith("/emby/"):
             if os.environ.get("OPENIPTV_MOCK_LOG") and "/Images/" not in path:
                 print(f"{time.time():.2f} GET {path}", flush=True)

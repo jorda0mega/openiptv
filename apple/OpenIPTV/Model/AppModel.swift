@@ -67,6 +67,9 @@ final class AppModel {
         let home: HomeContent? = AppCache.read("home.v4.json")
         rows = home?.rows ?? []
         featured = home?.featured
+        homeBuiltAt = home?.builtAt
+        homeHistory = home?.history ?? []
+        live.onChange = { [weak self] change in self?.apply(change) }
         Task { await guide.loadCache(); guideState = await guide.state }
     }
 
@@ -76,16 +79,26 @@ final class AppModel {
 
     // MARK: Home
 
-    func loadHome(cardWidth: Int, sync: Bool = true) async {
+    /// `full`: rebuild every row. Otherwise, when the saved Home is recent
+    /// (six hours), the catalog hasn't changed since and you haven't watched
+    /// anything new elsewhere, only Continue Watching is fetched again.
+    func loadHome(cardWidth: Int, sync: Bool = true, full: Bool = false) async {
         lastCardWidth = cardWidth
         guard let emby else {
             rows = []
             featured = nil
             return
         }
+        connectLive()
         // Trending and versions come from the index and charts on the device.
         await library.open(emby)
         await library.loadCachedCharts()
+        if !full, !rows.isEmpty, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600,
+           library.changedAt.map({ $0 <= builtAt }) ?? true,
+           await !refreshContinueWatching(checkingHistory: true) {
+            if sync { Task { await syncLibrary(emby) } }
+            return
+        }
         do {
             let fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
                                                 backdropWidth: Self.backdropWidth)
@@ -103,6 +116,8 @@ final class AppModel {
             }
             if fresh.rows != rows { rows = fresh.rows }
             if fresh.featured != featured { featured = fresh.featured }
+            homeBuiltAt = fresh.builtAt
+            homeHistory = fresh.history ?? []
             homeError = nil
             AppCache.write("home.v4.json", fresh)
             // The first few things you'd tap on Home are ready before you do.
@@ -249,11 +264,20 @@ final class AppModel {
 
     /// Continue Watching alone (two small requests), after watching
     /// something: the other rows stay put, minus anything now in it.
-    func refreshContinueWatching() async {
-        guard let emby else { return }
+    /// `checkingHistory`: also ask what was finished lately, and return true
+    /// (leaving the page alone) when Top picks' recent watches changed, so
+    /// the caller rebuilds everything instead.
+    @discardableResult
+    func refreshContinueWatching(checkingHistory: Bool = false) async -> Bool {
+        guard let emby else { return false }
         async let watching = emby.watching()
         async let nextUp = emby.nextUp()
-        guard let watching = try? await watching else { return }
+        async let played: [EmbyItem]? = checkingHistory ? (try? await emby.played(limit: 10)) : nil
+        guard let watching = try? await watching else { return false }
+        if let played = await played,
+           HomeFeed.seeds(watching: watching, played: played).map(\.id) != homeHistory {
+            return true
+        }
         let items = HomeFeed.continueItems(watching: watching, nextUp: (try? await nextUp) ?? [])
         let row = emby.showRow("Continue Watching", items, lastCardWidth)
         var updated = rows.filter { $0.title != "Continue Watching" }
@@ -263,8 +287,70 @@ final class AppModel {
         }.filter { !$0.cards.isEmpty }
         if let row { updated.insert(row, at: 0) }
         if updated != rows { rows = updated }
-        AppCache.write("home.v4.json", HomeContent(featured: featured, rows: rows))
+        AppCache.write("home.v4.json", HomeContent(featured: featured, rows: rows, builtAt: homeBuiltAt, history: homeHistory))
         prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
+        return false
+    }
+
+    // MARK: Live updates from Emby
+
+    let live = EmbyLive()
+    private var homeBuiltAt: Date?
+    private var homeHistory: [String] = []
+    /// What's playing now: its own progress reports don't refresh Home.
+    private var playingItem: String?
+    private var watchRefresh: Task<Void, Never>?
+    private var libraryRefresh: Task<Void, Never>?
+
+    /// Listen for changes while the app is in use.
+    func connectLive() {
+        guard let account = sources.emby else { return live.disconnect() }
+        live.connect(account, deviceId: sources.deviceId)
+    }
+
+    func disconnectLive() { live.disconnect() }
+
+    private func apply(_ change: EmbyLive.Change) {
+        switch change {
+        case let .watched(list):
+            for change in list {
+                // Its resume point moved: prepare it again when needed.
+                if change.itemId != playingItem { prepared[change.itemId] = nil }
+                patchShows(change)
+            }
+            // Mid-video these are its own progress reports; Home is
+            // refreshed when it stops.
+            guard playingItem == nil else { return }
+            watchRefresh?.cancel()
+            watchRefresh = Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
+                await refreshContinueWatching()
+            }
+        case .library:
+            libraryRefresh?.cancel()
+            libraryRefresh = Task {
+                // Additions come in bursts; let them settle.
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, let emby else { return }
+                await library.prepare(emby, now: true)
+                await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
+            }
+        }
+    }
+
+    /// A watched or progress change applied to any show saved in memory.
+    private func patchShows(_ change: EmbyLive.WatchChange) {
+        for (series, data) in shows {
+            guard let index = data.episodes.firstIndex(where: { $0.id == change.itemId }) else { continue }
+            var episodes = data.episodes
+            var user = episodes[index].userData ?? EmbyItem.UserData()
+            if let played = change.played { user.played = played }
+            if let ticks = change.positionTicks { user.playbackPositionTicks = ticks }
+            user.playedPercentage = change.playedPercentage
+            episodes[index].userData = user
+            shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: data.nextUp, loadedAt: data.loadedAt)
+        }
     }
 
     // MARK: Warm start
@@ -368,6 +454,11 @@ final class AppModel {
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
         await library.prepare(emby)
         await charts
+        // New titles since Home was built: rebuild its other rows.
+        if let changed = library.changedAt, let built = homeBuiltAt, changed > built {
+            await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
+            return
+        }
         // Trending arrived for the first time (Home was built without it):
         // rebuild once. Otherwise the next visit or refresh picks it up,
         // rather than the page changing under you.
@@ -379,6 +470,8 @@ final class AppModel {
     }
 
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
+        if event == .started { playingItem = playback.itemId }
+        if event == .stopped { playingItem = nil }
         await emby?.report(event, itemId: playback.itemId, seconds: seconds,
                            mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
         guard event == .stopped else { return }
@@ -396,10 +489,11 @@ final class AppModel {
 
     func signedInToEmby(_ account: EmbyAccount) async {
         sources.setEmby(account)
-        await loadHome(cardWidth: lastCardWidth)
+        await loadHome(cardWidth: lastCardWidth, full: true)
     }
 
     func signOutOfEmby() async {
+        live.disconnect()
         await emby?.logout()
         sources.setEmby(nil)
         rows = []
@@ -459,8 +553,11 @@ final class AppModel {
         }
         if allChannels.isEmpty, let saved = await Self.savedLineup(), saved.sources == iptv.map(\.id) {
             await applyLineup(categories: saved.categories, channels: saved.channels)
+            // Saved within the hour: good as it is (event categories are
+            // fetched again on their own when opened).
+            if let at = saved.savedAt, Date().timeIntervalSince(at) < 3600 { liveFetchedAt = at }
         }
-        guard force || !liveFetched, !liveLoading else { return }
+        guard force || liveFetchedAt.map({ Date().timeIntervalSince($0) >= 3600 }) ?? true, !liveLoading else { return }
         liveLoading = true
         defer { liveLoading = false }
         providers = Dictionary(uniqueKeysWithValues: iptv.map { ($0.id, Providers.make($0)) })
@@ -502,7 +599,7 @@ final class AppModel {
         liveErrors = errors
         if !channels.isEmpty {
             await applyLineup(categories: cats, channels: channels)
-            liveFetched = true
+            liveFetchedAt = Date()
             Self.saveLineup(sources: iptv.map(\.id), categories: cats, channels: channels)
         }
 
@@ -555,12 +652,40 @@ final class AppModel {
 
     // MARK: Saved lineup
 
-    private var liveFetched = false
+    /// When the providers' lineup was last fetched (or saved, if recent).
+    private var liveFetchedAt: Date?
+    private var categoryFetchedAt: [String: Date] = [:]
 
     private struct SavedLineup: Codable {
         let sources: [UUID]
         let categories: [LiveCategory]
         let channels: [LiveChannel]
+        var savedAt: Date?
+    }
+
+    /// Event and PPV categories are renamed for every game: the one being
+    /// looked at is fetched again on its own (at most every 5 minutes),
+    /// instead of the whole lineup.
+    func refreshCategory(_ id: String?) async {
+        guard let id, id != Self.favoritesID, id != Self.localID,
+              let category = categories.first(where: { $0.id == id }), Self.isEventCategory(category.name),
+              categoryFetchedAt[id].map({ Date().timeIntervalSince($0) >= 300 }) ?? true,
+              let sourceId = id.split(separator: "|").first.flatMap({ UUID(uuidString: String($0)) }),
+              let provider = providers[sourceId] ?? sources.iptv.first(where: { $0.id == sourceId }).map(Providers.make),
+              let fresh = try? await provider.channels(inCategory: id)
+        else { return }
+        categoryFetchedAt[id] = Date()
+        guard fresh != channelsByCategory[id] else { return }
+        let channels = allChannels.filter { $0.categoryId != id } + fresh
+        await applyLineup(categories: categories, channels: channels)
+        Self.saveLineup(sources: sources.iptv.map(\.id), categories: categories, channels: channels)
+    }
+
+    private static func isEventCategory(_ name: String) -> Bool {
+        let upper = name.uppercased()
+        return ["PPV", "EVENT", "NFL", "NBA", "NHL", "MLB", "MLS", "UFC", "BOXING", "DAZN", "ESPN+", "PEACOCK", "FLO",
+                "NCAA", "KAYO", "PARAMOUNT+", "MAX", "FANATIZ", "TSN+", "VICTORY+", "SEC+", "BIG TEN+", "FIFA+", "F1 TV", "LIVE"]
+            .contains { upper.contains($0) }
     }
 
     private static let lineupFile = "live-lineup.v1.json"
@@ -585,7 +710,8 @@ final class AppModel {
     /// the providers' current lineup supplies them.
     private nonisolated static func saveLineup(sources: [UUID], categories: [LiveCategory], channels: [LiveChannel]) {
         Task.detached(priority: .utility) {
-            AppCache.write(lineupFile, SavedLineup(sources: sources, categories: categories, channels: channels.map(\.withoutSecrets)))
+            AppCache.write(lineupFile, SavedLineup(sources: sources, categories: categories,
+                                                   channels: channels.map(\.withoutSecrets), savedAt: Date()))
         }
     }
 

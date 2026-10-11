@@ -54,7 +54,15 @@ struct RootView: View {
         .task { await model.prepareLibrary() }
         // Pick up library changes whenever the app comes back.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await model.prepareLibrary() } }
+            switch phase {
+            case .active:
+                model.connectLive()
+                Task { await model.prepareLibrary() }
+            case .background:
+                model.disconnectLive()
+            default:
+                break
+            }
         }
     }
 }

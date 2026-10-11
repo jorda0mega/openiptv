@@ -129,11 +129,7 @@ struct EmbyClient {
         async let viewList: [EmbyItem] = items("Users/\(account.userId)/Views", [])
         async let watching = watching()
         async let nextUp = nextUp()
-        async let played = items("Users/\(account.userId)/Items", Self.cardQuery + [
-            .init(name: "Filters", value: "IsPlayed"), .init(name: "Recursive", value: "true"),
-            .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
-            .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "40"),
-        ])
+        async let played = played()
         let views = try await viewList
         let libraries = views.filter { ["movies", "tvshows"].contains($0.collectionType ?? "") }.prefix(12)
         // Per library: much faster than one query across all of them.
@@ -159,6 +155,15 @@ struct EmbyClient {
             .init(name: "Filters", value: "IsResumable"), .init(name: "Recursive", value: "true"),
             .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
             .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "30"),
+        ])
+    }
+
+    /// Recently finished, most recent first.
+    func played(limit: Int = 40) async throws -> [EmbyItem] {
+        try await items("Users/\(account.userId)/Items", Self.cardQuery + [
+            .init(name: "Filters", value: "IsPlayed"), .init(name: "Recursive", value: "true"),
+            .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
+            .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: String(limit)),
         ])
     }
 
