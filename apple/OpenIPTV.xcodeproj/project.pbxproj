@@ -12,6 +12,7 @@
 		02F218C7FAB20DC50F729108 /* Libavutil.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */; };
 		05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00376995EF16ADF89BDF9B03 /* PlayerView.swift */; };
 		07533D7519AC4A6D0FA838C3 /* libexpat.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A9E566E295D6785A720DEA83 /* libexpat.tbd */; };
+		08CAD4E635F64EFAA0A4416E /* IMDbRatings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C136886855C91760BFF6EF /* IMDbRatings.swift */; };
 		08E75A7643668D7A58668D53 /* ShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63408BC25C1847C3DC54CDDE /* ShowView.swift */; };
 		09D01D3CC36F63E11448B353 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 19C99105C77050902E084B3D /* CoreMedia.framework */; };
 		09D42133B87A08F33EEB1C07 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00376995EF16ADF89BDF9B03 /* PlayerView.swift */; };
@@ -82,6 +83,7 @@
 		7048D6DC77B943DA816AC4C1 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6624BB656CA61632353DBA8C /* Preferences.swift */; };
 		70CFBFACBD2EFCA866865C45 /* Libshaderc_combined.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CE629B229349145FBEDD02D /* Libshaderc_combined.xcframework */; };
 		70DBA9993C5650094FE7CCDD /* EmbyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063896B003501F3D99466FB4 /* EmbyClient.swift */; };
+		70E2D7E887B69FA5F3EEE248 /* IMDbRatings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C136886855C91760BFF6EF /* IMDbRatings.swift */; };
 		745069F235FB22D844A7CC35 /* Libssl.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00EF07025216C13B1F3C7908 /* Libssl.xcframework */; };
 		7883F5821E1388ECFF8BAA77 /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
 		7E8E70B831C4BE5F7BEBC6F6 /* MPVPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4C4ECAD884618771521E44 /* MPVPlayer.swift */; };
@@ -223,6 +225,7 @@
 		BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
 		C26407BD93F001EDE4CBAEDF /* Libavdevice.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavdevice.xcframework; path = Vendor/Libavdevice.xcframework; sourceTree = "<group>"; };
 		C5EDE0462D2DCE22124164E8 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		C6C136886855C91760BFF6EF /* IMDbRatings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMDbRatings.swift; sourceTree = "<group>"; };
 		C868DE1356883E3FDC24AC23 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = gnutls.xcframework; path = Vendor/gnutls.xcframework; sourceTree = "<group>"; };
 		C8BBE98FBA505A36A33CB129 /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
@@ -507,6 +510,7 @@
 		E44E52CEEFAA9AF5C6CB4BBC /* Search */ = {
 			isa = PBXGroup;
 			children = (
+				C6C136886855C91760BFF6EF /* IMDbRatings.swift */,
 				312496694F477570E1827C77 /* SearchIndex.swift */,
 			);
 			path = Search;
@@ -694,6 +698,7 @@
 				C2FA9C8739B0E46A8270DC84 /* Flex.swift in Sources */,
 				028C183EB3E8EC859906DC4A /* Guide.swift in Sources */,
 				A49929AB5718F330A7BBDB8C /* HomeView.swift in Sources */,
+				08CAD4E635F64EFAA0A4416E /* IMDbRatings.swift in Sources */,
 				C2B3A024AC7BEF379F2E4C4A /* ImagePipeline.swift in Sources */,
 				53650932E226B2B55FA992A1 /* Keychain.swift in Sources */,
 				84F1C24A345749B9277FDA29 /* LiveModels.swift in Sources */,
@@ -730,6 +735,7 @@
 				87A1B9D7209C39E0CE907BA4 /* Flex.swift in Sources */,
 				6C46F5C97FF574089046DC42 /* Guide.swift in Sources */,
 				6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */,
+				70E2D7E887B69FA5F3EEE248 /* IMDbRatings.swift in Sources */,
 				507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */,
 				4209B928261B700D9F0978FA /* Keychain.swift in Sources */,
 				1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */,

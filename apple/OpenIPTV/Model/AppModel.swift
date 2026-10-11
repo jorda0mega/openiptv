@@ -82,7 +82,7 @@ final class AppModel {
             // The first few things you'd tap on Home are ready before you do.
             let likely = fresh.prefix(2).flatMap { $0.cards.prefix(3) }
             prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
-            Task { await library.prepare(emby) }
+            Task { await syncLibrary(emby) }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
         }
@@ -236,7 +236,12 @@ final class AppModel {
     /// Loads (or quietly updates) the on-device library index. Called when
     /// the app opens; never blocks the UI.
     func prepareLibrary() async {
-        if let emby { await library.prepare(emby) }
+        if let emby { await syncLibrary(emby) }
+    }
+
+    private func syncLibrary(_ emby: EmbyClient) async {
+        library.refreshRatings(unmetered: NetworkStatus.shared.unmetered)
+        await library.prepare(emby)
     }
 
     func playback(for card: Card) async throws -> EmbyPlayback {
@@ -402,7 +407,7 @@ final class AppModel {
     }
 
     func card(for entry: LibraryEntry, width: Int) -> Card? {
-        emby?.card(for: entry, width: width)
+        emby?.card(for: entry, width: width, rating: library.rating(entry))
     }
 
     func playable(_ channel: LiveChannel) async throws -> PlayableStream {

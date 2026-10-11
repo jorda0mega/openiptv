@@ -25,6 +25,9 @@ from urllib.parse import parse_qs, urlparse
 PANEL_TZ = timezone(timedelta(hours=1))
 CHANNELS = 40
 SLOT = 1800
+# Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
+SHOW_IMDB = {"Forensic Files": "tt0247882", "Forensic Files II": "tt11840612",
+             "The Office": "tt0290978", "The Office (US)": "tt0386676"}
 
 
 def png(seed, w=60, h=90):
@@ -267,6 +270,7 @@ class Handler(BaseHTTPRequestHandler):
                 names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
                 n = int(item_id[1:]) if item_id[1:].isdigit() and int(item_id[1:]) < len(names) else 1
                 return self.send({"Id": item_id, "Name": names[n], "Type": "Series", "ProductionYear": 2000 + n,
+                                  "ProviderIds": {"Imdb": SHOW_IMDB.get(names[n], "")},
                                   "Overview": "Real cases solved with forensic science.",
                                   "ImageTags": {"Primary": "p"}, "BackdropImageTags": ["b"]})
             if item_id.startswith("e"):
@@ -304,13 +308,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
         if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q:
             # The library index: movies plus a few real-looking show names.
-            names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
+            names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office", "The Office (US)"]
             shows = [{"Id": f"s{i}", "Name": n, "Type": "Series", "ProductionYear": 2000 + i,
-                      "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
+                      "ProviderIds": {"Imdb": SHOW_IMDB.get(n, "")}, "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
+            # Same-named and similar titles with real IMDb ids, to check
+            # that search ranks by popularity (the 2026 "Animals" first).
+            known = [{"Id": f"a{i}", "Name": n, "Type": t, "ProductionYear": y, "ProviderIds": {"Imdb": imdb},
+                      "ImageTags": {"Primary": f"t{i}"}}
+                     for i, (n, t, y, imdb) in enumerate([
+                         ("Animals", "Movie", 2019, "tt4426738"), ("Animals", "Movie", 2009, "tt1056036"),
+                         ("Animal House", "Movie", 1978, "tt0077975"), ("Nocturnal Animals", "Movie", 2016, "tt4550098"),
+                         ("Animals", "Movie", 2026, "tt31049299"), ("American Animals", "Movie", 2018, "tt6212478"),
+                         ("Dangerous Animals", "Movie", 2025, "tt32299316"), ("Animals.", "Series", 2016, "tt4953128")])]
             # Big enough to page: real libraries run to 100k+ titles.
             extra = [{"Id": f"x{i}", "Name": f"Library Title {i:05d}", "Type": "Movie", "ProductionYear": 2000 + i % 25,
                       "ImageTags": {"Primary": f"t{i % 40}"}} for i in range(23000)]
-            everything = shows + [movie(i) for i in range(40)] + extra
+            everything = shows + known + [movie(i) for i in range(40)] + extra
             start, limit = int(q.get("StartIndex", 0)), int(q.get("Limit", 100))
             time.sleep(0.5)  # a page takes a while on a real server
             body = {"Items": everything[start:start + limit]}

@@ -99,13 +99,17 @@ struct SettingsView: View {
                     Text("Logins live only in this device's Keychain (not iCloud, not backups). Openreel has no servers, collects nothing and logs nothing.")
                 }
 
-                Section("About") {
+                Section {
                     LabeledContent("Version", value: HTTP.appVersion)
                     #if os(iOS)
                     Link("Source code on GitHub", destination: URL(string: "https://github.com/jorda0mega/openiptv")!)
                     #else
                     LabeledContent("Source code", value: "github.com/jorda0mega/openiptv")
                     #endif
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("Ratings and popularity: information courtesy of IMDb (imdb.com), used with permission. Downloaded about once a week on Wi-Fi.")
                 }
             }
             .navigationTitle("Settings")

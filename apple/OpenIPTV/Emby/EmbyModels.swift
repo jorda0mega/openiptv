@@ -39,6 +39,14 @@ struct EmbyItem: Decodable, Hashable {
     var channelPrimaryImageTag: String?
     var userData: UserData?
     var overview: String?
+    var providerIds: [String: String]?
+
+    /// IMDb title id ("tt…"), when the server has matched one.
+    var imdb: String? { Self.imdb(in: providerIds) }
+
+    static func imdb(in providers: [String: String]?) -> String? {
+        providers?.first { $0.key.caseInsensitiveCompare("Imdb") == .orderedSame && $0.value.hasPrefix("tt") }?.value
+    }
 
     enum CodingKeys: String, CodingKey {
         case id = "Id", name = "Name", kind = "Type", collectionType = "CollectionType"
@@ -55,6 +63,7 @@ struct EmbyItem: Decodable, Hashable {
         case channelId = "ChannelId", channelPrimaryImageTag = "ChannelPrimaryImageTag"
         case userData = "UserData"
         case overview = "Overview"
+        case providerIds = "ProviderIds"
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +94,7 @@ struct EmbyItem: Decodable, Hashable {
         channelPrimaryImageTag = try? c.decodeIfPresent(String.self, forKey: .channelPrimaryImageTag)
         userData = try? c.decodeIfPresent(UserData.self, forKey: .userData)
         overview = try? c.decodeIfPresent(String.self, forKey: .overview)
+        providerIds = try? c.decodeIfPresent([String: String].self, forKey: .providerIds)
     }
 }
 

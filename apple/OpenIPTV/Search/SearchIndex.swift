@@ -12,10 +12,19 @@ import UIKit
 /// "spiderman" still finds "Spider-Man". Typing more letters re-checks only
 /// the previous matches. When exact matches are few, `fuzzy` tolerates typos
 /// ("forensinc" finds "Forensic") using a word index built up front.
+///
+/// Results go by how well the name matches (the whole title, its start, a
+/// word in it, then the loose pass), and within that by `boost`, such as
+/// popularity, so the title people mean comes first.
 struct SearchCorpus<Item>: @unchecked Sendable {
     let items: [Item]
     /// " word word": a leading space so a word start is " " + prefix.
     private let keys: [[UInt8]]
+    /// Key length without a trailing "(US)" / "(2005)", so typing the title
+    /// alone counts as the whole title.
+    private let bare: [Int]
+    /// Extra score per item (0–650), or empty.
+    private var boost: [Int] = []
     /// The same without spaces, for the loose pass.
     private let compact: [[UInt8]]
     /// Every distinct word, the items containing it, and words grouped by
@@ -27,6 +36,11 @@ struct SearchCorpus<Item>: @unchecked Sendable {
     init(_ items: [Item] = [], name: (Item) -> String) {
         self.items = items
         keys = items.map { Self.fold(name($0)) }
+        bare = zip(items, keys).map { item, key in
+            let name = name(item)
+            guard name.hasSuffix(")"), let open = name.range(of: " (", options: .backwards) else { return key.count }
+            return Self.fold(String(name[..<open.lowerBound])).count
+        }
         compact = keys.map { $0.filter { $0 != 32 } }
         var ids: [[UInt8]: Int32] = [:]
         var vocabulary: [[UInt8]] = []
@@ -50,6 +64,15 @@ struct SearchCorpus<Item>: @unchecked Sendable {
         self.postings = postings
         self.byFirst = byFirst
     }
+
+    /// The same corpus ranking with `boost` (one score per item, 0–650).
+    func boosted(_ boost: [Int]) -> SearchCorpus {
+        var copy = self
+        copy.boost = boost.count == items.count ? boost : []
+        return copy
+    }
+
+    private func boost(_ index: Int) -> Int { boost.isEmpty ? 0 : boost[index] }
 
     /// Typo-tolerant matches, best first: every query word within an edit or
     /// two of a word in the name (the last word may still be being typed,
@@ -81,7 +104,11 @@ struct SearchCorpus<Item>: @unchecked Sendable {
             if combined?.isEmpty ?? true { return [] }
         }
         return (combined ?? [:])
-            .sorted { $0.value != $1.value ? $0.value < $1.value : keys[Int($0.key)].count < keys[Int($1.key)].count }
+            .sorted {
+                if $0.value != $1.value { return $0.value < $1.value }
+                let a = boost(Int($0.key)), b = boost(Int($1.key))
+                return a != b ? a > b : keys[Int($0.key)].count < keys[Int($1.key)].count
+            }
             .prefix(limit).map { Int($0.key) }
     }
 
@@ -158,13 +185,15 @@ struct SearchCorpus<Item>: @unchecked Sendable {
             var score: Int
             if words.allSatisfy({ Self.contains(key, $0) }) {
                 score = 1000
-                if key.starts(with: q) { score += key.count == q.count ? 3000 : 2000 }
+                if key.starts(with: q) { score += bare[index] == q.count || key.count == q.count ? 3000 : 2000 }
             } else if Self.contains(compact[index], loose) {
                 score = 200
             } else {
                 continue
             }
-            // Closer matches (shorter names) first.
+            // Within a kind of match: the more popular, then the closer
+            // (shorter) name, first.
+            score += boost(index)
             score -= min(key.count, 120)
             scored.append((index, score))
         }
@@ -223,14 +252,17 @@ struct LibraryEntry: Codable, Hashable, Identifiable, Sendable {
     let year: Int?
     let imageTag: String?
     let aspect: Double?
+    /// IMDb title id ("tt0076759"), when the server knows it.
+    var imdb: String? = nil
 }
 
 /// Every movie and show on the Emby server, cached on the device so search
 /// never waits for the network. Loaded once (four pages at a time, each
 /// page retried, search usable as pages arrive, resumed after an
 /// interruption), then kept current with only what changed since the last
-/// sync, plus a weekly full pass to drop deleted items. Runs in the
-/// background from app launch.
+/// sync, plus a weekly full pass to drop deleted items (search keeps the
+/// old pages until each is replaced). Runs in the background from app
+/// launch. IMDb ratings, downloaded weekly, rank it by popularity.
 @Observable
 @MainActor
 final class LibraryIndex {
@@ -244,8 +276,14 @@ final class LibraryIndex {
     private var syncedAt: Date?
     private var fullSyncAt: Date?
     private var server: String?
+    /// The cached pages predate a field the index now keeps (IMDb ids):
+    /// fetch them all again, searching the old ones meanwhile.
+    private var outdated = false
+    private(set) var ratings: IMDbRatings?
+    private var ratingsTask: Task<Void, Never>?
 
     private struct Cache: Codable {
+        var version: Int?
         let server: String
         let syncedAt: Date?
         let fullSyncAt: Date?
@@ -253,6 +291,8 @@ final class LibraryIndex {
         let pages: [Int: [LibraryEntry]]
     }
 
+    /// 2: entries carry IMDb ids.
+    private nonisolated static let version = 2
     private nonisolated static let file = "library-index.json"
     private nonisolated static let pageSize = 5000
     private nonisolated static let parallel = 4
@@ -274,18 +314,20 @@ final class LibraryIndex {
             total = nil
             syncedAt = nil
             fullSyncAt = nil
+            outdated = false
             corpus = SearchCorpus(name: \.name)
             if let cache = await Self.readCache(), cache.server == server {
                 pages = cache.pages
                 total = cache.total
                 syncedAt = cache.syncedAt
                 fullSyncAt = cache.fullSyncAt
-                corpus = await Self.build(ordered())
+                outdated = (cache.version ?? 1) < Self.version
+                corpus = await Self.build(ordered(), ratings)
             }
         }
         guard !indexing else { return }
         let now = Date()
-        let needsFull = !complete || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
+        let needsFull = !complete || outdated || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
         let needsChanges = syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
         guard needsFull || needsChanges else { return }
         indexing = true
@@ -305,27 +347,59 @@ final class LibraryIndex {
                 let all = await Self.merge(ordered(), changed)
                 pages = Self.paged(all)
                 total = all.count
-                corpus = await Self.build(all)
+                corpus = await Self.build(all, ratings)
             }
             save()
         }
     }
 
-    /// The whole catalog, resuming from whatever pages are already here.
+    /// Loads IMDb ratings from the device, and downloads a fresh copy when
+    /// it's over a week old (on Wi-Fi; on any connection after a month or
+    /// if there's none yet). Search re-ranks when they arrive.
+    func refreshRatings(unmetered: Bool) {
+        guard ratingsTask == nil else { return }
+        ratingsTask = Task {
+            defer { ratingsTask = nil }
+            if ratings == nil, let cached = await Task.detached(priority: .utility, operation: { IMDbRatings.cached() }).value {
+                await apply(cached)
+            }
+            let age = IMDbRatings.age()
+            guard age.map({ $0 > 7 * 24 * 3600 && (unmetered || $0 > 30 * 24 * 3600) }) ?? true else { return }
+            if let fresh = try? await Task.detached(priority: .utility, operation: { try await IMDbRatings.download() }).value {
+                await apply(fresh)
+            }
+        }
+    }
+
+    private func apply(_ ratings: IMDbRatings) async {
+        self.ratings = ratings
+        corpus = await Self.boost(corpus, ratings)
+    }
+
+    /// IMDb's score and votes for a title, once ratings are loaded.
+    func rating(_ entry: LibraryEntry) -> IMDbRatings.Rating? {
+        ratings?.rating(entry.imdb)
+    }
+
+    /// The whole catalog, resuming from whatever pages are already here. A
+    /// fresh pass (weekly, or when the cache is outdated) fetches every page
+    /// again, replacing the old ones as the new arrive.
     private func loadAll(_ emby: EmbyClient, server: String) async {
-        let fresh = fullSyncAt.map { Date().timeIntervalSince($0) > Self.fullEvery } ?? false
+        let fresh = outdated || fullSyncAt.map { Date().timeIntervalSince($0) > Self.fullEvery } ?? false
         if fresh || total == nil {
             // A new full pass (or the first): learn the size from page one.
             guard let first = try? await Self.retrying({ try await emby.libraryPage(start: 0, limit: Self.pageSize, withTotal: true) })
             else { return }
-            if fresh { pages = [:] }
             pages[0] = first.entries
             total = first.total ?? first.entries.count
+            if let total, fresh { pages = pages.filter { $0.key < total } }
         }
         guard let total else { return }
-        let starts = stride(from: 0, to: total, by: Self.pageSize).filter { pages[$0] == nil }
-        progress = (loadedCount, total)
+        let starts = stride(from: 0, to: total, by: Self.pageSize).filter { fresh ? $0 > 0 : pages[$0] == nil }
+        // A refresh of a complete index runs unseen; search covers it all.
+        if !fresh { progress = (loadedCount, total) }
         var sincePublish = 0
+        var failed = false
         await withTaskGroup(of: (Int, [LibraryEntry]?).self) { group in
             var queue = starts[...]
             for _ in 0..<Self.parallel {
@@ -334,13 +408,13 @@ final class LibraryIndex {
             }
             for await (start, entries) in group {
                 guard self.server == server else { group.cancelAll(); return }
-                if let entries { pages[start] = entries }
-                progress = (loadedCount, total)
+                if let entries { pages[start] = entries } else { failed = true }
+                if !fresh { progress = (loadedCount, total) }
                 sincePublish += 1
                 // Search covers what's loaded so far.
                 if sincePublish >= Self.parallel {
                     sincePublish = 0
-                    corpus = await Self.build(ordered())
+                    corpus = await Self.build(ordered(), ratings)
                     save()
                 }
                 if let next = queue.popFirst() {
@@ -349,11 +423,12 @@ final class LibraryIndex {
             }
         }
         guard self.server == server else { return }
-        if stride(from: 0, to: total, by: Self.pageSize).allSatisfy({ pages[$0] != nil }) {
+        if !failed, stride(from: 0, to: total, by: Self.pageSize).allSatisfy({ pages[$0] != nil }) {
             fullSyncAt = Date()
             syncedAt = fullSyncAt
+            outdated = false
         }
-        corpus = await Self.build(ordered())
+        corpus = await Self.build(ordered(), ratings)
         save()
     }
 
@@ -370,13 +445,16 @@ final class LibraryIndex {
         syncedAt = nil
         fullSyncAt = nil
         server = nil
+        outdated = false
         progress = nil
         AppCache.remove(Self.file)
     }
 
     private func save() {
         guard let server else { return }
-        let cache = Cache(server: server, syncedAt: syncedAt, fullSyncAt: fullSyncAt, total: total, pages: pages)
+        // Outdated pages are saved as such, so an interrupted fresh pass resumes.
+        let cache = Cache(version: outdated ? 1 : Self.version, server: server, syncedAt: syncedAt,
+                          fullSyncAt: fullSyncAt, total: total, pages: pages)
         Task.detached(priority: .utility) { AppCache.write(Self.file, cache) }
     }
 
@@ -408,8 +486,24 @@ final class LibraryIndex {
         }.value
     }
 
-    private nonisolated static func build(_ entries: [LibraryEntry]) async -> SearchCorpus<LibraryEntry> {
-        await Task.detached(priority: .userInitiated) { SearchCorpus(entries, name: \.name) }.value
+    /// The search corpus, each title once (pages can overlap mid-refresh),
+    /// ranked by IMDb popularity when ratings are loaded.
+    private nonisolated static func build(_ entries: [LibraryEntry], _ ratings: IMDbRatings?) async -> SearchCorpus<LibraryEntry> {
+        await Task.detached(priority: .userInitiated) {
+            var seen = Set<String>()
+            seen.reserveCapacity(entries.count)
+            let corpus = SearchCorpus(entries.filter { seen.insert($0.id).inserted }, name: \.name)
+            return ratings.map { boosted(corpus, $0) } ?? corpus
+        }.value
+    }
+
+    private nonisolated static func boost(_ corpus: SearchCorpus<LibraryEntry>, _ ratings: IMDbRatings) async -> SearchCorpus<LibraryEntry> {
+        await Task.detached(priority: .userInitiated) { boosted(corpus, ratings) }.value
+    }
+
+    private nonisolated static func boosted(_ corpus: SearchCorpus<LibraryEntry>, _ ratings: IMDbRatings) -> SearchCorpus<LibraryEntry> {
+        let year = Calendar.current.component(.year, from: Date())
+        return corpus.boosted(corpus.items.map { ratings.popularity($0.imdb, year: $0.year, currentYear: year) })
     }
 
     private nonisolated static func readCache() async -> Cache? {

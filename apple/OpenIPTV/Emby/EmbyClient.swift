@@ -208,7 +208,7 @@ struct EmbyClient {
     /// A show with its overview and artwork.
     func item(_ id: String) async throws -> EmbyItem {
         try await get("Users/\(account.userId)/Items/\(id)", [
-            .init(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProductionYear"),
+            .init(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProductionYear,ProviderIds"),
         ])
     }
 
@@ -265,8 +265,9 @@ struct EmbyClient {
             let kind: String?
             let year: Int?
             let tags: [String: String]?
+            let providers: [String: String]?
             enum CodingKeys: String, CodingKey {
-                case id = "Id", name = "Name", kind = "Type", year = "ProductionYear", tags = "ImageTags"
+                case id = "Id", name = "Name", kind = "Type", year = "ProductionYear", tags = "ImageTags", providers = "ProviderIds"
             }
         }
         struct Page: Decodable {
@@ -276,7 +277,7 @@ struct EmbyClient {
         var parts = URLComponents(url: Self.api(account.serverURL, "Users/\(account.userId)/Items"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [
             .init(name: "Recursive", value: "true"), .init(name: "IncludeItemTypes", value: "Movie,Series"),
-            .init(name: "Fields", value: "ProductionYear"),
+            .init(name: "Fields", value: "ProductionYear,ProviderIds"),
             .init(name: "EnableImageTypes", value: "Primary"), .init(name: "ImageTypeLimit", value: "1"),
             .init(name: "EnableUserData", value: "false"), .init(name: "EnableTotalRecordCount", value: withTotal ? "true" : "false"),
             .init(name: "SortBy", value: "SortName"), .init(name: "SortOrder", value: "Ascending"),
@@ -294,7 +295,7 @@ struct EmbyClient {
             let entries: [LibraryEntry] = (page.Items ?? []).compactMap(\.value).compactMap { entry in
                 guard let name = entry.name, !name.isEmpty else { return nil }
                 return LibraryEntry(id: entry.id, name: name, kind: entry.kind ?? "Movie", year: entry.year,
-                                    imageTag: entry.tags?["Primary"], aspect: nil)
+                                    imageTag: entry.tags?["Primary"], aspect: nil, imdb: EmbyItem.imdb(in: entry.providers))
             }
             return (entries, page.TotalRecordCount)
         }.value
@@ -316,8 +317,9 @@ struct EmbyClient {
         }
     }
 
-    /// A card for an on-device index entry (poster from its image tag).
-    func card(for entry: LibraryEntry, width: Int) -> Card {
+    /// A card for an on-device index entry (poster from its image tag),
+    /// with its IMDb score when known.
+    func card(for entry: LibraryEntry, width: Int, rating: IMDbRatings.Rating? = nil) -> Card {
         var images: [CardImage] = []
         if let tag = entry.imageTag {
             let candidate = Artwork.Candidate(itemId: entry.id, type: "Primary", tag: tag, index: nil,
@@ -326,8 +328,9 @@ struct EmbyClient {
                                     contain: candidate.contain(in: .portrait)))
         }
         let kind = entry.kind == "Series" ? "Show" : "Movie"
+        let details = [kind, entry.year.map(String.init), rating.map(IMDbRatings.label)].compactMap(\.self)
         return Card(id: entry.id, kind: entry.kind, title: entry.name,
-                    subtitle: entry.year.map { "\(kind) · \($0)" } ?? kind,
+                    subtitle: details.joined(separator: " · "),
                     images: images, progress: nil, playable: true)
     }
 

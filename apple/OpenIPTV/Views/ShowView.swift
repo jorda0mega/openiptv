@@ -169,8 +169,10 @@ struct ShowView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(route.title).font(.title2.weight(.bold))
-                if let year = data?.show.productionYear {
-                    Text(String(year)).font(.subheadline).foregroundStyle(.secondary)
+                let rating = model.library.ratings?.rating(data?.show.imdb)
+                let details = [data?.show.productionYear.map(String.init), rating.map(IMDbRatings.detail)].compactMap(\.self)
+                if !details.isEmpty {
+                    Text(details.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Button { playMain() } label: {
                     Label(loadingItem == mainId ? "Starting…" : mainLabel, systemImage: "play.fill")
