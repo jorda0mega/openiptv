@@ -290,6 +290,8 @@ struct MoviePlayerView: View {
     @State private var resumeAfterScrub = false
     /// Where the current scrub started, for "+1:30" / "−0:45".
     @State private var scrubOrigin: Double?
+    /// Exact-frame seek once the finger rests.
+    @State private var settleSeek: Task<Void, Never>?
     /// Picks original vs a server-converted lower bitrate to avoid stalls.
     @State private var governor: QualityGovernor?
     /// Shown briefly when the quality changes.
@@ -640,12 +642,16 @@ struct MoviePlayerView: View {
     @ViewBuilder private var scrubPreview: some View {
         if let target = scrubbing {
             GeometryReader { geo in
-                let width: CGFloat = thumbnails == nil ? 120 : Layout.scrubPreviewWidth
+                // Slower scrubbing moves second by second, finer than the
+                // server's 10-second thumbnails: the picture itself is the
+                // preview then.
+                let thumb = scrubSpeed == nil ? thumbnails?.image(at: target) : nil
+                let width: CGFloat = thumb == nil ? 120 : Layout.scrubPreviewWidth
                 let fraction = total > 0 ? min(max(target / total, 0), 1) : 0
                 let x = min(max(16 + fraction * (geo.size.width - 32) - width / 2, 0), geo.size.width - width)
                 VStack(spacing: 4) {
-                    if let image = thumbnails?.image(at: target) {
-                        Image(uiImage: image)
+                    if let thumb {
+                        Image(uiImage: thumb)
                             .resizable()
                             .aspectRatio(16 / 9, contentMode: .fill)
                             .frame(width: width, height: width * 9 / 16)
@@ -662,14 +668,15 @@ struct MoviePlayerView: View {
                 .padding(8)
                 .frame(width: width + 16)
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                .offset(x: x - 8, y: -(thumbnails == nil ? 76 : width * 9 / 16 + 84))
+                .offset(x: x - 8, y: -(thumb == nil ? 76 : width * 9 / 16 + 84))
             }
             .allowsHitTesting(false)
         }
     }
 
-    /// While dragging: pause, and move the picture to the nearest keyframe
-    /// a few times a second so it follows the finger.
+    /// While dragging: pause, and move the picture so it follows the finger:
+    /// the exact frame when scrubbing slowly or resting, the nearest
+    /// keyframe while sweeping fast.
     private func liveScrub(_ target: Double) {
         showControls(autoHide: false)
         if scrubOrigin == nil { scrubOrigin = position }
@@ -677,13 +684,24 @@ struct MoviePlayerView: View {
             resumeAfterScrub = true
             player?.setPaused(true)
         }
-        guard Date().timeIntervalSince(lastLiveSeek) > 0.15 else { return }
+        // When the finger rests, show the exact frame at that second (the
+        // server's thumbnails are 10 s apart, keyframes several seconds).
+        settleSeek?.cancel()
+        settleSeek = Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            player?.seek(to: max(0, target - offset), exact: true)
+        }
+        // Moving: a few times a second so it keeps up; keyframes only when
+        // sweeping at full speed, where a pixel is many seconds anyway.
+        guard Date().timeIntervalSince(lastLiveSeek) > 0.12 else { return }
         lastLiveSeek = Date()
-        player?.seek(to: max(0, target - offset), exact: false)
+        player?.seek(to: max(0, target - offset), exact: scrubSpeed != nil)
     }
 
     /// On release: land on the exact second and carry on playing.
     private func commitScrub(_ target: Double) {
+        settleSeek?.cancel()
         player?.seek(to: max(0, target - offset))
         position = target
         scrubbing = nil
