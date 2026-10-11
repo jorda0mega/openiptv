@@ -16,7 +16,10 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                // Not lazy: there are only a dozen rows (each scrolls lazily
+                // itself), and a lazy stack adding a row as the page slides
+                // back after pull to refresh stops it halfway, stuck down.
+                VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                     if visibleRows.isEmpty { emptyState }
                     ForEach(visibleRows) { row in
                         RowView(row: row, loadingCard: loadingCard) { card in play(card) }

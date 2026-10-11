@@ -257,7 +257,10 @@ class Handler(BaseHTTPRequestHandler):
                              "UserData": {"PlaybackPositionTicks": 6000000000, "PlayedPercentage": 40.0}}
         if path == "/Users/U1/Views":
             return self.send({"Items": [{"Id": "v1", "Name": "Movies", "Type": "CollectionFolder", "CollectionType": "movies"},
-                                        {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"}]})
+                                        {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"}]
+                                       # A long home page, like a real server with many libraries.
+                                       + [{"Id": f"v{n}", "Name": f"Library {n}", "Type": "CollectionFolder", "CollectionType": "movies"}
+                                          for n in range(3, 3 + int(os.environ.get("OPENIPTV_MOCK_EXTRA_LIBRARIES", "0")))]})
         if path.startswith("/Users/U1/Items/") and path.count("/") == 4 and not path.endswith(("/Latest", "/Resume")):
             item_id = path.rsplit("/", 1)[1]
             if item_id.startswith("s"):
@@ -324,7 +327,12 @@ class Handler(BaseHTTPRequestHandler):
             ep = lambda s, i: episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
                                                     "UserData": {"PlaybackPositionTicks": 5280000000, "PlayedPercentage": 40}}
             twin = ep(2, 3) | {"Id": "e4k203", "SeriesId": "s1-4k"}  # same show, another library
-            return self.send({"Items": [ep(2, 3), twin, movie(5) | {"UserData": {"PlayedPercentage": 25}}, ep(1, 4), ep(1, 2)]})
+            # Like a real server: home takes a moment, and progress moves
+            # between refreshes.
+            print(f"{time.time():.2f} home requested", flush=True)
+            time.sleep(float(os.environ.get("OPENIPTV_MOCK_HOME_DELAY", "0")))
+            progress = 5 + int(time.time()) % 90
+            return self.send({"Items": [ep(2, 3), twin, movie(5) | {"UserData": {"PlayedPercentage": progress}}, ep(1, 4), ep(1, 2)]})
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
         if path == "/Users/U1/Items/Latest":
