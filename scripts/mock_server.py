@@ -392,6 +392,10 @@ class Handler(BaseHTTPRequestHandler):
             found = [episode(i) for i in range(3) if term in "episode"] + \
                     [movie(i) for i in range(40) if term in f"movie {i}"]
             return self.send({"Items": found[: int(q.get("Limit", 40))]})
+        if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Episode" and "ParentId" in q:
+            # A show's changed episodes: none, unless asked without a date.
+            if "MinDateLastSaved" in q or "MinDateLastSavedForUser" in q:
+                return self.send({"Items": []})
         if path == "/Users/U1/Items" and q.get("Filters") == "IsPlayed":
             return self.send({"Items": [known_item(KNOWN_BY_ID["a9"], played=True)]})
         if path == "/Users/U1/Items" and "Ids" in q:

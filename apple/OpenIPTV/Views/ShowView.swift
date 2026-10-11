@@ -143,7 +143,7 @@ struct ShowView: View {
                 model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
             }
             // Draw what's already here at once, then refresh behind it.
-            data = model.shows[route.id]
+            data = model.cachedShow(route.id)
             if let fresh = await model.loadShow(route.id) {
                 data = fresh
             } else if data == nil {

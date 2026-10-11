@@ -73,8 +73,11 @@ struct HomeView: View {
     }
 
     private func warmFirst() {
-        // Shows in the first rows open fully drawn.
-        model.prefetchShows(model.rows.prefix(2).flatMap { $0.cards.prefix(3) }.filter { $0.kind == "Series" }.map(\.id))
+        // Every show in Continue Watching, and the first few below, open
+        // fully drawn (saved ones are only checked for changes).
+        let resuming = model.rows.first { $0.title == "Continue Watching" }?.cards ?? []
+        let below = model.rows.filter { $0.title != "Continue Watching" }.prefix(1).flatMap { $0.cards.prefix(3) }
+        model.prefetchShows((resuming + below).filter { $0.kind == "Series" }.map(\.id))
         guard let card = (model.rows.first { $0.title == "Continue Watching" } ?? model.rows.first)?.cards.first else { return }
         if let episode = card.episodeId {
             model.warmUp(episode, kind: "Episode", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)

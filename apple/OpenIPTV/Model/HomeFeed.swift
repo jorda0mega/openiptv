@@ -31,6 +31,16 @@ struct HomeContent: Codable, Hashable {
 /// week's trending titles, so no row is emptied by another.
 @MainActor
 enum HomeFeed {
+    /// What's partway through, then the next episode of each show being
+    /// watched that isn't already there.
+    static func continueItems(watching: [EmbyItem], nextUp: [EmbyItem]) -> [EmbyItem] {
+        let watchingShows = Set(watching.compactMap(\.seriesId))
+        let watchingNames = Set(watching.compactMap { $0.seriesName?.lowercased() })
+        return watching + nextUp.filter {
+            !watchingShows.contains($0.seriesId ?? "") && !watchingNames.contains(($0.seriesName ?? "").lowercased())
+        }
+    }
+
     static func load(_ emby: EmbyClient, library: LibraryIndex, cardWidth: Int, backdropWidth: Int) async throws -> HomeContent {
         // Everything that doesn't depend on something else, at once: what
         // you're watching and what's new, and the trending titles with what
@@ -78,13 +88,9 @@ enum HomeFeed {
         var rows: [HomeRow] = []
 
         // Continue Watching, then the next episode of shows not already in it.
-        let watchingShows = Set(sources.watching.compactMap(\.seriesId))
-        let watchingNames = Set(sources.watching.compactMap { $0.seriesName?.lowercased() })
-        let upNext = sources.nextUp.filter {
-            !watchingShows.contains($0.seriesId ?? "") && !watchingNames.contains(($0.seriesName ?? "").lowercased())
-        }
-        if let row = emby.showRow("Continue Watching", sources.watching + upNext, cardWidth) { rows.append(row) }
-        (sources.watching + upNext).forEach(show)
+        let resume = continueItems(watching: sources.watching, nextUp: sources.nextUp)
+        if let row = emby.showRow("Continue Watching", resume, cardWidth) { rows.append(row) }
+        resume.forEach(show)
 
         // Trending titles on the server, with what this user has seen of them.
         let popular = await trendingItems.filter { !watched($0) && !isShown($0) && worthIt($0) }

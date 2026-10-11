@@ -155,7 +155,7 @@ final class AppModel {
 
     /// A show page's data, kept so reopening (or opening something prepared
     /// ahead) draws at once; refreshed quietly behind.
-    struct ShowData {
+    struct ShowData: Codable {
         let show: EmbyItem
         let episodes: [EmbyItem]
         let nextUp: EmbyItem?
@@ -166,10 +166,33 @@ final class AppModel {
     private var showLoads: [String: Task<ShowData?, Never>] = [:]
 
     /// The show's details, every episode and the next one to watch.
+    /// A show's page as last seen: in memory, else saved on the device, so
+    /// it opens at once (even after a relaunch) while it's brought up to date.
+    func cachedShow(_ id: String) -> ShowData? {
+        if let data = shows[id] { return data }
+        guard let saved: ShowData = AppCache.read(Self.showFile(id)) else { return nil }
+        shows[id] = saved
+        return saved
+    }
+
+    private static func showFile(_ id: String) -> String { "show-\(id).json" }
+
+    /// Brings a show up to date. Saved within the last day: only the
+    /// episodes that changed since (usually none) and the next episode;
+    /// otherwise everything (which also drops deleted episodes).
     func loadShow(_ id: String) async -> ShowData? {
         if let running = showLoads[id] { return await running.value }
         guard let emby else { return nil }
+        let previous = cachedShow(id)
         let task = Task<ShowData?, Never> {
+            if let previous, Date().timeIntervalSince(previous.loadedAt) < 24 * 3600 {
+                async let changes = emby.episodeChanges(of: id, since: previous.loadedAt)
+                async let next = emby.nextEpisode(of: id)
+                if let changed = try? await changes {
+                    return ShowData(show: previous.show, episodes: Self.merge(previous.episodes, changed),
+                                    nextUp: (try? await next) ?? previous.nextUp, loadedAt: Date())
+                }
+            }
             async let item = emby.item(id)
             async let list = emby.episodes(of: id, season: nil)
             async let next = emby.nextEpisode(of: id)
@@ -180,17 +203,68 @@ final class AppModel {
         let data = await task.value
         showLoads[id] = nil
         if let data {
-            if shows.count > 12 { shows.removeAll() }
+            if shows.count > 40 { shows.removeAll() }
             shows[id] = data
+            let file = Self.showFile(id)
+            Task.detached(priority: .utility) { AppCache.write(file, data) }
         }
         return data
     }
 
+    /// Changed episodes replace their old selves; new ones join in order.
+    private nonisolated static func merge(_ episodes: [EmbyItem], _ changed: [EmbyItem]) -> [EmbyItem] {
+        guard !changed.isEmpty else { return episodes }
+        let updates = Dictionary(changed.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var merged = episodes.map { updates[$0.id] ?? $0 }
+        let known = Set(episodes.map(\.id))
+        merged += changed.filter { !known.contains($0.id) }
+        return merged.sorted { ($0.parentIndexNumber ?? 0, $0.indexNumber ?? 0) < ($1.parentIndexNumber ?? 0, $1.indexNumber ?? 0) }
+    }
+
+    /// What just played, applied to the saved show straight away (where
+    /// it got to, or watched), so its page and Continue Watching are right
+    /// before the server is asked.
+    private func noteProgress(_ playback: EmbyPlayback, seconds: Double) {
+        guard let series = playback.seriesId, let data = cachedShow(series),
+              let index = data.episodes.firstIndex(where: { $0.id == playback.itemId }) else { return }
+        var episodes = data.episodes
+        let duration = playback.durationSeconds ?? 0
+        let finished = duration > 0 && seconds >= duration * 0.9
+        var user = episodes[index].userData ?? EmbyItem.UserData()
+        user.played = finished ? true : user.played
+        user.playbackPositionTicks = finished ? 0 : Int64(seconds * 1e7)
+        user.playedPercentage = finished || duration == 0 ? nil : seconds / duration * 100
+        user.lastPlayedDate = ISO8601DateFormatter().string(from: Date())
+        episodes[index].userData = user
+        // Keep loadedAt: the next update still asks for everything since.
+        shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: data.nextUp, loadedAt: data.loadedAt)
+    }
+
     /// Loads shows the user is likely to open next, in the background.
-    func prefetchShows(_ ids: [String]) {
-        for id in ids where shows[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
+    func prefetchShows(_ ids: [String], force: Bool = false) {
+        for id in ids where force || cachedShow(id).map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
             Task(priority: .utility) { _ = await loadShow(id) }
         }
+    }
+
+    /// Continue Watching alone (two small requests), after watching
+    /// something: the other rows stay put, minus anything now in it.
+    func refreshContinueWatching() async {
+        guard let emby else { return }
+        async let watching = emby.watching()
+        async let nextUp = emby.nextUp()
+        guard let watching = try? await watching else { return }
+        let items = HomeFeed.continueItems(watching: watching, nextUp: (try? await nextUp) ?? [])
+        let row = emby.showRow("Continue Watching", items, lastCardWidth)
+        var updated = rows.filter { $0.title != "Continue Watching" }
+        let resumed = Set(row?.cards.map(\.id) ?? [])
+        updated = updated.map { other in
+            HomeRow(title: other.title, shape: other.shape, aspect: other.aspect, cards: other.cards.filter { !resumed.contains($0.id) })
+        }.filter { !$0.cards.isEmpty }
+        if let row { updated.insert(row, at: 0) }
+        if updated != rows { rows = updated }
+        AppCache.write("home.v4.json", HomeContent(featured: featured, rows: rows))
+        prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
     }
 
     // MARK: Warm start
@@ -307,14 +381,15 @@ final class AppModel {
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
         await emby?.report(event, itemId: playback.itemId, seconds: seconds,
                            mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
-        // Positions changed, so anything prepared earlier may resume wrongly.
-        if event == .stopped {
-            prepared = [:]
-            coolDown()
-            // Watched marks and progress changed; reload in the background.
-            if let series = playback.seriesId { shows[series] = nil; prefetchShows([series]) }
-        }
-        if event == .stopped { await loadHome(cardWidth: lastCardWidth) }
+        guard event == .stopped else { return }
+        // Only this title's resume point changed: everything else prepared
+        // stays ready.
+        prepared[playback.itemId] = nil
+        if warm?.key == playback.itemId { coolDown() }
+        noteProgress(playback, seconds: seconds)
+        if let series = playback.seriesId { prefetchShows([series], force: true) }
+        // Only Continue Watching changed; the rest of Home stays as it is.
+        await refreshContinueWatching()
     }
 
     // MARK: Accounts

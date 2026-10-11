@@ -1,8 +1,8 @@
 import Foundation
 
 /// The subset of an Emby item the app renders.
-struct EmbyItem: Decodable, Hashable {
-    struct UserData: Decodable, Hashable {
+struct EmbyItem: Codable, Hashable {
+    struct UserData: Codable, Hashable {
         var playbackPositionTicks: Int64?
         var playedPercentage: Double?
         var played: Bool?
@@ -49,7 +49,7 @@ struct EmbyItem: Decodable, Hashable {
     var people: [Person]?
     var genres: [String]?
 
-    struct Person: Decodable, Hashable {
+    struct Person: Codable, Hashable {
         var name: String
         /// "Actor", "Director", "Writer", "GuestStar", …
         var type: String?

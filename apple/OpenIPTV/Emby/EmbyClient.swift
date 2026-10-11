@@ -126,21 +126,16 @@ struct EmbyClient {
     }
 
     func homeSources() async throws -> HomeSources {
-        let views: [EmbyItem] = try await items("Users/\(account.userId)/Views", [])
-        let libraries = views.filter { ["movies", "tvshows"].contains($0.collectionType ?? "") }.prefix(12)
-        async let watching = items("Users/\(account.userId)/Items", Self.cardQuery + [
-            .init(name: "Filters", value: "IsResumable"), .init(name: "Recursive", value: "true"),
-            .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
-            .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "30"),
-        ])
-        async let nextUp = items("Shows/NextUp", Self.cardQuery + [
-            .init(name: "UserId", value: account.userId), .init(name: "Limit", value: "16"),
-        ])
+        async let viewList: [EmbyItem] = items("Users/\(account.userId)/Views", [])
+        async let watching = watching()
+        async let nextUp = nextUp()
         async let played = items("Users/\(account.userId)/Items", Self.cardQuery + [
             .init(name: "Filters", value: "IsPlayed"), .init(name: "Recursive", value: "true"),
             .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
             .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "40"),
         ])
+        let views = try await viewList
+        let libraries = views.filter { ["movies", "tvshows"].contains($0.collectionType ?? "") }.prefix(12)
         // Per library: much faster than one query across all of them.
         let added = await withTaskGroup(of: [EmbyItem].self) { group in
             for library in libraries {
@@ -156,6 +151,42 @@ struct EmbyClient {
         }
         return HomeSources(watching: try await watching, nextUp: (try? await nextUp) ?? [],
                            played: (try? await played) ?? [], added: added)
+    }
+
+    /// Partly watched, most recent first.
+    func watching() async throws -> [EmbyItem] {
+        try await items("Users/\(account.userId)/Items", Self.cardQuery + [
+            .init(name: "Filters", value: "IsResumable"), .init(name: "Recursive", value: "true"),
+            .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
+            .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "30"),
+        ])
+    }
+
+    /// The next episode of each show being watched.
+    func nextUp() async throws -> [EmbyItem] {
+        try await items("Shows/NextUp", Self.cardQuery + [
+            .init(name: "UserId", value: account.userId), .init(name: "Limit", value: "16"),
+        ])
+    }
+
+    /// A show's episodes that changed since `date`: watched or progress
+    /// (this user's data) or the episode itself (new, or edited). Usually
+    /// none, so a saved show is brought up to date with two tiny answers. A
+    /// server that ignores the filter just returns them all, which merges
+    /// the same.
+    func episodeChanges(of series: String, since date: Date) async throws -> [EmbyItem] {
+        let stamp = ISO8601DateFormatter().string(from: date.addingTimeInterval(-120))
+        let query: [URLQueryItem] = [
+            .init(name: "ParentId", value: series), .init(name: "Recursive", value: "true"),
+            .init(name: "IncludeItemTypes", value: "Episode"), .init(name: "EnableUserData", value: "true"),
+            .init(name: "Fields", value: "Overview,PrimaryImageAspectRatio"),
+            .init(name: "ImageTypeLimit", value: "1"), .init(name: "EnableImageTypes", value: "Primary,Thumb,Backdrop"),
+            .init(name: "EnableTotalRecordCount", value: "false"),
+        ]
+        async let forUser = items("Users/\(account.userId)/Items", query + [.init(name: "MinDateLastSavedForUser", value: stamp)])
+        async let saved = items("Users/\(account.userId)/Items", query + [.init(name: "MinDateLastSaved", value: stamp)])
+        var seen = Set<String>()
+        return try await (forUser + saved).filter { seen.insert($0.id).inserted }
     }
 
     /// Titles like this one (genre, cast, director), as Emby judges it.
