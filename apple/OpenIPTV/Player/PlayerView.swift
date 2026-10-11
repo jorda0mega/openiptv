@@ -284,6 +284,12 @@ struct MoviePlayerView: View {
     @State private var thumbnails: TrickplayImages?
     /// Apple TV: presses add up into one seek, applied after a short pause.
     @State private var pendingSeek: Task<Void, Never>?
+    /// iPhone scrubbing: speed label, and live seeks so the picture follows.
+    @State private var scrubSpeed: String?
+    @State private var lastLiveSeek = Date.distantPast
+    @State private var resumeAfterScrub = false
+    /// Where the current scrub started, for "+1:30" / "−0:45".
+    @State private var scrubOrigin: Double?
     /// Picks original vs a server-converted lower bitrate to avoid stalls.
     @State private var governor: QualityGovernor?
     /// Shown briefly when the quality changes.
@@ -402,17 +408,8 @@ struct MoviePlayerView: View {
     @ViewBuilder private var scrubber: some View {
         VStack(spacing: 6) {
             #if os(iOS)
-            Slider(
-                value: Binding(get: { scrubbing ?? position }, set: { scrubbing = $0; showControls() }),
-                in: 0...max(total, 1),
-                onEditingChanged: { editing in
-                    if !editing, let target = scrubbing {
-                        player?.seek(to: max(0, target - offset))
-                        position = target
-                        scrubbing = nil
-                    }
-                }
-            )
+            Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
+                     onChanged: liveScrub, onCommit: commitScrub)
             #else
             ProgressView(value: min(position, max(total, 1)), total: max(total, 1)).tint(.white)
             #endif
@@ -651,7 +648,10 @@ struct MoviePlayerView: View {
                             .clipShape(.rect(cornerRadius: 10))
                     }
                     Text(timeString(target)).font(.headline.monospacedDigit())
-                    let delta = target - position
+                    if let scrubSpeed {
+                        Text(scrubSpeed).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    let delta = target - (scrubOrigin ?? position)
                     Text((delta < 0 ? "−" : "+") + timeString(abs(delta)))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
@@ -664,9 +664,37 @@ struct MoviePlayerView: View {
         }
     }
 
+    /// While dragging: pause, and move the picture to the nearest keyframe
+    /// a few times a second so it follows the finger.
+    private func liveScrub(_ target: Double) {
+        showControls(autoHide: false)
+        if scrubOrigin == nil { scrubOrigin = position }
+        if !resumeAfterScrub, !paused {
+            resumeAfterScrub = true
+            player?.setPaused(true)
+        }
+        guard Date().timeIntervalSince(lastLiveSeek) > 0.15 else { return }
+        lastLiveSeek = Date()
+        player?.seek(to: max(0, target - offset), exact: false)
+    }
+
+    /// On release: land on the exact second and carry on playing.
+    private func commitScrub(_ target: Double) {
+        player?.seek(to: max(0, target - offset))
+        position = target
+        scrubbing = nil
+        scrubOrigin = nil
+        if resumeAfterScrub {
+            resumeAfterScrub = false
+            player?.setPaused(false)
+        }
+        showControls()
+    }
+
     /// Apple TV: each press moves the target; the seek happens once the
     /// presses stop, so holding skips far without stuttering.
     private func scrub(by seconds: Double) {
+        if scrubOrigin == nil { scrubOrigin = position }
         let target = min(max((scrubbing ?? position) + seconds, 0), max(total, 1))
         scrubbing = target
         pendingSeek?.cancel()
@@ -676,6 +704,7 @@ struct MoviePlayerView: View {
             player?.seek(to: max(0, target - offset))
             position = target
             scrubbing = nil
+            scrubOrigin = nil
         }
     }
 

@@ -129,8 +129,10 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in command(["seek", String(seconds), "relative"]) }
     }
 
-    func seek(to seconds: Double) {
-        queue.async { [self] in command(["seek", String(seconds), "absolute"]) }
+    /// `exact: false` lands on the nearest keyframe: quick enough to follow
+    /// a finger while scrubbing.
+    func seek(to seconds: Double, exact: Bool = true) {
+        queue.async { [self] in command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"]) }
     }
 
     /// Stops playback and frees libmpv; the network connection closes with it.

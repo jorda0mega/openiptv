@@ -70,7 +70,7 @@ struct ShowView: View {
                             .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 6)
-                            .background(.bar)
+                            .background(.regularMaterial)
                             .id("season-\(season.number)")
                     }
                 }

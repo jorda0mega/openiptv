@@ -65,12 +65,14 @@
 		56FC834D455E6F4164EC0918 /* Libavformat.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */; };
 		5DAD3128BF5196E7F19247AC /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 4B0770E7215519F6AED0BA2C /* libz.tbd */; };
 		5F82F737A3D8F30EA5D8D9F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B695C9975B1FB89D1266C09E /* Assets.xcassets */; };
+		60B2D8D9A75B0585552C69E7 /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */; };
 		6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
 		62FC945DE2AA99B3AFD08224 /* Libfribidi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */; };
 		65E5DDEBE26E74B78CA34AB4 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DE7D9201148434BE2E8348A /* CoreVideo.framework */; };
 		668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
 		673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
 		675F87B1E11CC35003D7F57C /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
+		6A41782159CEB6B853714738 /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */; };
 		6AB7EB94E728096236440394 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */; };
 		6C06C2BAAAB78489283A8E78 /* Libcrypto.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B41963718B2429F644A73CAD /* Libcrypto.xcframework */; };
 		6C46F5C97FF574089046DC42 /* Guide.swift in Sources */ = {isa = PBXBuildFile; fileRef = B878EE2EE283C3772241FCF0 /* Guide.swift */; };
@@ -162,6 +164,7 @@
 		04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePipeline.swift; sourceTree = "<group>"; };
 		063896B003501F3D99466FB4 /* EmbyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyClient.swift; sourceTree = "<group>"; };
 		074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = lcms2.xcframework; path = Vendor/lcms2.xcframework; sourceTree = "<group>"; };
+		0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scrubber.swift; sourceTree = "<group>"; };
 		0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK.xcframework; path = Vendor/MoltenVK.xcframework; sourceTree = "<group>"; };
 		12D689360F95FEEBC85A1443 /* libxml2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libxml2.tbd; path = usr/lib/libxml2.tbd; sourceTree = SDKROOT; };
 		17EBB6B2E9C237BA7C90687B /* Libplacebo.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libplacebo.xcframework; path = Vendor/Libplacebo.xcframework; sourceTree = "<group>"; };
@@ -350,6 +353,7 @@
 				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
 				00376995EF16ADF89BDF9B03 /* PlayerView.swift */,
 				B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */,
+				0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */,
 				F539FC96776F18A52123D17E /* Trickplay.swift */,
 			);
 			path = Player;
@@ -698,6 +702,7 @@
 				09D42133B87A08F33EEB1C07 /* PlayerView.swift in Sources */,
 				446773C297E6355CDB46F2A6 /* Preferences.swift in Sources */,
 				B48DB7B4EA35EAD96E9169ED /* QualityGovernor.swift in Sources */,
+				6A41782159CEB6B853714738 /* Scrubber.swift in Sources */,
 				668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */,
 				21673D3FCC00E6AAD2482428 /* SearchView.swift in Sources */,
 				9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */,
@@ -732,6 +737,7 @@
 				05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */,
 				7048D6DC77B943DA816AC4C1 /* Preferences.swift in Sources */,
 				972CFEF9670619E14A53FC6D /* QualityGovernor.swift in Sources */,
+				60B2D8D9A75B0585552C69E7 /* Scrubber.swift in Sources */,
 				CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */,
 				4B7140CB6E5B116E80716522 /* SearchView.swift in Sources */,
 				CBB6BCA84516D445B5F74E8A /* SettingsView.swift in Sources */,
