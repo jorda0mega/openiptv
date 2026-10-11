@@ -289,9 +289,12 @@ struct EmbyClient {
             let kind: String?
             let year: Int?
             let tags: [String: String]?
-            let providers: [String: String]?
+            /// Values can be null on some servers.
+            let providers: [String: String?]?
+            let genres: [String]?
             enum CodingKeys: String, CodingKey {
                 case id = "Id", name = "Name", kind = "Type", year = "ProductionYear", tags = "ImageTags", providers = "ProviderIds"
+                case genres = "Genres"
             }
         }
         struct Page: Decodable {
@@ -301,7 +304,7 @@ struct EmbyClient {
         var parts = URLComponents(url: Self.api(account.serverURL, "Users/\(account.userId)/Items"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [
             .init(name: "Recursive", value: "true"), .init(name: "IncludeItemTypes", value: "Movie,Series"),
-            .init(name: "Fields", value: "ProductionYear,ProviderIds"),
+            .init(name: "Fields", value: "ProductionYear,ProviderIds,Genres"),
             .init(name: "EnableImageTypes", value: "Primary"), .init(name: "ImageTypeLimit", value: "1"),
             .init(name: "EnableUserData", value: "false"), .init(name: "EnableTotalRecordCount", value: withTotal ? "true" : "false"),
             .init(name: "SortBy", value: "SortName"), .init(name: "SortOrder", value: "Ascending"),
@@ -320,10 +323,41 @@ struct EmbyClient {
                 guard let name = entry.name, !name.isEmpty else { return nil }
                 return LibraryEntry(id: entry.id, name: name, kind: entry.kind ?? "Movie", year: entry.year,
                                     imageTag: entry.tags?["Primary"], aspect: nil,
-                                    imdb: EmbyItem.imdb(in: entry.providers), tmdb: EmbyItem.tmdb(in: entry.providers))
+                                    imdb: EmbyItem.imdb(in: entry.providers?.compactMapValues { $0 }),
+                                    tmdb: EmbyItem.tmdb(in: entry.providers?.compactMapValues { $0 }),
+                                    genres: entry.genres.flatMap { $0.isEmpty ? nil : $0 })
             }
             return (entries, page.TotalRecordCount)
         }.value
+    }
+
+    /// Cast and crew of these titles (each one's actors and directors).
+    func people(of ids: [String]) async -> [String: [EmbyItem.Person]] {
+        guard !ids.isEmpty else { return [:] }
+        let found = (try? await items("Users/\(account.userId)/Items", [
+            .init(name: "Ids", value: ids.joined(separator: ",")), .init(name: "Fields", value: "People"),
+            .init(name: "EnableImageTypes", value: "None"), .init(name: "EnableUserData", value: "false"),
+            .init(name: "EnableTotalRecordCount", value: "false"),
+        ])) ?? []
+        return Dictionary(found.map { ($0.id, $0.people ?? []) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// People on the server whose name matches (actors, directors…).
+    func persons(matching term: String, limit: Int = 3) async -> [(id: String, name: String)] {
+        let found = (try? await items("Persons", [
+            .init(name: "SearchTerm", value: term), .init(name: "UserId", value: account.userId),
+            .init(name: "Limit", value: String(limit)), .init(name: "EnableImageTypes", value: "None"),
+            .init(name: "EnableTotalRecordCount", value: "false"),
+        ])) ?? []
+        return found.map { ($0.id, $0.name) }
+    }
+
+    /// Movies and shows with this person in them.
+    func titles(withPerson id: String, limit: Int = 60) async -> [EmbyItem] {
+        (try? await items("Users/\(account.userId)/Items", Self.cardQuery + [
+            .init(name: "PersonIds", value: id), .init(name: "Recursive", value: "true"),
+            .init(name: "IncludeItemTypes", value: "Movie,Series"), .init(name: "Limit", value: String(limit)),
+        ])) ?? []
     }
 
     /// The server's own search, for episodes (which the on-device index

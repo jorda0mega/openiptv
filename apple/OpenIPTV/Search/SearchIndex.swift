@@ -202,6 +202,25 @@ struct SearchCorpus<Item>: @unchecked Sendable {
         return Match(query: q, ranked: scored.map(\.index), size: items.count)
     }
 
+    /// Items whose name contains some of these words (each as the start of
+    /// a word in the name), most words first, then most popular. `matched`
+    /// has bit i set when word i is in the name.
+    func partial(_ words: [String], limit: Int = 300) -> [(index: Int, matched: UInt64)] {
+        let needles = words.prefix(64).map(Self.fold).filter { $0.count > 1 }
+        guard !needles.isEmpty else { return [] }
+        var found: [(index: Int, matched: UInt64, score: Int)] = []
+        for index in items.indices {
+            var mask: UInt64 = 0
+            for (i, needle) in needles.enumerated() where Self.contains(keys[index], needle) { mask |= 1 << UInt64(i) }
+            guard mask != 0 else { continue }
+            found.append((index, mask, mask.nonzeroBitCount * 1000 + boost(index) - min(keys[index].count, 120)))
+        }
+        return found.sorted { $0.score > $1.score }.prefix(limit).map { ($0.index, $0.matched) }
+    }
+
+    /// Popularity score of an item (0 without one).
+    func popularity(_ index: Int) -> Int { boost(index) }
+
     /// Lowercase, accent-free words separated by single spaces, with a
     /// leading space. Apostrophes join ("Grey's" → "greys").
     static func fold(_ text: String) -> [UInt8] {
@@ -256,6 +275,8 @@ struct LibraryEntry: Codable, Hashable, Identifiable, Sendable {
     var imdb: String? = nil
     /// TMDb id, when the server knows it.
     var tmdb: Int? = nil
+    /// "Comedy", "Adventure", … for matching a query's words beyond the name.
+    var genres: [String]? = nil
 
     /// The same for every copy of a title in different libraries (an HD and
     /// a 4K film, say): its IMDb or TMDb id, else its name and year.
@@ -312,8 +333,8 @@ final class LibraryIndex {
         let pages: [Int: [LibraryEntry]]
     }
 
-    /// 2: entries carry IMDb ids. 3: and TMDb ids.
-    private nonisolated static let version = 3
+    /// 2: entries carry IMDb ids. 3: and TMDb ids. 4: and genres.
+    private nonisolated static let version = 4
     private nonisolated static let file = "library-index.json"
     private nonisolated static let pageSize = 5000
     private nonisolated static let parallel = 4

@@ -41,7 +41,21 @@ KNOWN_TITLES = [
     ("a10", "Inception", "Movie", 2010, "tt1375666", "27205"), ("a11", "Weapons", "Movie", 2025, "tt26581740", "1078605"),
     ("a12", "F1", "Movie", 2025, "tt16311594", "911430"), ("a13", "Caught Stealing", "Movie", 2025, None, "1245993"),
     ("k8", "Dune: Part Two", "Movie", 2024, "tt15239678", "693134"), ("k10", "Inception", "Movie", 2010, "tt1375666", "27205"),
+    ("z0", "The Mask of Zorro", "Movie", 1998, "tt0120746", "9342"), ("z1", "The Legend of Zorro", "Movie", 2005, "tt0386140", "1656"),
+    ("z2", "Zorro", "Series", 1990, "tt0098957", None), ("z3", "Zorro", "Movie", 1975, "tt0072448", "18450"),
+    ("z4", "The Mark of Zorro", "Movie", 1940, "tt0032762", None),
 ]
+# Genres and cast (searching "zorro antonio", "zorro comedy", "antonio banderas").
+GENRES = {"z0": ["Action", "Adventure"], "z1": ["Action", "Adventure", "Western"], "z2": ["Action", "Adventure"],
+          "z3": ["Adventure", "Western"], "z4": ["Adventure", "Romance"], "a9": ["Drama", "History"], "a10": ["Action", "Science Fiction"],
+          "a2": ["Comedy"], "a8": ["Science Fiction", "Adventure"]}
+CAST = {"z0": [("Antonio Banderas", "Actor"), ("Anthony Hopkins", "Actor"), ("Catherine Zeta-Jones", "Actor"), ("Martin Campbell", "Director")],
+        "z1": [("Antonio Banderas", "Actor"), ("Catherine Zeta-Jones", "Actor"), ("Martin Campbell", "Director")],
+        "z2": [("Duncan Regehr", "Actor"), ("Patrice Martinez", "Actor")],
+        "z3": [("Alain Delon", "Actor"), ("Stanley Baker", "Actor")],
+        "z4": [("Tyrone Power", "Actor"), ("Linda Darnell", "Actor")],
+        "a9": [("Cillian Murphy", "Actor"), ("Christopher Nolan", "Director")],
+        "a10": [("Leonardo DiCaprio", "Actor"), ("Christopher Nolan", "Director")]}
 
 
 def known_item(entry, played=False):
@@ -51,7 +65,8 @@ def known_item(entry, played=False):
             "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{len(id_) * 7 + int(id_[1:])}"},
             "BackdropImageTags": [f"b{id_}"], "Overview": f"{name} ({year}), a title from the test library.",
             "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
-            "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None}}
+            "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None},
+            "Genres": GENRES.get(id_, [])}
 
 
 KNOWN_BY_ID = {entry[0]: entry for entry in KNOWN_TITLES}
@@ -343,7 +358,8 @@ class Handler(BaseHTTPRequestHandler):
             if video and os.path.exists(video):
                 return self.send_file(video)
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
-        if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q:
+        if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q \
+                and "PersonIds" not in q:
             # The library index: movies plus a few real-looking show names.
             names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office", "The Office (US)"]
             shows = [{"Id": f"s{i}", "Name": n, "Type": "Series", "ProductionYear": 2000 + i,
@@ -371,7 +387,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"Items": [known_item(KNOWN_BY_ID["a9"], played=True)]})
         if path == "/Users/U1/Items" and "Ids" in q:
             items = [known_item(KNOWN_BY_ID[i], played=i == "a9") for i in q["Ids"].split(",") if i in KNOWN_BY_ID]
+            if "People" in q.get("Fields", ""):
+                items = [item | {"People": [{"Name": n, "Type": t} for n, t in CAST.get(item["Id"], [])]} for item in items]
             return self.send({"Items": items})
+        if path == "/Persons":
+            term = q.get("SearchTerm", "").lower()
+            names = sorted({n for cast in CAST.values() for n, _ in cast if term and term in n.lower()})
+            return self.send({"Items": [{"Id": "p-" + n.replace(" ", "_"), "Name": n, "Type": "Person"} for n in names[:int(q.get("Limit", 3))]]})
+        if path == "/Users/U1/Items" and "PersonIds" in q:
+            name = q["PersonIds"][2:].replace("_", " ")
+            return self.send({"Items": [known_item(KNOWN_BY_ID[i]) for i, cast in CAST.items() if any(n == name for n, _ in cast)]})
         if path.startswith("/Items/") and path.endswith("/Similar"):
             like = ["a8", "a10", "a3", "a11", "a12", "a13", "a5", "a9"] if path.split("/")[2].startswith("a") \
                 else ["a7", "a6", "a2", "a0", "a1", "a3"]

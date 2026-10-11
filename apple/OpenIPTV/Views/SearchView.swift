@@ -147,27 +147,32 @@ struct SearchView: View {
             .contentShape(Rectangle())
     }
 
-    /// Local matches straight away, then the server's after a short pause.
+    /// Local matches straight away (name, year, genres), then after a short
+    /// pause the server's: cast checks, people named, episodes.
     private func search() async {
         let q = query
+        let parsed = SearchQuery(q)
         let libraryCorpus = model.library.corpus
         let channelCorpus = model.channelCorpus
         let previousLibrary = libraryMatch, previousChannels = channelMatch
-        let (lm, cm, typoLibrary, typoChannels) = await Task.detached(priority: .userInitiated) {
-            let lm = libraryCorpus.search(q, refining: previousLibrary)
+        let (lm, hits, cm, typoLibrary, typoChannels) = await Task.detached(priority: .userInitiated) {
+            let (lm, hits) = SmartSearch.local(parsed, corpus: libraryCorpus, previous: previousLibrary)
             let cm = channelCorpus.search(q, refining: previousChannels)
-            // Few exact matches: also look for near-misses (typos).
-            let fl = lm.ranked.count < 8 ? libraryCorpus.fuzzy(q).filter { !Set(lm.ranked.prefix(40)).contains($0) } : []
+            // Few matches: also look for near-misses (typos).
+            let shown = Set(hits.map(\.entry.id))
+            let fl = hits.count < 8 && !parsed.title.isEmpty
+                ? libraryCorpus.fuzzy(parsed.title).map { libraryCorpus.items[$0] }.filter { !shown.contains($0.id) } : []
             let fc = cm.ranked.count < 8 ? channelCorpus.fuzzy(q, limit: 30).filter { !Set(cm.ranked.prefix(60)).contains($0) } : []
-            return (lm, cm, fl, fc)
+            return (lm, hits, cm, fl, fc)
         }.value
         guard !Task.isCancelled else { return }
         libraryMatch = lm
         channelMatch = cm
-        library = (Array(lm.ranked.prefix(40)) + typoLibrary).compactMap { model.card(for: libraryCorpus.items[$0], width: thumbWidth) }
+        let typos = typoLibrary.map { SearchHit(entry: $0, pending: []) }
+        library = cards(hits + typos)
         channels = (Array(cm.ranked.prefix(60)) + typoChannels).map { channelCorpus.items[$0] }
         completions = Self.completions(for: q,
-                                       names: (Array(lm.ranked.prefix(12)) + typoLibrary.prefix(6)).map { libraryCorpus.items[$0].name }
+                                       names: (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
                                            + (Array(cm.ranked.prefix(6)) + typoChannels.prefix(3)).map { channelCorpus.items[$0].name })
         serverDone = false
 
@@ -191,10 +196,26 @@ struct SearchView: View {
         }
         try? await Task.sleep(for: .milliseconds(150))
         guard !Task.isCancelled else { return }
-        let cards = await model.serverSearch(trimmed, cardWidth: thumbWidth)
+        async let refined = model.refine(parsed, hits: hits)
+        let found = await model.serverSearch(trimmed, cardWidth: thumbWidth)
+        let (confirmed, people) = await refined
         guard !Task.isCancelled else { return }
-        serverCards = cards
+        // Cast checks settled; then titles with people the query names.
+        var titles = Set(confirmed.map(\.entry.titleKey) + typos.map(\.entry.titleKey))
+        let withPeople = people.filter { titles.insert($0.item.titleKey).inserted }
+            .compactMap { model.card(for: $0.item, width: thumbWidth, with: $0.person) }
+        library = cards(confirmed) + withPeople + cards(typos)
+        if confirmed.count != hits.count || !people.isEmpty {
+            // Suggest what matched the whole query, not just its title words.
+            completions = Self.completions(for: q, names: (confirmed.prefix(12) + typos.prefix(6)).map(\.entry.name)
+                                               + people.prefix(6).map(\.item.name) + channels.prefix(3).map(\.name))
+        }
+        serverCards = found
         serverDone = true
+    }
+
+    private func cards(_ hits: [SearchHit]) -> [Card] {
+        hits.compactMap { model.card(for: $0.entry, width: thumbWidth, with: $0.person) }
     }
 
     /// Up to three full titles for what's typed, best match first (the

@@ -45,6 +45,15 @@ struct EmbyItem: Decodable, Hashable {
     var providerIds: [String: String]?
     /// ISO 8601: when the server added it.
     var dateCreated: String?
+    /// Cast and crew, when asked for (`Fields=People`).
+    var people: [Person]?
+
+    struct Person: Decodable, Hashable {
+        var name: String
+        /// "Actor", "Director", "Writer", "GuestStar", …
+        var type: String?
+        enum CodingKeys: String, CodingKey { case name = "Name", type = "Type" }
+    }
 
     /// IMDb title id ("tt…"), when the server has matched one.
     var imdb: String? { Self.imdb(in: providerIds) }
@@ -81,6 +90,7 @@ struct EmbyItem: Decodable, Hashable {
         case overview = "Overview"
         case providerIds = "ProviderIds"
         case dateCreated = "DateCreated"
+        case people = "People"
     }
 
     init(from decoder: Decoder) throws {
@@ -111,14 +121,24 @@ struct EmbyItem: Decodable, Hashable {
         channelPrimaryImageTag = try? c.decodeIfPresent(String.self, forKey: .channelPrimaryImageTag)
         userData = try? c.decodeIfPresent(UserData.self, forKey: .userData)
         overview = try? c.decodeIfPresent(String.self, forKey: .overview)
-        providerIds = try? c.decodeIfPresent([String: String].self, forKey: .providerIds)
+        // Values can be null on some servers; keep the ones that are there.
+        providerIds = (try? c.decodeIfPresent([String: String?].self, forKey: .providerIds))?.compactMapValues { $0 }
         dateCreated = try? c.decodeIfPresent(String.self, forKey: .dateCreated)
+        people = (try? c.decodeIfPresent([Lenient<Person>].self, forKey: .people))?.compactMap(\.value)
     }
 }
 
 struct CardImage: Codable, Hashable {
     let url: String
     let contain: Bool
+}
+
+extension Card {
+    /// The same card with more after its subtitle ("… · with Antonio Banderas").
+    func adding(_ note: String) -> Card {
+        Card(id: id, kind: kind, title: title, subtitle: [subtitle, note].compactMap(\.self).joined(separator: " · "),
+             images: images, progress: progress, playable: playable, episodeId: episodeId)
+    }
 }
 
 struct Card: Codable, Hashable, Identifiable {

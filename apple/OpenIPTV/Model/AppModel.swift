@@ -438,8 +438,62 @@ final class AppModel {
         return cards
     }
 
-    func card(for entry: LibraryEntry, width: Int) -> Card? {
-        emby?.card(for: entry, width: width, rating: library.rating(entry))
+    func card(for entry: LibraryEntry, width: Int, with person: String? = nil) -> Card? {
+        guard let card = emby?.card(for: entry, width: width, rating: library.rating(entry)) else { return nil }
+        return person.map { card.adding("with " + $0) } ?? card
+    }
+
+    /// A search card for a title found through someone in it.
+    func card(for item: EmbyItem, width: Int, with person: String) -> Card? {
+        guard let emby else { return nil }
+        let base = emby.card(item, context: .poster, shape: .portrait, width: width)
+        let details = [item.kind == "Series" ? "Show" : "Movie", item.productionYear.map(String.init),
+                       library.ratings?.rating(item.imdb).map(IMDbRatings.label), "with " + person]
+        return Card(id: base.id, kind: base.kind, title: base.title, subtitle: details.compactMap(\.self).joined(separator: " · "),
+                    images: base.images, progress: nil, playable: base.playable)
+    }
+
+    // MARK: Search across cast
+
+    /// Actors and directors of titles checked so far this session.
+    private var castCache: [String: [String]] = [:]
+
+    /// The server part of a search. Titles waiting for a cast check keep
+    /// only if each leftover word is in an actor's or director's name
+    /// (noting whom), and people named by the query bring their titles
+    /// ("antonio banderas"), the asked year's and the most popular first.
+    func refine(_ query: SearchQuery, hits: [SearchHit]) async -> (hits: [SearchHit], people: [(item: EmbyItem, person: String)]) {
+        guard let emby else { return (hits.filter { $0.pending.isEmpty }, []) }
+        let unknown = hits.filter { !$0.pending.isEmpty && castCache[$0.entry.id] == nil }.map(\.entry.id)
+        async let castLists = emby.people(of: Array(unknown.prefix(40)))
+        async let persons = query.words.isEmpty ? [] : emby.persons(matching: query.title)
+        for (id, people) in await castLists {
+            castCache[id] = people.filter { [nil, "Actor", "Director", "GuestStar"].contains($0.type) }.prefix(25).map(\.name)
+        }
+        var refined: [SearchHit] = []
+        for var hit in hits {
+            guard !hit.pending.isEmpty else { refined.append(hit); continue }
+            guard let cast = castCache[hit.entry.id] else { continue }
+            let found = hit.pending.compactMap { word in cast.first { SearchQuery.startsWord(word, in: $0) } }
+            guard found.count == hit.pending.count else { continue }
+            hit.pending = []
+            hit.person = found.first
+            refined.append(hit)
+        }
+        var people: [(item: EmbyItem, person: String)] = []
+        if let person = await persons.first {
+            let popularity = library.popularity
+            people = await emby.titles(withPerson: person.id)
+                .map { (item: $0, person: person.name) }
+                .sorted {
+                    let a = query.yearDistance($0.item.productionYear), b = query.yearDistance($1.item.productionYear)
+                    if a != b { return a < b }
+                    let pa = popularity?.popularity($0.item.tmdb, $0.item.kind == "Series" ? .show : .movie) ?? 0
+                    let pb = popularity?.popularity($1.item.tmdb, $1.item.kind == "Series" ? .show : .movie) ?? 0
+                    return pa > pb
+                }
+        }
+        return (refined, people)
     }
 
     func playable(_ channel: LiveChannel) async throws -> PlayableStream {
