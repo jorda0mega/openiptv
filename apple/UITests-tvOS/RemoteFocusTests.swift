@@ -36,12 +36,14 @@ final class RemoteFocusTests: XCTestCase {
         app.launch()
         sleep(6)
         print("FOCUS start: \(focused())")
+        // From the tab bar to the keyboard, then into the results.
+        press(.down, "to keyboard")
         press(.down, "down")
         press(.right, "right")
         press(.down, "down to channels")
         press(.up, "up to posters")
         press(.up, "up to keyboard")
-        press(.up, "up again")
+        press(.up, "up again (tab bar)")
     }
 
     /// The player's remote: open a film from Search, play it, click right
@@ -51,6 +53,7 @@ final class RemoteFocusTests: XCTestCase {
         app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
         app.launch()
         sleep(6)
+        press(.down, "to keyboard")
         press(.down, "to first film")
         press(.select, "open film")
         sleep(2)
@@ -83,6 +86,7 @@ final class RemoteFocusTests: XCTestCase {
         app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
         app.launch()
         sleep(6)
+        press(.down, "to keyboard")
         press(.down, "to the posters")
         for _ in 0..<8 where !focused().contains(", Show") { press(.right, "looking for the show") }
         press(.select, "open show")
@@ -93,5 +97,21 @@ final class RemoteFocusTests: XCTestCase {
         press(.select, "pause to see time")
         press(.menu, "menu 1")
         press(.menu, "menu 2")
+    }
+
+    /// Live TV: from the tab bar to the shelf row, pick another shelf, down
+    /// into its channels, and back up to the row.
+    func testLiveShelves() {
+        // No -tvLiveTab: a launch argument would pin the shelf.
+        app.launchArguments = ["-tvTab", "live"]
+        app.launch()
+        sleep(6)
+        press(.down, "to shelf row")
+        press(.right, "next shelf")
+        press(.select, "choose it")
+        press(.down, "into channels")
+        press(.down, "further down")
+        press(.up, "up")
+        press(.up, "up to row")
     }
 }

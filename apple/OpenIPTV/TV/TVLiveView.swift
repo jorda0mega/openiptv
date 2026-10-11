@@ -1,23 +1,32 @@
 #if os(tvOS)
 import SwiftUI
 
-/// One Live TV page in the sidebar: a shelf (Sports, News…), Favourites,
-/// Local or the provider's own categories, as grids of cards like the TV
-/// app's: a channel shows its logo, name and what's on now; a game its
-/// title, league and time, LIVE once it's started.
+/// Live TV: a row of shelves at the top (Favourites, Sports, Local, News…,
+/// the provider's own categories last), then the chosen one as grids of
+/// cards like the TV app's: a channel shows its logo, name and what's on
+/// now; a game its title, league and time, LIVE once it's started. The row
+/// scrolls away with the page; Up brings it back.
 struct TVLiveView: View {
     static let categoriesID = "tv:categories"
 
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
-    let id: String
     @Binding var playing: PlayerItem?
+    @AppStorage("tvLiveTab") private var chosen = ""
+    @FocusState private var focusedShelf: String?
+
+    /// The chosen shelf, or the first while none is (or it's gone).
+    private var id: String {
+        tabs.contains { $0.id == chosen } ? chosen : tabs.first?.id ?? ""
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 50) {
+                    shelfRow
                     content
+                        .id(id)
                 }
                 .padding(.vertical, 40)
             }
@@ -70,6 +79,60 @@ struct TVLiveView: View {
 
     private func entries(_ channels: [LiveChannel]) -> [LiveOrganizer.Entry] {
         channels.map { LiveOrganizer.Entry(title: model.title(of: $0), channels: [$0]) }
+    }
+
+    private var shelfRow: some View {
+        let current = id
+        return ScrollView(.horizontal) {
+            HStack(spacing: 16) {
+                ForEach(tabs, id: \.id) { tab in
+                    Button { chosen = tab.id } label: {
+                        Label(tab.title, systemImage: tab.icon)
+                    }
+                    .buttonStyle(TVChipStyle(selected: tab.id == current))
+                    .focused($focusedShelf, equals: tab.id)
+                }
+            }
+            .padding(.horizontal, 90)
+            .padding(.vertical, 12)
+        }
+        .scrollClipDisabled()
+        .scrollIndicators(.hidden)
+        // Up from any card comes back to the row, not just the card above,
+        // and lands on the chosen shelf (from the tab bar too).
+        .focusSection()
+        .defaultFocus($focusedShelf, current, priority: .userInitiated)
+    }
+
+    /// Favourites, the shelves with Local after Sports, and the provider's
+    /// own categories last.
+    private var tabs: [(id: String, title: String, icon: String)] {
+        var tabs: [(id: String, title: String, icon: String)] = []
+        if !prefs.favorites.isEmpty { tabs.append((AppModel.favoritesID, "Favourites", "star")) }
+        for shelf in model.liveLibrary.shelves {
+            tabs.append((shelf.id, shelf.title, Self.icon(shelf.id)))
+            if shelf.id == LiveOrganizer.sportsID { tabs.append((AppModel.localID, "Local", "antenna.radiowaves.left.and.right")) }
+        }
+        if !model.liveLibrary.shelves.contains(where: { $0.id == LiveOrganizer.sportsID }), !model.sources.iptv.isEmpty {
+            tabs.insert((AppModel.localID, "Local", "antenna.radiowaves.left.and.right"), at: tabs.isEmpty ? 0 : min(1, tabs.count))
+        }
+        if !model.categories.isEmpty { tabs.append((Self.categoriesID, "All Categories", "list.bullet")) }
+        return tabs
+    }
+
+    private static func icon(_ shelf: String) -> String {
+        switch shelf {
+        case LiveOrganizer.sportsID: "sportscourt"
+        case "shelf:news": "newspaper"
+        case "shelf:entertainment": "tv"
+        case "shelf:movies": "film"
+        case "shelf:kids": "figure.and.child.holdinghands"
+        case "shelf:nonstop": "infinity"
+        case "shelf:music": "music.note"
+        case "shelf:radio": "radio"
+        case LiveOrganizer.internationalID: "globe"
+        default: "ellipsis.circle"
+        }
     }
 }
 

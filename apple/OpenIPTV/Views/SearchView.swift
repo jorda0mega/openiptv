@@ -192,38 +192,17 @@ struct SearchView: View {
     #endif
 
     #if os(tvOS)
-    @Namespace private var tvFocus
-    @Environment(\.resetFocus) private var resetFocus
-
-    /// Up from the top row of results: back to the keyboard (the remote
-    /// won't cross from SwiftUI into the UIKit keyboard by itself).
-    private func upToKeyboard(_ direction: MoveCommandDirection) {
-        if direction == .up { resetFocus(in: tvFocus) }
-    }
-
-    /// Which row is at the top of the results.
-    private var topRow: Int {
-        !moviesAndShows.isEmpty ? 0 : !episodes.isEmpty ? 1 : !onTV.isEmpty ? 2 : 3
-    }
-
-    /// Apple TV, like Apple's TV app: the keyboard row across the top, then
-    /// the results as rows of cards: titles, episodes, what's on, channels.
-    /// Titles open their page; episodes, programmes and channels play.
+    /// Apple TV, like Apple's TV app: the system search field and keyboard
+    /// row under the tab bar, then the results as rows of cards: titles,
+    /// episodes, what's on, channels. Titles open their page; episodes,
+    /// programmes and channels play.
     private var tvBody: some View {
         NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                TVSearchContainer(query: $query, prompt: "Movies, shows, channels, what's on")
-                    // The field and the keyboard row; UIKit keeps its own
-                    // side margins (the hint at the field's end ran off the
-                    // screen inside SwiftUI's).
-                    .frame(height: 300)
-                    .ignoresSafeArea(edges: .horizontal)
-                    .prefersDefaultFocus(in: tvFocus)
-                tvResults
-            }
-            .focusScope(tvFocus)
-            .navigationDestination(for: ShowRoute.self) { TVShowView(route: $0, playing: $playing) }
-            .navigationDestination(for: MovieRoute.self) { TVMovieView(route: $0, playing: $playing) }
+            tvResults
+                .searchable(text: $query, prompt: "Movies, shows, channels, what's on")
+                .autocorrectionDisabled()
+                .navigationDestination(for: ShowRoute.self) { TVShowView(route: $0, playing: $playing) }
+                .navigationDestination(for: MovieRoute.self) { TVMovieView(route: $0, playing: $playing) }
         }
         .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") { await search() }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
@@ -238,12 +217,10 @@ struct SearchView: View {
             LazyVStack(alignment: .leading, spacing: 30) {
                 if !moviesAndShows.isEmpty {
                     TVPosterRow(title: "Movies & Shows", cards: moviesAndShows) { openDetails($0) }
-                        .onMoveCommand(perform: topRow == 0 ? upToKeyboard : nil)
                 }
                 if !episodes.isEmpty {
                     TVContinueRow(row: HomeRow(title: "Episodes", shape: "landscape", aspect: 16.0 / 9, cards: episodes),
                                   loadingCard: loadingCard, play: { play($0) }, open: { openDetails($0) })
-                        .onMoveCommand(perform: topRow == 1 ? upToKeyboard : nil)
                 }
                 if !onTV.isEmpty {
                     TVShelf(title: "On TV") {
@@ -257,7 +234,6 @@ struct SearchView: View {
                             .buttonStyle(.card)
                         }
                     }
-                    .onMoveCommand(perform: topRow == 2 ? upToKeyboard : nil)
                 }
                 if !channels.isEmpty {
                     TVShelf(title: "Channels") {
@@ -272,7 +248,6 @@ struct SearchView: View {
                             .onDisappear { model.disappeared(channel.id) }
                         }
                     }
-                    .onMoveCommand(perform: topRow == 3 ? upToKeyboard : nil)
                 }
             }
             .padding(.vertical, 20)

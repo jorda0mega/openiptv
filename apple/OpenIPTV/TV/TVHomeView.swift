@@ -1,13 +1,15 @@
 #if os(tvOS)
 import SwiftUI
 
-/// Apple TV: laid out like Apple's TV app. A sidebar (Search, Home, Live
-/// TV by shelf, Settings) over full-screen pages.
+/// Apple TV: Search, Home, Live TV and Settings in the top tab bar, like
+/// Max, Prime Video and Paramount+. It hides as you move down a page and
+/// comes back with Up or Menu, so it never covers a page's own controls
+/// (tvOS 26's sidebar button sat on top of them). Live TV's shelves are a
+/// row at the top of its page.
 struct TVRootView: View {
-    @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     @Binding var playing: PlayerItem?
     @AppStorage("tvTab") private var selection = "home"
+    @AppStorage("tvLiveTab") private var liveTab = ""
 
     var body: some View {
         TabView(selection: $selection) {
@@ -17,48 +19,19 @@ struct TVRootView: View {
             Tab("Home", systemImage: "house", value: "home") {
                 TVHomeView(playing: $playing)
             }
-            TabSection("Live TV") {
-                ForEach(liveTabs, id: \.id) { tab in
-                    Tab(tab.title, systemImage: tab.icon, value: tab.id) {
-                        TVLiveView(id: tab.id, playing: $playing)
-                    }
-                }
+            Tab("Live TV", systemImage: "dot.radiowaves.left.and.right", value: "live") {
+                TVLiveView(playing: $playing)
             }
             Tab("Settings", systemImage: "gearshape", value: "settings") {
                 SettingsView()
             }
         }
-        .tabViewStyle(.sidebarAdaptable)
-    }
-
-    /// Favourites, the shelves with Local after Sports, and the provider's
-    /// own categories last.
-    private var liveTabs: [(id: String, title: String, icon: String)] {
-        var tabs: [(id: String, title: String, icon: String)] = []
-        if !prefs.favorites.isEmpty { tabs.append((AppModel.favoritesID, "Favourites", "star")) }
-        for shelf in model.liveLibrary.shelves {
-            tabs.append((shelf.id, shelf.title, Self.icon(shelf.id)))
-            if shelf.id == LiveOrganizer.sportsID { tabs.append((AppModel.localID, "Local", "antenna.radiowaves.left.and.right")) }
-        }
-        if !model.liveLibrary.shelves.contains(where: { $0.id == LiveOrganizer.sportsID }), !model.sources.iptv.isEmpty {
-            tabs.insert((AppModel.localID, "Local", "antenna.radiowaves.left.and.right"), at: tabs.isEmpty ? 0 : min(1, tabs.count))
-        }
-        if !model.categories.isEmpty { tabs.append((TVLiveView.categoriesID, "All Categories", "list.bullet")) }
-        return tabs
-    }
-
-    private static func icon(_ shelf: String) -> String {
-        switch shelf {
-        case LiveOrganizer.sportsID: "sportscourt"
-        case "shelf:news": "newspaper"
-        case "shelf:entertainment": "tv"
-        case "shelf:movies": "film"
-        case "shelf:kids": "figure.and.child.holdinghands"
-        case "shelf:nonstop": "infinity"
-        case "shelf:music": "music.note"
-        case "shelf:radio": "radio"
-        case LiveOrganizer.internationalID: "globe"
-        default: "ellipsis.circle"
+        .onAppear {
+            // A Live TV shelf chosen when each was its own tab in the sidebar.
+            if !["search", "home", "live", "settings"].contains(selection) {
+                liveTab = selection
+                selection = "live"
+            }
         }
     }
 }
