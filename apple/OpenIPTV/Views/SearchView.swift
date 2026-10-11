@@ -12,6 +12,7 @@ struct SearchView: View {
 
     @State private var query = ""
     @State private var scope: Scope = .all
+    @State private var path = NavigationPath()
 
     /// What the results show: everything, or one kind. Episodes come under
     /// Shows (an episode is part of a show).
@@ -65,7 +66,7 @@ struct SearchView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if scope == .all, !completions.isEmpty {
                     Section {
@@ -132,6 +133,7 @@ struct SearchView: View {
             .overlay { emptyState }
             .navigationTitle("Search")
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
+            .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             #if os(iOS)
             // One field with one clear button, instead of the system bar's
             // clear and close buttons side by side. Scrolling the results
@@ -244,32 +246,92 @@ struct SearchView: View {
     }
 
     /// Shows open their page; movies and episodes play.
+    /// iPhone: the picture plays it straight away (a show from the episode
+    /// you're up to); the rest of the row opens its details (a film's page,
+    /// a show's page, or an episode's show at that episode).
     @ViewBuilder private func result(_ card: Card, wide: Bool) -> some View {
+        #if os(iOS)
+        HStack(spacing: 12) {
+            Button { play(card) } label: { thumbnail(card, wide: wide, playBadge: true) }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Play \(card.title)")
+            Button { openDetails(card) } label: {
+                HStack(spacing: 8) {
+                    info(card)
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(card.title)
+            .accessibilityValue(card.subtitle ?? "")
+            .accessibilityHint("Shows details")
+        }
+        .rowForeground()
+        #else
         if card.kind == "Series" {
             NavigationLink(value: ShowRoute(id: card.id, title: card.title)) { resultLabel(card, wide: wide) }
         } else {
             Button { play(card) } label: { resultLabel(card, wide: wide) }
                 .buttonStyle(.plain)
         }
+        #endif
     }
 
     private func resultLabel(_ card: Card, wide: Bool) -> some View {
-            HStack(spacing: 12) {
-                let width = wide ? Layout.searchThumbWide : Layout.searchThumb
-                CoverImage(images: card.images, title: card.title)
-                    .frame(width: width, height: wide ? width * 9 / 16 : width * 1.5)
-                    .clipShape(.rect(cornerRadius: 6))
-                    .overlay { if loadingCard == card.id { ProgressView() } }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(card.title).font(.body.weight(.semibold)).lineLimit(1)
-                    if let subtitle = card.subtitle {
-                        Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    }
+        HStack(spacing: 12) {
+            thumbnail(card, wide: wide, playBadge: false)
+            info(card)
+        }
+        .rowForeground()
+        .contentShape(Rectangle())
+    }
+
+    private func thumbnail(_ card: Card, wide: Bool, playBadge: Bool) -> some View {
+        let width = wide ? Layout.searchThumbWide : Layout.searchThumb
+        return CoverImage(images: card.images, title: card.title)
+            .frame(width: width, height: wide ? width * 9 / 16 : width * 1.5)
+            .clipShape(.rect(cornerRadius: 6))
+            .overlay {
+                if loadingCard == card.id {
+                    ProgressView()
+                } else if playBadge {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: wide ? 14 : 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: wide ? 32 : 26, height: wide ? 32 : 26)
+                        .background(.black.opacity(0.55), in: .circle)
+                        .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 1))
                 }
-                Spacer(minLength: 0)
             }
-            .rowForeground()
-            .contentShape(Rectangle())
+    }
+
+    private func info(_ card: Card) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                // Plain colours, not the button tint.
+                Text(card.title).font(.body.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
+                if let subtitle = card.subtitle {
+                    Text(subtitle).font(.subheadline).foregroundStyle(Color.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func openDetails(_ card: Card) {
+        switch card.kind {
+        case "Series":
+            path.append(ShowRoute(id: card.id, title: card.title))
+        case "Episode":
+            if let series = card.seriesId {
+                path.append(ShowRoute(id: series, title: card.title, episodeId: card.id))
+            } else {
+                play(card)
+            }
+        default:
+            path.append(MovieRoute(id: card.id, title: card.title))
+        }
     }
 
     /// Local matches straight away (name, year, genres), then after a short

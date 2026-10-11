@@ -223,8 +223,10 @@ struct EmbyClient {
         let (title, subtitle) = Self.titles(item)
         let progress = item.userData?.playedPercentage.flatMap { $0 > 0 && $0 < 100 ? $0 : nil }
         let playable = ["Movie", "Episode", "Video", "MusicVideo", "Series", "Season"].contains(item.kind)
-        return Card(id: item.id, kind: item.kind, title: title, subtitle: subtitle,
-                    images: images, progress: progress, playable: playable)
+        var card = Card(id: item.id, kind: item.kind, title: title, subtitle: subtitle,
+                        images: images, progress: progress, playable: playable)
+        if item.kind == "Episode" { card.seriesId = item.seriesId }
+        return card
     }
 
     // MARK: Shows
@@ -233,6 +235,14 @@ struct EmbyClient {
     func item(_ id: String) async throws -> EmbyItem {
         try await get("Users/\(account.userId)/Items/\(id)", [
             .init(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProductionYear,ProviderIds"),
+        ])
+    }
+
+    /// A film's details page: story, genres, cast and crew, artwork and
+    /// what this user has watched of it.
+    func details(_ id: String) async -> EmbyItem? {
+        try? await get("Users/\(account.userId)/Items/\(id)", [
+            .init(name: "Fields", value: "Overview,Genres,People,ProviderIds,ProductionYear,PrimaryImageAspectRatio"),
         ])
     }
 

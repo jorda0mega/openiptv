@@ -47,6 +47,7 @@ struct EmbyItem: Decodable, Hashable {
     var dateCreated: String?
     /// Cast and crew, when asked for (`Fields=People`).
     var people: [Person]?
+    var genres: [String]?
 
     struct Person: Decodable, Hashable {
         var name: String
@@ -91,6 +92,7 @@ struct EmbyItem: Decodable, Hashable {
         case providerIds = "ProviderIds"
         case dateCreated = "DateCreated"
         case people = "People"
+        case genres = "Genres"
     }
 
     init(from decoder: Decoder) throws {
@@ -125,6 +127,7 @@ struct EmbyItem: Decodable, Hashable {
         providerIds = (try? c.decodeIfPresent([String: String?].self, forKey: .providerIds))?.compactMapValues { $0 }
         dateCreated = try? c.decodeIfPresent(String.self, forKey: .dateCreated)
         people = (try? c.decodeIfPresent([Lenient<Person>].self, forKey: .people))?.compactMap(\.value)
+        genres = try? c.decodeIfPresent([String].self, forKey: .genres)
     }
 }
 
@@ -137,7 +140,7 @@ extension Card {
     /// The same card with more after its subtitle ("… · with Antonio Banderas").
     func adding(_ note: String) -> Card {
         Card(id: id, kind: kind, title: title, subtitle: [subtitle, note].compactMap(\.self).joined(separator: " · "),
-             images: images, progress: progress, playable: playable, episodeId: episodeId)
+             images: images, progress: progress, playable: playable, episodeId: episodeId, seriesId: seriesId)
     }
 }
 
@@ -151,6 +154,8 @@ struct Card: Codable, Hashable, Identifiable {
     let playable: Bool
     /// For a show in Continue Watching / Next Up: the episode to resume.
     var episodeId: String? = nil
+    /// For an episode: its show, to open from search.
+    var seriesId: String? = nil
 }
 
 struct HomeRow: Codable, Hashable, Identifiable {
