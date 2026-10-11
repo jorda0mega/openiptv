@@ -2,6 +2,9 @@ import SwiftUI
 
 @main
 struct OpenIPTVApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
     @State private var model = AppModel()
     @State private var prefs = Preferences()
 

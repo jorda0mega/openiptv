@@ -15,13 +15,20 @@ enum PlayerItem: Identifiable {
 }
 
 struct PlayerScreen: View {
+    @Environment(Preferences.self) private var prefs
     let item: PlayerItem
 
     var body: some View {
-        switch item {
-        case let .live(channels, index): LivePlayerView(channels: channels, index: index)
-        case let .vod(playback): MoviePlayerView(playback: playback)
+        Group {
+            switch item {
+            case let .live(channels, index): LivePlayerView(channels: channels, index: index)
+            case let .vod(playback): MoviePlayerView(playback: playback)
+            }
         }
+        #if os(iOS)
+        .onAppear { PlayerOrientation.shared.playerAppeared(followTilt: prefs.rotateWithPhone) }
+        .onDisappear { PlayerOrientation.shared.playerDisappeared() }
+        #endif
     }
 }
 
@@ -128,6 +135,9 @@ struct LivePlayerView: View {
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .glassEffect(.regular, in: .capsule)
+                    #if os(iOS)
+                    GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
+                    #endif
                     #if os(iOS)
                     if error != nil {
                         GlassIconButton(systemName: "arrow.clockwise", label: "Try again") { play() }
@@ -375,6 +385,9 @@ struct MoviePlayerView: View {
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .glassEffect(.regular, in: .capsule)
+                    #if os(iOS)
+                    GlassIconButton(systemName: "rotate.right", label: "Rotate") { PlayerOrientation.shared.toggle() }
+                    #endif
                 }
             }
             Spacer()

@@ -97,6 +97,7 @@
 		71899403CBD5CEFA439BEEBA /* TabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036E1882E4281173C09E8777 /* TabStrip.swift */; };
 		745069F235FB22D844A7CC35 /* Libssl.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00EF07025216C13B1F3C7908 /* Libssl.xcframework */; };
 		760E273F99B961DCBF917D46 /* MovieView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E895C7A337E5874B38A8020C /* MovieView.swift */; };
+		77EDE39EF1FBF524AD0B54A7 /* PlayerOrientation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */; };
 		7883F5821E1388ECFF8BAA77 /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
 		7E8E70B831C4BE5F7BEBC6F6 /* MPVPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4C4ECAD884618771521E44 /* MPVPlayer.swift */; };
 		7FD76CBB8EC351891CEEA1B6 /* Libbluray.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5D24524038DF8138B881F54 /* Libbluray.xcframework */; };
@@ -137,6 +138,7 @@
 		B7E430E49C8BD6FC0A114352 /* nettle.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57788799C7CF36103C03E61C /* nettle.xcframework */; };
 		B845A3EB0B884AD2D73E3AEB /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */; };
 		B8640E66EFE6670F23CE9788 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */; };
+		BD094BC015A36CC339757823 /* PlayerOrientation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */; };
 		BE03B6B036990782A2E60BB6 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E6BB902BA3158069CE35BE75 /* QuartzCore.framework */; };
 		BEA7D82FFF28D87DD9B16601 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D277F32EC509804119BFFFC4 /* VideoToolbox.framework */; };
 		C1C8F5F69D4DC48190F37C1E /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 188FE6D60C2DA8B042E0772F /* libc++.tbd */; };
@@ -187,6 +189,7 @@
 		04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePipeline.swift; sourceTree = "<group>"; };
 		063896B003501F3D99466FB4 /* EmbyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyClient.swift; sourceTree = "<group>"; };
 		074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = lcms2.xcframework; path = Vendor/lcms2.xcframework; sourceTree = "<group>"; };
+		098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerOrientation.swift; sourceTree = "<group>"; };
 		0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scrubber.swift; sourceTree = "<group>"; };
 		0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK.xcframework; path = Vendor/MoltenVK.xcframework; sourceTree = "<group>"; };
 		12D689360F95FEEBC85A1443 /* libxml2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libxml2.tbd; path = usr/lib/libxml2.tbd; sourceTree = SDKROOT; };
@@ -385,6 +388,7 @@
 			children = (
 				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
 				F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */,
+				098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */,
 				00376995EF16ADF89BDF9B03 /* PlayerView.swift */,
 				B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */,
 				0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */,
@@ -750,6 +754,7 @@
 				10831580B6F72D43D2609FD1 /* Onboarding.swift in Sources */,
 				0DE6D69F6DA84444642E07C3 /* OpenIPTVApp.swift in Sources */,
 				EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */,
+				77EDE39EF1FBF524AD0B54A7 /* PlayerOrientation.swift in Sources */,
 				09D42133B87A08F33EEB1C07 /* PlayerView.swift in Sources */,
 				446773C297E6355CDB46F2A6 /* Preferences.swift in Sources */,
 				B48DB7B4EA35EAD96E9169ED /* QualityGovernor.swift in Sources */,
@@ -796,6 +801,7 @@
 				673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */,
 				CBE34968B8E97EBD13B63FB1 /* OpenIPTVApp.swift in Sources */,
 				461BF742965E3E5A547A1485 /* Platform.swift in Sources */,
+				BD094BC015A36CC339757823 /* PlayerOrientation.swift in Sources */,
 				05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */,
 				7048D6DC77B943DA816AC4C1 /* Preferences.swift in Sources */,
 				972CFEF9670619E14A53FC6D /* QualityGovernor.swift in Sources */,

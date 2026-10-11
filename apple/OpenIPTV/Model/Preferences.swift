@@ -52,6 +52,8 @@ final class Preferences {
     /// Where local channels come from (set in Settings, or from the
     /// iPhone's approximate location).
     var area: LocalArea? { didSet { save() } }
+    /// Turn videos with the phone even when Rotation Lock is on (iPhone).
+    var rotateWithPhone: Bool { didSet { save() } }
 
     private struct Stored: Codable {
         var playerProfile = PlayerProfile.fastStart
@@ -61,6 +63,7 @@ final class Preferences {
         var hiddenCategories: Set<String> = []
         var hiddenRows: Set<String> = []
         var area: LocalArea?
+        var rotateWithPhone: Bool? = true
     }
 
     // Favourites hold channel names, logos and stream references. Xtream and
@@ -78,6 +81,7 @@ final class Preferences {
         hiddenCategories = stored.hiddenCategories
         hiddenRows = stored.hiddenRows
         area = stored.area
+        rotateWithPhone = stored.rotateWithPhone ?? true
     }
 
     func isFavorite(_ channel: LiveChannel) -> Bool { favorites.contains { $0.id == channel.id } }
@@ -98,7 +102,8 @@ final class Preferences {
             favorites: favorites.map(\.withoutSecrets),
             hiddenCategories: hiddenCategories,
             hiddenRows: hiddenRows,
-            area: area
+            area: area,
+            rotateWithPhone: rotateWithPhone
         )
         if let data = try? JSONEncoder().encode(stored) {
             UserDefaults.standard.set(data, forKey: Self.key)

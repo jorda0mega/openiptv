@@ -171,6 +171,23 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    /// The video surface changed size (the phone turned). libmpv's Metal
+    /// output only measures its surface when the picture's format changes,
+    /// so nudge the aspect ratio by a hundredth of a percent (invisible) and
+    /// put it back: each change makes it lay the picture out for the new size.
+    func surfaceChanged() {
+        queue.async { [self] in
+            guard let mpv else { return }
+            var aspect: Double = 0
+            guard mpv_get_property(mpv, "video-params/aspect", MPV_FORMAT_DOUBLE, &aspect) >= 0, aspect > 0 else { return }
+            mpv_set_property_string(mpv, "video-aspect-override", String(aspect * 1.0001))
+            queue.asyncAfter(deadline: .now() + 0.12) { [self] in
+                guard let current = self.mpv else { return }
+                mpv_set_property_string(current, "video-aspect-override", "-1")
+            }
+        }
+    }
+
     func setPaused(_ paused: Bool) {
         queue.async { [self] in
             guard let mpv else { return }
@@ -308,9 +325,12 @@ final class MPVPlayer: @unchecked Sendable {
 /// its drawable size so rotation re-creates mpv's swapchain at full size.
 final class MPVHostView: UIView {
     private let metalLayer: CAMetalLayer
+    private weak var player: MPVPlayer?
+    private var lastSize: CGSize = .zero
 
     init(player: MPVPlayer) {
         metalLayer = player.layer
+        self.player = player
         super.init(frame: .zero)
         backgroundColor = .black
         layer.addSublayer(metalLayer)
@@ -328,5 +348,9 @@ final class MPVHostView: UIView {
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         CATransaction.commit()
+        // Turned (or resized): libmpv resizes its surface but keeps placing
+        // the picture for the old size, so tell it the surface changed.
+        if lastSize != .zero, bounds.size != lastSize { player?.surfaceChanged() }
+        lastSize = bounds.size
     }
 }
