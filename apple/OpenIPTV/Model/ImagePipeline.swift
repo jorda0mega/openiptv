@@ -43,6 +43,8 @@ actor ImagePipeline {
                 group.addTask { _ = try? await self.image(for: url, visible: false) }
             }
             for await _ in group {
+                // Something started playing: stop here.
+                guard !PlaybackActivity.isPlaying else { break }
                 if let url = queue.popFirst() { group.addTask { _ = try? await self.image(for: url, visible: false) } }
             }
         }

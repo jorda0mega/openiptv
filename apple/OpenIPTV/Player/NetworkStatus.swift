@@ -9,12 +9,16 @@ final class NetworkStatus: @unchecked Sendable {
     private let monitor = NWPathMonitor()
     private let lock = NSLock()
     private var unmeteredValue = true
+    /// The connection has been seen (until then, it's not known to be
+    /// unmetered: nothing is fetched speculatively).
+    private var known = false
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
             lock.lock()
             unmeteredValue = path.status == .satisfied && !path.isExpensive && !path.isConstrained
+            known = true
             lock.unlock()
         }
         monitor.start(queue: DispatchQueue(label: "openiptv.network-status"))
@@ -24,6 +28,14 @@ final class NetworkStatus: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return unmeteredValue
+    }
+
+    /// Unmetered, and known to be: speculative work (warm players, pages
+    /// and pictures fetched ahead) needs this.
+    var knownUnmetered: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return known && unmeteredValue
     }
 
     /// How a file should be buffered: generously (in memory) when the

@@ -427,6 +427,10 @@ struct SearchView: View {
     /// episodes. The next letter cancels all of it, background work too.
     private func search() async {
         let q = query
+        #if DEBUG
+        let began = Date()
+        func mark(_ stage: String) { NSLog("%@", String(format: "PERF search %@ %.0f ms (%@)", stage, Date().timeIntervalSince(began) * 1000, "\(q.count) letters")) }
+        #endif
         let parsed = SearchQuery(q)
         let libraryCorpus = model.library.corpus
         let channelCorpus = model.channelCorpus
@@ -452,6 +456,9 @@ struct SearchView: View {
         library = cards(hits + typos)
         publishTitles()
         channels = (Array(cm.ranked.prefix(60)) + found.typoChannels).map { channelCorpus.items[$0] }
+        #if DEBUG
+        mark("local")
+        #endif
         let titleNames = (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
         let channelIndices = Array(cm.ranked.prefix(6)) + Array(found.typoChannels.prefix(3))
         let channelNames = channelIndices.map { model.title(of: channelCorpus.items[$0]) }
@@ -469,7 +476,7 @@ struct SearchView: View {
                              hardwareDecoding: prefs.hardwareDecoding)
                 // The first few results' pages and pictures too, so the one
                 // chosen opens complete.
-                if NetworkStatus.shared.unmetered { likely.forEach(model.prefetchTitle) } else if top.kind == "Series" {
+                if NetworkStatus.shared.knownUnmetered { likely.forEach(model.prefetchTitle) } else if top.kind == "Series" {
                     model.prefetchShows([top.id])
                 }
             }
@@ -479,6 +486,9 @@ struct SearchView: View {
             group.addTask { await searchOnTV(q) }
             group.addTask { await searchServer(q, parsed: parsed, hits: hits, typos: typos) }
         }
+        #if DEBUG
+        if !Task.isCancelled { mark("all") }
+        #endif
     }
 
     private struct LocalResults: Sendable {

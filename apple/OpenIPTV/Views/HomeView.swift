@@ -299,7 +299,7 @@ private struct ContinueRow: View {
         .task(id: row.cards.first?.id) {
             guard let card = row.cards.first else { return }
             try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled, NetworkStatus.shared.unmetered else { return }
+            guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered else { return }
             model.warmUp(card.episodeId ?? card.id, kind: card.episodeId != nil ? "Episode" : card.kind,
                          options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
         }
@@ -339,6 +339,7 @@ private struct ContinueRow: View {
 /// the title; press and hold to play.
 private struct PosterRow: View {
     @Environment(AppModel.self) private var model
+    @State private var pending: [String: Task<Void, Never>] = [:]
     let title: String
     let cards: [Card]
     let open: (Card) -> Void
@@ -362,12 +363,16 @@ private struct PosterRow: View {
                         .contextMenu {
                             Button("Play", systemImage: "play.fill") { play(card) }
                         }
-                        // On screen a moment (not scrolling past): fetch its
-                        // page and pictures, so a tap opens it complete.
-                        .task {
-                            try? await Task.sleep(for: .milliseconds(600))
-                            guard !Task.isCancelled, NetworkStatus.shared.unmetered else { return }
-                            model.prefetchTitle(card)
+                        // Really on screen a moment (not scrolling past, not just
+                        // laid out ahead): fetch its page and pictures, so a
+                        // tap opens it complete.
+                        .onScrollVisibilityChange(threshold: 0.6) { visible in
+                            pending[card.id]?.cancel()
+                            pending[card.id] = visible ? Task {
+                                try? await Task.sleep(for: .milliseconds(600))
+                                guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered else { return }
+                                model.prefetchTitle(card)
+                            } : nil
                         }
                         .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
@@ -445,11 +450,14 @@ struct CoverImage: View {
                     return
                 }
                 if let loaded = try? await ImagePipeline.shared.image(for: url) {
+                    // The card moved on to another picture meanwhile: not this one.
+                    guard !Task.isCancelled else { return }
                     contain = candidate.contain
                     withAnimation(.easeOut(duration: 0.15)) { image = loaded }
                     return
                 }
             }
+            guard !Task.isCancelled else { return }
             failed = true
         }
     }

@@ -133,11 +133,13 @@ actor GuideStore {
     /// moment for a big guide).
     private func prepareSearchInBackground() {
         let snapshot = programmes, built = generation
-        Task.detached(priority: .utility) {
-            let index = GuideStore.index(snapshot)
-            await self.install(index, for: built)
-        }
+        let task = Task.detached(priority: .utility) { GuideStore.index(snapshot) }
+        indexBuild = (built, task)
+        Task { await install(await task.value, for: built) }
     }
+
+    /// The background build under way, and which guide it's for.
+    private var indexBuild: (generation: Int, task: Task<[(epgId: String, programme: Programme, folded: String)], Never>)?
 
     private func install(_ index: [(epgId: String, programme: Programme, folded: String)], for built: Int) {
         if built == generation, searchIndex == nil { searchIndex = index }
@@ -157,9 +159,14 @@ actor GuideStore {
 
     /// Stops early when the search that asked is cancelled (the next letter
     /// was typed), so letters typed quickly don't queue up whole scans.
-    func search(_ words: [String], now: Int64 = Int64(Date().timeIntervalSince1970), limit: Int = 300)
+    func search(_ words: [String], now: Int64 = Int64(Date().timeIntervalSince1970), limit: Int = 300) async
         -> [(epgId: String, programme: Programme)] {
         guard !words.isEmpty else { return [] }
+        // The index still being built in the background: wait for it rather
+        // than build a second one here.
+        if searchIndex == nil, let build = indexBuild, build.generation == generation {
+            install(await build.task.value, for: build.generation)
+        }
         prepareSearch()
         var onNow: [(String, Programme)] = [], later: [(String, Programme)] = []
         for (offset, item) in (searchIndex ?? []).enumerated() where item.programme.stop > now {

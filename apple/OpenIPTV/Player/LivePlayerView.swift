@@ -318,6 +318,8 @@ struct LivePlayerView: View {
     // MARK: Playing
 
     private func start() {
+        // A film warmed up in the background would only compete.
+        model.coolDown()
         let player = makePlayer(prefs: prefs)
         player.onEvent = { event in handle(event) }
         self.player = player

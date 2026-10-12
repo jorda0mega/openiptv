@@ -239,7 +239,7 @@ struct MoviePlayerView: View {
     /// so they don't slow the start), on Wi-Fi.
     private func loadThumbnails() async {
         try? await Task.sleep(for: .seconds(5))
-        guard !Task.isCancelled, NetworkStatus.shared.unmetered, let emby = model.emby,
+        guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered, let emby = model.emby,
               let data = await emby.previewThumbnails(itemId: playback.itemId) else { return }
         thumbnails = await Task.detached(priority: .utility) { PreviewThumbnails(data) }.value
         #if DEBUG

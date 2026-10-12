@@ -387,13 +387,17 @@ struct TVPosterRow: View {
             }
             .tvRowScroll()
         }
-        // Resting on a poster a moment: fetch its page and pictures, so
-        // Select opens it complete (passing over posters fetches nothing).
+        // Resting on a poster a moment: fetch its page (and pictures), so
+        // Select opens it complete; then the next one along, where focus
+        // usually goes. Sweeping across posters fetches nothing.
         .task(id: focused) {
-            guard let id = focused, let card = cards.first(where: { $0.id == id }) else { return }
-            try? await Task.sleep(for: .milliseconds(250))
+            guard let id = focused, let index = cards.firstIndex(where: { $0.id == id }) else { return }
+            try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled else { return }
-            model.prefetchTitle(card)
+            model.prefetchTitle(cards[index])
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, index + 1 < cards.count else { return }
+            model.prefetchTitle(cards[index + 1])
         }
     }
 }
