@@ -50,6 +50,26 @@ actor ImagePipeline {
         }
     }
 
+    /// Downloads these into the disk cache only (not decoded, so no memory
+    /// held), four at a time at low priority: rows further down then open
+    /// from the device. Not while something plays.
+    func store(_ urls: [URL]) async {
+        guard !PlaybackActivity.isPlaying else { return }
+        let session = session
+        await withTaskGroup(of: Void.self) { group in
+            var queue = urls.filter { memory.object(forKey: $0 as NSURL) == nil && inFlight[$0] == nil }[...]
+            func next() {
+                guard let url = queue.popFirst() else { return }
+                group.addTask { _ = try? await RequestHandle(priority: URLSessionTask.lowPriority).fetch(url, with: session) }
+            }
+            for _ in 0..<4 { next() }
+            for await _ in group {
+                guard !PlaybackActivity.isPlaying else { break }
+                next()
+            }
+        }
+    }
+
     /// An image already decoded, without waiting (rows scrolling back in).
     nonisolated func cached(_ url: URL) -> UIImage? {
         memory.object(forKey: url as NSURL)

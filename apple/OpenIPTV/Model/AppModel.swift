@@ -179,6 +179,15 @@ final class AppModel {
             // instead of covers popping in; on the very first load, show the
             // rows straight away and let the pictures follow.
             let prefetch = Task { await ImagePipeline.shared.prefetch(Self.visibleImages(fresh)) }
+            // Then every other cover on Home into the disk cache (Wi-Fi),
+            // so rows further down don't fill in as they scroll into view.
+            if NetworkStatus.shared.knownUnmetered {
+                let rest = fresh.rows.flatMap(\.cards).compactMap { $0.images.first.flatMap { URL(string: $0.url) } }
+                Task(priority: .utility) {
+                    await prefetch.value
+                    await ImagePipeline.shared.store(rest)
+                }
+            }
             if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured {
                 await Self.wait(for: prefetch, atMost: 1.5)
             }
