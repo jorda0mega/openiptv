@@ -120,7 +120,10 @@ enum HTTP {
 
     static func data(_ request: URLRequest) async throws -> Data {
         do {
-            let (data, response) = try await Task.currentPriority <= .utility
+            // Only reads go ahead (and may be asked twice): a POST (playback
+            // info, progress reports) is sent once, on the main connections.
+            let read = (request.httpMethod ?? "GET") == "GET"
+            let (data, response) = try await read && Task.currentPriority <= .utility
                 ? fetchAhead(request) : session.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 || code == 403 { throw SourceError.rejected }

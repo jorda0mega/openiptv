@@ -638,6 +638,7 @@ final class MPVHostView: UIView {
     private let metalLayer: CAMetalLayer
     private weak var player: MPVPlayer?
     private var lastSize: CGSize = .zero
+    private var settle: DispatchWorkItem?
 
     init(player: MPVPlayer) {
         metalLayer = player.layer
@@ -650,18 +651,41 @@ final class MPVHostView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        setNeedsLayout()
+    }
+
+    /// The picture always covers the whole window, whatever SwiftUI makes
+    /// of this view: showing the controls (and with them the status bar)
+    /// used to change its height by 30 points, animated, and the picture
+    /// zoomed and lost its top and bottom.
     override func layoutSubviews() {
         super.layoutSubviews()
+        let area = window.map { convert($0.bounds, from: $0) } ?? bounds
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        metalLayer.frame = area
         let scale = traitCollection.displayScale
-        metalLayer.frame = bounds
         metalLayer.contentsScale = scale
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        if area.size != lastSize {
+            metalLayer.drawableSize = CGSize(width: area.width * scale, height: area.height * scale)
+        }
         CATransaction.commit()
-        // Turned (or resized): libmpv resizes its surface but keeps placing
-        // the picture for the old size, so tell it the surface changed.
-        if lastSize != .zero, bounds.size != lastSize { player?.surfaceChanged() }
-        lastSize = bounds.size
+        guard area.size != lastSize else { return }
+        #if DEBUG
+        NSLog("%@", "PERF surface \(Int(area.width))x\(Int(area.height))")
+        #endif
+        // Turned: libmpv resizes its surface but keeps placing the picture
+        // for the old size, so tell it, now and once the turn has settled
+        // (not on every frame of it, which could leave a size from midway).
+        if lastSize != .zero {
+            player?.surfaceChanged()
+            settle?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.player?.surfaceChanged() }
+            settle = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        }
+        lastSize = area.size
     }
 }

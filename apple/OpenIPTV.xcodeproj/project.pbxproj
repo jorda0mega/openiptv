@@ -187,6 +187,7 @@
 		D9ADA4B59CE9DE2921B38B77 /* Libuchardet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */; };
 		DAFF7B46995143828A4E0CF1 /* Libavutil.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */; };
 		DB9631F047A88625F86A6031 /* Libssl.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00EF07025216C13B1F3C7908 /* Libssl.xcframework */; };
+		DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */; };
 		DC9AC16AE071981D3F442D2D /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
 		DD7ABAA9E4BA1C5B1B8D7A7A /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */; };
 		E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036E1882E4281173C09E8777 /* TabStrip.swift */; };
@@ -221,6 +222,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 7ADDB68C71A820575FC81346;
 			remoteInfo = "OpenIPTV TV";
+		};
+		6A7AB5EE991B219E7EAA72A9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 57A8340F1E61A940DE4F6434 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AD7F8BE51E1A0F04864E24B8;
+			remoteInfo = OpenIPTV;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -319,8 +327,10 @@
 		D277F32EC509804119BFFFC4 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
 		D5B1B94210411D81E015B0B6 /* Libass.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libass.xcframework; path = Vendor/Libass.xcframework; sourceTree = "<group>"; };
 		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
+		D7C7B40E07692829A697DF27 /* OpenIPTV UITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "OpenIPTV UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVHomeView.swift; sourceTree = "<group>"; };
 		DB4C4ECAD884618771521E44 /* MPVPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MPVPlayer.swift; sourceTree = "<group>"; };
+		DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerLookTests.swift; sourceTree = "<group>"; };
 		E1FD9D66654217AC33F67CB5 /* IMDbSignals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMDbSignals.swift; sourceTree = "<group>"; };
 		E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePlayerView.swift; sourceTree = "<group>"; };
 		E3030647E45661C4305A8F16 /* TVSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVSearch.swift; sourceTree = "<group>"; };
@@ -568,6 +578,7 @@
 			children = (
 				071BD85601EB668FA8EC5B64 /* OpenIPTV TV UITests.xctest */,
 				97967C99C760D04279F1A9D0 /* OpenIPTV TV.app */,
+				D7C7B40E07692829A697DF27 /* OpenIPTV UITests.xctest */,
 				EC69C2183749D6C420FF3721 /* OpenIPTV.app */,
 			);
 			name = Products;
@@ -585,6 +596,14 @@
 				320EE0FE4DDEEB903360A4AF /* Sources.swift */,
 			);
 			path = Model;
+			sourceTree = "<group>";
+		};
+		7307F6DA46B44D3D69D3FF06 /* UITests-iOS */ = {
+			isa = PBXGroup;
+			children = (
+				DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */,
+			);
+			path = "UITests-iOS";
 			sourceTree = "<group>";
 		};
 		8B691C7E5D74CD1A1FC86F71 /* Resources */ = {
@@ -608,6 +627,7 @@
 			children = (
 				F925FAF1D5D2D9A374D4166C /* OpenIPTV */,
 				474311821299A867F469EBB0 /* OpenIPTV-tvOS */,
+				7307F6DA46B44D3D69D3FF06 /* UITests-iOS */,
 				A32DCDEE120866F82216EB12 /* UITests-tvOS */,
 				13FA51AC3215C6F8A8DAC42A /* Frameworks */,
 				4C7506CFBE7F4CE9DCC7CFD1 /* Products */,
@@ -682,6 +702,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		202FE88894DF300F1FB5428A /* OpenIPTV UITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2BB8BAAECF976251ABBC3EDF /* Build configuration list for PBXNativeTarget "OpenIPTV UITests" */;
+			buildPhases = (
+				1E11A1CB9DA69C8B5AAA285B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				70E245DD81883DB222F36AAF /* PBXTargetDependency */,
+			);
+			name = "OpenIPTV UITests";
+			packageProductDependencies = (
+			);
+			productName = "OpenIPTV UITests";
+			productReference = D7C7B40E07692829A697DF27 /* OpenIPTV UITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		7ADDB68C71A820575FC81346 /* OpenIPTV TV */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 751B0A5DBF9A1EB456903B8A /* Build configuration list for PBXNativeTarget "OpenIPTV TV" */;
@@ -749,6 +787,11 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					202FE88894DF300F1FB5428A = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+						TestTargetID = AD7F8BE51E1A0F04864E24B8;
+					};
 					7ADDB68C71A820575FC81346 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
@@ -780,6 +823,7 @@
 			targets = (
 				AD7F8BE51E1A0F04864E24B8 /* OpenIPTV */,
 				7ADDB68C71A820575FC81346 /* OpenIPTV TV */,
+				202FE88894DF300F1FB5428A /* OpenIPTV UITests */,
 				D7C6CC9C17AE9EBD281960A5 /* OpenIPTV TV UITests */,
 			);
 		};
@@ -846,6 +890,14 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1E11A1CB9DA69C8B5AAA285B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5A7365C903E355342716359D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -987,6 +1039,11 @@
 			isa = PBXTargetDependency;
 			target = 7ADDB68C71A820575FC81346 /* OpenIPTV TV */;
 			targetProxy = 5E26BBEF8D822D0AC25CE134 /* PBXContainerItemProxy */;
+		};
+		70E245DD81883DB222F36AAF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AD7F8BE51E1A0F04864E24B8 /* OpenIPTV */;
+			targetProxy = 6A7AB5EE991B219E7EAA72A9 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1145,6 +1202,23 @@
 			};
 			name = Debug;
 		};
+		70F16B2DECD9DF5E31C14E31 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = OpenIPTV;
+			};
+			name = Release;
+		};
 		75BDFC35D2F93BEED0673F6F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1201,6 +1275,23 @@
 				PRODUCT_NAME = OpenIPTV;
 				SDKROOT = appletvos;
 				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Debug;
+		};
+		98551076DA2B448C3DF4EAA7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jorda0mega.openiptv.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = OpenIPTV;
 			};
 			name = Debug;
 		};
@@ -1261,6 +1352,15 @@
 			buildConfigurations = (
 				EB7F5C4054FE4CE1BAA47DB2 /* Debug */,
 				9E17F5C6A64FE0208C28F97A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		2BB8BAAECF976251ABBC3EDF /* Build configuration list for PBXNativeTarget "OpenIPTV UITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				98551076DA2B448C3DF4EAA7 /* Debug */,
+				70F16B2DECD9DF5E31C14E31 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

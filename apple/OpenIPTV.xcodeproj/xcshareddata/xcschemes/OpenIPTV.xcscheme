@@ -39,6 +39,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "202FE88894DF300F1FB5428A"
+               BuildableName = "OpenIPTV UITests.xctest"
+               BlueprintName = "OpenIPTV UITests"
+               ReferencedContainer = "container:OpenIPTV.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>
