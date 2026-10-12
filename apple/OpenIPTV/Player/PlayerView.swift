@@ -103,6 +103,8 @@ struct MoviePlayerView: View {
     @State private var settleSeek: Task<Void, Never>?
     /// Testing the connection while a converted version plays.
     @State private var probeTask: Task<Void, Never>?
+    /// The next episode got ready (near the end of this one).
+    @State private var preparedNext = false
     /// Just after a jump the player still reports where it was for a
     /// moment: until it lands (or this time passes), the bar stays put.
     @State private var jumpUntil: Date?
@@ -409,6 +411,11 @@ struct MoviePlayerView: View {
             }
             let newPosition = rawPosition + offset
             position = newPosition
+            // Into the last fifth of an episode: the next one, ready.
+            if !preparedNext, playback.seriesId != nil, total > 0, newPosition >= total * 0.8 {
+                preparedNext = true
+                model.prepareNext(after: playback)
+            }
             // Not while choosing where to jump: the picture's previews
             // aren't where the viewer is.
             if abs(newPosition - lastReport) >= 10, scrubbing == nil {

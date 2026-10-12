@@ -175,6 +175,7 @@ final class AppModel {
             let likely = (fresh.featured.map { [$0.card] } ?? []) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(3) }
             let pages = (fresh.spotlight ?? []).map(\.card) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(4) }
             pages.forEach(prefetchTitle)
+            prepareRotation()
             prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
             if sync { Task { await syncLibrary(emby) } }
         } catch {
@@ -305,7 +306,10 @@ final class AppModel {
                     shows[old.key] = nil
                 }
             }
-            if shows[id] == nil { prefetchArt(data.show) }
+            if shows[id] == nil {
+                prefetchArt(data.show)
+                prefetchStills(data)
+            }
             shows[id] = data
             AppCache.save(Self.showFile(id), data)
         }
@@ -325,6 +329,79 @@ final class AppModel {
 
     private func unpin(_ id: String) {
         if let count = pinned[id], count > 1 { pinned[id] = count - 1 } else { pinned[id] = nil }
+    }
+
+    // MARK: Intent
+
+    /// What this device plays, and when (the last 20 times each): the titles
+    /// in rotation, and the channels watched most, are kept ready so they
+    /// open and start at once.
+    private struct Habits: Codable {
+        var titles: [String: Played] = [:]
+        var channels: [String: [Date]] = [:]
+        struct Played: Codable { var kind: String; var at: [Date] }
+    }
+    @ObservationIgnored private lazy var habits: Habits = AppCache.read("habits.json") ?? Habits()
+
+    /// How much, and how lately (each play counts less the older it is:
+    /// half as much after a week).
+    private static func score(_ dates: [Date], now: Date = Date()) -> Double {
+        dates.reduce(0) { $0 + pow(0.5, now.timeIntervalSince($1) / (7 * 24 * 3600)) }
+    }
+
+    private func notePlay(_ id: String, kind: String) {
+        var played = habits.titles[id] ?? Habits.Played(kind: kind, at: [])
+        played.at = Array((played.at + [Date()]).suffix(20))
+        habits.titles[id] = played
+        AppCache.save("habits.json", habits)
+    }
+
+    func noteChannel(_ id: String) {
+        habits.channels[id] = Array(((habits.channels[id] ?? []) + [Date()]).suffix(20))
+        AppCache.save("habits.json", habits)
+    }
+
+    /// The titles in rotation, most likely first.
+    func inRotation(_ limit: Int = 6) -> [(id: String, kind: String)] {
+        let now = Date()
+        return habits.titles.map { (id: $0.key, kind: $0.value.kind, score: Self.score($0.value.at, now: now)) }
+            .filter { $0.score > 0.2 }
+            .sorted { $0.score > $1.score }
+            .prefix(limit).map { ($0.id, $0.kind) }
+    }
+
+    /// The channels watched most, most first.
+    func favouriteChannels(_ limit: Int = 12) -> [String] {
+        let now = Date()
+        return habits.channels.map { ($0.key, Self.score($0.value, now: now)) }
+            .filter { $0.1 > 0.2 }.sorted { $0.1 > $1.1 }.prefix(limit).map(\.0)
+    }
+
+    /// The titles in rotation ready before they're chosen: their pages and
+    /// pictures, and how to play them (the next episode, or where a film
+    /// was left), so opening or resuming any of them is instant.
+    func prepareRotation() {
+        guard !PlaybackActivity.isPlaying else { return }
+        let rotation = inRotation()
+        for (id, kind) in rotation {
+            if kind == "Series" { prefetchShows([id]) } else { Task(priority: .utility) { await refreshTitle(id, kind: kind) } }
+        }
+        prepare(rotation.map { (id: $0.id, kind: Optional($0.kind)) })
+    }
+
+    /// Near the end of an episode: the next one's details and how to play it.
+    func prepareNext(after playback: EmbyPlayback) {
+        guard let series = playback.seriesId, let data = shows[series],
+              let index = data.episodes.firstIndex(where: { $0.id == playback.itemId }),
+              let next = data.episodes[(index + 1)...].first(where: { $0.userData?.played != true }) else { return }
+        prepare([(id: next.id, kind: "Episode")])
+    }
+
+    /// The channels watched most: what's on now and next, ready for Live TV.
+    func prepareFavouriteChannels() async {
+        let channels = favouriteChannels().compactMap { channelById[$0] }
+        guard !channels.isEmpty else { return }
+        await ensureNowNext(channels)
     }
 
     // MARK: Films
@@ -406,6 +483,18 @@ final class AppModel {
     #else
     static let pageBackdropWidth = 1280, pageLogoWidth = 800
     #endif
+
+    /// Apple TV's show page opens on the episode you're up to: its still
+    /// and its neighbours', fetched with the page.
+    private func prefetchStills(_ data: ShowData) {
+        #if os(tvOS)
+        guard let emby else { return }
+        let at = data.episodes.firstIndex { $0.id == data.nextUp?.id } ?? 0
+        let around = data.episodes[max(0, at - 2)..<min(data.episodes.count, at + 4)]
+        let urls = around.compactMap { emby.card(for: $0, landscape: true, width: 960).images.first.flatMap { URL(string: $0.url) } }
+        Task(priority: .utility) { await ImagePipeline.shared.prefetch(urls) }
+        #endif
+    }
 
     private func prefetchArt(_ item: EmbyItem) {
         guard let emby else { return }
@@ -719,7 +808,10 @@ final class AppModel {
     @ObservationIgnored private var queuedProgress: (playback: EmbyPlayback, seconds: Double)?
 
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
-        if event == .started { playingItem = playback.itemId }
+        if event == .started {
+            playingItem = playback.itemId
+            notePlay(playback.seriesId ?? playback.itemId, kind: playback.seriesId != nil ? "Series" : "Movie")
+        }
         if event == .stopped {
             playingItem = nil
             // The title's page, then Home, as they'll be, before the server hears.
@@ -1028,6 +1120,8 @@ final class AppModel {
                 || (browsingProviderCategory && built.categories.contains { $0.id == id })
         } ?? false
         if !valid { selectedCategory = shelves.first?.id ?? built.categories.first?.id }
+        // The channels watched most: what's on, ready before Live TV opens.
+        Task { await prepareFavouriteChannels() }
     }
 
     /// A lineup ready to show: organised into shelves, with which channel

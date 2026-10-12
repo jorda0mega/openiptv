@@ -329,6 +329,7 @@ struct LivePlayerView: View {
         reset()
         recording = nil
         tried = [channel.id]
+        model.noteChannel(channel.id)
         open(channel, after: delay)
         showAround()
         showControls()

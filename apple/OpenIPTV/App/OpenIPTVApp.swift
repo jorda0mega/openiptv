@@ -61,6 +61,8 @@ struct RootView: View {
                 // Watched elsewhere while away (the live connection was
                 // closed): Continue Watching is right when you look.
                 if !model.rows.isEmpty { Task { await model.refreshContinueWatching() } }
+                // What's usually watched, ready before it's chosen.
+                model.prepareRotation()
             case .background:
                 model.disconnectLive()
             default:

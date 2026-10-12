@@ -461,12 +461,17 @@ struct SearchView: View {
         // Results settled: treat the top title as intent and get it ready,
         // so tapping it starts at once.
         if let top = library.first {
+            let likely = Array(library.prefix(3))
             Task {
                 try? await Task.sleep(for: .milliseconds(450))
                 guard !Task.isCancelled, query == q else { return }
                 model.warmUp(top.id, kind: top.kind, options: prefs.playerProfile.mpvOptions,
                              hardwareDecoding: prefs.hardwareDecoding)
-                if top.kind == "Series" { model.prefetchShows([top.id]) }
+                // The first few results' pages and pictures too, so the one
+                // chosen opens complete.
+                if NetworkStatus.shared.unmetered { likely.forEach(model.prefetchTitle) } else if top.kind == "Series" {
+                    model.prefetchShows([top.id])
+                }
             }
         }
 
