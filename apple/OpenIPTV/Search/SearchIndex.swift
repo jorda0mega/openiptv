@@ -695,6 +695,20 @@ enum AppCache {
         writer.async { write(name, value) }
     }
 
+    /// Saved files starting with one of these that haven't been written for
+    /// `days` (title pages not visited in a month), in the background.
+    static func prune(startingWith prefixes: [String], olderThan days: Double) {
+        let directory = directory
+        writer.async {
+            let cutoff = Date().addingTimeInterval(-days * 24 * 3600)
+            let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for url in urls where prefixes.contains(where: url.lastPathComponent.hasPrefix) {
+                let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                if modified < cutoff { try? FileManager.default.removeItem(at: url) }
+            }
+        }
+    }
+
     /// Every saved file whose name starts with one of these (an account's
     /// title pages), in order with the background writes.
     static func removeAll(startingWith prefixes: [String]) {

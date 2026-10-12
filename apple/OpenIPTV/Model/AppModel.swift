@@ -96,6 +96,8 @@ final class AppModel {
         // Watching the connection from the start (speculative work waits
         // until it's known to be unmetered).
         _ = NetworkStatus.shared
+        // Title pages not visited in a month.
+        AppCache.prune(startingWith: ["show-", "movie-"], olderThan: 30)
         // The first screen's pictures, decoded from the disk cache while the
         // app is still drawing its first frame, so Home opens with them.
         if let home {
