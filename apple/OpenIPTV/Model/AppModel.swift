@@ -615,10 +615,30 @@ final class AppModel {
     /// (the server's answer follows): the title just watched first with its
     /// new progress; once finished, a show's next episode instead (as the
     /// TV app does), a film gone. A title that wasn't in the row joins it.
+    /// What was stopped on this device in the last two minutes: a server
+    /// answer that hasn't caught up yet doesn't undo it.
+    @ObservationIgnored private var recentStops: [String: (at: Date, progress: Double?, finished: Bool)] = [:]
+
+    /// The server's Continue Watching, with this device's last few stops
+    /// applied over anything older the server still says.
+    private func reconciled(_ row: HomeRow) -> HomeRow {
+        recentStops = recentStops.filter { Date().timeIntervalSince($0.value.at) < 120 }
+        guard !recentStops.isEmpty else { return row }
+        let cards = row.cards.compactMap { card -> Card? in
+            guard let stop = recentStops[card.episodeId ?? card.id] else { return card }
+            if stop.finished { return nil }
+            guard let progress = stop.progress, abs((card.progress ?? 0) - progress) > 1 else { return card }
+            return Card(id: card.id, kind: card.kind, title: card.title, subtitle: card.subtitle, images: card.images,
+                        progress: progress, playable: card.playable, episodeId: card.episodeId, seriesId: card.seriesId)
+        }
+        return HomeRow(title: row.title, shape: row.shape, aspect: row.aspect, cards: cards)
+    }
+
     private func patchContinueWatching(_ playback: EmbyPlayback, seconds: Double) {
         guard let emby else { return }
         let duration = playback.durationSeconds ?? 0
         let finished = duration > 0 && seconds >= duration * 0.9
+        recentStops[playback.itemId] = (Date(), duration > 0 ? seconds / duration * 100 : nil, finished)
         let index = rows.firstIndex { $0.title == "Continue Watching" }
         var cards = index.map { rows[$0].cards } ?? []
         let old = cards.firstIndex { $0.id == playback.itemId || $0.episodeId == playback.itemId }.map { cards.remove(at: $0) }
@@ -676,7 +696,7 @@ final class AppModel {
             return true
         }
         let items = HomeFeed.continueItems(watching: watching, nextUp: (try? await nextUp) ?? [])
-        let row = emby.showRow("Continue Watching", items, lastCardWidth)
+        let row = emby.showRow("Continue Watching", items, lastCardWidth).map(reconciled)
         var updated = rows.filter { $0.title != "Continue Watching" }
         let resumed = Set(row?.cards.map(\.id) ?? [])
         updated = updated.map { other in
