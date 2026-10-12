@@ -335,13 +335,19 @@ struct MoviePlayerView: View {
         return thumbnails.image(near: target)
     }
 
-    /// The film's preview thumbnails, a second after the first frame (so
-    /// they don't slow the start), on Wi-Fi; the stills around where it's
-    /// playing decoded straight away.
+    /// The film's preview thumbnails: at once when they came with the
+    /// player got ready before the tap, else a second after the first frame
+    /// (so they don't slow the start), on Wi-Fi; the stills around where
+    /// it's playing decoded straight away.
     private func loadThumbnails() async {
-        try? await Task.sleep(for: .seconds(1))
-        guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered, let emby = model.emby,
-              let data = await emby.previewThumbnails(itemId: playback.itemId) else { return }
+        // Fetched with the player got ready before the tap: straight away.
+        var data = model.cachedPreviewStills(playback.itemId)
+        if data == nil {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered else { return }
+            data = await model.previewStills(playback.itemId)
+        }
+        guard !Task.isCancelled, let data else { return }
         thumbnails = await Task.detached(priority: .utility) { PreviewThumbnails(data) }.value
         thumbnails?.warm(around: position)
         #if DEBUG

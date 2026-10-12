@@ -881,6 +881,9 @@ final class AppModel {
             player.prepareOffscreen()
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm)
             warm = (itemId, player, playback)
+            // Its preview stills too, so scrubbing has its pictures from
+            // the first second of playing.
+            Task(priority: .utility) { _ = await previewStills(itemId) }
             // Don't hold a connection open for long if it isn't wanted.
             warmExpiry = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(300))
@@ -888,6 +891,32 @@ final class AppModel {
                 self?.coolDown()
             }
         }
+    }
+
+    /// The preview stills (BIF) of the last two titles got ready ahead of a
+    /// tap, and fetches under way.
+    @ObservationIgnored private var previews: [(id: String, data: Data)] = []
+    @ObservationIgnored private var previewLoads: [String: Task<Data?, Never>] = [:]
+
+    /// A title's preview stills, fetched once (joining a fetch under way).
+    func previewStills(_ itemId: String) async -> Data? {
+        if let data = cachedPreviewStills(itemId) { return data }
+        if let running = previewLoads[itemId] { return await running.value }
+        guard let emby else { return nil }
+        let account = accountGeneration
+        let task = Task(priority: .utility) { await emby.previewThumbnails(itemId: itemId) }
+        previewLoads[itemId] = task
+        let data = await task.value
+        previewLoads[itemId] = nil
+        if let data, account == accountGeneration {
+            previews = Array((previews.filter { $0.id != itemId } + [(itemId, data)]).suffix(2))
+        }
+        return data
+    }
+
+    /// Stills already here, without waiting.
+    func cachedPreviewStills(_ itemId: String) -> Data? {
+        previews.first { $0.id == itemId }?.data
     }
 
     /// Hands over the warmed-up player for this episode or movie, if any.
@@ -1093,6 +1122,7 @@ final class AppModel {
         shows = [:]
         movies = [:]
         prepared = [:]
+        previews = []
         habits = Habits()
         AppCache.remove("habits.json")
         AppCache.remove("home.v4.json")
