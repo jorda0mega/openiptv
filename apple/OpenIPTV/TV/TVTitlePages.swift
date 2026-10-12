@@ -189,11 +189,9 @@ struct TVShowView: View {
                                     .buttonStyle(TVChipStyle(selected: number == shownSeason))
                             }
                         }
-                        .padding(.horizontal, 90)
                         .padding(.vertical, 10)
                     }
-                    .scrollClipDisabled()
-                    .scrollIndicators(.hidden)
+                    .tvRowScroll()
                 }
                 let episodes = (data?.episodes ?? []).filter { ($0.parentIndexNumber ?? 0) == (shownSeason ?? 0) }
                 if !episodes.isEmpty {
@@ -210,11 +208,9 @@ struct TVShowView: View {
                                         .id(episode.id)
                                     }
                                 }
-                                .padding(.horizontal, 90)
                                 .padding(.vertical, 24)
                             }
-                            .scrollClipDisabled()
-                            .scrollIndicators(.hidden)
+                            .tvRowScroll()
                             .onAppear {
                                 // The episode you're up to, in view with the row's margin.
                                 if let id = upNext?.id, id != episodes.first?.id { proxy.scrollTo(id, anchor: .center) }
@@ -303,7 +299,8 @@ private struct TVEpisodeCard: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // Room below the picture for its lift.
+        VStack(alignment: .leading, spacing: 22) {
             Button(action: action) {
                 CoverImage(images: card?.images ?? [], title: episode.name)
                     .frame(width: 440, height: 248)
@@ -319,8 +316,9 @@ private struct TVEpisodeCard: View {
                         }
                     }
                     .overlay { if loading { ProgressView() } }
+                    .tvArtwork()
             }
-            .buttonStyle(.card)
+            .buttonStyle(.borderless)
             .accessibilityLabel("\(episode.indexNumber.map { "Episode \($0), " } ?? "")\(episode.name)")
             VStack(alignment: .leading, spacing: 4) {
                 Text([episode.indexNumber.map { "Episode \($0)" }, upNext ? "Up Next" : nil].compactMap(\.self).joined(separator: " · "))
@@ -374,11 +372,9 @@ private struct TVCastRow: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
-                .padding(.horizontal, 90)
                 .padding(.vertical, 20)
             }
-            .scrollClipDisabled()
-            .scrollIndicators(.hidden)
+            .tvRowScroll()
         }
     }
 

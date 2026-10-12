@@ -310,19 +310,18 @@ struct TVContinueRow: View {
                                 .overlay {
                                     if loadingCard == card.id { ProgressView() }
                                 }
+                                .tvArtwork()
                         }
-                        .buttonStyle(.card)
+                        .buttonStyle(.borderless)
                         .contextMenu {
                             Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
                         }
                         .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
                 }
-                .padding(.horizontal, 90)
                 .padding(.vertical, 24)
             }
-            .scrollClipDisabled()
-            .scrollIndicators(.hidden)
+            .tvRowScroll()
         }
     }
 }
@@ -348,17 +347,37 @@ struct TVPosterRow: View {
                                         ProgressBar(value: progress / 100).padding(12)
                                     }
                                 }
+                                .tvArtwork()
                         }
-                        .buttonStyle(.card)
+                        .buttonStyle(.borderless)
                         .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
                 }
-                .padding(.horizontal, 90)
                 .padding(.vertical, 24)
             }
+            .tvRowScroll()
+        }
+    }
+}
+
+extension View {
+    /// A row that scrolls sideways like the TV app's: the scroll view sits
+    /// 90 pt in from each edge and draws past them, so moving along keeps
+    /// the focused card that far from the screen's edge (room for its lift,
+    /// the next one peeking in), rather than pressed against the edge while
+    /// the row slides under it. (Content margins don't steer focus scrolling.)
+    func tvRowScroll() -> some View {
+        padding(.horizontal, 90)
             .scrollClipDisabled()
             .scrollIndicators(.hidden)
-        }
+    }
+
+    /// Artwork in a borderless button, lifting under focus like the TV
+    /// app's posters: the picture itself rises, tilts with the remote and
+    /// catches the light, with no platter behind it.
+    func tvArtwork(cornerRadius: CGFloat = 12) -> some View {
+        clipShape(.rect(cornerRadius: cornerRadius))
+            .hoverEffect(.highlight)
     }
 }
 

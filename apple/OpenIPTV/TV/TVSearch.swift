@@ -11,11 +11,9 @@ struct TVShelf<Content: View>: View {
             TVRowTitle(title)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 40) { content }
-                    .padding(.horizontal, 90)
                     .padding(.vertical, 24)
             }
-            .scrollClipDisabled()
-            .scrollIndicators(.hidden)
+            .tvRowScroll()
         }
     }
 }

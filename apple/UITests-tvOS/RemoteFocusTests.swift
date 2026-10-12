@@ -100,6 +100,23 @@ final class RemoteFocusTests: XCTestCase {
         shot("a second later")
     }
 
+    /// Home's focus motion, for a screen recording: down into the rows,
+    /// along one, open a title, and back.
+    func testHomeMotion() {
+        app.launchArguments = ["-tvTab", "home"]
+        app.launch()
+        sleep(6)
+        for _ in 0..<2 { remote.press(.down); sleep(1) }
+        for _ in 0..<4 { remote.press(.right); usleep(700_000) }
+        remote.press(.down); sleep(1)
+        for _ in 0..<3 { remote.press(.right); usleep(700_000) }
+        remote.press(.select)
+        sleep(3)
+        remote.press(.down); sleep(1)
+        remote.press(.menu)
+        sleep(2)
+    }
+
     /// The live player's bar: playing, then paused (Play/Pause).
     func testLivePlayerBar() {
         app.launchArguments = ["-tvTab", "live"]
