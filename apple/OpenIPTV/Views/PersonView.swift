@@ -62,7 +62,7 @@ struct PersonView: View {
                     if cards.isEmpty {
                         Text("Nothing with \(person.name) in your library.").foregroundStyle(.secondary).padding(.horizontal, 90)
                     } else {
-                        TVPosterRow(title: "Movies & Shows", cards: cards) { selected = $0 }
+                        TVPosterRow(title: "Movies & Shows", cards: cards, captions: true) { selected = $0 }
                     }
                 } else {
                     ProgressView().frame(maxWidth: .infinity).frame(height: 400)

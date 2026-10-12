@@ -152,7 +152,9 @@ struct TVHero: View {
 
     enum Control: Hashable { case play, info }
 
-    static let height: CGFloat = 900
+    /// The Apple TV app's: tall enough to feel like a film, short enough
+    /// that the next row shows under it (it was 900, which hid it).
+    static let height: CGFloat = 780
 
     var body: some View {
         let item = items[min(index, items.count - 1)]
@@ -378,6 +380,9 @@ struct TVPosterRow: View {
     @Environment(AppModel.self) private var model
     let title: String
     let cards: [Card]
+    /// Search and a person's page: the title and year under each poster
+    /// (several editions of one name tell apart), in room kept for them.
+    var captions = false
     let select: (Card) -> Void
     @FocusState private var focused: String?
 
@@ -387,19 +392,33 @@ struct TVPosterRow: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 36) {
                     ForEach(cards) { card in
-                        Button { select(card) } label: {
-                            CoverImage(images: card.images, title: card.title)
-                                .frame(width: 240, height: 360)
-                                .overlay(alignment: .bottom) {
-                                    if let progress = card.progress, progress > 0 {
-                                        ProgressBar(value: progress / 100).padding(12)
+                        VStack(alignment: .leading, spacing: 14) {
+                            Button { select(card) } label: {
+                                CoverImage(images: card.images, title: card.title)
+                                    .frame(width: 240, height: 360)
+                                    .overlay(alignment: .bottom) {
+                                        if let progress = card.progress, progress > 0 {
+                                            ProgressBar(value: progress / 100).padding(12)
+                                        }
                                     }
+                                    .tvArtwork()
+                            }
+                            .buttonStyle(.borderless)
+                            .focused($focused, equals: card.id)
+                            .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
+                            if captions {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(card.title).font(.system(size: 26, weight: .semibold)).lineLimit(1)
+                                    Text(card.subtitle ?? " ").font(.system(size: 22)).foregroundStyle(.secondary).lineLimit(1)
                                 }
-                                .tvArtwork()
+                                .frame(width: 240, height: 64, alignment: .topLeading)
+                                // Lifted with the focused poster, brighter.
+                                .opacity(focused == card.id ? 1 : 0.7)
+                                .offset(y: focused == card.id ? 14 : 0)
+                                .animation(.easeOut(duration: 0.2), value: focused == card.id)
+                                .accessibilityHidden(true)
+                            }
                         }
-                        .buttonStyle(.borderless)
-                        .focused($focused, equals: card.id)
-                        .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
                 }
                 .padding(.vertical, 24)
