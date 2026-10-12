@@ -102,9 +102,6 @@ enum HTTP {
     static let session = make(connections: 8)
     static let ahead = make(connections: 4)
 
-    /// The connections for the current task's priority.
-    static var current: URLSession { Task.currentPriority <= .utility ? ahead : session }
-
     private static func make(connections: Int) -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
@@ -123,13 +120,38 @@ enum HTTP {
 
     static func data(_ request: URLRequest) async throws -> Data {
         do {
-            let (data, response) = try await current.data(for: request)
+            let (data, response) = try await Task.currentPriority <= .utility
+                ? fetchAhead(request) : session.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 || code == 403 { throw SourceError.rejected }
             guard (200..<300).contains(code) else { throw SourceError.http(code) }
             return data
         } catch {
             throw SourceError.wrap(error)
+        }
+    }
+
+    /// A request fetched ahead, on the prefetch connections, where it may
+    /// wait its turn. If something on screen starts waiting for it (its
+    /// task's priority rises: a page opened while it was being prefetched),
+    /// it's asked again on the main connections, and the first answer wins.
+    private static func fetchAhead(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        let (escalated, signal) = AsyncStream<Void>.makeStream()
+        defer { signal.finish() }
+        return try await withTaskPriorityEscalationHandler {
+            try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
+                group.addTask { try await ahead.data(for: request) }
+                group.addTask {
+                    var wanted = escalated.makeAsyncIterator()
+                    guard await wanted.next() != nil else { throw CancellationError() }
+                    return try await session.data(for: request)
+                }
+                defer { group.cancelAll() }
+                guard let first = try await group.next() else { throw CancellationError() }
+                return first
+            }
+        } onPriorityEscalated: { _, now in
+            if now > .utility { signal.yield() }
         }
     }
 

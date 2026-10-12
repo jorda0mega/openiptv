@@ -690,7 +690,12 @@ final class AppModel {
                 card.id == itemId || card.episodeId == itemId
                     || stop.seriesId.map { card.id == $0 || card.seriesId == $0 } ?? false
             }
-            let theirs = cards.first(where: isIt)
+            // Its card as it stands, else as the server sent it (an older
+            // stop of the same show may have taken it out already); this
+            // very episode or film before any card of its show.
+            func exact(_ card: Card) -> Bool { card.id == itemId || card.episodeId == itemId }
+            let candidates = cards + (row?.cards ?? [])
+            let theirs = candidates.first(where: exact) ?? candidates.first(where: isIt)
             cards.removeAll(where: isIt)
             switch stop.outcome {
             case let .card(card):
@@ -700,9 +705,10 @@ final class AppModel {
             case let .progress(progress):
                 // The server's own card, in front with where it got to.
                 guard let old = theirs else { break }
+                // The new progress only on a card for this very title.
                 cards.insert(Card(id: old.id, kind: old.kind, title: old.title, subtitle: old.subtitle, images: old.images,
-                                  progress: progress ?? old.progress, playable: old.playable, episodeId: old.episodeId,
-                                  seriesId: old.seriesId), at: 0)
+                                  progress: exact(old) ? (progress ?? old.progress) : old.progress, playable: old.playable,
+                                  episodeId: old.episodeId, seriesId: old.seriesId), at: 0)
             }
         }
         guard !cards.isEmpty else { return nil }
@@ -896,7 +902,8 @@ final class AppModel {
             warm = (itemId, player, playback)
             // Its preview stills too, so scrubbing has its pictures from
             // the first second of playing.
-            Task(priority: .utility) { _ = await previewStills(itemId) }
+            // By what plays (a show resolves to one of its episodes).
+            Task(priority: .utility) { _ = await previewStills(playback.itemId) }
             // Don't hold a connection open for long if it isn't wanted.
             warmExpiry = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(300))
@@ -914,16 +921,20 @@ final class AppModel {
     /// A title's preview stills, fetched once (joining a fetch under way).
     func previewStills(_ itemId: String) async -> Data? {
         if let data = cachedPreviewStills(itemId) { return data }
-        if let running = previewLoads[itemId] { return await running.value }
-        guard let emby else { return nil }
+        // Per account: another account's fetch of the same id isn't joined.
         let account = accountGeneration
-        let task = Task(priority: .utility) { await emby.previewThumbnails(itemId: itemId) }
-        previewLoads[itemId] = task
-        let data = await task.value
-        previewLoads[itemId] = nil
-        if let data, account == accountGeneration {
-            previews = Array((previews.filter { $0.id != itemId } + [(itemId, data)]).suffix(2))
+        let key = "\(account)|\(itemId)"
+        if let running = previewLoads[key] {
+            let data = await running.value
+            return account == accountGeneration ? data : nil
         }
+        guard let emby else { return nil }
+        let task = Task(priority: .utility) { await emby.previewThumbnails(itemId: itemId) }
+        previewLoads[key] = task
+        let data = await task.value
+        if previewLoads[key] == task { previewLoads[key] = nil }
+        guard account == accountGeneration else { return nil }
+        if let data { previews = Array((previews.filter { $0.id != itemId } + [(itemId, data)]).suffix(2)) }
         return data
     }
 
@@ -1050,8 +1061,18 @@ final class AppModel {
         if event == .stopped {
             playingItem = nil
             // The title's page, then Home, as they'll be, before the server hears.
+            #if DEBUG
+            let began = CFAbsoluteTimeGetCurrent()
+            #endif
             noteProgress(playback, seconds: seconds)
+            #if DEBUG
+            let noted = CFAbsoluteTimeGetCurrent()
+            #endif
             patchContinueWatching(playback, seconds: seconds)
+            #if DEBUG
+            NSLog("%@", String(format: "PERF stop note %.1f ms, continue watching %.1f ms",
+                               (noted - began) * 1000, (CFAbsoluteTimeGetCurrent() - noted) * 1000))
+            #endif
         }
         // In the order they happened: a progress report sent a moment before
         // Stopped must not land after it and move the resume point back.
@@ -1110,6 +1131,8 @@ final class AppModel {
     func signedInToEmby(_ account: EmbyAccount) async {
         accountGeneration += 1
         recentStops = [:]
+        previews = []
+        previewLoads = [:]
         catalogJob?.cancel()
         showLoads = [:]
         movieLoads = [:]
@@ -1136,6 +1159,7 @@ final class AppModel {
         movies = [:]
         prepared = [:]
         previews = []
+        previewLoads = [:]
         habits = Habits()
         AppCache.remove("habits.json")
         AppCache.remove("home.v4.json")

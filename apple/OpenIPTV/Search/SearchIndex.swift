@@ -677,6 +677,7 @@ final class LibraryIndex {
             pages[0] = first.entries
             total = first.total ?? first.entries.count
             if let total, fresh { pages = pages.filter { $0.key < total } }
+            unpublished = true
         }
         guard let total else { return }
         let starts = stride(from: 0, to: total, by: Self.pageSize).filter { fresh ? $0 > 0 : pages[$0] == nil }
@@ -684,6 +685,7 @@ final class LibraryIndex {
         if !fresh { progress = (loadedCount, total) }
         var sincePublish = 0
         var failed = false
+        defer { unpublished = false }
         await withTaskGroup(of: (Int, [LibraryEntry]?).self) { group in
             var queue = starts[...]
             for _ in 0..<Self.parallel {
@@ -692,12 +694,18 @@ final class LibraryIndex {
             }
             for await (start, entries) in group {
                 guard self.server == server else { group.cancelAll(); return }
-                if let entries { pages[start] = entries } else { failed = true }
+                if let entries {
+                    pages[start] = entries
+                    unpublished = true
+                } else {
+                    failed = true
+                }
                 if !fresh { progress = (loadedCount, total) }
                 sincePublish += 1
                 // Search covers what's loaded so far.
                 if sincePublish >= Self.parallel {
                     sincePublish = 0
+                    unpublished = false
                     await publish(ordered())
                     save()
                 }
@@ -712,10 +720,14 @@ final class LibraryIndex {
             syncedAt = fullSyncAt
             outdated = false
         }
-        // The last pages already published with their batch: not built twice.
-        if sincePublish > 0 { await publish(ordered()) }
+        // Pages not yet in search (the first alone, or the last batch's
+        // remainder); not built twice when the last batch just published.
+        if unpublished { await publish(ordered()) }
         save()
     }
+
+    /// Pages loaded since search was last built from them.
+    private var unpublished = false
 
     private var loadedCount: Int { pages.values.reduce(0) { $0 + $1.count } }
 

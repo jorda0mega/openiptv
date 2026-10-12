@@ -22,6 +22,9 @@ final class PreviewThumbnails: @unchecked Sendable {
     private var target: Int?
     private var working = false
     private var broken = Set<Int>()
+    /// Stills tried for the current position: each decoded once per
+    /// position, even if the cache lets it go again (memory pressure).
+    private var tried = Set<Int>()
 
     var count: Int { times.count }
 
@@ -57,6 +60,7 @@ final class PreviewThumbnails: @unchecked Sendable {
     func warm(around seconds: Double) {
         let center = index(near: seconds)
         let start = lock.withLock { () -> Bool in
+            if target != center { tried = [] }
             target = center
             guard !working else { return false }
             working = true
@@ -86,7 +90,10 @@ final class PreviewThumbnails: @unchecked Sendable {
             let low = max(0, center - 15), high = min(times.count - 1, center + 45)
             for distance in 0...max(center - low, high - center) {
                 for index in [center + distance, center - distance] where index >= low && index <= high {
-                    if !broken.contains(index), decoded.object(forKey: index as NSNumber) == nil { return index }
+                    if !broken.contains(index), !tried.contains(index), decoded.object(forKey: index as NSNumber) == nil {
+                        tried.insert(index)
+                        return index
+                    }
                 }
             }
             target = nil
