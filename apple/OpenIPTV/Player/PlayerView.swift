@@ -103,8 +103,13 @@ struct MoviePlayerView: View {
     @State private var settleSeek: Task<Void, Never>?
     /// Testing the connection while a converted version plays.
     @State private var probeTask: Task<Void, Never>?
+    @State private var thumbnailTask: Task<Void, Never>?
     /// The next episode got ready (near the end of this one).
     @State private var preparedNext = false
+    /// The film's preview thumbnails, when the server has them, and where
+    /// the last preview the player has on screen is (its seconds).
+    @State private var thumbnails: PreviewThumbnails?
+    @State private var previewShown: Double?
     /// Just after a jump the player still reports where it was for a
     /// moment: until it lands (or this time passes), the bar stays put.
     @State private var jumpUntil: Date?
@@ -138,6 +143,17 @@ struct MoviePlayerView: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { showControls() }
                     .accessibilityAction(.escape) { dismiss() }
+            }
+            // Choosing where to jump: the still for that moment, full-screen,
+            // until the player has the frame itself.
+            if let still = stillWhileChoosing {
+                Image(uiImage: still)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
             }
             // With the controls up, their play button turns into the spinner.
             if (buffering || !started), error == nil, !controlsVisible {
@@ -211,6 +227,26 @@ struct MoviePlayerView: View {
         #endif
     }
 
+    /// The preview still for where a jump would land, while the player's
+    /// own picture is still on its way there.
+    private var stillWhileChoosing: UIImage? {
+        guard let target = scrubbing, let thumbnails else { return nil }
+        if let shown = previewShown, abs(shown - (target - offset)) < 2 { return nil }
+        return thumbnails.image(near: target)
+    }
+
+    /// The film's preview thumbnails, a few seconds in (once it's playing,
+    /// so they don't slow the start), on Wi-Fi.
+    private func loadThumbnails() async {
+        try? await Task.sleep(for: .seconds(5))
+        guard !Task.isCancelled, NetworkStatus.shared.unmetered, let emby = model.emby,
+              let data = await emby.previewThumbnails(itemId: playback.itemId) else { return }
+        thumbnails = await Task.detached(priority: .utility) { PreviewThumbnails(data) }.value
+        #if DEBUG
+        NSLog("%@", "PERF thumbnails \(thumbnails?.count ?? 0)")
+        #endif
+    }
+
     private func start() {
         position = playback.startSeconds ?? 0
         if let (warmPlayer, _) = model.takeWarm(playback.itemId) {
@@ -240,6 +276,7 @@ struct MoviePlayerView: View {
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
         probeTask = Task { await probeWhileConverted() }
+        thumbnailTask = Task { await loadThumbnails() }
     }
 
     /// While playing a converted version, test the connection every 20 s by
@@ -428,6 +465,8 @@ struct MoviePlayerView: View {
         case .ended:
             position = total
             dismiss()
+        case let .previewShown(seconds):
+            previewShown = seconds
         case .window:
             break
         }
@@ -436,6 +475,7 @@ struct MoviePlayerView: View {
     private func finish() {
         hideTask?.cancel()
         probeTask?.cancel()
+        thumbnailTask?.cancel()
         settleSeek?.cancel()
         #if os(tvOS)
         holdTask?.cancel()

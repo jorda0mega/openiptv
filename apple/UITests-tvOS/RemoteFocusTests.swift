@@ -9,6 +9,15 @@ final class RemoteFocusTests: XCTestCase {
     private let app = XCUIApplication()
     private let remote = XCUIRemote.shared
 
+    override func setUp() {
+        super.setUp()
+        // A spare simulator not signed in: the test server's account, passed
+        // in by xcodebuild (TEST_RUNNER_DEBUG_EMBY), debug builds only.
+        if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
+            app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
+        }
+    }
+
     private func focused() -> String {
         let element = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
         guard element.exists else { return "nothing" }
@@ -115,6 +124,42 @@ final class RemoteFocusTests: XCTestCase {
         remote.press(.down); sleep(1)
         remote.press(.menu)
         sleep(2)
+    }
+
+    /// Preview stills: play a film long enough for its thumbnails to load
+    /// (debug builds log "PERF thumbnails <count>"), then hold right; the
+    /// still shows while the player catches up.
+    func testScrubStills() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(9)
+        remote.press(.right, forDuration: 1.2)
+        shot("after hold")
+        sleep(2)
+        shot("playing on")
+    }
+
+    /// Signed in through the Keychain: the account saved as signing in
+    /// does, then a launch reading it back (one Keychain read for all).
+    func testKeychainSignIn() throws {
+        guard let account = ProcessInfo.processInfo.environment["STORE_EMBY"] else { throw XCTSkip("no account") }
+        app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = nil
+        app.launchEnvironment["OPENREEL_DEBUG_STORE_EMBY"] = account
+        app.launchArguments = ["-tvTab", "home"]
+        app.launch()
+        sleep(3)
+        app.terminate()
+        app.launchEnvironment["OPENREEL_DEBUG_STORE_EMBY"] = nil
+        app.launch()
+        sleep(8)
+        shot("signed in from keychain")
+        XCTAssertTrue(app.buttons["More Info"].exists, "not signed in")
     }
 
     /// The live player's bar: playing, then paused (Play/Pause).

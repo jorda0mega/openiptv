@@ -111,10 +111,10 @@ struct MovieView: View {
 
     /// The page as last seen (or fetched ahead), complete from the first
     /// frame; brought up to date in the background.
-    private var item: EmbyItem? { model.movies[route.id]?.item }
+    private var item: EmbyItem? { model.movieState(route.id).value?.item }
 
     private var similar: [Card] {
-        guard let emby = model.emby, let data = model.movies[route.id] else { return [] }
+        guard let emby = model.emby, let data = model.movieState(route.id).value else { return [] }
         let width = Int(Layout.posterWidth * displayScale)
         return data.similar.filter { $0.userData?.played != true }
             .map { emby.card($0, context: .poster, shape: .portrait, width: width) }

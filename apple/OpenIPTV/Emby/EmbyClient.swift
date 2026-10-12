@@ -761,6 +761,19 @@ struct EmbyClient {
         _ = try? await HTTP.data(request)
     }
 
+    /// The film's preview thumbnails (BIF), when the server has made them
+    /// (a library option); nil otherwise.
+    func previewThumbnails(itemId: String, width: Int = 320) async -> Data? {
+        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/index.bif"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "Width", value: String(width))]
+        var request = URLRequest(url: parts.url!)
+        request.timeoutInterval = 30
+        authorize(&request)
+        guard let (data, response) = try? await HTTP.session.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return data
+    }
+
     // MARK: Plumbing
 
     static func api(_ server: URL, _ path: String) -> URL {

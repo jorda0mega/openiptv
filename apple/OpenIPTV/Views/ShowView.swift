@@ -24,7 +24,7 @@ struct ShowView: View {
 
     /// The page as last seen (or fetched ahead), complete from the first
     /// frame; brought up to date in the background.
-    private var data: AppModel.ShowData? { model.shows[route.id] }
+    private var data: AppModel.ShowData? { model.showState(route.id).value }
     @State private var error: String?
     @State private var loadingItem: String?
     @State private var playError: String?

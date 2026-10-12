@@ -79,7 +79,10 @@ enum HomeFeed {
         }
     }
 
-    static func load(_ emby: EmbyClient, library: LibraryIndex, cardWidth: Int, backdropWidth: Int) async throws -> HomeContent {
+    /// `early`: Continue Watching as soon as it's known, before the slower
+    /// rows (for a Home with nothing to show yet).
+    static func load(_ emby: EmbyClient, library: LibraryIndex, cardWidth: Int, backdropWidth: Int,
+                     early: ((HomeRow) -> Void)? = nil) async throws -> HomeContent {
         // Everything that doesn't depend on something else, at once: what
         // you're watching and what's new, and the trending titles with what
         // you've seen of them.
@@ -130,7 +133,10 @@ enum HomeFeed {
 
         // Continue Watching, then the next episode of shows not already in it.
         let resume = continueItems(watching: sources.watching, nextUp: sources.nextUp)
-        if let row = emby.showRow("Continue Watching", resume, cardWidth) { rows.append(row) }
+        if let row = emby.showRow("Continue Watching", resume, cardWidth) {
+            rows.append(row)
+            early?(row)
+        }
         resume.forEach(show)
 
         // Trending titles on the server, with what this user has seen of them.

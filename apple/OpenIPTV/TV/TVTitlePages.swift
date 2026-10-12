@@ -111,10 +111,10 @@ struct TVMovieView: View {
 
     /// The page as last seen (or fetched ahead when it was focused),
     /// complete from the first frame; brought up to date in the background.
-    private var item: EmbyItem? { model.movies[route.id]?.item }
+    private var item: EmbyItem? { model.movieState(route.id).value?.item }
 
     private var similar: [Card] {
-        guard let emby = model.emby, let data = model.movies[route.id] else { return [] }
+        guard let emby = model.emby, let data = model.movieState(route.id).value else { return [] }
         return data.similar.filter { $0.userData?.played != true }
             .map { emby.card($0, context: .poster, shape: .portrait, width: 480) }
     }
@@ -171,7 +171,7 @@ struct TVShowView: View {
 
     /// The page as last seen (or fetched ahead when it was focused),
     /// complete from the first frame; brought up to date in the background.
-    private var data: AppModel.ShowData? { model.shows[route.id] }
+    private var data: AppModel.ShowData? { model.showState(route.id).value }
 
     private var similar: [Card] {
         guard let emby = model.emby else { return [] }

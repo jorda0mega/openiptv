@@ -154,8 +154,12 @@ final class AppModel {
             return
         }
         do {
+            // Nothing on Home yet (first launch, just signed in): Continue
+            // Watching shows as soon as it's known; the rest follows.
+            let empty = rows.isEmpty
             let fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
-                                                backdropWidth: Self.backdropWidth)
+                                                backdropWidth: Self.backdropWidth,
+                                                early: { [weak self] row in if empty, let self, self.rows.isEmpty { self.rows = [row] } })
             // The pictures first (all at once), so the page changes in one go
             // instead of covers popping in; on the very first load, show the
             // rows straight away and let the pictures follow.
@@ -238,7 +242,7 @@ final class AppModel {
 
     /// A show page's data, kept so reopening (or opening something prepared
     /// ahead) draws at once; refreshed quietly behind.
-    struct ShowData: Codable {
+    struct ShowData: Codable, Equatable {
         /// With its cast, crew and genres.
         let show: EmbyItem
         let episodes: [EmbyItem]
@@ -248,7 +252,20 @@ final class AppModel {
         var similar: [EmbyItem]? = nil
     }
 
-    private(set) var shows: [String: ShowData] = [:]
+    /// Not observed as a whole: a page watches its own title's state (see
+    /// `showState`), so fetching other shows ahead doesn't redraw it.
+    @ObservationIgnored private(set) var shows: [String: ShowData] = [:] {
+        didSet { for (id, state) in showStates where state.value != shows[id] { state.value = shows[id] } }
+    }
+    @ObservationIgnored private var showStates: [String: TitleState<ShowData>] = [:]
+
+    /// One show's page data, to watch: it changes only when this show does.
+    func showState(_ id: String) -> TitleState<ShowData> {
+        if let state = showStates[id] { return state }
+        let state = TitleState(shows[id])
+        showStates[id] = state
+        return state
+    }
     private var showLoads: [String: Task<ShowData?, Never>] = [:]
 
     /// The show's details, every episode and the next one to watch.
@@ -328,7 +345,13 @@ final class AppModel {
     }
 
     private func unpin(_ id: String) {
-        if let count = pinned[id], count > 1 { pinned[id] = count - 1 } else { pinned[id] = nil }
+        if let count = pinned[id], count > 1 {
+            pinned[id] = count - 1
+        } else {
+            pinned[id] = nil
+            showStates[id] = nil
+            movieStates[id] = nil
+        }
     }
 
     // MARK: Intent
@@ -407,13 +430,25 @@ final class AppModel {
     // MARK: Films
 
     /// A film's page: its details and the titles like it.
-    struct MovieData: Codable, Sendable {
+    struct MovieData: Codable, Sendable, Equatable {
         let item: EmbyItem
         let similar: [EmbyItem]
         let loadedAt: Date
     }
 
-    private(set) var movies: [String: MovieData] = [:]
+    /// Not observed as a whole (see `shows`).
+    @ObservationIgnored private(set) var movies: [String: MovieData] = [:] {
+        didSet { for (id, state) in movieStates where state.value != movies[id] { state.value = movies[id] } }
+    }
+    @ObservationIgnored private var movieStates: [String: TitleState<MovieData>] = [:]
+
+    /// One film's page data, to watch: it changes only when this film does.
+    func movieState(_ id: String) -> TitleState<MovieData> {
+        if let state = movieStates[id] { return state }
+        let state = TitleState(movies[id])
+        movieStates[id] = state
+        return state
+    }
     private var movieLoads: [String: Task<MovieData?, Never>] = [:]
 
     /// A film's page as last seen: in memory, else saved on the device, so
@@ -1120,8 +1155,13 @@ final class AppModel {
                 || (browsingProviderCategory && built.categories.contains { $0.id == id })
         } ?? false
         if !valid { selectedCategory = shelves.first?.id ?? built.categories.first?.id }
-        // The channels watched most: what's on, ready before Live TV opens.
+        // The channels watched most: what's on, ready before Live TV opens;
+        // their logos and the first shelf's, so Live TV opens drawn.
         Task { await prepareFavouriteChannels() }
+        let firstShelf = shelves.first?.sections.flatMap(\.entries).prefix(30).compactMap(\.logo) ?? []
+        let favourites = favouriteChannels().compactMap { built.byId[$0]?.logo }
+        let logos = Array(Set(favourites + firstShelf))
+        Task(priority: .utility) { await ImagePipeline.shared.prefetch(logos) }
     }
 
     /// A lineup ready to show: organised into shelves, with which channel
@@ -1549,4 +1589,12 @@ final class PagePin {
     private let release: @Sendable () -> Void
     init(_ release: @escaping @Sendable () -> Void) { self.release = release }
     deinit { release() }
+}
+
+/// One title page's data, observed on its own.
+@Observable
+@MainActor
+final class TitleState<Value> {
+    var value: Value?
+    init(_ value: Value?) { self.value = value }
 }

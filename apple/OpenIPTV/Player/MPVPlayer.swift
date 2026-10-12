@@ -29,6 +29,9 @@ final class MPVPlayer: @unchecked Sendable {
         case network(buffer: Double, bytesPerSecond: Double)
         /// A jump landed and playback carried on; seconds since it was asked.
         case seeked(Double)
+        /// A preview while choosing where to jump is on screen (its target,
+        /// in the player's seconds).
+        case previewShown(Double)
         /// Streams (not files), about once a second: the stretch kept to
         /// rewind into, in the stream's own seconds, and whether the server
         /// also lets it jump outside that stretch.
@@ -404,6 +407,7 @@ final class MPVPlayer: @unchecked Sendable {
                 followStarted = nil
                 followShown = followTarget
                 followShownExact = followTargetExact
+                if let shown = followTarget { emit(.previewShown(shown)) }
                 if let next = followNext { startFollowing(next.seconds, exact: next.exact) }
             }
             if let asked = seekStarted {

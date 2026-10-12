@@ -65,9 +65,20 @@ final class SourceStore {
     let deviceId: String
 
     init() {
-        emby = Keychain.load(EmbyAccount.self, for: "emby")
-        iptv = Keychain.load([IPTVSource].self, for: "iptv") ?? []
-        if let existing = Keychain.load(String.self, for: "deviceId") {
+        #if DEBUG
+        // Tests: store the test server's account the way signing in does.
+        if let raw = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_STORE_EMBY"],
+           let account = try? JSONDecoder().decode(EmbyAccount.self, from: Data(raw.utf8)) {
+            Keychain.save(account, for: "emby")
+        }
+        #endif
+        let stored = Keychain.loadAll()
+        func decode<T: Decodable>(_ type: T.Type, _ account: String) -> T? {
+            stored[account].flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        }
+        emby = decode(EmbyAccount.self, "emby")
+        iptv = decode([IPTVSource].self, "iptv") ?? []
+        if let existing = decode(String.self, "deviceId") {
             deviceId = existing
         } else {
             deviceId = UUID().uuidString

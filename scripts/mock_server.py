@@ -528,6 +528,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if path.startswith("/Videos/") and path.endswith("/index.bif"):
+            # Preview thumbnails (Roku BIF), when the library has them.
+            bif = os.environ.get("OPENIPTV_MOCK_BIF")
+            if bif and os.path.exists(bif):
+                with open(bif, "rb") as f:
+                    return self.send(f.read(), "application/octet-stream")
+            return self.send({"error": "not found"}, status=404)
         if path.startswith("/Videos/") and "/stream" in path:
             print(f"{time.time():.2f} stream {path.split('/')[2]}", flush=True)
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")

@@ -37,6 +37,28 @@ enum Keychain {
         return try? JSONDecoder().decode(T.self, from: data)
     }
 
+    /// Everything this app stored, by account name, in one Keychain read
+    /// (the app reads its accounts before its first frame).
+    static func loadAll() -> [String: Data] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnData as String: true,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else { return [:] }
+        var out: [String: Data] = [:]
+        for item in items {
+            if let account = item[kSecAttrAccount as String] as? String, let data = item[kSecValueData as String] as? Data {
+                out[account] = data
+            }
+        }
+        return out
+    }
+
     /// Removes every item this app stored.
     static func deleteAll() {
         let query: [String: Any] = [
