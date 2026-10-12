@@ -16,8 +16,13 @@ actor GuideStore {
 
     private(set) var state: State = .idle
     private var programmes: [String: [Programme]] = [:] {
-        didSet { searchIndex = nil }
+        didSet {
+            searchIndex = nil
+            generation += 1
+        }
     }
+    /// Which `programmes` a search index built in the background is for.
+    private var generation = 0
     private var fetchedAt: Date?
     /// Every programme with its title folded for matching, in start order
     /// (built on the first search after the guide changes).
@@ -35,13 +40,20 @@ actor GuideStore {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "guide.json")
     }
 
-    func loadCache() {
-        guard programmes.isEmpty, let data = try? Data(contentsOf: cacheURL),
-              let cache = try? JSONDecoder().decode(Cache.self, from: data) else { return }
+    /// Decoded off this actor (a big guide takes a while), so now/next
+    /// lookups aren't held up meanwhile.
+    func loadCache() async {
+        guard programmes.isEmpty else { return }
+        let url = cacheURL
+        let cache = await Task.detached(priority: .userInitiated) { () -> Cache? in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? JSONDecoder().decode(Cache.self, from: data)
+        }.value
+        guard let cache, programmes.isEmpty else { return }
         programmes = cache.programmes
         fetchedAt = cache.fetchedAt
         state = .ready(programmes: programmes.values.reduce(0) { $0 + $1.count }, fetchedAt: cache.fetchedAt)
-        prepareSearch()
+        prepareSearchInBackground()
     }
 
     func isStale(maxAge: TimeInterval = 6 * 3600) -> Bool {
@@ -70,15 +82,23 @@ actor GuideStore {
             state = .failed(lastError ?? "The guide had no programmes for your channels.")
             return
         }
-        for key in merged.keys {
-            merged[key]?.sort { ($0.start, $0.stop) < ($1.start, $1.stop) }
-        }
+        let unsorted = merged
+        merged = await Task.detached(priority: .utility) {
+            var sorted = unsorted
+            for key in sorted.keys { sorted[key]?.sort { ($0.start, $0.stop) < ($1.start, $1.stop) } }
+            return sorted
+        }.value
         programmes = merged
-        fetchedAt = Date()
-        state = .ready(programmes: merged.values.reduce(0) { $0 + $1.count }, fetchedAt: fetchedAt!)
-        prepareSearch()
-        if let data = try? JSONEncoder().encode(Cache(fetchedAt: fetchedAt!, programmes: merged)) {
-            try? data.write(to: cacheURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let at = Date()
+        fetchedAt = at
+        state = .ready(programmes: merged.values.reduce(0) { $0 + $1.count }, fetchedAt: at)
+        prepareSearchInBackground()
+        // Saved off this actor too.
+        let saved = merged, url = cacheURL
+        Task.detached(priority: .utility) {
+            if let data = try? JSONEncoder().encode(Cache(fetchedAt: at, programmes: saved)) {
+                try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
         }
     }
 
@@ -108,11 +128,29 @@ actor GuideStore {
     /// Programmes on now or later whose title has the query's words (each
     /// word in the title or the channel's name, at least one in the title):
     /// the ones on now first, then by start time.
-    /// The search index, built when the guide arrives rather than on the
-    /// first letter typed (it folds every title: a moment for a big guide).
+    /// The search index, built in the background when the guide arrives
+    /// rather than on the first letter typed (it folds every title: a
+    /// moment for a big guide).
+    private func prepareSearchInBackground() {
+        let snapshot = programmes, built = generation
+        Task.detached(priority: .utility) {
+            let index = GuideStore.index(snapshot)
+            await self.install(index, for: built)
+        }
+    }
+
+    private func install(_ index: [(epgId: String, programme: Programme, folded: String)], for built: Int) {
+        if built == generation, searchIndex == nil { searchIndex = index }
+    }
+
+    /// Searching before the background index is ready: build it here.
     private func prepareSearch() {
         guard searchIndex == nil else { return }
-        searchIndex = programmes.flatMap { id, list in
+        searchIndex = Self.index(programmes)
+    }
+
+    private nonisolated static func index(_ programmes: [String: [Programme]]) -> [(epgId: String, programme: Programme, folded: String)] {
+        programmes.flatMap { id, list in
             list.map { (epgId: id, programme: $0, folded: GuideStore.fold($0.title)) }
         }.sorted { $0.programme.start < $1.programme.start }
     }
