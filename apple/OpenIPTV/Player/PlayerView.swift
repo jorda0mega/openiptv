@@ -72,7 +72,8 @@ struct MoviePlayerView: View {
     @State private var attempt = 0
     /// Where a server-converted (HLS) fallback starts, since its clock starts at 0.
     @State private var offset: Double = 0
-    /// "Started in …" for a few seconds after the first frame.
+    /// "Started in …" for a few seconds after the first frame (development
+    /// builds with the stats on).
     @State private var timing: String?
     @State private var warmStart = false
     #if os(tvOS)
@@ -161,6 +162,9 @@ struct MoviePlayerView: View {
         if let error { return (error, .red) }
         if let qualityNote { return (qualityNote, .yellow) }
         if let timing { return (timing, .white.opacity(0.6)) }
+        #if DEBUG
+        if prefs.performanceStats, !stats.isEmpty { return (stats, .white.opacity(0.6)) }
+        #endif
         return nil
     }
 
@@ -293,14 +297,15 @@ struct MoviePlayerView: View {
                 timing = String(format: "Started in %.1f s · server %.1f · setup %.1f · open %.1f · first frame %.1f",
                                 total, playback.resolvedIn, setup, opened, playerSeconds - opened)
             }
-            showTiming(timing ?? "", for: 5)
             #if DEBUG
             print("PERF start " + (timing ?? ""))
             #endif
+            // Development builds with the stats on: shown for a moment.
+            if prefs.performanceStats { showTiming(timing ?? "", for: 5) } else { timing = nil }
             if controlsVisible { showControls() }
             Task { await model.report(playback, seconds: position, event: .started) }
         case let .seeked(seconds):
-            showTiming(String(format: "Jumped in %.1f s", seconds), for: 3)
+            if prefs.performanceStats { showTiming(String(format: "Jumped in %.1f s", seconds), for: 3) }
             #if DEBUG
             print(String(format: "PERF seek %.3f", seconds))
             #endif

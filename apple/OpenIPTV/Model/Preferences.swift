@@ -52,6 +52,19 @@ final class Preferences {
     /// Where local channels come from (set in Settings, or from the
     /// iPhone's approximate location).
     var area: LocalArea? { didSet { save() } }
+    /// Development builds: start and jump times, quality and speed under
+    /// the player's title (Settings → Developer).
+    var showPerformanceStats: Bool { didSet { save() } }
+
+    /// Whether the players show those: the toggle in a development build,
+    /// never in a release (TestFlight or App Store) one.
+    var performanceStats: Bool {
+        #if DEBUG
+        showPerformanceStats
+        #else
+        false
+        #endif
+    }
 
     private struct Stored: Codable {
         var playerProfile = PlayerProfile.fastStart
@@ -61,6 +74,7 @@ final class Preferences {
         var hiddenCategories: Set<String> = []
         var hiddenRows: Set<String> = []
         var area: LocalArea?
+        var showPerformanceStats: Bool? = false
     }
 
     // Favorites hold channel names, logos and stream references. Xtream and
@@ -78,6 +92,7 @@ final class Preferences {
         hiddenCategories = stored.hiddenCategories
         hiddenRows = stored.hiddenRows
         area = stored.area
+        showPerformanceStats = stored.showPerformanceStats ?? false
     }
 
     func isFavorite(_ channel: LiveChannel) -> Bool { favorites.contains { $0.id == channel.id } }
@@ -98,7 +113,8 @@ final class Preferences {
             favorites: favorites.map(\.withoutSecrets),
             hiddenCategories: hiddenCategories,
             hiddenRows: hiddenRows,
-            area: area
+            area: area,
+            showPerformanceStats: showPerformanceStats
         )
         if let data = try? JSONEncoder().encode(stored) {
             UserDefaults.standard.set(data, forKey: Self.key)

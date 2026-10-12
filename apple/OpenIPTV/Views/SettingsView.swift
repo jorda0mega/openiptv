@@ -62,6 +62,16 @@ struct SettingsView: View {
                     Text(prefs.playerProfile.detail + " Applies to the next channel or video you open.")
                 }
 
+                #if DEBUG
+                Section {
+                    Toggle(isOn: $prefs.showPerformanceStats) { Text("Show performance stats").rowForeground() }
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    Text("Development builds only: how fast videos start and jump, the quality and the connection speed, under the player's title.")
+                }
+                #endif
+
                 if !model.rows.isEmpty {
                     Section("Home rows") {
                         ForEach(model.rows) { row in

@@ -10,7 +10,7 @@ import SwiftUI
 struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     var caption: String?
     let title: String
-    /// A short note under the title (an error, "Started in 0.6 s").
+    /// A short note under the title (an error, "2:05 behind live").
     var note: (text: String, color: Color)?
     let paused: Bool
     var canGoForward = true

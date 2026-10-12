@@ -411,8 +411,11 @@ struct LivePlayerView: View {
         case let .started(seconds):
             started = true
             buffering = false
-            timing = String(format: "Started in %.1f s", seconds)
-            timingUntil = Date().addingTimeInterval(3)
+            // Development builds with the stats on.
+            if prefs.performanceStats {
+                timing = String(format: "Started in %.1f s", seconds)
+                timingUntil = Date().addingTimeInterval(3)
+            }
             if controlsVisible { showControls() }
         case let .buffering(isBuffering):
             buffering = isBuffering
