@@ -17,7 +17,11 @@ final class PreviewThumbnails: @unchecked Sendable {
     private let decoded = NSCache<NSNumber, UIImage>()
     private let decoder = DispatchQueue(label: "openiptv.preview-stills", qos: .userInitiated)
     private let lock = NSLock()
-    private var queued = Set<Int>()
+    /// Where the viewer is choosing now (the window follows it), whether
+    /// the decoder is running, and stills that wouldn't decode.
+    private var target: Int?
+    private var working = false
+    private var broken = Set<Int>()
 
     var count: Int { times.count }
 
@@ -47,19 +51,47 @@ final class PreviewThumbnails: @unchecked Sendable {
     }
 
     /// Decodes the stills around `seconds` in the background (more ahead
-    /// than behind), so each is ready to show the moment it's chosen.
+    /// than behind), so each is ready to show the moment it's chosen. One
+    /// worker, nearest the latest position first: a new position replaces
+    /// the window at once rather than queueing behind the old one.
     func warm(around seconds: Double) {
         let center = index(near: seconds)
-        let wanted = (max(0, center - 15)...min(times.count - 1, center + 45)).filter { decoded.object(forKey: $0 as NSNumber) == nil }
-        let fresh = lock.withLock { wanted.filter { queued.insert($0).inserted } }
-        guard !fresh.isEmpty else { return }
-        // Nearest first.
-        for index in fresh.sorted(by: { abs($0 - center) < abs($1 - center) }) {
-            decoder.async { [self] in
-                defer { lock.withLock { _ = queued.remove(index) } }
-                guard decoded.object(forKey: index as NSNumber) == nil, let image = still(index) else { return }
+        let start = lock.withLock { () -> Bool in
+            target = center
+            guard !working else { return false }
+            working = true
+            return true
+        }
+        if start { decoder.async { [self] in decodeWindow() } }
+    }
+
+    private func decodeWindow() {
+        while let index = nextToDecode() {
+            if let image = still(index) {
                 decoded.setObject(image.preparingForDisplay() ?? image, forKey: index as NSNumber)
+            } else {
+                lock.withLock { _ = broken.insert(index) }
             }
+        }
+    }
+
+    /// The undecoded still nearest the target in its window; nil (and the
+    /// worker stops) when the window is ready.
+    private func nextToDecode() -> Int? {
+        lock.withLock {
+            guard let center = target, !times.isEmpty else {
+                working = false
+                return nil
+            }
+            let low = max(0, center - 15), high = min(times.count - 1, center + 45)
+            for distance in 0...max(center - low, high - center) {
+                for index in [center + distance, center - distance] where index >= low && index <= high {
+                    if !broken.contains(index), decoded.object(forKey: index as NSNumber) == nil { return index }
+                }
+            }
+            target = nil
+            working = false
+            return nil
         }
     }
 

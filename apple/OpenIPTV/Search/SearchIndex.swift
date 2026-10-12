@@ -712,7 +712,8 @@ final class LibraryIndex {
             syncedAt = fullSyncAt
             outdated = false
         }
-        await publish(ordered())
+        // The last pages already published with their batch: not built twice.
+        if sincePublish > 0 { await publish(ordered()) }
         save()
     }
 
@@ -749,8 +750,7 @@ final class LibraryIndex {
         let header = LibraryIndexFile.Header(version: outdated ? 1 : Self.version, server: server, syncedAt: syncedAt,
                                              fullSyncAt: fullSyncAt, total: total,
                                              pages: snapshot.keys.sorted().map { [$0, snapshot[$0]?.count ?? 0] })
-        AppCache.saveData(Self.file) { LibraryIndexFile.encode(header, pages: snapshot) }
-        AppCache.remove(Self.legacyFile)
+        AppCache.saveData(Self.file, replacing: Self.legacyFile) { LibraryIndexFile.encode(header, pages: snapshot) }
     }
 
     /// Three tries with a short pause, so one slow page doesn't sink the load.
@@ -903,8 +903,9 @@ final class LibraryIndex {
             let started = CFAbsoluteTimeGetCurrent()
             defer { NSLog("%@", String(format: "PERF index read %.0f ms", (CFAbsoluteTimeGetCurrent() - started) * 1000)) }
             #endif
+            // A newer build's format (or damage) reads as nothing: rebuilt.
             if let data = try? Data(contentsOf: AppCache.directory.appending(path: file), options: .alwaysMapped),
-               let (header, pages) = LibraryIndexFile.decode(data) {
+               let (header, pages) = LibraryIndexFile.decode(data), (header.version ?? 1) <= version {
                 return (Cache(version: header.version, server: header.server, syncedAt: header.syncedAt,
                               fullSyncAt: header.fullSyncAt, total: header.total, pages: pages), false)
             }
@@ -947,12 +948,16 @@ enum AppCache {
         writer.async { write(name, value) }
     }
 
-    /// The same for a file in its own format, made on the writer's queue.
-    static func saveData(_ name: String, _ make: @escaping @Sendable () -> Data?) {
+    /// The same for a file in its own format, made on the writer's queue;
+    /// `replacing`: an older copy removed once this one is safely written.
+    static func saveData(_ name: String, replacing old: String? = nil, _ make: @escaping @Sendable () -> Data?) {
         let url = directory.appending(path: name)
+        let oldURL = old.map { directory.appending(path: $0) }
         writer.async {
-            guard let data = make() else { return }
-            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            guard let data = make(),
+                  (try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])) != nil
+            else { return }
+            if let oldURL { try? FileManager.default.removeItem(at: oldURL) }
         }
     }
 

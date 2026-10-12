@@ -17,6 +17,9 @@ enum LibraryIndexFile {
     }
 
     private static let magic: [UInt8] = Array("LIX1".utf8)
+    /// The fewest bytes a title takes (empty strings, no genres): a page
+    /// claiming more titles than the rest of the file could hold is damage.
+    private static let smallestEntry = 31
 
     static func encode(_ header: Header, pages: [Int: [LibraryEntry]]) -> Data? {
         guard let head = try? JSONEncoder().encode(header) else { return nil }
@@ -56,7 +59,8 @@ enum LibraryIndexFile {
             var pages: [Int: [LibraryEntry]] = [:]
             pages.reserveCapacity(header.pages.count)
             for page in header.pages {
-                guard page.count == 2 else { return nil }
+                guard page.count == 2, page[0] >= 0, page[1] >= 0, pages[page[0]] == nil,
+                      page[1] <= (raw.count - reader.at) / smallestEntry else { return nil }
                 var entries: [LibraryEntry] = []
                 entries.reserveCapacity(page[1])
                 for _ in 0..<page[1] {

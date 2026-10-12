@@ -577,7 +577,10 @@ struct MoviePlayerView: View {
                 compact = true
                 // Playing again: the bar alone, and the remote back on it
                 // (a hidden button kept it, and swallowed the skips).
-                if panel == nil { focus = .bar }
+                if panel == nil {
+                    menuRequest += 1
+                    focus = .bar
+                }
             }
             #endif
             if isPaused { showControls(autoHide: false) } else { showControls() }
@@ -772,6 +775,8 @@ struct MoviePlayerView: View {
         switch input {
         case let .click(direction):
             guard !subtitleTracks.isEmpty else { return }
+            // Off the button: a menu asked for there no longer opens.
+            menuRequest += 1
             focus = direction < 0 ? .subtitles : .audio
         case .select:
             openMenu(focus == .subtitles ? .subtitles : .audio)
@@ -817,6 +822,8 @@ struct MoviePlayerView: View {
 
     /// Back on the bar: playing, the controls hide again in a moment.
     private func backToBar() {
+        // A menu still being fetched for a button doesn't open later.
+        menuRequest += 1
         focus = .bar
         if !paused { compact = true }
         showControls(autoHide: !paused)
@@ -828,10 +835,11 @@ struct MoviePlayerView: View {
         let request = menuRequest
         let button: TVPlayerFocus = kind == .subtitles ? .subtitles : .audio
         Task {
-            if let player { tracks = await player.tracks() }
+            let fresh = await player?.tracks()
             // Still asked for: the latest request, the remote still on its
             // button, nothing else opened meanwhile.
             guard request == menuRequest, focus == button, panel == nil else { return }
+            if let fresh { tracks = fresh }
             let chosen = kind == .audio
                 ? audioTracks.firstIndex(where: \.selected) ?? 0
                 : subtitleTracks.firstIndex(where: \.selected).map { $0 + 1 } ?? 0

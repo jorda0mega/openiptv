@@ -186,7 +186,11 @@ final class AppModel {
             homeBuiltAt = fresh.builtAt
             homeHistory = fresh.history ?? []
             homeError = nil
-            AppCache.save("home.v4.json", fresh)
+            // Saved as shown (with this device's stops), not as the server
+            // still had it.
+            var saved = fresh
+            saved.rows = freshRows
+            AppCache.save("home.v4.json", saved)
             // The first few things you'd tap on Home are ready before you do:
             // how to play them, and their pages.
             let likely = (fresh.featured.map { [$0.card] } ?? []) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(3) }
@@ -644,10 +648,18 @@ final class AppModel {
     @ObservationIgnored private var recentStops: [String: RecentStop] = [:]
 
     private struct RecentStop {
+        enum Outcome {
+            /// The card Continue Watching showed for it.
+            case card(Card)
+            /// Finished with nothing next: no card.
+            case gone
+            /// Partway, but no card could be made here (nothing about it
+            /// saved): the server's card stays, with this progress.
+            case progress(Double?)
+        }
+
         let at: Date
-        /// The card Continue Watching showed for it (nil: none, a film
-        /// finished).
-        let card: Card?
+        let outcome: Outcome
         /// Its show, whose card it replaces whichever episode that had.
         let seriesId: String?
     }
@@ -661,11 +673,24 @@ final class AppModel {
         guard !recentStops.isEmpty else { return row }
         var cards = row?.cards ?? []
         for (itemId, stop) in recentStops.sorted(by: { $0.value.at < $1.value.at }) {
-            cards.removeAll { card in
+            func isIt(_ card: Card) -> Bool {
                 card.id == itemId || card.episodeId == itemId
                     || stop.seriesId.map { card.id == $0 || card.seriesId == $0 } ?? false
             }
-            if let card = stop.card { cards.insert(card, at: 0) }
+            let theirs = cards.first(where: isIt)
+            cards.removeAll(where: isIt)
+            switch stop.outcome {
+            case let .card(card):
+                cards.insert(card, at: 0)
+            case .gone:
+                break
+            case let .progress(progress):
+                // The server's own card, in front with where it got to.
+                guard let old = theirs else { break }
+                cards.insert(Card(id: old.id, kind: old.kind, title: old.title, subtitle: old.subtitle, images: old.images,
+                                  progress: progress ?? old.progress, playable: old.playable, episodeId: old.episodeId,
+                                  seriesId: old.seriesId), at: 0)
+            }
         }
         guard !cards.isEmpty else { return nil }
         let shape = Artwork.Shape.landscape
@@ -708,7 +733,10 @@ final class AppModel {
                         progress: progress, playable: old.playable, episodeId: old.episodeId, seriesId: old.seriesId)
         }
         if let lead { cards.insert(lead, at: 0) }
-        recentStops[playback.itemId] = RecentStop(at: Date(), card: lead, seriesId: playback.seriesId)
+        let outcome: RecentStop.Outcome = if let lead { .card(lead) } else if finished { .gone } else {
+            .progress(duration > 0 ? seconds / duration * 100 : nil)
+        }
+        recentStops[playback.itemId] = RecentStop(at: Date(), outcome: outcome, seriesId: playback.seriesId)
         var updated = rows
         let shape = Artwork.Shape.landscape
         if let index {
