@@ -98,7 +98,9 @@ struct LivePlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
+        .onAppear { PlaybackActivity.began() }
         .onDisappear {
+            PlaybackActivity.ended()
             hideTask?.cancel()
             loadTask?.cancel()
             player?.shutdown()

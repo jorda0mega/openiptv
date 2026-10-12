@@ -158,7 +158,11 @@ struct MoviePlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
-        .onDisappear { finish() }
+        .onAppear { PlaybackActivity.began() }
+        .onDisappear {
+            PlaybackActivity.ended()
+            finish()
+        }
     }
 
     /// Minimal, like the streaming apps (see PlayerChrome): the episode and

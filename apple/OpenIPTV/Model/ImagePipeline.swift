@@ -26,8 +26,10 @@ actor ImagePipeline {
         memory.countLimit = 800
     }
 
-    /// Loads these (up to eight at a time) so they're ready when shown.
+    /// Loads these (up to eight at a time) so they're ready when shown;
+    /// not while something plays (the stream comes first).
     func prefetch(_ urls: [URL]) async {
+        guard !PlaybackActivity.isPlaying else { return }
         await withTaskGroup(of: Void.self) { group in
             var queue = urls[...]
             for _ in 0..<8 {

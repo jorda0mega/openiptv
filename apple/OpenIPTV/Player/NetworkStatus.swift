@@ -45,3 +45,14 @@ final class NetworkStatus: @unchecked Sendable {
         return free >= 8_000_000_000
     }
 }
+
+/// Whether something is playing: work done ahead of time (pictures, pages,
+/// warm-ups) waits meanwhile, so the stream has the connection to itself.
+enum PlaybackActivity {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var count = 0
+
+    static var isPlaying: Bool { lock.withLock { count > 0 } }
+    static func began() { lock.withLock { count += 1 } }
+    static func ended() { lock.withLock { count = max(0, count - 1) } }
+}

@@ -371,6 +371,7 @@ final class AppModel {
     /// Likely to be opened next (focused a moment, at the top of Home): its
     /// page and its pictures, so it opens complete instead of filling in.
     func prefetchTitle(_ card: Card) {
+        guard !PlaybackActivity.isPlaying else { return }
         switch card.kind {
         case "Series": prefetchShows([card.id])
         case "Movie": Task(priority: .utility) { await refreshTitle(card.id, kind: "Movie") }
@@ -586,7 +587,7 @@ final class AppModel {
     private var warming: String?
 
     func warmUp(_ itemId: String, kind: String?, options: [(String, String)], hardwareDecoding: Bool) {
-        guard warm?.key != itemId, warming != itemId else { return }
+        guard warm?.key != itemId, warming != itemId, !PlaybackActivity.isPlaying else { return }
         coolDown()
         warming = itemId
         prepare([(id: itemId, kind: kind)])
