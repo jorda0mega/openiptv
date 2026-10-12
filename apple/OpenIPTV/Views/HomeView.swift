@@ -270,6 +270,8 @@ private struct RowTitle: View {
 /// through, the episode and what's left. Tap plays; press and hold for the
 /// show or film.
 private struct ContinueRow: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Preferences.self) private var prefs
     let row: HomeRow
     let loadingCard: String?
     let play: (Card) -> Void
@@ -291,6 +293,15 @@ private struct ContinueRow: View {
                 .padding(.horizontal, 20)
             }
             .scrollIndicators(.hidden)
+        }
+        // The title you're most likely to resume, opened in the background
+        // a second after Home settles (on Wi-Fi), so Play starts at once.
+        .task(id: row.cards.first?.id) {
+            guard let card = row.cards.first else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, NetworkStatus.shared.unmetered else { return }
+            model.warmUp(card.episodeId ?? card.id, kind: card.episodeId != nil ? "Episode" : card.kind,
+                         options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
         }
     }
 
@@ -327,6 +338,7 @@ private struct ContinueRow: View {
 /// A row of posters: the artwork only (it carries the title). Tap opens
 /// the title; press and hold to play.
 private struct PosterRow: View {
+    @Environment(AppModel.self) private var model
     let title: String
     let cards: [Card]
     let open: (Card) -> Void
@@ -349,6 +361,13 @@ private struct PosterRow: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button("Play", systemImage: "play.fill") { play(card) }
+                        }
+                        // On screen a moment (not scrolling past): fetch its
+                        // page and pictures, so a tap opens it complete.
+                        .task {
+                            try? await Task.sleep(for: .milliseconds(600))
+                            guard !Task.isCancelled, NetworkStatus.shared.unmetered else { return }
+                            model.prefetchTitle(card)
                         }
                         .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
