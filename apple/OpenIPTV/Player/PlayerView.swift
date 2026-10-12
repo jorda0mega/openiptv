@@ -105,6 +105,9 @@ struct MoviePlayerView: View {
     /// "HDR") for the Info panel.
     @State private var tracks: [MPVPlayer.Track] = []
     @State private var badges: [String] = []
+    /// The latest track-menu request: an older one finishing late (the
+    /// player busy) doesn't open its menu.
+    @State private var menuRequest = 0
     #endif
     /// iPhone scrubbing: speed label, and live seeks so the picture follows.
     @State private var scrubSpeed: String?
@@ -332,13 +335,15 @@ struct MoviePlayerView: View {
         return thumbnails.image(near: target)
     }
 
-    /// The film's preview thumbnails, a few seconds in (once it's playing,
-    /// so they don't slow the start), on Wi-Fi.
+    /// The film's preview thumbnails, a second after the first frame (so
+    /// they don't slow the start), on Wi-Fi; the stills around where it's
+    /// playing decoded straight away.
     private func loadThumbnails() async {
-        try? await Task.sleep(for: .seconds(5))
+        try? await Task.sleep(for: .seconds(1))
         guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered, let emby = model.emby,
               let data = await emby.previewThumbnails(itemId: playback.itemId) else { return }
         thumbnails = await Task.detached(priority: .utility) { PreviewThumbnails(data) }.value
+        thumbnails?.warm(around: position)
         #if DEBUG
         NSLog("%@", "PERF thumbnails \(thumbnails?.count ?? 0)")
         #endif
@@ -373,7 +378,6 @@ struct MoviePlayerView: View {
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
         probeTask = Task { await probeWhileConverted() }
-        thumbnailTask = Task { await loadThumbnails() }
     }
 
     /// While playing a converted version, test the connection every 20 s by
@@ -470,6 +474,7 @@ struct MoviePlayerView: View {
             #if os(tvOS)
             Task { await loadTrackInfo() }
             #endif
+            thumbnailTask = Task { await loadThumbnails() }
             // Development builds with the stats on: shown for a moment.
             if prefs.performanceStats { showTiming(timing ?? "", for: 5) } else { timing = nil }
             if controlsVisible { showControls() }
@@ -562,11 +567,18 @@ struct MoviePlayerView: View {
             }
         case let .paused(isPaused):
             paused = isPaused
+            // Paused: choosing where to go is likely next.
+            if isPaused { thumbnails?.warm(around: position) }
             #if os(tvOS)
             // Paused by the viewer (not to choose where to jump): the title,
             // buttons and Info tab; playing, the bar alone.
             if isPaused, scrubbing == nil, !resumeAfterScrub { compact = false }
-            if !isPaused { compact = true }
+            if !isPaused {
+                compact = true
+                // Playing again: the bar alone, and the remote back on it
+                // (a hidden button kept it, and swallowed the skips).
+                if panel == nil { focus = .bar }
+            }
             #endif
             if isPaused { showControls(autoHide: false) } else { showControls() }
         case .ended:
@@ -812,8 +824,14 @@ struct MoviePlayerView: View {
 
     /// A track menu, on the track in use.
     private func openMenu(_ kind: TVPlayerPanel) {
+        menuRequest += 1
+        let request = menuRequest
+        let button: TVPlayerFocus = kind == .subtitles ? .subtitles : .audio
         Task {
             if let player { tracks = await player.tracks() }
+            // Still asked for: the latest request, the remote still on its
+            // button, nothing else opened meanwhile.
+            guard request == menuRequest, focus == button, panel == nil else { return }
             let chosen = kind == .audio
                 ? audioTracks.firstIndex(where: \.selected) ?? 0
                 : subtitleTracks.firstIndex(where: \.selected).map { $0 + 1 } ?? 0

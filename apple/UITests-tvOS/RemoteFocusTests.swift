@@ -158,6 +158,66 @@ final class RemoteFocusTests: XCTestCase {
         shot("look info closed")
     }
 
+    /// A film just stopped stays first in Continue Watching though the
+    /// server doesn't list it yet (the test server never does): a refresh
+    /// used to take it away again 86 ms after it appeared.
+    func testStopStaysInContinueWatching() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(8)
+        press(.menu, "menu 1")
+        press(.menu, "menu 2 leaves the player")
+        // Back to the tab bar (never Menu on it: that leaves the app).
+        for _ in 0..<5 where !focused().contains("id='magnifyingglass'") { press(.menu, "back") }
+        press(.right, "to Home")
+        sleep(5)
+        shot("home after stop")
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label BEGINSWITH 'Animals'")).firstMatch
+        XCTAssertTrue(card.exists, "the film just stopped isn't in Continue Watching")
+    }
+
+    /// Paused, up to the audio button, then Play/Pause: playing again with
+    /// the remote back on the bar, so a click right still skips (it used to
+    /// stay on the hidden button and do nothing).
+    func testSkipAfterResumeFromButtons() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(8)
+        remote.press(.playPause)
+        sleep(1)
+        remote.press(.up)
+        usleep(800_000)
+        remote.press(.playPause)
+        usleep(1_500_000)
+        let before = barSeconds()
+        remote.press(.right)
+        usleep(700_000)
+        let after = barSeconds()
+        shot("after resume and skip")
+        print("BAR before \(before ?? -1) after \(after ?? -1)")
+        XCTAssertNotNil(before, "no transport bar")
+        XCTAssertGreaterThanOrEqual((after ?? 0) - (before ?? 0), 8, "the click right didn't skip")
+    }
+
+    /// The transport bar's time, in seconds ("02:12, -07:48" → 132).
+    private func barSeconds() -> Double? {
+        let bar = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Playing' OR label == 'Paused'")).firstMatch
+        guard bar.exists, let value = bar.value as? String, let time = value.split(separator: ",").first else { return nil }
+        return time.split(separator: ":").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }.reduce(0) { $0 * 60 + $1 }
+    }
+
     /// Home's focus motion, for a screen recording: down into the rows,
     /// along one, open a title, and back.
     func testHomeMotion() {

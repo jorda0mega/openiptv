@@ -45,7 +45,10 @@ struct IMDbCatalog: Codable, Sendable {
 
     static func cached() -> IMDbCatalog? { AppCache.read(file) }
 
-    /// Downloads both datasets and keeps these titles (by number).
+    /// Downloads both datasets and keeps these titles (by number). Stops
+    /// (CancellationError) when cancelled or something starts playing,
+    /// downloading or reading: the stream gets the connection and the
+    /// processor; a dataset already downloaded is kept for next time.
     static func build(for wanted: Set<UInt32>) async throws -> IMDbCatalog {
         var titles: [UInt32: Title] = [:]
         titles.reserveCapacity(wanted.count)
@@ -86,7 +89,20 @@ struct IMDbCatalog: Codable, Sendable {
         let age = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
             .map { Date().timeIntervalSince($0) }
         if age.map({ $0 > 7 * 24 * 3600 }) ?? true {
-            let (temporary, response) = try await URLSession.shared.download(from: url)
+            let download = Task { try await URLSession.shared.download(from: url) }
+            // Something starts playing: the download stops at once.
+            let watch = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    if PlaybackActivity.isPlaying { return download.cancel() }
+                }
+            }
+            defer { watch.cancel() }
+            let (temporary, response) = try await withTaskCancellationHandler {
+                try await download.value
+            } onCancel: {
+                download.cancel()
+            }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                 try? FileManager.default.removeItem(at: temporary)
                 throw URLError(.badServerResponse)
@@ -96,12 +112,15 @@ struct IMDbCatalog: Codable, Sendable {
         }
         do {
             let compressed = try Data(contentsOf: file, options: .alwaysMapped)
-            try Gzip.lines(compressed) { line in
+            try Gzip.lines(compressed, stop: { Task.isCancelled || PlaybackActivity.isPlaying }) { line in
                 // Only data lines ("tt…"), not the header.
                 guard line.count > 2, line[0] == 116, line[1] == 116,
                       let id = number(line[..<(line.firstIndex(of: 9) ?? line.endIndex)]), keep(id) else { return }
                 each(id, line[...].split(separator: 9, omittingEmptySubsequences: false))
             }
+        } catch is CancellationError {
+            // Stopped: the file is fine, and read again next time.
+            throw CancellationError()
         } catch {
             // Damaged: downloaded again next time.
             try? FileManager.default.removeItem(at: file)

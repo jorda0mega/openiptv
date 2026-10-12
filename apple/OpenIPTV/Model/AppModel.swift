@@ -178,7 +178,9 @@ final class AppModel {
             if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured {
                 await Self.wait(for: prefetch, atMost: 1.5)
             }
-            if fresh.rows != rows { rows = fresh.rows }
+            // What was just stopped here, even if the server hasn't caught up.
+            let freshRows = withStops(fresh.rows)
+            if freshRows != rows { rows = freshRows }
             if fresh.featured != featured { featured = fresh.featured }
             if (fresh.spotlight ?? []) != spotlight { spotlight = fresh.spotlight ?? [] }
             homeBuiltAt = fresh.builtAt
@@ -639,28 +641,54 @@ final class AppModel {
     /// TV app does), a film gone. A title that wasn't in the row joins it.
     /// What was stopped on this device in the last two minutes: a server
     /// answer that hasn't caught up yet doesn't undo it.
-    @ObservationIgnored private var recentStops: [String: (at: Date, progress: Double?, finished: Bool)] = [:]
+    @ObservationIgnored private var recentStops: [String: RecentStop] = [:]
 
-    /// The server's Continue Watching, with this device's last few stops
-    /// applied over anything older the server still says.
-    private func reconciled(_ row: HomeRow) -> HomeRow {
+    private struct RecentStop {
+        let at: Date
+        /// The card Continue Watching showed for it (nil: none, a film
+        /// finished).
+        let card: Card?
+        /// Its show, whose card it replaces whichever episode that had.
+        let seriesId: String?
+    }
+
+    /// The server's Continue Watching, with this device's stops of the last
+    /// two minutes over anything older it still says: each one's card in
+    /// front (newest first) in place of the server's for that title or
+    /// show, also when the server doesn't list it yet.
+    private func reconciled(_ row: HomeRow?) -> HomeRow? {
         recentStops = recentStops.filter { Date().timeIntervalSince($0.value.at) < 120 }
         guard !recentStops.isEmpty else { return row }
-        let cards = row.cards.compactMap { card -> Card? in
-            guard let stop = recentStops[card.episodeId ?? card.id] else { return card }
-            if stop.finished { return nil }
-            guard let progress = stop.progress, abs((card.progress ?? 0) - progress) > 1 else { return card }
-            return Card(id: card.id, kind: card.kind, title: card.title, subtitle: card.subtitle, images: card.images,
-                        progress: progress, playable: card.playable, episodeId: card.episodeId, seriesId: card.seriesId)
+        var cards = row?.cards ?? []
+        for (itemId, stop) in recentStops.sorted(by: { $0.value.at < $1.value.at }) {
+            cards.removeAll { card in
+                card.id == itemId || card.episodeId == itemId
+                    || stop.seriesId.map { card.id == $0 || card.seriesId == $0 } ?? false
+            }
+            if let card = stop.card { cards.insert(card, at: 0) }
         }
-        return HomeRow(title: row.title, shape: row.shape, aspect: row.aspect, cards: cards)
+        guard !cards.isEmpty else { return nil }
+        let shape = Artwork.Shape.landscape
+        return HomeRow(title: "Continue Watching", shape: row?.shape ?? shape.rawValue, aspect: row?.aspect ?? shape.aspect, cards: cards)
+    }
+
+    /// Rows with Continue Watching reconciled (first), and the other rows
+    /// without what's in it.
+    private func withStops(_ rows: [HomeRow]) -> [HomeRow] {
+        guard !recentStops.isEmpty else { return rows }
+        let row = reconciled(rows.first { $0.title == "Continue Watching" })
+        let resumed = Set(row?.cards.flatMap { [$0.id] + [$0.seriesId].compactMap(\.self) } ?? [])
+        var updated = rows.filter { $0.title != "Continue Watching" }.map { other in
+            HomeRow(title: other.title, shape: other.shape, aspect: other.aspect, cards: other.cards.filter { !resumed.contains($0.id) })
+        }.filter { !$0.cards.isEmpty }
+        if let row { updated.insert(row, at: 0) }
+        return updated
     }
 
     private func patchContinueWatching(_ playback: EmbyPlayback, seconds: Double) {
         guard let emby else { return }
         let duration = playback.durationSeconds ?? 0
         let finished = duration > 0 && seconds >= duration * 0.9
-        recentStops[playback.itemId] = (Date(), duration > 0 ? seconds / duration * 100 : nil, finished)
         let index = rows.firstIndex { $0.title == "Continue Watching" }
         var cards = index.map { rows[$0].cards } ?? []
         let old = cards.firstIndex { $0.id == playback.itemId || $0.episodeId == playback.itemId }.map { cards.remove(at: $0) }
@@ -680,6 +708,7 @@ final class AppModel {
                         progress: progress, playable: old.playable, episodeId: old.episodeId, seriesId: old.seriesId)
         }
         if let lead { cards.insert(lead, at: 0) }
+        recentStops[playback.itemId] = RecentStop(at: Date(), card: lead, seriesId: playback.seriesId)
         var updated = rows
         let shape = Artwork.Shape.landscape
         if let index {
@@ -718,7 +747,7 @@ final class AppModel {
             return true
         }
         let items = HomeFeed.continueItems(watching: watching, nextUp: (try? await nextUp) ?? [])
-        let row = emby.showRow("Continue Watching", items, lastCardWidth).map(reconciled)
+        let row = reconciled(emby.showRow("Continue Watching", items, lastCardWidth))
         var updated = rows.filter { $0.title != "Continue Watching" }
         let resumed = Set(row?.cards.map(\.id) ?? [])
         updated = updated.map { other in
@@ -904,10 +933,18 @@ final class AppModel {
         // first two minutes: browsing and a first play get the connection,
         // and a quick look doesn't start a download it won't finish.
         let hadCatalog = library.catalog != nil
-        Task(priority: .background) { [weak self] in
+        // One at a time, owned, so signing out stops it.
+        catalogJob?.cancel()
+        let account = accountGeneration
+        catalogJob = Task(priority: .background) { [weak self] in
             try? await Task.sleep(for: .seconds(120))
-            guard let self else { return }
-            await library.refreshCatalog(unmetered: NetworkStatus.shared.knownUnmetered)
+            guard let self, !Task.isCancelled, account == accountGeneration else { return }
+            await withTaskCancellationHandler {
+                await self.library.refreshCatalog(unmetered: NetworkStatus.shared.knownUnmetered)
+            } onCancel: { [library] in
+                Task { @MainActor in library.cancelCatalog() }
+            }
+            guard !Task.isCancelled, account == accountGeneration else { return }
             if !hadCatalog, library.catalog != nil { await loadHome(cardWidth: lastCardWidth, sync: false, full: true) }
         }
         await charts
@@ -997,9 +1034,13 @@ final class AppModel {
     /// Changes when the Emby account does: loads that began before ignore
     /// their results.
     @ObservationIgnored private var accountGeneration = 0
+    /// IMDb's catalog, fetched a while after the library syncs.
+    @ObservationIgnored private var catalogJob: Task<Void, Never>?
 
     func signedInToEmby(_ account: EmbyAccount) async {
         accountGeneration += 1
+        recentStops = [:]
+        catalogJob?.cancel()
         showLoads = [:]
         movieLoads = [:]
         sources.setEmby(account)
@@ -1008,6 +1049,8 @@ final class AppModel {
 
     func signOutOfEmby() async {
         accountGeneration += 1
+        recentStops = [:]
+        catalogJob?.cancel()
         showLoads = [:]
         movieLoads = [:]
         live.disconnect()

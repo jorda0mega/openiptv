@@ -518,14 +518,23 @@ final class LibraryIndex {
             if catalog == nil { catalog = await Task.detached(priority: .utility) { IMDbCatalog.cached() }.value }
             let age = catalog.map { Date().timeIntervalSince($0.builtAt) }
             let missing = catalog.map { $0.coverage(of: wanted) < 0.95 } ?? true
-            guard age.map({ $0 > 30 * 24 * 3600 || (missing && $0 > 3 * 24 * 3600) }) ?? true,
-                  let fresh = try? await Task.detached(priority: .background, operation: { try await IMDbCatalog.build(for: wanted) }).value
-            else { return await rank() }
+            guard age.map({ $0 > 30 * 24 * 3600 || (missing && $0 > 3 * 24 * 3600) }) ?? true else { return await rank() }
+            // Cancelling this cancels the work (a detached task doesn't
+            // inherit it).
+            let work = Task.detached(priority: .background) { try await IMDbCatalog.build(for: wanted) }
+            let fresh = try? await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            guard let fresh, !Task.isCancelled else { return }
             catalog = fresh
             await rank()
         }
         catalogTask = task
         await task.value
+        if catalogTask == task { catalogTask = nil }
+    }
+
+    /// Stops a catalog download or build under way (signing out).
+    func cancelCatalog() {
+        catalogTask?.cancel()
         catalogTask = nil
     }
 
@@ -567,18 +576,45 @@ final class LibraryIndex {
 
     /// Every list made from the public data, again (new entries, ratings,
     /// popularity, votes or catalog), off the main thread.
+    /// One at a time: asked again while one runs, it runs once more after
+    /// with the inputs as they are then, so the newest inputs always
+    /// publish last (an older run can't finish after a newer one).
     private func rank() async {
+        if let running = rankTask {
+            rankAgain = true
+            return await running.value
+        }
+        let task = Task {
+            repeat {
+                rankAgain = false
+                await rankOnce()
+            } while rankAgain
+            rankTask = nil
+        }
+        rankTask = task
+        await task.value
+    }
+
+    private var rankTask: Task<Void, Never>?
+    private var rankAgain = false
+
+    private func rankOnce() async {
         guard ratings != nil || popularity != nil else { return }
         let start = generation
-        let entries = corpus.items, gain = votes.dailyGain(), catalog = catalog
+        let entries = corpus.items, history = votes, catalog = catalog
         let ratings = ratings, popularity = popularity
+        let gain = await Task.detached(priority: .utility) { history.dailyGain() }.value
         async let notable = Self.notable(entries, ratings)
         async let trending = Self.trending(entries, ratings: ratings, popularity: popularity, gain: gain)
         async let similarity = Task.detached(priority: .utility) {
             catalog.map { IMDbSimilarity(entries: entries, catalog: $0, ratings: ratings) }
         }.value
         let (n, t, s) = await (notable, trending, similarity)
-        guard generation == start else { return await rank() }
+        // The entries changed meanwhile: once more with the new ones.
+        guard generation == start else {
+            rankAgain = true
+            return
+        }
         self.notable = n
         self.trending = t
         self.similarity = s
@@ -601,6 +637,22 @@ final class LibraryIndex {
               let entry = entryById[id] ?? versions[id]?.lazy.compactMap({ self.entryById[$0] }).first,
               let imdb = entry.imdb else { return [] }
         return await Task.detached(priority: .userInitiated) { similarity.similar(toIMDb: imdb, limit: limit) }.value
+    }
+
+    /// The same for several titles at once: scanned side by side in one
+    /// pass off the main thread (Home's Top picks has five).
+    func imdbSimilar(to ids: [String], limit: Int = 20) async -> [[LibraryEntry]] {
+        guard let similarity else { return ids.map { _ in [] } }
+        let imdbs = ids.map { id in (entryById[id] ?? versions[id]?.lazy.compactMap({ self.entryById[$0] }).first)?.imdb }
+        return await Task.detached(priority: .userInitiated) {
+            var results = [[LibraryEntry]](repeating: [], count: imdbs.count)
+            results.withUnsafeMutableBufferPointer { out in
+                DispatchQueue.concurrentPerform(iterations: imdbs.count) { i in
+                    out[i] = imdbs[i].map { similarity.similar(toIMDb: $0, limit: limit) } ?? []
+                }
+            }
+            return results
+        }.value
     }
 
     /// Every copy of the title with this id (just the id when there's one).
@@ -671,6 +723,7 @@ final class LibraryIndex {
     }
 
     func clear() {
+        cancelCatalog()
         corpus = SearchCorpus(name: \.name)
         generation += 1
         versions = [:]
@@ -802,12 +855,13 @@ final class LibraryIndex {
             // Each signal's ranks as 0 … 1 (1 the most; equal values share
             // one), averaged over the signals that know the title.
             var sum: [Int: Double] = [:], count: [Int: Double] = [:]
-            for signal in signals where signal.count > 1 {
+            for signal in signals where !signal.isEmpty {
                 let ordered = signal.sorted { $0.value < $1.value }
                 var place = 0
                 for (k, (i, value)) in ordered.enumerated() {
                     if k > 0, value != ordered[k - 1].value { place = k }
-                    sum[i, default: 0] += Double(place) / Double(ordered.count - 1)
+                    // A signal knowing one title ranks it top.
+                    sum[i, default: 0] += ordered.count > 1 ? Double(place) / Double(ordered.count - 1) : 1
                     count[i, default: 0] += 1
                 }
             }

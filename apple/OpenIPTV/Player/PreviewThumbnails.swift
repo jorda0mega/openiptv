@@ -12,6 +12,12 @@ final class PreviewThumbnails: @unchecked Sendable {
     private let times: [Double]
     private let offsets: [Int]
     private var last: (index: Int, image: UIImage)?
+    /// Stills decoded ahead, off the main thread, around where the viewer
+    /// is choosing (a window of about 60: 14 MB for 320-wide stills).
+    private let decoded = NSCache<NSNumber, UIImage>()
+    private let decoder = DispatchQueue(label: "openiptv.preview-stills", qos: .userInitiated)
+    private let lock = NSLock()
+    private var queued = Set<Int>()
 
     var count: Int { times.count }
 
@@ -37,19 +43,47 @@ final class PreviewThumbnails: @unchecked Sendable {
         self.data = data
         self.times = times
         self.offsets = offsets
+        decoded.countLimit = 90
     }
 
-    /// The still at or just before `seconds`.
-    @MainActor func image(near seconds: Double) -> UIImage? {
+    /// Decodes the stills around `seconds` in the background (more ahead
+    /// than behind), so each is ready to show the moment it's chosen.
+    func warm(around seconds: Double) {
+        let center = index(near: seconds)
+        let wanted = (max(0, center - 15)...min(times.count - 1, center + 45)).filter { decoded.object(forKey: $0 as NSNumber) == nil }
+        let fresh = lock.withLock { wanted.filter { queued.insert($0).inserted } }
+        guard !fresh.isEmpty else { return }
+        // Nearest first.
+        for index in fresh.sorted(by: { abs($0 - center) < abs($1 - center) }) {
+            decoder.async { [self] in
+                defer { lock.withLock { _ = queued.remove(index) } }
+                guard decoded.object(forKey: index as NSNumber) == nil, let image = still(index) else { return }
+                decoded.setObject(image.preparingForDisplay() ?? image, forKey: index as NSNumber)
+            }
+        }
+    }
+
+    private func index(near seconds: Double) -> Int {
         var lo = 0, hi = times.count
         while lo < hi {
             let mid = (lo + hi) / 2
             if times[mid] <= seconds { lo = mid + 1 } else { hi = mid }
         }
-        let index = max(0, lo - 1)
+        return max(0, lo - 1)
+    }
+
+    private func still(_ index: Int) -> UIImage? {
+        guard offsets[index] < offsets[index + 1] else { return nil }
+        return UIImage(data: data.subdata(in: offsets[index]..<offsets[index + 1]))
+    }
+
+    /// The still at or just before `seconds`: decoded ahead when it can
+    /// be (and the ones around it are started).
+    @MainActor func image(near seconds: Double) -> UIImage? {
+        let index = index(near: seconds)
         if let last, last.index == index { return last.image }
-        guard offsets[index] < offsets[index + 1],
-              let image = UIImage(data: data.subdata(in: offsets[index]..<offsets[index + 1])) else { return nil }
+        warm(around: seconds)
+        guard let image = decoded.object(forKey: index as NSNumber) ?? still(index) else { return nil }
         last = (index, image)
         return image
     }

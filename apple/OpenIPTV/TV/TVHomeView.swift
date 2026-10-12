@@ -335,6 +335,7 @@ struct TVContinueRow: View {
                             Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
                         }
                         .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
+                        .accessibilityIdentifier("continue-\(card.id)")
                     }
                 }
                 .padding(.vertical, 24)

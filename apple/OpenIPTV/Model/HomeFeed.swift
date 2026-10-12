@@ -74,22 +74,24 @@ enum HomeFeed {
     /// request with what's been watched of them. Emby's own suggestions
     /// only for a title IMDb's data doesn't cover yet.
     private static func similar(_ emby: EmbyClient, library: LibraryIndex, to ids: [String]) async -> [[EmbyItem]] {
-        var alike: [[String]] = []
-        for id in ids { alike.append(await library.imdbSimilar(to: id, limit: 20).map(\.id)) }
+        let alike = await library.imdbSimilar(to: ids, limit: 20).map { $0.map(\.id) }
         var seen = Set<String>()
         let all = alike.flatMap { $0 }.filter { seen.insert($0).inserted }
+        // Emby's suggestions for the titles IMDb's data doesn't cover, asked
+        // alongside the others' details rather than after them.
+        let uncovered = alike.indices.filter { alike[$0].isEmpty }.map { ($0, ids[$0]) }
+        async let fallbacks = suggestions(emby, for: uncovered)
         let items = await emby.items(ids: all)
         let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
-            for (order, list) in alike.enumerated() {
-                if list.isEmpty {
-                    group.addTask { (order, await emby.similar(to: ids[order])) }
-                } else {
-                    let found = list.compactMap { byId[$0] }
-                    group.addTask { (order, found) }
-                }
-            }
-            var out = [[EmbyItem]](repeating: [], count: ids.count)
+        let other = await fallbacks
+        return alike.enumerated().map { order, list in list.isEmpty ? other[order] ?? [] : list.compactMap { byId[$0] } }
+    }
+
+    /// Emby's own suggestions for these (order, id) pairs, by order.
+    private nonisolated static func suggestions(_ emby: EmbyClient, for seeds: [(Int, String)]) async -> [Int: [EmbyItem]] {
+        await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
+            for (order, id) in seeds { group.addTask { (order, await emby.similar(to: id)) } }
+            var out: [Int: [EmbyItem]] = [:]
             for await (order, items) in group { out[order] = items }
             return out
         }

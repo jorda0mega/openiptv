@@ -4,7 +4,9 @@ import Foundation
 /// Reads a gzip file line by line while decompressing, so a large dataset
 /// never has to sit in memory uncompressed.
 enum Gzip {
-    static func lines(_ gzip: Data, _ each: ([UInt8]) -> Void) throws {
+    /// `stop`: checked every megabyte; true ends the reading with a
+    /// CancellationError.
+    static func lines(_ gzip: Data, stop: (() -> Bool)? = nil, _ each: ([UInt8]) -> Void) throws {
         var offset = try deflateStart(gzip)
         let filter = try InputFilter(.decompress, using: .zlib, bufferCapacity: 1 << 16) { (length: Int) -> Data? in
             let end = min(offset + length, gzip.count)
@@ -14,6 +16,7 @@ enum Gzip {
         var line: [UInt8] = []
         line.reserveCapacity(256)
         while let chunk = try filter.readData(ofLength: 1 << 20), !chunk.isEmpty {
+            if stop?() == true { throw CancellationError() }
             // Whole lines at a time between newlines (found with memchr),
             // not byte by byte: the datasets are a gigabyte uncompressed.
             chunk.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
