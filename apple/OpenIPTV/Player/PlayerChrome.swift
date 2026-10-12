@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// The player's controls, like the Apple TV app's player: no bars or
-/// panels, a soft shade over the picture; close at the top left; back 10,
-/// play/pause and forward 10 in the middle (a spinner in play's place while
-/// it opens or buffers); the title with its round buttons beside it, and
-/// the bar with the times at its ends.
+/// panels, a soft shade over the picture; close and rotate at the top left;
+/// back 10, play/pause and forward 10 in the middle (a spinner in play's
+/// place while it opens or buffers); the title (live: a LIVE badge before
+/// its caption) with "…" beside it, and the bar with the times at its ends.
 /// iPhone: Liquid Glass. Apple TV: the system's own look (title, a plain
 /// progress bar and times); the remote does the rest.
 struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
@@ -25,6 +25,11 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     @ViewBuilder var trailing: Trailing
     @ViewBuilder var accessory: Accessory
     @ViewBuilder var bar: Bar
+
+    #if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSize
+    private var landscape: Bool { verticalSize == .compact }
+    #endif
 
     var body: some View {
         ZStack {
@@ -49,10 +54,17 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         .allowsHitTesting(false)
     }
 
+    /// The caption line starts with the accessory (live: the LIVE badge),
+    /// like the Apple TV app's "LIVE 6:30–9:30 PM · MLS".
     private var titles: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if let caption, !caption.isEmpty {
-                Text(caption).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
+            if Accessory.self != EmptyView.self || !(caption ?? "").isEmpty {
+                HStack(spacing: 10) {
+                    accessory
+                    if let caption, !caption.isEmpty {
+                        Text(caption).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
+                    }
+                }
             }
             Text(title).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(2)
             if let note {
@@ -70,8 +82,14 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     /// times at its ends.
     private var phone: some View {
         VStack(spacing: 0) {
-            HStack {
+            // Close, and rotate beside it (where the Apple TV app keeps its
+            // picture buttons): the icon shows which way it turns.
+            HStack(spacing: 12) {
                 GlassIconButton(systemName: "xmark", label: "Close player", size: 44, action: close)
+                GlassIconButton(systemName: landscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate",
+                                label: landscape ? "Rotate to portrait" : "Rotate to landscape", size: 44) {
+                    PlayerOrientation.shared.toggle()
+                }
                 Spacer()
             }
             Spacer(minLength: 12)
@@ -100,11 +118,7 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
             HStack(alignment: .bottom, spacing: 10) {
                 titles
                 Spacer(minLength: 8)
-                accessory
                 trailing
-                GlassIconButton(systemName: "rotate.right", label: "Rotate", size: 44) {
-                    PlayerOrientation.shared.toggle()
-                }
             }
             .padding(.bottom, 14)
             bar
@@ -130,7 +144,6 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
             HStack(alignment: .bottom) {
                 titles
                 Spacer()
-                accessory
             }
             bar.tint(.white)
         }

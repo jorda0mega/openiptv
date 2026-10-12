@@ -184,26 +184,29 @@ struct LivePlayerView: View {
         return timing
     }
 
-    /// LIVE: red while at the live picture; tap to catch up when behind (or
-    /// to leave a recording).
+    /// LIVE, before the caption like the Apple TV app's: red at the live
+    /// picture, grey when behind (or watching a recording), and on iPhone a
+    /// tap catches up.
     @ViewBuilder private var liveButton: some View {
         let live = recording == nil && atLive
+        let badge = Text("LIVE")
+            .font(.caption.weight(.heavy))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(live ? Color.red : Color.white.opacity(0.3), in: .capsule)
         #if os(iOS)
-        Button(action: goLive) {
-            HStack(spacing: 6) {
-                Circle().fill(live ? Color.red : Color.white.opacity(0.6)).frame(width: 8, height: 8)
-                Text("LIVE").font(.footnote.weight(.bold))
-            }
-            .padding(.horizontal, 4)
+        // At live there's nothing to catch up on: no seek.
+        Button { if !live { goLive() } } label: {
+            badge
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.glass)
-        .tint(.white)
+        .buttonStyle(.plain)
+        .padding(.vertical, -8)
         .accessibilityLabel(live ? "Live" : "Go to live")
         #else
-        HStack(spacing: 8) {
-            Circle().fill(live ? Color.red : Color.white.opacity(0.6)).frame(width: 12, height: 12)
-            Text("LIVE").font(.callout.weight(.bold))
-        }
+        badge
         #endif
     }
 
@@ -257,9 +260,8 @@ struct LivePlayerView: View {
         guard let span, let position else { return "" }
         let at = scrubbing.map { span.lower + $0 } ?? position
         if recording != nil { return Self.time(at - span.lower) }
-        // The wall-clock time the bar starts at (its end is now).
-        let start = Date().addingTimeInterval(-(span.upper - span.lower))
-        return start.formatted(date: .omitted, time: .shortened)
+        // The clock time of what's on screen, like the Apple TV app's.
+        return Date().addingTimeInterval(-behind(at)).formatted(date: .omitted, time: .shortened)
     }
 
     private var rightLabel: String {
