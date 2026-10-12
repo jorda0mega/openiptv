@@ -33,7 +33,6 @@ struct LivePlayerView: View {
     @State private var liveGap: Double = 0
     @State private var scrubbing: Double?
     @State private var scrubSpeed: String?
-    @State private var lastScrubSeek = Date.distantPast
     /// A recorded programme playing from its start instead of live.
     @State private var recording: Programme?
     @State private var showGuide = false
@@ -487,9 +486,8 @@ struct LivePlayerView: View {
         guard let span else { return }
         following = false
         showControls(autoHide: false)
-        guard Date().timeIntervalSince(lastScrubSeek) > 0.15 else { return }
-        lastScrubSeek = Date()
-        player?.seek(to: reachable(span.lower + value), exact: false)
+        // One jump at a time, the newest next (see MPVPlayer.follow).
+        player?.follow(to: reachable(span.lower + value), exact: false)
     }
 
     private func scrubEnded(_ value: Double) {

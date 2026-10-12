@@ -93,6 +93,12 @@ final class AppModel {
         spotlight = home?.spotlight ?? []
         homeBuiltAt = home?.builtAt
         homeHistory = home?.history ?? []
+        // The first screen's pictures, decoded from the disk cache while the
+        // app is still drawing its first frame, so Home opens with them.
+        if let home {
+            let urls = Self.visibleImages(home)
+            Task.detached(priority: .userInitiated) { await ImagePipeline.shared.prefetch(urls) }
+        }
         live.onChange = { [weak self] change in self?.apply(change) }
         Task { await guide.loadCache(); guideState = await guide.state }
     }
@@ -935,55 +941,84 @@ final class AppModel {
     // channels some providers use to show the login.
     private nonisolated static let lineupFile = "live-lineup.v3.json"
 
+    /// Everything worked out off the main thread (organising, the guide's
+    /// channel index, search, lookups: tens of thousands of channels on a
+    /// big subscription), then applied in one go.
     private func applyLineup(categories allCategories: [LiveCategory], channels allListed: [LiveChannel]) async {
-        let (cats, channels) = LiveOrganizer.withoutLogin(categories: allCategories, channels: allListed)
         let home = Self.homeRegion
         // The provider's own category names (with several providers they're
         // shown as "Provider · US | News"), so the same channel from each
         // provider becomes one entry that can fall back to the other.
-        let names = Dictionary(sources.iptv.map { ($0.id.uuidString, $0.name + " · ") }, uniquingKeysWith: { a, _ in a })
-        let own = cats.map { category -> LiveCategory in
-            guard let source = category.id.split(separator: "|").first, let prefix = names[String(source)],
-                  category.name.hasPrefix(prefix) else { return category }
-            return LiveCategory(id: category.id, name: String(category.name.dropFirst(prefix.count)), channels: category.channels)
-        }
-        liveLibrary = await Task.detached(priority: .userInitiated) {
-            LiveOrganizer.organize(categories: own, channels: channels, home: home)
+        let prefixes = Dictionary(sources.iptv.map { ($0.id.uuidString, $0.name + " · ") }, uniquingKeysWith: { a, _ in a })
+        let built = await Task.detached(priority: .userInitiated) {
+            Lineup(categories: allCategories, channels: allListed, prefixes: prefixes, home: home)
         }.value
-        categories = cats
-        allChannels = channels
+        liveLibrary = built.library
+        categories = built.categories
+        allChannels = built.channels
         localCache = nil
-        indexGuideChannels(categories: own)
-        channelCorpus = await Task.detached(priority: .userInitiated) { SearchCorpus(channels, name: \.name) }.value
-        channelsByCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
-        channelById = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        guideChannels = built.guideChannels
+        localGuideCategories = built.localGuideCategories
+        abroad = built.abroad
+        channelCorpus = built.corpus
+        channelsByCategory = built.byCategory
+        channelById = built.byId
+        let guide = guide, names = built.guideNames
+        Task { await guide.setChannelNames(names) }
         // A shelf, Favorites or Local; a provider category only while it's
         // being browsed from the full list.
-        let shelves = liveLibrary.shelves
+        let shelves = built.library.shelves
         let valid = selectedCategory.map { id in
             id == Self.favoritesID || id == Self.localID || shelves.contains { $0.id == id }
-                || (browsingProviderCategory && cats.contains { $0.id == id })
+                || (browsingProviderCategory && built.categories.contains { $0.id == id })
         } ?? false
-        if !valid { selectedCategory = shelves.first?.id ?? cats.first?.id }
+        if !valid { selectedCategory = shelves.first?.id ?? built.categories.first?.id }
     }
 
-    /// Which channel plays each guide id, and the names guide search
-    /// matches against.
-    private func indexGuideChannels(categories: [LiveCategory]) {
-        let local = Set(categories.filter { LiveOrganizer.Kind($0.name, home: Self.homeRegion).topic == .local }.map(\.id))
-        var byGuide: [String: LiveChannel] = [:]
-        var names: [String: String] = [:]
-        for channel in allChannels {
-            guard let epg = channel.epgId, byGuide[epg] == nil else { continue }
-            let best = copies(of: channel).first ?? channel
-            byGuide[epg] = best
-            names[epg] = GuideStore.fold(title(of: best))
+    /// A lineup ready to show: organised into shelves, with which channel
+    /// plays each guide id (and the names guide search matches against),
+    /// search, and lookups by category and id.
+    private struct Lineup: Sendable {
+        let library: LiveOrganizer.Library
+        let categories: [LiveCategory]
+        let channels: [LiveChannel]
+        let guideChannels: [String: LiveChannel]
+        let guideNames: [String: String]
+        let localGuideCategories: Set<String>
+        let abroad: Set<String>
+        let corpus: SearchCorpus<LiveChannel>
+        let byCategory: [String: [LiveChannel]]
+        let byId: [String: LiveChannel]
+
+        nonisolated init(categories allCategories: [LiveCategory], channels allListed: [LiveChannel],
+                         prefixes: [String: String], home: String) {
+            let (cats, channels) = LiveOrganizer.withoutLogin(categories: allCategories, channels: allListed)
+            let own = cats.map { category -> LiveCategory in
+                guard let source = category.id.split(separator: "|").first, let prefix = prefixes[String(source)],
+                      category.name.hasPrefix(prefix) else { return category }
+                return LiveCategory(id: category.id, name: String(category.name.dropFirst(prefix.count)), channels: category.channels)
+            }
+            let library = LiveOrganizer.organize(categories: own, channels: channels, home: home)
+            var byGuide: [String: LiveChannel] = [:]
+            var names: [String: String] = [:]
+            for channel in channels {
+                guard let epg = channel.epgId, byGuide[epg] == nil else { continue }
+                let best = library.copies[channel.id]?.first ?? channel
+                byGuide[epg] = best
+                names[epg] = GuideStore.fold(library.titles[best.id] ?? LiveOrganizer.Name(best.name).display)
+            }
+            self.library = library
+            self.categories = cats
+            self.channels = channels
+            guideChannels = byGuide
+            guideNames = names
+            localGuideCategories = Set(own.filter { LiveOrganizer.Kind($0.name, home: home).topic == .local }.map(\.id))
+            abroad = Set(library.shelves.first { $0.id == LiveOrganizer.internationalID }?.sections
+                .flatMap { $0.entries.flatMap { $0.channels.map(\.id) } } ?? [])
+            corpus = SearchCorpus(channels, name: \.name)
+            byCategory = Dictionary(grouping: channels, by: { $0.categoryId ?? "" })
+            byId = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         }
-        guideChannels = byGuide
-        localGuideCategories = local
-        abroad = Set(shelf(LiveOrganizer.internationalID)?.sections.flatMap { $0.entries.flatMap { $0.channels.map(\.id) } } ?? [])
-        let guide = guide
-        Task { await guide.setChannelNames(names) }
     }
 
     @ObservationIgnored private var localGuideCategories: Set<String> = []
@@ -1261,7 +1296,9 @@ final class AppModel {
     /// The now/next a row watches (see NowNextSlot).
     func slot(_ id: String) -> NowNextSlot {
         if let slot = slots[id] { return slot }
-        let slot = NowNextSlot(nowNext[id])
+        // Read without observing: a row creating its slot while drawing
+        // would otherwise redraw whenever any channel's schedule changed.
+        let slot = NowNextSlot(_nowNext[id])
         slots[id] = slot
         return slot
     }

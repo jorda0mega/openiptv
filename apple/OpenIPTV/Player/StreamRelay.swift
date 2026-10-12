@@ -133,6 +133,15 @@ final class StreamRelay: @unchecked Sendable {
             }
         }
         task.resume()
+        // A hang-up shows as the end of what the player sends (it sends
+        // nothing more after its request): notice it at once, rather than
+        // only when the next piece fails to send.
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, isComplete, error in
+            if isComplete || error != nil {
+                relay.cancel()
+                connection.cancel()
+            }
+        }
     }
 
     private func fail(_ connection: NWConnection, _ status: Int) {
@@ -185,8 +194,14 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
             task.suspend()
         }
         lock.unlock()
-        connection.send(content: data, completion: .contentProcessed { [weak self] _ in
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in
             guard let self else { return }
+            if error != nil {
+                // The player's gone: stop the download.
+                self.cancel()
+                self.connection.cancel()
+                return
+            }
             self.lock.lock()
             self.pending -= data.count
             let resume = self.suspended && self.pending < 4_000_000 && !self.finished

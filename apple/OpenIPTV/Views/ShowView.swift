@@ -32,7 +32,11 @@ struct ShowView: View {
     @State private var unwatchedOnly = false
     @State private var newestFirst = false
     /// Episodes currently on screen, to highlight the season in view.
-    @State private var onScreen: Set<String> = []
+    /// Rows on screen, kept outside SwiftUI's state: each row scrolling in
+    /// or out used to re-run the whole page (regrouping every episode).
+    /// Only the season in view is published, when it changes.
+    @State private var visible = VisibleRows()
+    @State private var seasonOnScreen: Int?
     /// The season just jumped to: highlighted until you scroll yourself,
     /// even when it's too short to fill the screen.
     @State private var jumpedTo: Int?
@@ -69,10 +73,25 @@ struct ShowView: View {
     /// under the bars shouldn't win).
     private func seasonInView(_ seasons: [(number: Int, episodes: [EmbyItem])]) -> Int? {
         if let jumpedTo, seasons.contains(where: { $0.number == jumpedTo }) { return jumpedTo }
-        return seasons
-            .map { season in (season.number, season.episodes.filter { onScreen.contains($0.id) }.count) }
-            .filter { $0.1 > 0 }
-            .max { $0.1 < $1.1 }?.0
+        return seasonOnScreen
+    }
+
+    private func rowAppeared(_ episode: EmbyItem) {
+        guard visible.ids.insert(episode.id).inserted else { return }
+        visible.bySeason[episode.parentIndexNumber ?? 0, default: 0] += 1
+        publishSeason()
+    }
+
+    private func rowDisappeared(_ episode: EmbyItem) {
+        guard visible.ids.remove(episode.id) != nil else { return }
+        visible.bySeason[episode.parentIndexNumber ?? 0, default: 0] -= 1
+        publishSeason()
+    }
+
+    private func publishSeason() {
+        let top = visible.bySeason.filter { $0.value > 0 }
+            .max { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }?.key
+        if top != seasonOnScreen { seasonOnScreen = top }
     }
 
     var body: some View {
@@ -98,8 +117,8 @@ struct ShowView: View {
                             }
                             .buttonStyle(.plain)
                             .id(episode.id)
-                            .onAppear { onScreen.insert(episode.id) }
-                            .onDisappear { onScreen.remove(episode.id) }
+                            .onAppear { rowAppeared(episode) }
+                            .onDisappear { rowDisappeared(episode) }
                         }
                     }
                     if data != nil, seasons.isEmpty {
@@ -450,4 +469,11 @@ private struct EpisodeRow: View {
     private var title: String {
         episode.indexNumber.map { "\($0). \(episode.name)" } ?? episode.name
     }
+}
+
+/// Which episode rows are on screen, and how many per season (a plain
+/// object: changing it doesn't redraw anything).
+private final class VisibleRows {
+    var ids: Set<String> = []
+    var bySeason: [Int: Int] = [:]
 }

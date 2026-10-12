@@ -51,10 +51,26 @@ final class StalkerProvider: LiveProvider, @unchecked Sendable {
                 base.appending(path: "server/load.php")]
     }
 
+    /// The session token, and the handshake under way: requests made at
+    /// the same moment (the lineup, now/next for a screenful of channels)
+    /// share one handshake instead of each starting its own.
     private actor Session {
         var endpoint: URL?
         var token: String?
-        func set(endpoint: URL, token: String) { self.endpoint = endpoint; self.token = token }
+        private var running: Task<(URL, String), Error>?
+
+        func authenticated(_ handshake: @escaping @Sendable () async throws -> (URL, String)) async throws -> (URL, String) {
+            if let endpoint, let token { return (endpoint, token) }
+            if let running { return try await running.value }
+            let task = Task { try await handshake() }
+            running = task
+            defer { running = nil }
+            let (endpoint, token) = try await task.value
+            self.endpoint = endpoint
+            self.token = token
+            return (endpoint, token)
+        }
+
         func clear() { token = nil }
     }
 
@@ -71,7 +87,10 @@ final class StalkerProvider: LiveProvider, @unchecked Sendable {
     }
 
     private func authenticate() async throws -> (URL, String) {
-        if let endpoint = await session.endpoint, let token = await session.token { return (endpoint, token) }
+        try await session.authenticated { [self] in try await handshake() }
+    }
+
+    private func handshake() async throws -> (URL, String) {
         var lastError: Error = SourceError.unexpected("That portal didn't respond like a Stalker portal.")
         for endpoint in endpoints {
             do {
@@ -85,7 +104,6 @@ final class StalkerProvider: LiveProvider, @unchecked Sendable {
                     .init(name: "type", value: "stb"), .init(name: "action", value: "get_profile"),
                     .init(name: "hd", value: "1"), .init(name: "stb_type", value: "MAG250"),
                 ], token: token))
-                await session.set(endpoint: endpoint, token: token)
                 return (endpoint, token)
             } catch {
                 lastError = error
@@ -113,8 +131,11 @@ final class StalkerProvider: LiveProvider, @unchecked Sendable {
     }
 
     func load() async throws -> LiveLineup {
-        let genres = (try await call([.init(name: "type", value: "itv"), .init(name: "action", value: "get_genres")]) as? [[String: Any]]) ?? []
-        let all = try await call([.init(name: "type", value: "itv"), .init(name: "action", value: "get_all_channels")])
+        // Both at once (they share the one handshake).
+        async let genreList = call([.init(name: "type", value: "itv"), .init(name: "action", value: "get_genres")])
+        async let channelList = call([.init(name: "type", value: "itv"), .init(name: "action", value: "get_all_channels")])
+        let genres = (try await genreList as? [[String: Any]]) ?? []
+        let all = try await channelList
         let rows = ((all as? [String: Any])?["data"] as? [[String: Any]]) ?? (all as? [[String: Any]]) ?? []
         guard !rows.isEmpty else { throw SourceError.unexpected("The portal returned no channels for this MAC address.") }
 
