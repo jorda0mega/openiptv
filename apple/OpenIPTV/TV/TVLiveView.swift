@@ -16,6 +16,7 @@ struct TVLiveView: View {
     @AppStorage("tvLiveTab") private var chosen = ""
     /// Sports: Top, All, a league, or Channels.
     @AppStorage("tvSportsFilter") private var sportsFilter = ""
+    @AppStorage("tvTab") private var tab = "home"
     @State private var listOpen = false
     @State private var sportsExpanded = false
     /// Briefly off after the list closes, so focus landing at the left
@@ -45,8 +46,12 @@ struct TVLiveView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 50) {
                         header
-                        content
-                            .id(id + league)
+                        if tabs.isEmpty {
+                            emptyState.frame(maxWidth: .infinity).padding(.top, 120)
+                        } else {
+                            content
+                                .id(id + league)
+                        }
                     }
                     .padding(.vertical, 40)
                 }
@@ -55,7 +60,9 @@ struct TVLiveView: View {
                 .overlay {
                     if listOpen { Color.black.opacity(0.55).ignoresSafeArea().allowsHitTesting(false) }
                 }
-                if edgeOn, !listOpen { edge }
+                // Only with somewhere to go: an empty list would hide the tab
+                // bar and leave nothing to focus, and Menu would quit the app.
+                if edgeOn, !listOpen, !tabs.isEmpty { edge }
                 if listOpen {
                     list.transition(.move(edge: .leading).combined(with: .opacity))
                 }
@@ -63,6 +70,7 @@ struct TVLiveView: View {
             .background(Color.black.ignoresSafeArea())
             .toolbarVisibility(listOpen ? .hidden : .automatic, for: .tabBar)
             .onExitCommand(perform: listOpen ? { close() } : nil)
+            .onChange(of: tabs.isEmpty) { _, empty in if empty, listOpen { close() } }
             .navigationDestination(for: LiveCountry.self) { country in
                 TVSectionsPage(title: "\(LiveOrganizer.flag(country.code)) \(LiveOrganizer.countryName(country.code))",
                                sections: model.shelf(LiveOrganizer.internationalID)?.sections.filter { $0.country == country.code } ?? [],
@@ -87,14 +95,16 @@ struct TVLiveView: View {
         let shelf = tabs.first { $0.id == id }?.title ?? "Live TV"
         let isSports = id == LiveOrganizer.sportsID
         return HStack(spacing: 24) {
-            Button { open() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title3.weight(.semibold))
-                    .frame(width: 56, height: 56)
+            if !tabs.isEmpty {
+                Button { open() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 56, height: 56)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Live TV sections")
             }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("Live TV sections")
             VStack(alignment: .leading, spacing: 2) {
                 if isSports {
                     Text(shelf.uppercased())
@@ -138,6 +148,30 @@ struct TVLiveView: View {
         }
     }
 
+    /// No shelves yet: why, and a button to fix it (so there's always
+    /// something to focus besides the tab bar).
+    @ViewBuilder private var emptyState: some View {
+        if model.sources.iptv.isEmpty {
+            ContentUnavailableView {
+                Label("No live TV yet", systemImage: "dot.radiowaves.left.and.right")
+            } description: {
+                Text("Add an Xtream Codes login, an M3U playlist or a Stalker portal in Settings.")
+            } actions: {
+                Button("Open Settings") { tab = "settings" }
+            }
+        } else if model.liveLoading {
+            ProgressView("Loading channels…")
+        } else {
+            ContentUnavailableView {
+                Label("No channels", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(model.liveErrors.first ?? "Your subscription didn't return any channels.")
+            } actions: {
+                Button("Try Again") { Task { await model.loadLive(force: true) } }
+            }
+        }
+    }
+
     private func entries(_ channels: [LiveChannel]) -> [LiveOrganizer.Entry] {
         channels.map { LiveOrganizer.Entry(title: model.title(of: $0), channels: [$0]) }
     }
@@ -158,6 +192,7 @@ struct TVLiveView: View {
     // MARK: The list
 
     private func open() {
+        guard !tabs.isEmpty else { return }
         // Sports' leagues show when you're in Sports; otherwise they'd push
         // the shelf you're on out of view.
         sportsExpanded = id == LiveOrganizer.sportsID
@@ -246,7 +281,8 @@ struct TVLiveView: View {
             tabs.append((shelf.id, shelf.title, Self.icon(shelf.id)))
             if shelf.id == LiveOrganizer.sportsID { tabs.append((AppModel.localID, "Local", "antenna.radiowaves.left.and.right")) }
         }
-        if !model.liveLibrary.shelves.contains(where: { $0.id == LiveOrganizer.sportsID }), !model.sources.iptv.isEmpty {
+        // Local is picked from the channels: none until they've loaded.
+        if !model.liveLibrary.shelves.contains(where: { $0.id == LiveOrganizer.sportsID }), !model.allChannels.isEmpty {
             tabs.insert((AppModel.localID, "Local", "antenna.radiowaves.left.and.right"), at: tabs.isEmpty ? 0 : min(1, tabs.count))
         }
         if !model.categories.isEmpty { tabs.append((Self.categoriesID, "All Categories", "list.bullet")) }

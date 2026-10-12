@@ -56,6 +56,9 @@ struct TVHomeView: View {
                     let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
                     if !heroes.isEmpty {
                         TVHero(items: heroes, play: { play($0) }, open: { open($0) })
+                    } else {
+                        // No hero to sit under the tab bar: start below it.
+                        Color.clear.frame(height: 110)
                     }
                     ForEach(model.rows.filter { !prefs.hiddenRows.contains($0.title) }) { row in
                         if row.title == "Continue Watching" {

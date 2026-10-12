@@ -103,10 +103,32 @@ final class AppModel {
 
     // MARK: Home
 
+    /// The Home build in progress. Leaving Home cancels the page's task but
+    /// not this, so a build cut off halfway (its rows fetched as empty)
+    /// never replaces the page.
+    @ObservationIgnored private var homeLoad: Task<Void, Never>?
+    @ObservationIgnored private var homeLoadID = UUID()
+
     /// `full`: rebuild every row. Otherwise, when the saved Home is recent
     /// (six hours), the catalog hasn't changed since and you haven't watched
     /// anything new elsewhere, only Continue Watching is fetched again.
+    /// One build at a time: a full one waits for the one before, any other
+    /// joins it.
     func loadHome(cardWidth: Int, sync: Bool = true, full: Bool = false) async {
+        if let running = homeLoad, !full { return await running.value }
+        let previous = homeLoad
+        let id = UUID()
+        homeLoadID = id
+        let load = Task {
+            await previous?.value
+            await buildHome(cardWidth: cardWidth, sync: sync, full: full)
+            if homeLoadID == id { homeLoad = nil }
+        }
+        homeLoad = load
+        await load.value
+    }
+
+    private func buildHome(cardWidth: Int, sync: Bool, full: Bool) async {
         lastCardWidth = cardWidth
         guard let emby else {
             rows = []
@@ -117,7 +139,9 @@ final class AppModel {
         // Trending and versions come from the index and charts on the device.
         await library.open(emby)
         await library.loadCachedCharts()
-        if !full, !rows.isEmpty, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600,
+        // A saved page with no featured title is rebuilt: it was made before
+        // anything could be picked (or by a build that was cut off).
+        if !full, !rows.isEmpty, featured != nil, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600,
            library.changedAt.map({ $0 <= builtAt }) ?? true,
            await !refreshContinueWatching(checkingHistory: true) {
             if sync { Task { await syncLibrary(emby) } }

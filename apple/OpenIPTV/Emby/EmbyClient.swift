@@ -131,6 +131,19 @@ struct EmbyClient {
                            played: (try? await played) ?? [])
     }
 
+    /// Films and shows added lately, newest first, with overview and
+    /// backdrop: Home's featured pick before the charts have downloaded.
+    func recentlyAdded(limit: Int = 30) async -> [EmbyItem] {
+        (try? await items("Users/\(account.userId)/Items", [
+            .init(name: "Recursive", value: "true"), .init(name: "IncludeItemTypes", value: "Movie,Series"),
+            .init(name: "SortBy", value: "DateCreated"), .init(name: "SortOrder", value: "Descending"),
+            .init(name: "Limit", value: String(limit)),
+            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,ProviderIds,DateCreated,Overview"),
+            .init(name: "ImageTypeLimit", value: "1"), .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+            .init(name: "EnableUserData", value: "true"), .init(name: "EnableTotalRecordCount", value: "false"),
+        ])) ?? []
+    }
+
     /// Partly watched, most recent first.
     func watching() async throws -> [EmbyItem] {
         try await items("Users/\(account.userId)/Items", Self.cardQuery + [

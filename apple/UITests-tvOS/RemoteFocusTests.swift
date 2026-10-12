@@ -121,6 +121,37 @@ final class RemoteFocusTests: XCTestCase {
         press(.menu, "menu to tab bar")
     }
 
+    /// Live TV with no channels (the lineup failed, or hasn't loaded): Left
+    /// opens no empty list, and Menu goes to the tab bar instead of quitting.
+    /// Run with the test server stopped and no saved lineup.
+    func testLiveEmpty() {
+        app.launchArguments = ["-tvTab", "live"]
+        app.launch()
+        sleep(8)
+        press(.down, "into the page")
+        for _ in 0..<3 { press(.left, "left") }
+        shot("empty")
+        press(.menu, "menu to tab bar")
+        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertTrue(focused().contains("label='Live TV'"), focused())
+    }
+
+    /// Home, left before it finished loading and opened again: the featured
+    /// title and the rows are there (a cut-off load used to leave only
+    /// Continue Watching, for hours).
+    func testHomeAfterLeaving() {
+        app.launchArguments = ["-tvTab", "home"]
+        app.launch()
+        sleep(1)
+        press(.up, "to tab bar")
+        press(.right, "to Live TV")
+        sleep(6)
+        press(.left, "back to Home")
+        sleep(2)
+        shot("home")
+        XCTAssertTrue(app.buttons["More Info"].exists, "no featured title")
+    }
+
     /// Sports in the list: Select opens its leagues (with live counts), and
     /// a league opens its games.
     func testLiveListSports() {

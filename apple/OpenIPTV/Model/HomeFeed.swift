@@ -134,8 +134,12 @@ enum HomeFeed {
         }
         let fresh = await notableItems.filter { !watched($0) && outLastYear($0) }
 
-        // Featured: popular and recent, with a backdrop to show.
-        let pool = popular.isEmpty ? Array(fresh.prefix(20)) : popular
+        // Featured: popular and recent, with a backdrop to show. Before the
+        // charts have downloaded (a new device), the newest additions, so the
+        // top of Home is never empty.
+        let added = popular.isEmpty && fresh.isEmpty
+            ? await emby.recentlyAdded().filter { !watched($0) && !isShown($0) } : []
+        let pool = !popular.isEmpty ? popular : !fresh.isEmpty ? Array(fresh.prefix(20)) : added
         let withBackdrop = pool.filter { emby.backdropURL(for: $0, width: backdropWidth) != nil }
         // The same pick all day (one of the top few recent ones, by date),
         // so refreshing doesn't swap the top of the screen.
@@ -197,6 +201,8 @@ enum HomeFeed {
         if picks.count >= 4, let row = posterRow("Top picks for you", picks) { rows.append(row) }
         if let row = posterRow("Trending now", popularRow) { rows.append(row) }
         if newRow.count >= 4, let row = posterRow("New & notable", newRow) { rows.append(row) }
+        // Cut off halfway, the requests above came back empty: not a page.
+        try Task.checkCancellation()
         return HomeContent(featured: featured, rows: rows, builtAt: Date(), history: seeds.map(\.id), spotlight: Array(spotlight))
     }
 }
