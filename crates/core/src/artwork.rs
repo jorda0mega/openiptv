@@ -14,6 +14,9 @@ pub enum Context {
     /// 16:9 cards where a series' thumb or backdrop beats the episode still:
     /// Continue Watching, Next Up.
     Landscape,
+    /// 16:9 cards for a show's own episode list: each episode's still (a
+    /// frame from it) when it's wide, then the series' art as `Landscape`.
+    Still,
     /// Full-width hero or page background.
     Backdrop,
 }
@@ -125,7 +128,12 @@ pub fn candidates(item: &Item, context: Context) -> Vec<Candidate> {
     };
     match context {
         Context::Poster => chain.poster(),
-        Context::Landscape => {
+        Context::Landscape | Context::Still => {
+            if context == Context::Still
+                && item.primary_image_aspect_ratio.unwrap_or(Shape::Landscape.aspect()) >= 1.2
+            {
+                chain.own_primary();
+            }
             chain.own_thumb();
             if item.kind != "Photo" {
                 chain.parent_thumb();
@@ -356,6 +364,24 @@ mod tests {
         );
         assert_eq!(c[0].image.item_id, "series");
         assert_eq!(c[0].fit(Shape::Landscape), Fit::Cover);
+    }
+
+    #[test]
+    fn episode_list_shows_the_episode_still_first() {
+        let c = candidates(&episode(), Context::Still);
+        assert_eq!(
+            tags(&c),
+            ["still", "sthumb", "sback", "seasonposter", "poster"]
+        );
+        assert_eq!(c[0].image.item_id, "ep");
+        assert_eq!(c[0].fit(Shape::Landscape), Fit::Cover);
+        // No still (or a portrait one): the series' wide art, as Landscape.
+        let mut item = episode();
+        item.image_tags.clear();
+        assert_eq!(
+            tags(&candidates(&item, Context::Still)),
+            ["sthumb", "sback", "seasonposter", "poster"]
+        );
     }
 
     #[test]

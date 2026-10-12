@@ -471,8 +471,12 @@ class Handler(BaseHTTPRequestHandler):
                            "PrimaryImageAspectRatio": 0.6667,
                            "ImageTags": {"Primary": "stale-t15" if i == 15 else f"t{i}"},
                            "BackdropImageTags": [f"b{i}"]}
+        # Each episode has its own still (a frame from it), but every fifth,
+        # to check the fall back to the show's art.
         episode = lambda i: {"Id": f"e{i}", "Name": f"Episode {i}", "Type": "Episode", "SeriesId": "s1",
-                             "SeriesName": "Show", "SeriesPrimaryImageTag": "st", "ImageTags": {},
+                             "SeriesName": "Show", "SeriesPrimaryImageTag": "st",
+                             "ImageTags": {"Primary": f"still{i}"} if i % 5 != 4 else {},
+                             "PrimaryImageAspectRatio": 1.7778,
                              "ParentBackdropItemId": "s1", "ParentBackdropImageTags": ["stale-sb"],
                              "UserData": {"PlaybackPositionTicks": 6000000000, "PlayedPercentage": 40.0}}
         if path == "/Users/U1/Views":

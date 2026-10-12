@@ -294,10 +294,11 @@ struct EmbyClient {
         return try await items("Shows/\(series)/Episodes", query)
     }
 
-    /// Card for any item: landscape art for episodes and backdrops, posters
-    /// otherwise.
+    /// Card for any item: landscape art for episodes (each one's own still
+    /// first) and backdrops, posters otherwise.
     func card(for item: EmbyItem, landscape: Bool, width: Int) -> Card {
-        card(item, context: landscape ? .landscape : .poster, shape: landscape ? .landscape : .portrait, width: width)
+        let context: Artwork.Context = landscape ? (item.kind == "Episode" ? .still : .landscape) : .poster
+        return card(item, context: context, shape: landscape ? .landscape : .portrait, width: width)
     }
 
     func backdropURL(for item: EmbyItem, width: Int) -> URL? {

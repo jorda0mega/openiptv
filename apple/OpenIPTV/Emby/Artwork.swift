@@ -5,7 +5,10 @@ import Foundation
 /// but every usable candidate is returned so a broken image falls through to
 /// the next instead of leaving a blank card. Mirrors crates/core/src/artwork.rs.
 enum Artwork {
-    enum Context { case poster, landscape, backdrop }
+    /// `still`: 16:9 cards in a show's own episode list: each episode's
+    /// still (a frame from it) when it's wide, then the series' art as
+    /// `landscape` (which Continue Watching uses: the show's art first).
+    enum Context { case poster, landscape, still, backdrop }
 
     enum Shape: String {
         case portrait, square, fourThree, landscape
@@ -97,7 +100,8 @@ enum Artwork {
         switch context {
         case .poster:
             poster()
-        case .landscape:
+        case .landscape, .still:
+            if context == .still, (item.primaryImageAspectRatio ?? Shape.landscape.aspect) >= 1.2 { ownPrimary() }
             ownThumb()
             if item.kind != "Photo" { parentThumb() }
             ownBackdrop()
