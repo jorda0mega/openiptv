@@ -93,7 +93,7 @@ struct MoviePlayerView: View {
     @State private var tracks: [MPVPlayer.Track] = []
     @State private var badges: [String] = []
     #if os(iOS)
-    /// The Info card, and the picture filling the screen (cropped) rather
+    /// The Info panel, and the picture filling the screen (cropped) rather
     /// than fitting it.
     @State private var showInfo = false
     @State private var filled = false
@@ -198,7 +198,8 @@ struct MoviePlayerView: View {
         #endif
         #if os(iOS)
         .contentShape(Rectangle())
-        .onTapGesture { toggleControls() }
+        // A tap on the picture closes the Info panel first.
+        .onTapGesture { if showInfo { toggleInfo() } else { toggleControls() } }
         .statusBarHidden(!controlsVisible)
         #endif
         .persistentSystemOverlays(.hidden)
@@ -225,7 +226,8 @@ struct MoviePlayerView: View {
         // its "S1:E3 · Name" over the show.
         PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
                      paused: paused, busy: (buffering || !started) && error == nil, ready: started,
-                     topActions: [fillAction], pills: [PlayerAction(title: "Info") { showInfo = true }],
+                     topActions: [fillAction], pills: [PlayerAction(title: "Info") { toggleInfo() }],
+                     selectedPill: showInfo ? "Info" : nil, panel: showInfo ? infoPanel : nil,
                      close: { dismiss() }, back: { skip(-10) },
                      playPause: { player?.togglePause() }, forward: { skip(10) }) {
             trackMenu
@@ -234,16 +236,29 @@ struct MoviePlayerView: View {
         } bar: {
             scrubber
         }
-        .sheet(isPresented: $showInfo) {
-            PlayerInfoCard(caption: playback.subtitle, title: playback.title, overview: playback.overview,
-                           runtime: runtime, badges: badges)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-        }
         #endif
     }
 
     #if os(iOS)
+    /// The Info panel, as in the Apple TV app: the title, its story, genre
+    /// and running time, and From Beginning.
+    private var infoPanel: PlayerInfoPanel {
+        let genre = playback.seriesId == nil ? playback.subtitle?.components(separatedBy: " · ").last : playback.subtitle
+        let meta = [genre, runtime].compactMap(\.self).filter { !$0.isEmpty }
+        return PlayerInfoPanel(title: playback.title, overview: playback.overview, meta: meta.joined(separator: " · "),
+                               badges: badges,
+                               actions: [PlayerAction(title: "From Beginning", systemImage: "play.fill") {
+                                   restart()
+                                   toggleInfo()
+                               }])
+    }
+
+    private func toggleInfo() {
+        withAnimation(.snappy(duration: 0.3)) { showInfo.toggle() }
+        // Open: the controls stay until it's closed.
+        showControls(autoHide: !showInfo)
+    }
+
     /// Fill the screen (the picture cropped at its edges) or fit it, like
     /// pinching in the Apple TV app.
     private var fillAction: PlayerAction {
@@ -379,6 +394,21 @@ struct MoviePlayerView: View {
     }
 
     #endif
+
+    /// "From Beginning": the start, playing.
+    private func restart() {
+        if offset > 0, let bitrate = governor?.current,
+           let url = model.convertedURL(for: playback, bitrate: bitrate, start: 0) {
+            offset = 0
+            player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
+        } else {
+            player?.seek(to: 0, exact: true)
+        }
+        lastSeek = Date()
+        position = 0
+        jumpUntil = Date().addingTimeInterval(1.5)
+        if paused { player?.setPaused(false) }
+    }
 
     // MARK: Tracks and times (both platforms)
 
@@ -1000,21 +1030,6 @@ struct MoviePlayerView: View {
             return MPVPlayer.Track(id: track.id, kind: track.kind, title: track.title, language: track.language,
                                    channels: track.channels, forced: track.forced, selected: track.id == id)
         }
-    }
-
-    /// "From Beginning": the start, playing.
-    private func restart() {
-        if offset > 0, let bitrate = governor?.current,
-           let url = model.convertedURL(for: playback, bitrate: bitrate, start: 0) {
-            offset = 0
-            player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
-        } else {
-            player?.seek(to: 0, exact: true)
-        }
-        lastSeek = Date()
-        position = 0
-        jumpUntil = Date().addingTimeInterval(1.5)
-        if paused { player?.setPaused(false) }
     }
 
     /// A swipe across the whole touch surface (about the screen's width)

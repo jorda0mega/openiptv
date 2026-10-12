@@ -31,6 +31,10 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     /// pills under the bar.
     var topActions: [PlayerAction] = []
     var pills: [PlayerAction] = []
+    /// The pill shown selected, and the panel it opened (in place of the
+    /// title and bar; the play controls move up above it).
+    var selectedPill: String?
+    var panel: PlayerInfoPanel?
     let close: () -> Void
     let back: () -> Void
     let playPause: () -> Void
@@ -48,9 +52,12 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         #if os(iOS)
         ZStack {
             shade
-            center
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
+            if panel == nil {
+                center
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+            }
             phone
         }
         #else
@@ -60,10 +67,10 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
 
     #if os(iOS)
     /// The picture dimmed evenly, a little more at the bottom where the
-    /// title and times are.
+    /// title and times are; much more under the Info panel's text.
     private var shade: some View {
         ZStack {
-            Color.black.opacity(0.32)
+            Color.black.opacity(panel == nil ? 0.32 : 0.7)
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
                 .frame(height: 320)
                 .frame(maxHeight: .infinity, alignment: .bottom)
@@ -129,31 +136,49 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                 topCapsule
                 Spacer(minLength: 0)
             }
-            Spacer(minLength: 12)
-            HStack(alignment: .bottom, spacing: 12) {
-                titles
-                Spacer(minLength: 8)
-                trailing
+            // Info open (as in the Apple TV app): the play controls under the
+            // top buttons, the pills and the panel under them, room below.
+            if panel != nil {
+                center.frame(maxWidth: .infinity).padding(.top, 84).padding(.bottom, 93).transition(.opacity)
+            } else {
+                Spacer(minLength: 12)
             }
-            // Title to bar and bar to pills as in the Apple TV app (centres
-            // 30 and 41 points apart).
-            bar.padding(.top, 3)
+            if panel == nil {
+                HStack(alignment: .bottom, spacing: 12) {
+                    titles
+                    Spacer(minLength: 8)
+                    trailing
+                }
+                .transition(.opacity)
+                // Title to bar and bar to pills as in the Apple TV app
+                // (centres 30 and 41 points apart).
+                bar.padding(.top, 3).transition(.opacity)
+            }
             if !pills.isEmpty {
                 HStack(spacing: 9) {
                     ForEach(pills) { pill in
+                        let selected = pill.title == selectedPill
                         Button(action: pill.action) {
                             Text(pill.title)
                                 .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(selected ? .black : .white)
                                 .padding(.horizontal, 14)
                                 .frame(height: 40)
+                                .background { if selected { Capsule().fill(.white) } }
                                 .contentShape(.capsule)
                         }
                         .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .glassEffect(selected ? .identity : .regular.interactive(), in: .capsule)
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                     }
                 }
                 .padding(.top, 6)
+            }
+            if let panel {
+                PlayerInfoPanelView(panel: panel)
+                    .padding(.top, 23)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, 20)
@@ -272,41 +297,60 @@ struct TimeBar<Track: View>: View {
     }
 }
 
-#if os(iOS)
-/// The player's Info card (iPhone): what's playing, its story, how long it
-/// runs and the picture's format, like the Apple TV app's.
-struct PlayerInfoCard: View {
-    let caption: String?
+/// What the player's Info panel shows (iPhone).
+struct PlayerInfoPanel {
     let title: String
-    let overview: String?
-    let runtime: String?
-    let badges: [String]
+    var overview: String?
+    /// "Comedy · 33 min".
+    var meta: String
+    var badges: [String] = []
+    var actions: [PlayerAction] = []
+}
+
+#if os(iOS)
+/// The Apple TV app's Info panel in the player: the title, the story, genre
+/// and running time, and glass buttons side by side.
+struct PlayerInfoPanelView: View {
+    let panel: PlayerInfoPanel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if let caption, !caption.isEmpty {
-                    Text(caption).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(panel.title).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(1)
+            if let overview = panel.overview, !overview.isEmpty {
+                Text(overview).font(.body).foregroundStyle(.white).lineLimit(5)
+            }
+            HStack(spacing: 6) {
+                if !panel.meta.isEmpty {
+                    Text(panel.meta).font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.5))
                 }
-                Text(title).font(.title2.weight(.bold))
-                HStack(spacing: 8) {
-                    if let runtime { Text(runtime).font(.subheadline).foregroundStyle(.secondary) }
-                    ForEach(badges, id: \.self) { badge in
-                        Text(badge)
-                            .font(.caption2.weight(.heavy))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.white.opacity(0.85), in: .rect(cornerRadius: 3))
-                    }
-                }
-                if let overview, !overview.isEmpty {
-                    Text(overview).font(.body).foregroundStyle(.secondary).padding(.top, 4)
+                ForEach(panel.badges, id: \.self) { badge in
+                    Text(badge)
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(.white.opacity(0.55), lineWidth: 1))
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(24)
+            if !panel.actions.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(panel.actions) { action in
+                        Button(action: action.action) {
+                            Label(action.title, systemImage: action.systemImage ?? "circle")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .contentShape(.capsule)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                    }
+                }
+                .padding(.top, 14)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 #endif
