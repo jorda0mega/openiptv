@@ -414,6 +414,9 @@ struct LivePlayerView: View {
         case let .started(seconds):
             started = true
             buffering = false
+            #if DEBUG
+            NSLog("%@", String(format: "PERF live start %.3f", seconds))
+            #endif
             // Development builds with the stats on.
             if prefs.performanceStats {
                 timing = String(format: "Started in %.1f s", seconds)
