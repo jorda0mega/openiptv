@@ -99,7 +99,10 @@ enum HomeFeed {
 
     /// `early`: Continue Watching as soon as it's known, before the slower
     /// rows (for a Home with nothing to show yet).
+    /// `sources`: what's being watched, already asked for (while the index
+    /// opened).
     static func load(_ emby: EmbyClient, library: LibraryIndex, cardWidth: Int, backdropWidth: Int,
+                     sources pending: Task<EmbyClient.HomeSources, Error>? = nil,
                      early: ((HomeRow) -> Void)? = nil) async throws -> HomeContent {
         // Everything that doesn't depend on something else, at once: what
         // you're watching and what's new, and the trending titles with what
@@ -108,7 +111,8 @@ enum HomeFeed {
         async let trendingItems = emby.items(ids: trendingIds)
         let notableIds = library.notable.prefix(100).map(\.id)
         async let notableItems = emby.items(ids: notableIds)
-        let sources = try await emby.homeSources()
+        let sources: EmbyClient.HomeSources
+        if let pending { sources = try await pending.value } else { sources = try await emby.homeSources() }
         // Top picks only need what was watched: asked for now, alongside the
         // charts' titles, not after them.
         let seeds = seeds(watching: sources.watching, played: sources.played)

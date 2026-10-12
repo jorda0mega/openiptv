@@ -152,6 +152,7 @@ final class AppModel {
         // device: opened while Continue Watching is asked of the server, not
         // before it.
         async let opened: Void = openLibrary(emby)
+        var pendingSources: Task<EmbyClient.HomeSources, Error>?
         // A saved page with no featured title is rebuilt: it was made before
         // anything could be picked (or by a build that was cut off).
         if !full, !rows.isEmpty, featured != nil, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600 {
@@ -162,6 +163,9 @@ final class AppModel {
                 return
             }
         } else {
+            // Building Home afresh: what's being watched is asked for while
+            // the index and charts open.
+            pendingSources = Task { try await emby.homeSources() }
             await opened
         }
         do {
@@ -169,7 +173,7 @@ final class AppModel {
             // Watching shows as soon as it's known; the rest follows.
             let empty = rows.isEmpty
             let fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
-                                                backdropWidth: Self.backdropWidth,
+                                                backdropWidth: Self.backdropWidth, sources: pendingSources,
                                                 early: { [weak self] row in if empty, let self, self.rows.isEmpty { self.rows = [row] } })
             // The pictures first (all at once), so the page changes in one go
             // instead of covers popping in; on the very first load, show the
