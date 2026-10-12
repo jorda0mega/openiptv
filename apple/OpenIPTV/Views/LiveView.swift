@@ -355,8 +355,9 @@ struct ChannelLogo: View {
 }
 
 #if os(tvOS)
-/// Category chip for Apple TV: white text on glass, accent fill when
-/// selected, white and raised under focus.
+/// Category chip for Apple TV, like the TV app's season picker: white
+/// text on glass, a brighter glass when chosen, white with black text and
+/// raised under focus.
 struct TVChipStyle: ButtonStyle {
     let selected: Bool
 
@@ -380,10 +381,10 @@ struct TVChipStyle: ButtonStyle {
                     if focused {
                         Capsule().fill(.white)
                     } else if selected {
-                        Capsule().fill(Color.accentColor)
+                        Capsule().fill(.white.opacity(0.24))
                     }
                 }
-                .glassEffect(focused || selected ? .identity : .regular, in: .capsule)
+                .glassEffect(focused ? .identity : .regular, in: .capsule)
                 .scaleEffect(focused ? (pressed ? 1.02 : 1.08) : 1)
                 .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: 12, y: 8)
                 .animation(.snappy(duration: 0.18), value: focused)

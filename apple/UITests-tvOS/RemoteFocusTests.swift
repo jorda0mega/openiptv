@@ -159,6 +159,22 @@ final class RemoteFocusTests: XCTestCase {
         press(.menu, "menu 2")
     }
 
+    /// A show's seasons: the chosen one, one under focus, and the chosen
+    /// one again with focus down in the episodes.
+    func testSeasonChips() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "office"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to the posters")
+        for _ in 0..<8 where !focused().contains(", Show") { press(.right, "looking for the show") }
+        press(.select, "open show")
+        sleep(3)
+        press(.down, "to seasons")
+        press(.right, "next season")
+        press(.down, "to episodes")
+    }
+
     /// Live TV: into the page, Left opens the slide-out list on the chosen
     /// shelf, down to another shelf, Select picks it and closes the list;
     /// then Left and Right (close without changing), and Left and Menu.

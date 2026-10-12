@@ -323,7 +323,7 @@ private struct TVEpisodeCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text([episode.indexNumber.map { "Episode \($0)" }, upNext ? "Up Next" : nil].compactMap(\.self).joined(separator: " · "))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(upNext ? Color.accentColor : .secondary)
+                    .foregroundStyle(upNext ? Color.white : .secondary)
                 Text(episode.name).font(.callout.weight(.medium)).lineLimit(1)
                 if let minutes = episode.runTimeTicks.map({ Int($0 / 600_000_000) }), minutes > 0 {
                     Text("\(minutes) min").font(.caption).foregroundStyle(.secondary)
