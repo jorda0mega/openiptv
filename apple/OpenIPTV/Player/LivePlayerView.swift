@@ -169,18 +169,18 @@ struct LivePlayerView: View {
         return info?.now?.title ?? displayName
     }
 
-    /// An error; paused or how far behind; how fast it started, briefly.
+    /// An error; how far behind; how fast it started, briefly. Paused shows
+    /// on the play button, not here too.
     private var note: (text: String, color: Color)? {
         if let error { return (error, .red) }
-        if recording == nil, paused || !atLive { return (status, .white.opacity(0.75)) }
+        if recording == nil, !atLive || (paused && behind >= 3) { return (status, .white.opacity(0.75)) }
         if started, Date() < timingUntil { return (timing, .white.opacity(0.6)) }
         return nil
     }
 
     private var status: String {
         if let recording { return "From the start · \(recording.start.clock)" }
-        if paused { return behind >= 3 ? "Paused · \(Self.time(behind)) behind live" : "Paused" }
-        if !atLive { return "\(Self.time(behind)) behind live" }
+        if paused || !atLive { return "\(Self.time(behind)) behind live" }
         return timing
     }
 
@@ -217,7 +217,13 @@ struct LivePlayerView: View {
                          scrubbing: $scrubbing, speedLabel: $scrubSpeed,
                          onChanged: scrubMoved, onCommit: scrubEnded)
                 #else
-                ProgressView(value: min(max(position - span.lower, 0), span.upper - span.lower), total: max(span.upper - span.lower, 1))
+                HStack(spacing: 20) {
+                    Image(systemName: paused ? "pause.fill" : "play.fill")
+                        .font(.title3)
+                        .frame(width: 32)
+                        .accessibilityLabel(paused ? "Paused" : "Playing")
+                    TVProgressBar(position: position - span.lower, total: max(span.upper - span.lower, 1), target: nil)
+                }
                 #endif
             }
         } else {
@@ -229,7 +235,7 @@ struct LivePlayerView: View {
 
     #if os(iOS)
     private func more(info: NowNext?) -> some View {
-        GlassIconButton(systemName: "ellipsis", label: "More", size: 30) {
+        GlassIconButton(systemName: "ellipsis", label: "More", size: 44) {
             showMore = true
             showControls(autoHide: false)
         }
@@ -260,8 +266,9 @@ struct LivePlayerView: View {
         guard let span, let position else { return "" }
         let at = scrubbing.map { span.lower + $0 } ?? position
         if recording != nil { return "−" + Self.time(max(0, span.upper - at)) }
+        // At live the LIVE button says so; the bar's end stays blank.
         let gap = behind(at)
-        return gap >= 3 ? "−" + Self.time(gap) : "Live"
+        return gap >= 3 ? "−" + Self.time(gap) : ""
     }
 
     // MARK: Where "live" is

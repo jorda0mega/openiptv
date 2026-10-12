@@ -577,19 +577,6 @@ struct EmbyClient {
         return playback
     }
 
-    /// Scrubbing thumbnails, when the server has generated them (Emby's
-    /// "thumbnail image extraction"); nil otherwise.
-    func trickplay(itemId: String, mediaSourceId: String?, width: Int = 320) async -> TrickplayImages? {
-        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/index.bif"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [.init(name: "width", value: String(width))]
-            + (mediaSourceId.map { [URLQueryItem(name: "MediaSourceId", value: $0)] } ?? [])
-        var request = URLRequest(url: parts.url!)
-        request.timeoutInterval = 30
-        authorize(&request)
-        guard let data = try? await HTTP.data(request) else { return nil }
-        return await Task.detached(priority: .utility) { TrickplayImages(bif: data) }.value
-    }
-
     /// When nothing would play: how the server answers each address, in
     /// words (no addresses or tokens), so the cause is visible on screen.
     func diagnose(_ playback: EmbyPlayback) async -> String {

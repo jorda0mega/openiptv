@@ -398,10 +398,6 @@ final class AppModel {
             player.prepareOffscreen()
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm)
             warm = (itemId, player, playback)
-            // Scrubbing thumbnails ready before the tap too.
-            if trickplayCache[playback.itemId] == nil, let emby {
-                Task { trickplayCache[playback.itemId] = await emby.trickplay(itemId: playback.itemId, mediaSourceId: playback.mediaSourceId) }
-            }
             // Don't hold a connection open for long if it isn't wanted.
             warmExpiry = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(300))
@@ -452,17 +448,6 @@ final class AppModel {
             return sources.emby.map { UserDefaults.standard.double(forKey: "speed." + ($0.serverURL.host() ?? "")) }.flatMap { $0 > 0 ? $0 : nil }
         }
         set { if let host = sources.emby?.serverURL.host(), let newValue, newValue > 0 { UserDefaults.standard.set(newValue, forKey: "speed." + host) } }
-    }
-
-    /// Scrubbing thumbnails per item, fetched ahead for warmed-up items.
-    private var trickplayCache: [String: TrickplayImages] = [:]
-
-    func trickplay(for playback: EmbyPlayback) async -> TrickplayImages? {
-        if let cached = trickplayCache[playback.itemId] { return cached }
-        let images = await emby?.trickplay(itemId: playback.itemId, mediaSourceId: playback.mediaSourceId)
-        if trickplayCache.count > 4 { trickplayCache.removeAll() }
-        if let images { trickplayCache[playback.itemId] = images }
-        return images
     }
 
     func diagnose(_ playback: EmbyPlayback) async -> String {

@@ -74,7 +74,6 @@
 		5274B2DEB0C7389DA1D68536 /* EmbyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063896B003501F3D99466FB4 /* EmbyClient.swift */; };
 		52C8BDC2785EBA32424F1CB1 /* Libavformat.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */; };
 		53650932E226B2B55FA992A1 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */; };
-		53DB13F49C470CA57F047B5A /* Trickplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F539FC96776F18A52123D17E /* Trickplay.swift */; };
 		5412E25247B36394D2775B17 /* EmbyLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0103F884D3FCDC978ACBF582 /* EmbyLive.swift */; };
 		5633E2B7128DB4B72E585CD4 /* XtreamProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B14B5E25BA30ECE2BD6E701 /* XtreamProvider.swift */; };
 		56FC834D455E6F4164EC0918 /* Libavformat.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */; };
@@ -121,7 +120,6 @@
 		863051AB331FB77AD9A8617F /* Sources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320EE0FE4DDEEB903360A4AF /* Sources.swift */; };
 		87A1B9D7209C39E0CE907BA4 /* Flex.swift in Sources */ = {isa = PBXBuildFile; fileRef = F54AA14367E83C43E1A0457D /* Flex.swift */; };
 		8943A03A4AA4F1C805C227DC /* Libass.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5B1B94210411D81E015B0B6 /* Libass.xcframework */; };
-		8ACAF07CCDB43E80951A72B7 /* Trickplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F539FC96776F18A52123D17E /* Trickplay.swift */; };
 		8CFD892BCDF7775B3D0C8754 /* Libavcodec.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */; };
 		8D38B6155496E8A53B744167 /* libexpat.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A9E566E295D6785A720DEA83 /* libexpat.tbd */; };
 		8F2742F08E2D8AAE9A1BC3AA /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
@@ -319,7 +317,6 @@
 		EF2DE48775D87FC33EDCE40F /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		F21CB2421CE9A188C91DE446 /* TVTitlePages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVTitlePages.swift; sourceTree = "<group>"; };
 		F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatus.swift; sourceTree = "<group>"; };
-		F539FC96776F18A52123D17E /* Trickplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trickplay.swift; sourceTree = "<group>"; };
 		F54AA14367E83C43E1A0457D /* Flex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Flex.swift; sourceTree = "<group>"; };
 		FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libuchardet.xcframework; path = Vendor/Libuchardet.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -445,7 +442,6 @@
 				B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */,
 				0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */,
 				857825645808317F48AB50AA /* StreamRelay.swift */,
-				F539FC96776F18A52123D17E /* Trickplay.swift */,
 				3704F35E9F8381B01A16311E /* TVRemote.swift */,
 			);
 			path = Player;
@@ -884,7 +880,6 @@
 				F7D4B4BAB7ABD5CC5632552E /* TVTitlePages.swift in Sources */,
 				71899403CBD5CEFA439BEEBA /* TabStrip.swift in Sources */,
 				E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */,
-				53DB13F49C470CA57F047B5A /* Trickplay.swift in Sources */,
 				5633E2B7128DB4B72E585CD4 /* XtreamProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -951,7 +946,6 @@
 				5F01E1907CEC93ADB72EB792 /* TVTitlePages.swift in Sources */,
 				E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */,
 				F72204C9018C0C581257040E /* TitleHero.swift in Sources */,
-				8ACAF07CCDB43E80951A72B7 /* Trickplay.swift in Sources */,
 				21102DA03C0F276A1F777950 /* XtreamProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -75,16 +75,11 @@ struct MoviePlayerView: View {
     /// "Started in …" for a few seconds after the first frame.
     @State private var timing: String?
     @State private var warmStart = false
-    /// Scrubbing thumbnails, if the server has them.
-    @State private var thumbnails: TrickplayImages?
     #if os(tvOS)
     /// Where the current swipe started from.
     @State private var swipeFrom: Double?
     /// Rewinding or fast-forwarding while left or right is held.
     @State private var holdTask: Task<Void, Never>?
-    /// Play, pause or a skip, shown big in the middle for a moment.
-    @State private var flashSymbol: String?
-    @State private var flashTask: Task<Void, Never>?
     #endif
     /// iPhone scrubbing: speed label, and live seeks so the picture follows.
     @State private var scrubSpeed: String?
@@ -130,14 +125,6 @@ struct MoviePlayerView: View {
             }
             if controlsVisible { controls.transition(.opacity) }
             #if os(tvOS)
-            if let flashSymbol {
-                Image(systemName: flashSymbol)
-                    .font(.system(size: 60, weight: .semibold))
-                    .frame(width: 150, height: 150)
-                    .background(.ultraThinMaterial, in: .circle)
-                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
-                    .allowsHitTesting(false)
-            }
             // On top and see-through: it takes the remote.
             TVRemoteSurface { remote($0) }
                 .ignoresSafeArea()
@@ -165,11 +152,7 @@ struct MoviePlayerView: View {
                      playPause: { player?.togglePause() }, forward: { player?.seek(by: 10) }) {
             EmptyView()
         } bar: {
-            #if os(iOS)
-            scrubber.overlay(alignment: .topLeading) { scrubPreview }
-            #else
             scrubber
-            #endif
         }
     }
 
@@ -184,8 +167,10 @@ struct MoviePlayerView: View {
     private var total: Double { duration ?? playback.durationSeconds ?? 0 }
 
     @ViewBuilder private var scrubber: some View {
+        // While scrubbing the picture itself shows where it'll land (no
+        // preview box), and a slower drag says its speed at the end.
         TimeBar(leading: timeString(scrubbing ?? position),
-                trailing: "-" + timeString(max(0, total - (scrubbing ?? position)))) {
+                trailing: scrubSpeed ?? "-" + timeString(max(0, total - (scrubbing ?? position)))) {
             #if os(iOS)
             Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
                      onChanged: liveScrub, onCommit: commitScrub)
@@ -197,7 +182,6 @@ struct MoviePlayerView: View {
                     .frame(width: 32)
                     .accessibilityLabel(paused ? "Paused" : "Playing")
                 TVProgressBar(position: position, total: max(total, 1), target: scrubbing)
-                    .overlay(alignment: .topLeading) { scrubPreview }
             }
             #endif
         }
@@ -205,7 +189,6 @@ struct MoviePlayerView: View {
 
     private func start() {
         position = playback.startSeconds ?? 0
-        Task { thumbnails = await model.trickplay(for: playback) }
         if let (warmPlayer, _) = model.takeWarm(playback.itemId) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
@@ -420,43 +403,6 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// Where a drag or remote presses would land: a thumbnail of that
-    /// moment (when the server has them), the time, and how far it jumps.
-    @ViewBuilder private var scrubPreview: some View {
-        if let target = scrubbing {
-            GeometryReader { geo in
-                // Slower scrubbing moves second by second, finer than the
-                // server's 10-second thumbnails: the picture itself is the
-                // preview then.
-                let thumb = scrubSpeed == nil ? thumbnails?.image(at: target) : nil
-                let width: CGFloat = thumb == nil ? 120 : Layout.scrubPreviewWidth
-                let fraction = total > 0 ? min(max(target / total, 0), 1) : 0
-                let x = min(max(16 + fraction * (geo.size.width - 32) - width / 2, 0), geo.size.width - width)
-                VStack(spacing: 4) {
-                    if let thumb {
-                        Image(uiImage: thumb)
-                            .resizable()
-                            .aspectRatio(16 / 9, contentMode: .fill)
-                            .frame(width: width, height: width * 9 / 16)
-                            .clipShape(.rect(cornerRadius: 10))
-                    }
-                    Text(timeString(target)).font(.headline.monospacedDigit())
-                    if let scrubSpeed {
-                        Text(scrubSpeed).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    let delta = target - (scrubOrigin ?? position)
-                    Text((delta < 0 ? "−" : "+") + timeString(abs(delta)))
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
-                .padding(8)
-                .frame(width: width + 16)
-                .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                .offset(x: x - 8, y: -(thumb == nil ? 76 : width * 9 / 16 + 84))
-            }
-            .allowsHitTesting(false)
-        }
-    }
-
     /// While dragging: pause, and move the picture so it follows the finger:
     /// the exact frame when scrubbing slowly or resting, the nearest
     /// keyframe while sweeping fast.
@@ -523,7 +469,6 @@ struct MoviePlayerView: View {
             } else {
                 player?.seek(by: direction * 10)
                 position = min(max(position + direction * 10, 0), max(total, 1))
-                flash(direction < 0 ? "gobackward.10" : "goforward.10")
                 showControls(autoHide: !paused)
             }
         case let .hold(direction):
@@ -594,19 +539,9 @@ struct MoviePlayerView: View {
     private func togglePlay() {
         let pausing = !paused
         player?.togglePause()
-        flash(pausing ? "pause.fill" : "play.fill")
         showControls(autoHide: !pausing)
     }
 
-    private func flash(_ symbol: String) {
-        flashTask?.cancel()
-        withAnimation(.easeOut(duration: 0.12)) { flashSymbol = symbol }
-        flashTask = Task {
-            try? await Task.sleep(for: .milliseconds(700))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeIn(duration: 0.25)) { flashSymbol = nil }
-        }
-    }
     #endif
 
     private func timeString(_ seconds: Double) -> String {

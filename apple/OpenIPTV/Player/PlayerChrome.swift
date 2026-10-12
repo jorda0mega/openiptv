@@ -1,11 +1,10 @@
 import SwiftUI
 
-/// The player's controls, distilled from the streaming apps' players (Apple
-/// TV, HBO Max, Peacock, Disney+): no bars or panels, a soft shade over the
-/// picture; close at the top left; back 10, play/pause and forward 10 in
-/// the middle (a spinner in play's place while it opens or buffers); the
-/// title with any extra buttons beside it, and one scrubber capsule with the
-/// times and, at its end, rotate.
+/// The player's controls, like the Apple TV app's player: no bars or
+/// panels, a soft shade over the picture; close at the top left; back 10,
+/// play/pause and forward 10 in the middle (a spinner in play's place while
+/// it opens or buffers); the title with its round buttons beside it, and
+/// the bar with the times at its ends.
 /// iPhone: Liquid Glass. Apple TV: the system's own look (title, a plain
 /// progress bar and times); the remote does the rest.
 struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
@@ -65,30 +64,34 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     }
 
     #if os(iOS)
+    /// Like the Apple TV app's player: close at the top left; back 10,
+    /// play/pause and forward 10 in the middle; at the bottom the title with
+    /// its round buttons beside it (LIVE, "…", rotate), then the bar with the
+    /// times at its ends.
     private var phone: some View {
         VStack(spacing: 0) {
             HStack {
-                GlassIconButton(systemName: "xmark", label: "Close player", size: 32, action: close)
+                GlassIconButton(systemName: "xmark", label: "Close player", size: 44, action: close)
                 Spacer()
             }
             Spacer(minLength: 12)
-            HStack(spacing: 40) {
+            HStack(spacing: 44) {
                 if ready {
-                    GlassIconButton(systemName: "gobackward.10", label: "Back 10 seconds", size: 58, action: back)
+                    GlassIconButton(systemName: "gobackward.10", label: "Back 10 seconds", size: 64, action: back)
                 }
                 if busy {
                     ProgressView()
                         .controlSize(.large)
                         .tint(.white)
-                        .frame(width: 92, height: 92)
+                        .frame(width: 88, height: 88)
                         .glassEffect(.regular, in: .circle)
                         .accessibilityLabel("Loading")
                 } else {
                     GlassIconButton(systemName: paused ? "play.fill" : "pause.fill", label: paused ? "Play" : "Pause",
-                                    size: 78, action: playPause)
+                                    size: 88, action: playPause)
                 }
                 if ready {
-                    GlassIconButton(systemName: "goforward.10", label: "Forward 10 seconds", size: 58, action: forward)
+                    GlassIconButton(systemName: "goforward.10", label: "Forward 10 seconds", size: 64, action: forward)
                         .disabled(!canGoForward)
                         .opacity(canGoForward ? 1 : 0.45)
                 }
@@ -99,28 +102,16 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                 Spacer(minLength: 8)
                 accessory
                 trailing
-            }
-            .padding(.horizontal, 4)
-            .padding(.bottom, 10)
-            HStack(spacing: 10) {
-                bar
-                // Rotate lives in the bar, small, like a fullscreen toggle.
-                // A default-style button: plain ones inside glass get no taps.
-                Button { PlayerOrientation.shared.toggle() } label: {
-                    Image(systemName: "rotate.right")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
+                GlassIconButton(systemName: "rotate.right", label: "Rotate", size: 44) {
+                    PlayerOrientation.shared.toggle()
                 }
-                .accessibilityLabel("Rotate")
             }
-            .tint(.white)
-            .padding(.leading, 18)
-            .padding(.trailing, 8)
-            .frame(height: 46)
-            .glassEffect(.regular, in: .capsule)
+            .padding(.bottom, 14)
+            bar
+                .tint(.white)
+                .padding(.bottom, 6)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         // Room at the top in landscape too, where there's no status bar.
         .padding(.top, 14)
         .padding(.bottom, 8)
