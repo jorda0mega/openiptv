@@ -30,6 +30,11 @@ PANEL_TZ = timezone(timedelta(hours=1))
 CHANNELS = 40
 SLOT = 1800
 SOCKETS = set()
+# How the server behaves, set by UI tests at run time (GET /mock/set?k=v,
+# /mock/set?reset=1): "latency" (seconds per request), "home_delay" (seconds
+# for Continue Watching), "fail=persons" (a person's titles fail),
+# "resume_episode" (the episode a show's Continue Watching card is on).
+CONTROL = {}
 # Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
 SHOW_IMDB = {"Forensic Files": "tt0247882", "Forensic Files II": "tt11840612",
              "The Office": "tt0290978", "The Office (US)": "tt0386676"}
@@ -253,9 +258,15 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/embywebsocket" and q.get("api_key") == "tok":
             return self.websocket()
+        if path == "/mock/set":
+            if "reset" in q:
+                CONTROL.clear()
+            else:
+                CONTROL.update(q)
+            return self.send(dict(CONTROL))
         # A remote server's round trip (a real one measured 0.8-2.1 s for
         # API calls and covers), for every request but the video itself.
-        latency = float(os.environ.get("OPENIPTV_MOCK_LATENCY", "0"))
+        latency = float(CONTROL.get("latency", os.environ.get("OPENIPTV_MOCK_LATENCY", "0")))
         if latency and not (path.startswith("/Videos/") or path.endswith((".ts", ".m3u8", ".mkv"))):
             time.sleep(latency)
         if path == "/mock/push":
@@ -549,6 +560,18 @@ class Handler(BaseHTTPRequestHandler):
                                      "UserData": {"PlaybackPositionTicks": 5280000000, "PlayedPercentage": 40}}] \
                 if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
             return self.send({"Items": items, "TotalRecordCount": len(items)})
+        hls = os.environ.get("OPENIPTV_MOCK_HLS")
+        if hls and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
+            # Server-converted HLS like Emby's: the whole film listed from
+            # 0:00 whatever StartTimeTicks asks (the player has to jump).
+            with open(os.path.join(hls, "index.m3u8")) as f:
+                # Segment addresses carry the token, as Emby's do.
+                playlist = f.read().replace("seg", "/emby/hls/seg").replace(".ts", ".ts?api_key=tok")
+            return self.send(playlist.encode(), ctype="application/vnd.apple.mpegurl")
+        if hls and path.startswith("/hls/seg") and path.endswith(".ts"):
+            name = os.path.basename(path)
+            with open(os.path.join(hls, name), "rb") as f:
+                return self.send(f.read(), ctype="video/mp2t")
         if path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             # Server-converted HLS: hand off to Apple's public test stream so a
             # fallback can be seen playing real video.
@@ -612,6 +635,8 @@ class Handler(BaseHTTPRequestHandler):
             names = sorted({n for cast in CAST.values() for n, _ in cast if term and term in n.lower()})
             return self.send({"Items": [{"Id": "p-" + n.replace(" ", "_"), "Name": n, "Type": "Person"} for n in names[:int(q.get("Limit", 3))]]})
         if path == "/Users/U1/Items" and "PersonIds" in q:
+            if CONTROL.get("fail") == "persons":
+                return self.send({"error": "unavailable"}, status=503)
             name = q["PersonIds"][2:].replace("_", " ")
             return self.send({"Items": [known_item(KNOWN_BY_ID[i]) for i, cast in CAST.items() if any(n == name for n, _ in cast)]})
         if path.startswith("/Items/") and path.endswith("/Similar"):
@@ -622,13 +647,16 @@ class Handler(BaseHTTPRequestHandler):
             # Several episodes of one show (shown as one card) and a movie.
             ep = lambda s, i: episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
                                                     "UserData": {"PlaybackPositionTicks": 5280000000, "PlayedPercentage": 40}}
-            twin = ep(2, 3) | {"Id": "e4k203", "SeriesId": "s1-4k"}  # same show, another library
+            # The show's card is on S2 E3, or the episode a test moved it to
+            # (watched elsewhere).
+            current = int(CONTROL.get("resume_episode", 3))
+            twin = ep(2, current) | {"Id": f"e4k2{current:02d}", "SeriesId": "s1-4k"}  # same show, another library
             # Like a real server: home takes a moment, and progress moves
             # between refreshes.
             print(f"{time.time():.2f} home requested", flush=True)
-            time.sleep(float(os.environ.get("OPENIPTV_MOCK_HOME_DELAY", "0")))
+            time.sleep(float(CONTROL.get("home_delay", os.environ.get("OPENIPTV_MOCK_HOME_DELAY", "0"))))
             progress = 5 + int(time.time()) % 90
-            return self.send({"Items": [ep(2, 3), twin, movie(5) | {"UserData": {"PlayedPercentage": progress}}, ep(1, 4), ep(1, 2)]})
+            return self.send({"Items": [ep(2, current), twin, movie(5) | {"UserData": {"PlayedPercentage": progress}}, ep(1, 4), ep(1, 2)]})
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
         if path == "/Users/U1/Items/Latest":

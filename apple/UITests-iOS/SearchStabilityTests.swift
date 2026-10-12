@@ -34,8 +34,11 @@ final class SearchStabilityTests: XCTestCase {
         let local = results()
         shot("search local")
         XCTAssertFalse(noResultsShown(), "No Results before the server answered")
+        // Regression: nothing at all showed while the server worked.
+        XCTAssertTrue(searchingShown(), "nothing said the search was still running")
         sleep(6)
         let answered = results()
+        XCTAssertFalse(searchingShown(), "Searching… stayed after the server answered")
         shot("search answered")
         XCTAssertEqual(differences(local, answered).filter { !$0.hasPrefix("new ") }, [],
                        "results listed before the server answered moved or went")
@@ -116,6 +119,11 @@ final class SearchStabilityTests: XCTestCase {
     /// The header's parts: the title, the filters, and the whole.
     private func header() -> [String: CGRect] {
         frames { ["search-title", "search-header", "scope-All", "scope-Movies", "scope-Live TV"].contains($0.identifier) }
+    }
+
+    /// "Searching…" on the page.
+    private func searchingShown() -> Bool {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Searching…'")).firstMatch.exists
     }
 
     private func noResultsShown() -> Bool {

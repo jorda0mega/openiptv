@@ -8,6 +8,12 @@ struct OpenIPTVApp: App {
     @State private var model = AppModel()
     @State private var prefs = Preferences()
 
+    #if DEBUG
+    init() {
+        TrackChoice.forgetForTesting()
+    }
+    #endif
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -51,6 +57,16 @@ struct RootView: View {
             PlayerScreen(item: item)
         }
         .task { await model.loadLive() }
+        #if DEBUG && os(iOS)
+        // UI tests: what Picture in Picture is doing.
+        .overlay(alignment: .topLeading) {
+            Text(PictureInPictureProbe.shared.text)
+                .font(.caption2)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("debug-pip")
+        }
+        #endif
         #if os(iOS)
         // Picture in Picture: back in the app's player when brought back,
         // and its progress kept on the server meanwhile.

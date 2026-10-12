@@ -366,6 +366,8 @@ struct TVContinueRow: View {
         // left), so Select starts it at once.
         .task(id: focused) {
             guard let id = focused, let card = row.cards.first(where: { $0.id == id }) else { return }
+            // Browsing: a Home built from now on waits for the next moment.
+            model.homeBrowsed()
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
             model.warmUp(card.episodeId ?? card.id, kind: card.episodeId != nil ? "Episode" : card.kind,
@@ -430,6 +432,7 @@ struct TVPosterRow: View {
         // usually goes. Sweeping across posters fetches nothing.
         .task(id: focused) {
             guard let id = focused, let index = cards.firstIndex(where: { $0.id == id }) else { return }
+            model.homeBrowsed()
             try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled else { return }
             model.prefetchTitle(cards[index])

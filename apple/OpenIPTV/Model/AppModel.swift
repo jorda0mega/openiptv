@@ -95,12 +95,17 @@ final class AppModel {
         featured = home?.featured
         spotlight = home?.spotlight ?? []
         homeBuiltAt = home?.builtAt
+        #if DEBUG
+        // UI tests (OPENREEL_DEBUG_HOME_STALE): the saved Home is old, so the
+        // launch builds every row again.
+        if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_HOME_STALE"] != nil { homeBuiltAt = .distantPast }
+        #endif
         homeHistory = home?.history ?? []
         shownBuiltAt = home?.builtAt
         shownHistory = home?.history ?? []
         // A launch is a moment Home may change: a build ready in the
         // first seconds goes straight on the page.
-        homeOpensUntil = Date().addingTimeInterval(Self.homeOpensFor)
+        homeAwaitsFirstBuild = true
         observeAppState()
         // Watching the connection from the start (speculative work waits
         // until it's known to be unmetered).
@@ -137,10 +142,12 @@ final class AppModel {
     /// ready in the first seconds), a pull to refresh, and Home chosen from
     /// another tab. Its Continue Watching is the newest the server gave.
     @ObservationIgnored private var stagedHome: HomeContent?
-    /// Until when what's built goes straight on the page: the first
-    /// seconds after a launch or a long time away, while Home still opens.
-    @ObservationIgnored private var homeOpensUntil = Date.distantPast
-    private static let homeOpensFor: TimeInterval = 5
+    /// After a launch or a long time away, the first Home built goes
+    /// straight on the page, however long the server takes, unless the
+    /// viewer has started browsing it meanwhile (then it waits for the next
+    /// moment). One per launch: later builds wait. (A five-second window
+    /// left a slow server's first build hidden until another tab.)
+    @ObservationIgnored private var homeAwaitsFirstBuild = false
     /// Until when Continue Watching's cards may move, appear or go: just
     /// after the player closed, until the server's answer for that stop.
     @ObservationIgnored private var continueMovesUntil: Date?
@@ -196,11 +203,18 @@ final class AppModel {
     /// Whether a build may go straight on the page: Home is still opening,
     /// or has nothing built on it yet (only Continue Watching, or nothing).
     private var homeOpening: Bool {
-        Date() < homeOpensUntil || shownBuiltAt == nil || rows.isEmpty
+        homeAwaitsFirstBuild || shownBuiltAt == nil || rows.isEmpty
+    }
+
+    /// The viewer scrolled Home or moved along it: what's built from now
+    /// on waits for the next moment.
+    func homeBrowsed() {
+        homeAwaitsFirstBuild = false
     }
 
     private func buildHome(cardWidth: Int, sync: Bool, full: Bool, show: Bool) async {
         lastCardWidth = cardWidth
+        let account = accountGeneration
         guard let emby else {
             rows = []
             featured = nil
@@ -237,7 +251,10 @@ final class AppModel {
             let empty = rows.isEmpty
             var fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
                                                 backdropWidth: Self.backdropWidth, sources: pendingSources,
-                                                early: { [weak self] row in if empty, let self, self.rows.isEmpty { self.rows = [row] } })
+                                                early: { [weak self] row in
+                                                    guard let self, empty, self.rows.isEmpty, account == self.accountGeneration else { return }
+                                                    self.rows = [row]
+                                                })
             fresh.rows = variedForTests(fresh.rows)
             // The pictures first (all at once), so the page changes in one go
             // instead of covers popping in; on the very first load, show the
@@ -256,10 +273,14 @@ final class AppModel {
             homeBuiltAt = fresh.builtAt
             homeHistory = fresh.history ?? []
             homeError = nil
+            // Signed out or into another account meanwhile: not its Home.
+            guard account == accountGeneration else { return }
             if show || homeOpening {
                 if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured {
                     await Self.wait(for: prefetch, atMost: 1.5)
                 }
+                guard account == accountGeneration else { return }
+                homeAwaitsFirstBuild = false
                 showHome(fresh)
             } else {
                 stageHome(fresh)
@@ -325,7 +346,7 @@ final class AppModel {
 
     private func cameBack() {
         guard let away = backgroundedAt.map({ Date().timeIntervalSince($0) }), away >= Self.longAway else { return }
-        homeOpensUntil = Date().addingTimeInterval(Self.homeOpensFor)
+        homeAwaitsFirstBuild = true
         showStagedHome()
         guard emby != nil else { return }
         Task { await loadHome(cardWidth: lastCardWidth) }
@@ -893,7 +914,11 @@ final class AppModel {
             staged.rows = Self.replacingContinue(in: staged.rows, with: row)
             stagedHome = staged
         }
-        if mayMove || row?.cards.map(\.id) == shown?.cards.map(\.id) {
+        // The same cards: the same titles and, for shows, the same
+        // episodes (a show's card moving on to its next episode is a new
+        // card, not progress).
+        func identity(_ row: HomeRow?) -> [String]? { row?.cards.map { $0.id + "|" + ($0.episodeId ?? "") } }
+        if mayMove || identity(row) == identity(shown) {
             // Opening, the other rows lose what's now in it; otherwise
             // they stay as they are until the next moment.
             let updated = opening ? Self.replacingContinue(in: rows, with: row) : Self.settingContinue(in: rows, to: row)
@@ -1318,6 +1343,10 @@ final class AppModel {
 
     func signedInToEmby(_ account: EmbyAccount) async {
         accountGeneration += 1
+        // A Home on its way for the old account is dropped, not waited for.
+        homeLoad = nil
+        homeLoadID = UUID()
+        stagedHome = nil
         recentStops = [:]
         previews = []
         previewLoads = [:]
@@ -1333,6 +1362,9 @@ final class AppModel {
 
     func signOutOfEmby() async {
         accountGeneration += 1
+        homeLoad = nil
+        homeLoadID = UUID()
+        stagedHome = nil
         recentStops = [:]
         catalogJob?.cancel()
         showLoads = [:]

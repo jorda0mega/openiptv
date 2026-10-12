@@ -8,6 +8,7 @@ struct PersonView: View {
     let person: EmbyItem.Person
     @Binding var playing: PlayerItem?
     @State private var cards: [Card]?
+    @State private var failed = false
     @State private var selected: Card?
 
     var body: some View {
@@ -64,6 +65,8 @@ struct PersonView: View {
                     } else {
                         TVPosterRow(title: "Movies & Shows", cards: cards, captions: true) { selected = $0 }
                     }
+                } else if failed {
+                    retry.frame(maxWidth: .infinity).frame(height: 400)
                 } else {
                     ProgressView().frame(maxWidth: .infinity).frame(height: 400)
                 }
@@ -106,6 +109,8 @@ struct PersonView: View {
                         }
                         .padding(.horizontal, 20)
                     }
+                } else if failed {
+                    retry.frame(height: 200)
                 } else {
                     ProgressView().frame(height: 200)
                 }
@@ -123,14 +128,28 @@ struct PersonView: View {
         return type == "GuestStar" ? "Guest Star" : type
     }
 
+    /// Couldn't reach the server: said so, with Try Again.
+    private var retry: some View {
+        VStack(spacing: 12) {
+            Text("Couldn't load \(person.name)'s titles.").foregroundStyle(.secondary)
+            Button("Try Again") {
+                failed = false
+                Task { await load() }
+            }
+        }
+    }
+
     /// Their films and shows in the library, newest first.
     private func load() async {
         guard cards == nil, let emby = model.emby, let id = person.id else {
             if cards == nil { cards = [] }
             return
         }
-        let items = await emby.titles(withPerson: id)
-            .sorted { ($0.productionYear ?? 0) > ($1.productionYear ?? 0) }
+        guard let found = try? await emby.personTitles(id) else {
+            failed = true
+            return
+        }
+        let items = found.sorted { ($0.productionYear ?? 0) > ($1.productionYear ?? 0) }
         #if os(tvOS)
         let width = 360
         #else

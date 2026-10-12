@@ -9,6 +9,21 @@ struct TrackPlan: Hashable, Sendable {
     /// Subtitle languages; nil: none, except forced ones (signs, foreign
     /// lines) in the audio's language.
     var subtitles: [String]?
+    /// What it was made from, to make it again with the viewer's newest
+    /// picks (a playback got ready before a pick still has the old plan).
+    var basis: Basis?
+
+    struct Basis: Hashable, Sendable {
+        let audio: [String?]
+        let countries: [String]
+        let key: String
+    }
+
+    /// The plan with the viewer's newest picks.
+    func refreshed() -> TrackPlan {
+        guard let basis else { return self }
+        return TrackChoice.plan(audio: basis.audio, countries: basis.countries, key: basis.key)
+    }
 }
 
 /// The rules (the user's): Spanish for titles made in Spanish, English for
@@ -42,7 +57,8 @@ enum TrackChoice {
         } else {
             subtitles = codes("en") + codes("es")
         }
-        return TrackPlan(audio: codes(wanted), subtitles: subtitles)
+        return TrackPlan(audio: codes(wanted), subtitles: subtitles,
+                         basis: TrackPlan.Basis(audio: audio, countries: countries, key: key))
     }
 
     /// "eng", "en", "en-US" → "en"; "spa", "es-419", "esl" → "es".
@@ -107,6 +123,15 @@ enum TrackChoice {
     }
 
     private static let order = "trackChoicesOrder"
+
+    #if DEBUG
+    /// UI tests: `-forgetTrackChoices YES` at launch starts with no picks.
+    static func forgetForTesting() {
+        guard UserDefaults.standard.bool(forKey: "forgetTrackChoices") else { return }
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        UserDefaults.standard.removeObject(forKey: order)
+    }
+    #endif
 
     private static func update(_ key: String, _ change: (inout Kept) -> Void) {
         var list = all()

@@ -140,55 +140,81 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                 topCapsule
                 Spacer(minLength: 0)
             }
-            // Info open (as in the Apple TV app): the play controls under the
-            // top buttons, the pills and the panel under them, room below.
-            if panel != nil {
-                center.frame(maxWidth: .infinity).padding(.top, 84).padding(.bottom, 93).transition(.opacity)
-            } else {
-                Spacer(minLength: 12)
-            }
-            if panel == nil {
-                HStack(alignment: .bottom, spacing: 12) {
-                    titles
-                    Spacer(minLength: 8)
-                    trailing
-                }
-                .transition(.opacity)
-                // Title to bar and bar to pills as in the Apple TV app
-                // (centres 30 and 41 points apart).
-                bar.padding(.top, 3).transition(.opacity)
-            }
-            if !pills.isEmpty {
-                HStack(spacing: 9) {
-                    ForEach(pills) { pill in
-                        let selected = pill.title == selectedPill
-                        Button(action: pill.action) {
-                            Text(pill.title)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(selected ? .black : .white)
-                                .padding(.horizontal, 14)
-                                .frame(height: 40)
-                                .background { if selected { Capsule().fill(.white) } }
-                                .contentShape(.capsule)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(selected ? .identity : .regular.interactive(), in: .capsule)
-                        .accessibilityAddTraits(selected ? .isSelected : [])
+            if let panel, landscape {
+                // Landscape (little height): the play controls beside the
+                // pills and the panel, so nothing goes off the screen.
+                HStack(alignment: .center, spacing: 24) {
+                    center.frame(maxWidth: .infinity)
+                    VStack(alignment: .leading, spacing: 0) {
+                        pillsRow
+                        PlayerInfoPanelView(panel: panel, compact: true).padding(.top, 12)
                     }
+                    .frame(maxWidth: 440)
                 }
-                .padding(.top, 6)
-            }
-            if let panel {
-                PlayerInfoPanelView(panel: panel)
-                    .padding(.top, 23)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                Spacer(minLength: 0)
+                .frame(maxHeight: .infinity)
+                .transition(.opacity)
+            } else {
+                portraitBody
             }
         }
         .padding(.horizontal, 20)
         // Landscape has no status bar or home indicator to keep clear of.
         .padding(.top, landscape ? 20 : 0)
         .padding(.bottom, landscape ? 16 : 2)
+    }
+
+    /// Info open (as in the Apple TV app): the play controls under the top
+    /// buttons, the pills and the panel under them, room below; otherwise
+    /// the title, "…", the bar and the pills at the bottom.
+    @ViewBuilder private var portraitBody: some View {
+        // Info open (as in the Apple TV app): the play controls under the
+        // top buttons, the pills and the panel under them, room below.
+        if panel != nil {
+            center.frame(maxWidth: .infinity).padding(.top, 84).padding(.bottom, 93).transition(.opacity)
+        } else {
+            Spacer(minLength: 12)
+        }
+        if panel == nil {
+            HStack(alignment: .bottom, spacing: 12) {
+                titles
+                Spacer(minLength: 8)
+                trailing
+            }
+            .transition(.opacity)
+            // Title to bar and bar to pills as in the Apple TV app
+            // (centres 30 and 41 points apart).
+            bar.padding(.top, 3).transition(.opacity)
+        }
+        if !pills.isEmpty {
+            pillsRow.padding(.top, 6)
+        }
+        if let panel {
+            PlayerInfoPanelView(panel: panel)
+                .padding(.top, 23)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// The glass pills under the bar ("Info"), the open one in white.
+    private var pillsRow: some View {
+        HStack(spacing: 9) {
+            ForEach(pills) { pill in
+                let selected = pill.title == selectedPill
+                Button(action: pill.action) {
+                    Text(pill.title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(selected ? .black : .white)
+                        .padding(.horizontal, 14)
+                        .frame(height: 40)
+                        .background { if selected { Capsule().fill(.white) } }
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(selected ? .identity : .regular.interactive(), in: .capsule)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
     }
 
     /// Rotate (the icon shows which way it turns) and any other picture
@@ -348,12 +374,14 @@ struct PlayerInfoPanel {
 /// and running time, and glass buttons side by side.
 struct PlayerInfoPanelView: View {
     let panel: PlayerInfoPanel
+    /// Landscape: a shorter story, so it fits beside the controls.
+    var compact = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(panel.title).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(1)
             if let overview = panel.overview, !overview.isEmpty {
-                Text(overview).font(.body).foregroundStyle(.white).lineLimit(5)
+                Text(overview).font(.body).foregroundStyle(.white).lineLimit(compact ? 3 : 5)
             }
             HStack(spacing: 6) {
                 if !panel.meta.isEmpty {

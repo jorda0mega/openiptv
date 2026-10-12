@@ -423,7 +423,9 @@ final class MPVPlayer: @unchecked Sendable {
         set("slang", plan.subtitles?.joined(separator: ",") ?? "")
         set("subs-fallback", "no")
         set("subs-fallback-forced", "yes")
-        set("subs-with-matching-audio", "no")
+        // Subtitles asked for (picked by the viewer, or the audio in
+        // neither language) show even in the audio's language.
+        set("subs-with-matching-audio", plan.subtitles == nil ? "no" : "yes")
         // Not the phone's language either (only the plan's).
         set("subs-match-os-language", "no")
     }

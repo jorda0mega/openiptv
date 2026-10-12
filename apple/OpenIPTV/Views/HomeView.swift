@@ -52,6 +52,8 @@ struct HomeView: View {
             }
             // The hero runs up under the status bar, like the TV apps'.
             .ignoresSafeArea(edges: .top)
+            // Browsing: a Home built from now on waits for the next moment.
+            .onScrollPhaseChange { _, phase in if phase == .interacting { model.homeBrowsed() } }
             .background(Color.black)
             .scrollIndicators(.hidden)
             // The name pages opened from here go back to.

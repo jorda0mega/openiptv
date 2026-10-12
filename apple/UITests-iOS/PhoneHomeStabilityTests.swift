@@ -38,6 +38,10 @@ final class PhoneHomeStabilityTests: XCTestCase {
         let numbers = rowNumbers(before)
         XCTAssertFalse(numbers.isEmpty, "no numbered rows on Home: \(before.keys.sorted())")
 
+        // Regression: the show's card moving to its next episode (watched
+        // elsewhere) replaced the card on screen; it must wait too.
+        configure(server, ["resume_episode": "4"])
+        defer { configure(server, ["reset": "1"]) }
         push(server, "library")
         push(server, "watched")
         sleep(18)
@@ -63,6 +67,8 @@ final class PhoneHomeStabilityTests: XCTestCase {
         let again = rowNumbers(rows())
         shot("home chosen again")
         XCTAssertNotEqual(again, numbers, "the Home built meanwhile didn't go on when Home was chosen again")
+        let nextEpisode = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Case 4'")).firstMatch
+        XCTAssertTrue(nextEpisode.exists, "the show's next episode didn't go on when Home was chosen again: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { $0.contains("Case") })")
 
         // Back to the top, then pulled down: built afresh and shown.
         for _ in 0..<4 { drag(from: 0.3, to: 0.8) }
@@ -74,7 +80,81 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertNotEqual(rowNumbers(rows()), again, "pulling down didn't refresh Home")
     }
 
+    /// A launch is a moment Home may change: the first Home built goes on
+    /// the page, however long the server takes, if it hasn't been touched.
+    /// Regression: a build taking more than five seconds waited, unseen,
+    /// until another tab was chosen.
+    func testSlowFirstBuildStillShows() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        app.launch()
+        sleep(10)
+        app.terminate()
+        // Saved Home old (every row built again), and the server slow.
+        configure(server, ["home_delay": "9"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_HOME_STALE"] = "1"
+        app.launch()
+        sleep(2)
+        let saved = pageNumbers()
+        shot("slow launch saved")
+        XCTAssertFalse(saved.isEmpty, "no numbered rows on the saved Home")
+        sleep(20)
+        let later = pageNumbers()
+        shot("slow launch built")
+        XCTAssertFalse(later.isEmpty, "no numbered rows after the build")
+        XCTAssertNotEqual(later, saved, "the slow first build never went on the page")
+    }
+
+    /// Signed out while Home is being built: the old account's Home doesn't
+    /// come back when the build ends. Regression: it did (rows and pictures
+    /// of the account just signed out of).
+    func testSignOutWhileHomeLoads() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["home_delay": "10"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_HOME_STALE"] = "1"
+        app.launch()
+        sleep(2)
+        app.buttons["Settings"].firstMatch.tap()
+        let emby = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Emby'")).firstMatch
+        XCTAssertTrue(emby.waitForExistence(timeout: 3), "no Emby in Settings")
+        emby.tap()
+        let signOut = app.buttons["Sign out"].firstMatch
+        XCTAssertTrue(signOut.waitForExistence(timeout: 3), "no Sign out")
+        signOut.tap()
+        sleep(1)
+        // Back to Settings' first page, then closed.
+        let back = app.navigationBars.buttons["Settings"].firstMatch
+        if back.exists { back.tap(); sleep(1) }
+        let done = app.buttons["Done"].firstMatch
+        if done.waitForExistence(timeout: 2) { done.tap() } else { app.swipeDown(velocity: .fast) }
+        sleep(1)
+        shot("signed out")
+        XCTAssertFalse(app.staticTexts["Continue Watching"].exists, "Home kept the old account's rows")
+        // The build for the old account ends meanwhile.
+        sleep(16)
+        shot("signed out later")
+        XCTAssertFalse(app.staticTexts["Continue Watching"].exists, "the old account's Home came back after signing out")
+        XCTAssertTrue(pageNumbers().isEmpty, "the old account's rows came back after signing out")
+    }
+
     // MARK: Helpers
+
+    /// Sets how the test server behaves (see CONTROL in mock_server.py).
+    private func configure(_ server: URL, _ settings: [String: String]) {
+        let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
+        let done = expectation(description: "configure")
+        URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
+    }
+
+    /// The build numbers of the rows on the page, on screen or not
+    /// ("Trending now ·12"), without scrolling (which counts as browsing).
+    private func pageNumbers() -> Set<String> {
+        let headings = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '·'")).allElementsBoundByIndex.map(\.label)
+        return rowNumbers(Dictionary(headings.map { ("text:" + $0, CGRect.zero) }, uniquingKeysWith: { a, _ in a }))
+    }
 
     private func testServer() -> URL? {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],

@@ -414,10 +414,16 @@ struct EmbyClient {
 
     /// Movies and shows with this person in them.
     func titles(withPerson id: String, limit: Int = 60) async -> [EmbyItem] {
-        (try? await items("Users/\(account.userId)/Items", Self.cardQuery + [
+        (try? await personTitles(id, limit: limit)) ?? []
+    }
+
+    /// The same, failing when the server can't be reached (a person's page
+    /// says so and offers to try again, rather than "nothing").
+    func personTitles(_ id: String, limit: Int = 60) async throws -> [EmbyItem] {
+        try await items("Users/\(account.userId)/Items", Self.cardQuery + [
             .init(name: "PersonIds", value: id), .init(name: "Recursive", value: "true"),
             .init(name: "IncludeItemTypes", value: "Movie,Series"), .init(name: "Limit", value: String(limit)),
-        ])) ?? []
+        ])
     }
 
     /// The server's own search, for episodes (which the on-device index
@@ -588,14 +594,18 @@ struct EmbyClient {
         playback.overview = item.overview
         // English or Spanish audio as the title calls for, subtitles off
         // (see TrackChoice), from the tracks the server lists.
+        // Always a plan: without the server's track list (it didn't answer
+        // in time) it still asks for the language the title calls for, and
+        // the player keeps the file's own only when that one isn't there.
         let audio = (info?.MediaSources?.first?.MediaStreams ?? [])
             .filter { $0.Type == "Audio" }
             .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }
             .map(\.Language)
-        if !audio.isEmpty {
-            playback.tracks = TrackChoice.plan(audio: audio, countries: item.productionLocations ?? [],
-                                               key: item.seriesId ?? item.id)
-        }
+        playback.tracks = TrackChoice.plan(audio: audio, countries: item.productionLocations ?? [],
+                                           key: item.seriesId ?? item.id)
+        #if DEBUG
+        if audio.isEmpty { NSLog("%@", "PERF tracks planned without the server's track list") }
+        #endif
         // Some servers only honour the token as a header; send it both ways
         // for Emby's own stream addresses (not for remote files).
         let auth = ["X-Emby-Token: \(account.accessToken)"]

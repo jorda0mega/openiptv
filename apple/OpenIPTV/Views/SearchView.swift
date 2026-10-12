@@ -436,6 +436,13 @@ struct SearchView: View {
             }
             ContentUnavailableView("No \(what)", systemImage: "line.3.horizontal.decrease",
                                    description: Text("No \(what) match “\(q)”. Try All."))
+        } else if isEmpty(scope) {
+            // Nothing yet, the server's part still on its way: said so
+            // (over the list, so nothing moves), after a moment, so a quick
+            // answer never flashes it.
+            ProgressView("Searching…")
+                .foregroundStyle(.secondary)
+                .transition(.opacity.animation(.easeIn(duration: 0.2).delay(0.25)))
         }
     }
 
