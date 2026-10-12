@@ -50,6 +50,9 @@ struct EmbyItem: Codable, Hashable {
     /// Cast and crew, when asked for (`Fields=People`).
     var people: [Person]?
     var genres: [String]?
+    /// Where it was made, the main country first (a single item's full
+    /// record has it): which language it starts in.
+    var productionLocations: [String]?
 
     struct Person: Codable, Hashable {
         var name: String
@@ -102,6 +105,7 @@ struct EmbyItem: Codable, Hashable {
         case premiereDate = "PremiereDate"
         case people = "People"
         case genres = "Genres"
+        case productionLocations = "ProductionLocations"
     }
 
     init(from decoder: Decoder) throws {
@@ -138,6 +142,7 @@ struct EmbyItem: Codable, Hashable {
         premiereDate = try? c.decodeIfPresent(String.self, forKey: .premiereDate)
         people = (try? c.decodeIfPresent([Lenient<Person>].self, forKey: .people))?.compactMap(\.value)
         genres = try? c.decodeIfPresent([String].self, forKey: .genres)
+        productionLocations = try? c.decodeIfPresent([String].self, forKey: .productionLocations)
     }
 }
 
@@ -207,6 +212,8 @@ struct EmbyPlayback: Hashable, Identifiable {
     var seriesId: String?
     /// The story, for the player's Info panel.
     var overview: String?
+    /// The audio and subtitles it starts with (see TrackChoice).
+    var tracks: TrackPlan?
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {

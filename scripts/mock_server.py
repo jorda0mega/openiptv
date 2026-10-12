@@ -70,6 +70,28 @@ CAST = {"z0": [("Antonio Banderas", "Actor"), ("Anthony Hopkins", "Actor"), ("Ca
         "a10": [("Leonardo DiCaprio", "Actor"), ("Christopher Nolan", "Director")]}
 
 
+def file_streams():
+    """The test video's audio and subtitle tracks as Emby lists them
+    (language, default, index), read once with ffprobe."""
+    global _STREAMS
+    if _STREAMS is None:
+        _STREAMS = []
+        video = os.environ.get("OPENIPTV_MOCK_VIDEO")
+        if video and shutil.which("ffprobe"):
+            out = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", video],
+                                 capture_output=True, text=True).stdout
+            for s in json.loads(out or "{}").get("streams", []):
+                kind = {"audio": "Audio", "subtitle": "Subtitle"}.get(s.get("codec_type"))
+                if kind:
+                    _STREAMS.append({"Type": kind, "Index": s.get("index"),
+                                     "Language": (s.get("tags") or {}).get("language"),
+                                     "IsDefault": bool((s.get("disposition") or {}).get("default"))})
+    return _STREAMS
+
+
+_STREAMS = None
+
+
 def known_item(entry, played=False):
     id_, name, kind, year, imdb, tmdb = entry
     providers = {"Tmdb": tmdb} | ({"Imdb": imdb} if imdb else {})
@@ -78,7 +100,9 @@ def known_item(entry, played=False):
             "BackdropImageTags": [f"b{id_}"], "Overview": f"{name} ({year}), a title from the test library.",
             "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
             "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None},
-            "Genres": GENRES.get(id_, [])} | (
+            "Genres": GENRES.get(id_, []),
+            # Where it was made (which language it starts in), when asked.
+            "ProductionLocations": [c for c in os.environ.get("OPENIPTV_MOCK_COUNTRIES", "").split(",") if c]} | (
             {"PremiereDate": f"{PREMIERES[id_]}T00:00:00.0000000Z"} if id_ in PREMIERES else {})
 
 
@@ -217,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             width = 3840 if item.startswith("k") else 1920
             return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": 8000000,
                                                 "SupportsDirectPlay": True, "SupportsDirectStream": True,
-                                                "MediaStreams": [{"Type": "Video", "Width": width}]}],
+                                                "MediaStreams": [{"Type": "Video", "Width": width}] + file_streams()}],
                               "PlaySessionId": "ps1"})
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})

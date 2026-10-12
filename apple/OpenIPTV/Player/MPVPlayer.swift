@@ -169,7 +169,7 @@ final class MPVPlayer: @unchecked Sendable {
     /// a one-connection provider may refuse); jumps stay within what's
     /// downloaded.
     func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, sequential: Bool = false,
-              readahead: Readahead = .live) {
+              readahead: Readahead = .live, tracks: TrackPlan? = nil) {
         // Files go through the in-app relay, which keeps one warm HTTP/2
         // connection to the server instead of a new one per seek.
         var url = url, headers = headers
@@ -196,6 +196,7 @@ final class MPVPlayer: @unchecked Sendable {
             // Resume at the nearest keyframe instead of decoding up to the
             // exact second; precise seeking comes back once it's playing.
             mpv_set_property_string(mpv, "hr-seek", start == nil ? "default" : "no")
+            Self.apply(tracks, mpv)
             command(["loadfile", url.absoluteString, "replace"])
         }
     }
@@ -396,6 +397,35 @@ final class MPVPlayer: @unchecked Sendable {
                 continuation.resume(returning: Self.trackList(mpv))
             }
         }
+    }
+
+    /// The audio and subtitles to start with: the plan's languages, and no
+    /// subtitles but forced ones in the audio's language when it has none
+    /// (a file's or the server's "default" subtitles are not shown). No
+    /// plan (live TV): the stream's own choice.
+    private static func apply(_ plan: TrackPlan?, _ mpv: OpaquePointer) {
+        func set(_ name: String, _ value: String) {
+            let result = mpv_set_property_string(mpv, name, value)
+            #if DEBUG
+            if result < 0 { NSLog("%@", "PERF option \(name)=\(value) failed \(result)") }
+            #endif
+        }
+        set("aid", "auto")
+        set("sid", "auto")
+        guard let plan else {
+            set("alang", "")
+            set("slang", "")
+            set("subs-fallback", "default")
+            set("subs-fallback-forced", "yes")
+            return
+        }
+        set("alang", plan.audio.joined(separator: ","))
+        set("slang", plan.subtitles?.joined(separator: ",") ?? "")
+        set("subs-fallback", "no")
+        set("subs-fallback-forced", "yes")
+        set("subs-with-matching-audio", "no")
+        // Not the phone's language either (only the plan's).
+        set("subs-match-os-language", "no")
     }
 
     /// Fills the screen with the picture (cropping its edges) or fits it.

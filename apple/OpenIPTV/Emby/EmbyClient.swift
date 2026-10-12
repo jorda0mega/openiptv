@@ -586,6 +586,16 @@ struct EmbyClient {
         playback.bitrate = info?.MediaSources?.first?.Bitrate
         playback.seriesId = item.seriesId
         playback.overview = item.overview
+        // English or Spanish audio as the title calls for, subtitles off
+        // (see TrackChoice), from the tracks the server lists.
+        let audio = (info?.MediaSources?.first?.MediaStreams ?? [])
+            .filter { $0.Type == "Audio" }
+            .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }
+            .map(\.Language)
+        if !audio.isEmpty {
+            playback.tracks = TrackChoice.plan(audio: audio, countries: item.productionLocations ?? [],
+                                               key: item.seriesId ?? item.id)
+        }
         // Some servers only honour the token as a header; send it both ways
         // for Emby's own stream addresses (not for remote files).
         let auth = ["X-Emby-Token: \(account.accessToken)"]
@@ -688,6 +698,8 @@ struct EmbyClient {
         struct Stream: Decodable {
             let `Type`: String?
             let Width: Int?
+            let Index: Int?
+            let Language: String?
         }
         let MediaSources: [Source]?
         let PlaySessionId: String?

@@ -301,15 +301,21 @@ struct MoviePlayerView: View {
     private func pick(_ track: MPVPlayer.Track) {
         player?.selectAudio(track.id)
         markSelected(track.id, kind: .audio)
+        TrackChoice.rememberAudio(track.language, for: trackKey)
         showControls()
     }
 
     private func pickSubtitles(_ track: MPVPlayer.Track?) {
         player?.selectSubtitle(track?.id)
         markSelected(track?.id, kind: .subtitle)
+        TrackChoice.rememberSubtitles(track?.language, for: trackKey)
         showControls()
     }
     #endif
+
+    /// What a choice of tracks is kept for: the show (every episode), or
+    /// the film.
+    private var trackKey: String { playback.seriesId ?? playback.itemId }
 
     /// The tick moves at once (the player confirms on its own queue).
     private func markSelected(_ id: Int?, kind: MPVPlayer.Track.Kind) {
@@ -432,6 +438,11 @@ struct MoviePlayerView: View {
     private func loadTrackInfo() async {
         guard let player else { return }
         tracks = await player.tracks()
+        #if DEBUG
+        let audio = tracks.first { $0.kind == .audio && $0.selected }?.language ?? "none"
+        let subtitles = tracks.first { $0.kind == .subtitle && $0.selected }?.language ?? "off"
+        NSLog("%@", "PERF tracks audio=\(audio) subtitles=\(subtitles) of \(tracks.count)")
+        #endif
         if let format = await player.videoFormat() {
             var badges = [format.height >= 1800 ? "4K" : format.height >= 700 ? "HD" : "SD"]
             if format.gamma == "pq" || format.gamma == "hlg" { badges.append("HDR") }
@@ -491,7 +502,7 @@ struct MoviePlayerView: View {
             // begin (and every seek restarts it). Quality only drops if the
             // original actually stalls.
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
-                        readahead: NetworkStatus.shared.fileReadahead)
+                        readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks)
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
@@ -539,13 +550,13 @@ struct MoviePlayerView: View {
             lastConverted = bitrate
             guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at) else { return }
             offset = at
-            player.load(url, headers: playback.fallbackHeaders, file: false)
+            player.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
             note("Lower quality to keep playing smoothly")
         case .original:
             revertTo = lastConverted
             offset = 0
             player.load(playback.url, headers: playback.headers, start: at, file: true,
-                        readahead: NetworkStatus.shared.fileReadahead)
+                        readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks)
             note("Back to full quality")
         }
     }
@@ -633,7 +644,7 @@ struct MoviePlayerView: View {
                 revertTo = nil
                 governor?.revert(to: bitrate)
                 offset = position
-                player?.load(url, headers: playback.fallbackHeaders, file: false)
+                player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
                 note("Staying at lower quality")
                 return
             }
@@ -642,7 +653,7 @@ struct MoviePlayerView: View {
             if started, governor?.current != nil {
                 governor = nil
                 offset = 0
-                player?.load(playback.url, headers: playback.headers, start: position, file: true)
+                player?.load(playback.url, headers: playback.headers, start: position, file: true, tracks: playback.tracks)
                 note("Couldn't lower the quality; playing the original")
                 return
             }
@@ -652,7 +663,8 @@ struct MoviePlayerView: View {
                 attempt += 1
                 let converted = next.path().hasSuffix(".m3u8")
                 offset = converted ? (playback.startSeconds ?? 0) : 0
-                player?.load(next, headers: playback.fallbackHeaders, start: converted ? nil : playback.startSeconds, file: !converted)
+                player?.load(next, headers: playback.fallbackHeaders, start: converted ? nil : playback.startSeconds, file: !converted,
+                              tracks: playback.tracks)
                 return
             }
             error = "Couldn't play: \(message)"
@@ -976,9 +988,12 @@ struct MoviePlayerView: View {
             guard list.indices.contains(row) else { return }
             id = list[row].id
             player.selectAudio(list[row].id)
+            TrackChoice.rememberAudio(list[row].language, for: trackKey)
         } else {
-            id = row > 0 && list.indices.contains(row - 1) ? list[row - 1].id : nil
+            let track = row > 0 && list.indices.contains(row - 1) ? list[row - 1] : nil
+            id = track?.id
             player.selectSubtitle(id)
+            TrackChoice.rememberSubtitles(track?.language, for: trackKey)
         }
         tracks = tracks.map { track in
             guard track.kind == trackKind else { return track }
@@ -992,7 +1007,7 @@ struct MoviePlayerView: View {
         if offset > 0, let bitrate = governor?.current,
            let url = model.convertedURL(for: playback, bitrate: bitrate, start: 0) {
             offset = 0
-            player?.load(url, headers: playback.fallbackHeaders, file: false)
+            player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
         } else {
             player?.seek(to: 0, exact: true)
         }

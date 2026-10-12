@@ -71,6 +71,7 @@
 		4C9338B92D678D172D89E014 /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */; };
 		4CE8D1C0AE1570EBE3561ECD /* Libfreetype.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5183C151FC323F23D289CE6E /* Libfreetype.xcframework */; };
 		4CF9404E0D9798C453F590CD /* LibraryIndexFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */; };
+		4E17F6DF6C837EC823DFF111 /* TrackChoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD17B24F165233943D636F8 /* TrackChoice.swift */; };
 		4FA8FBF2F779CEEA8E158953 /* Libuchardet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */; };
 		500CE028575089ED5DE60A5C /* MovieView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E895C7A337E5874B38A8020C /* MovieView.swift */; };
 		507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */; };
@@ -87,6 +88,7 @@
 		5F01E1907CEC93ADB72EB792 /* TVTitlePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21CB2421CE9A188C91DE446 /* TVTitlePages.swift */; };
 		5F82F737A3D8F30EA5D8D9F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B695C9975B1FB89D1266C09E /* Assets.xcassets */; };
 		60B2D8D9A75B0585552C69E7 /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */; };
+		614E357F852A9FBCB2C5EB3C /* TrackChoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD17B24F165233943D636F8 /* TrackChoice.swift */; };
 		6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
 		6174F7217B1972C035E19B29 /* AreaPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7ED05298F5A207B9C71BE5A /* AreaPicker.swift */; };
 		62FC945DE2AA99B3AFD08224 /* Libfribidi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */; };
@@ -344,6 +346,7 @@
 		F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatus.swift; sourceTree = "<group>"; };
 		F54AA14367E83C43E1A0457D /* Flex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Flex.swift; sourceTree = "<group>"; };
 		FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libuchardet.xcframework; path = Vendor/Libuchardet.xcframework; sourceTree = "<group>"; };
+		FFD17B24F165233943D636F8 /* TrackChoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackChoice.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -468,6 +471,7 @@
 				B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */,
 				0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */,
 				857825645808317F48AB50AA /* StreamRelay.swift */,
+				FFD17B24F165233943D636F8 /* TrackChoice.swift */,
 				0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */,
 				3704F35E9F8381B01A16311E /* TVRemote.swift */,
 			);
@@ -957,6 +961,7 @@
 				F7D4B4BAB7ABD5CC5632552E /* TVTitlePages.swift in Sources */,
 				71899403CBD5CEFA439BEEBA /* TabStrip.swift in Sources */,
 				E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */,
+				4E17F6DF6C837EC823DFF111 /* TrackChoice.swift in Sources */,
 				5633E2B7128DB4B72E585CD4 /* XtreamProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1028,6 +1033,7 @@
 				5F01E1907CEC93ADB72EB792 /* TVTitlePages.swift in Sources */,
 				E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */,
 				F72204C9018C0C581257040E /* TitleHero.swift in Sources */,
+				614E357F852A9FBCB2C5EB3C /* TrackChoice.swift in Sources */,
 				21102DA03C0F276A1F777950 /* XtreamProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
