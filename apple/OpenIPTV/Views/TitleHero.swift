@@ -103,7 +103,10 @@ struct PlayCapsule: View {
                 .accessibilityLabel(left ?? "\(Int(min(progress, 1) * 100))% watched")
             }
         }
-        .padding(.bottom, hasProgress ? 28 : 0)
+        // The bar's room is kept even before there's progress, so coming
+        // back from the player doesn't move the title and button up.
+        .padding(.bottom, 28)
+        .animation(.easeOut(duration: 0.18), value: hasProgress)
     }
 }
 

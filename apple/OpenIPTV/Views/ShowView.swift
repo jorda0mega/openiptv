@@ -29,6 +29,8 @@ struct ShowView: View {
     @State private var loadingItem: String?
     @State private var playError: String?
     @State private var scrolledToUpNext = false
+    /// The viewer has scrolled the page: it's never moved for them after.
+    @State private var userScrolled = false
     @State private var unwatchedOnly = false
     @State private var newestFirst = false
     /// Episodes currently on screen, to highlight the season in view.
@@ -145,15 +147,22 @@ struct ShowView: View {
             }
             .listStyle(.plain)
             .onScrollPhaseChange { _, phase in
-                if phase == .interacting { jumpedTo = nil }
+                if phase == .interacting {
+                    jumpedTo = nil
+                    userScrolled = true
+                }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, top in pinY = top }
             .onChange(of: data?.episodes.count) { _, _ in
-                // Open at the episode you're up to.
-                guard let id = upNext?.id, !scrolledToUpNext else { return }
+                // Opened for one episode (Continue Watching, say): that
+                // episode in view. A show otherwise opens at its top (the
+                // picture and story), as in the Apple TV app, and never
+                // moves once the viewer has started scrolling.
+                guard let id = route.episodeId, !scrolledToUpNext, !userScrolled else { return }
                 scrolledToUpNext = true
                 Task {
                     try? await Task.sleep(for: .milliseconds(100))
+                    guard !userScrolled else { return }
                     proxy.scrollTo(id, anchor: .center)
                 }
             }

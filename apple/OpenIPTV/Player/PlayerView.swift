@@ -1093,14 +1093,18 @@ struct GlassIconButton: View {
     var size: CGFloat = 44
     let action: () -> Void
 
+    /// Exactly `size` across: the system's glass button style padded the
+    /// label, which made a 44-point button about 58.
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(size > 60 ? .title.weight(.semibold) : size < 40 ? .body.weight(.semibold) : .title3.weight(.semibold))
+                .foregroundStyle(.white)
                 .frame(width: size, height: size)
+                .contentShape(.circle)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
         .accessibilityLabel(label)
     }
 }
