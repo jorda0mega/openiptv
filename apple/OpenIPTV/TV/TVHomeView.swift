@@ -56,6 +56,10 @@ struct TVHomeView: View {
                     let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
                     if !heroes.isEmpty {
                         TVHero(items: heroes, play: { play($0) }, open: { open($0) })
+                    } else if model.homePending {
+                        // The first Home is on its way: the hero's space is
+                        // kept, so the rows don't move down when it comes.
+                        Color.clear.frame(height: TVHero.height).overlay { ProgressView() }
                     } else {
                         // No hero to sit under the tab bar: start below it.
                         Color.clear.frame(height: 110)
@@ -67,7 +71,7 @@ struct TVHomeView: View {
                             TVPosterRow(title: row.title, cards: row.cards) { open($0) }
                         }
                     }
-                    if model.rows.isEmpty, model.featured == nil {
+                    if model.rows.isEmpty, model.featured == nil, !model.homePending {
                         emptyState.frame(maxWidth: .infinity).padding(.top, 200)
                     }
                 }
@@ -77,7 +81,6 @@ struct TVHomeView: View {
             .ignoresSafeArea()
             .background(Color.black.ignoresSafeArea())
             .scrollClipDisabled()
-            .task { await model.loadHome(cardWidth: 480) }
             .navigationDestination(for: ShowRoute.self) { TVShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { TVMovieView(route: $0, playing: $playing) }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
@@ -86,6 +89,12 @@ struct TVHomeView: View {
                 Text(playError ?? "")
             }
         }
+        // On the stack, not its first page: coming back from a title's page
+        // isn't Home appearing. Home chosen in the tab bar (or at launch)
+        // is: what was built meanwhile goes on before it's drawn, then the
+        // next one is built in the background, to wait for the next time.
+        .onAppear { model.homeAppeared() }
+        .task { await model.loadHome(cardWidth: 480) }
     }
 
     @ViewBuilder private var emptyState: some View {
@@ -143,6 +152,8 @@ struct TVHero: View {
 
     enum Control: Hashable { case play, info }
 
+    static let height: CGFloat = 900
+
     var body: some View {
         let item = items[min(index, items.count - 1)]
         ZStack(alignment: .bottomLeading) {
@@ -150,12 +161,14 @@ struct TVHero: View {
                 .id(item.backdrop)
                 .transition(.opacity)
             VStack(alignment: .leading, spacing: 18) {
+                // The same space for every title (logo or name, long story
+                // or none), so the hero's text doesn't jump as it turns.
                 TVTitleArt(logo: item.logo, title: item.card.title, maxHeight: 190)
+                    .frame(minHeight: 190, alignment: .bottomLeading)
                 Text(item.details).font(.callout.weight(.medium)).foregroundStyle(.white.opacity(0.8))
-                if let overview = item.overview, !overview.isEmpty {
-                    Text(overview).font(.callout).foregroundStyle(.white.opacity(0.75)).lineLimit(3)
-                        .frame(maxWidth: 820, alignment: .leading)
-                }
+                Text(item.overview ?? "").font(.callout).foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(3, reservesSpace: true)
+                    .frame(maxWidth: 820, alignment: .leading)
                 HStack(spacing: 24) {
                     Button { play(item.card) } label: {
                         Label(item.card.kind == "Series" ? "Play" : "Play", systemImage: "play.fill")
@@ -199,14 +212,19 @@ struct TVHero: View {
             .padding(.bottom, 70)
             .animation(.easeInOut(duration: 0.35), value: index)
         }
-        .frame(height: 900)
+        .frame(height: Self.height)
         .frame(maxWidth: .infinity)
-        // Moves on by itself every nine seconds.
-        .task(id: turn) {
+        // Moves on by itself every nine seconds, but not while you're on
+        // its buttons: Play plays the title you're looking at.
+        .task(id: "\(turn)|\(focus == nil)") {
+            guard focus == nil else { return }
             try? await Task.sleep(for: .seconds(9))
-            guard !Task.isCancelled, items.count > 1 else { return }
+            guard !Task.isCancelled, items.count > 1, focus == nil else { return }
             advance(by: 1)
         }
+        // Other titles (Home changed at a moment): from the first, with
+        // focus staying on the same button.
+        .onChange(of: items.map(\.card.id)) { index = 0 }
     }
 
     private func advance(by step: Int) {
@@ -312,14 +330,14 @@ struct TVContinueRow: View {
                                                    startPoint: .top, endPoint: .bottom)
                                 }
                                 .overlay(alignment: .bottomLeading) {
+                                    // The subtitle's line and the progress bar's
+                                    // place always kept, so the title doesn't
+                                    // rise when progress comes.
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(card.title).font(.headline).lineLimit(1)
-                                        if let subtitle = card.subtitle {
-                                            Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
-                                        }
-                                        if let progress = card.progress, progress > 0 {
-                                            ProgressBar(value: progress / 100).padding(.top, 6)
-                                        }
+                                        Text(card.subtitle ?? " ").font(.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                                        ProgressBar(value: (card.progress ?? 0) / 100).padding(.top, 6)
+                                            .opacity((card.progress ?? 0) > 0 ? 1 : 0)
                                     }
                                     .foregroundStyle(.white)
                                     .padding(20)

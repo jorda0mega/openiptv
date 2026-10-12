@@ -61,29 +61,40 @@ final class SearchStabilityTests: XCTestCase {
     func testHeaderStaysFixed() {
         openSearch("movie")
         sleep(6)
-        let list = app.collectionViews.firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: 5), "no results list")
         let start = header()
+        let firstResult = results()["Play Movie 0"]
         shot("header start")
         XCTAssertEqual(start.count, 5, "header parts missing: \(start.keys.sorted())")
-        list.swipeUp()
+        XCTAssertNotNil(firstResult, "no results for “movie”")
+        drag(from: 0.7, to: 0.3)
         sleep(1)
         shot("header scrolled")
+        XCTAssertNotEqual(results()["Play Movie 0"], firstResult, "the results didn't scroll")
         XCTAssertEqual(differences(start, header()), [], "the header moved as the results scrolled")
-        list.swipeDown()
+        drag(from: 0.3, to: 0.7)
+        drag(from: 0.3, to: 0.7)
         sleep(1)
+        XCTAssertEqual(differences(start, header()), [], "the header moved as the results scrolled back")
         // Past the top and held a moment, then let go.
-        let top = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
-        top.press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)),
-                  withVelocity: .slow, thenHoldForDuration: 0.5)
+        drag(from: 0.35, to: 0.8, hold: 1)
         shot("header after pull")
         XCTAssertEqual(differences(start, header()), [], "the header moved with the pull")
         sleep(1)
         XCTAssertEqual(differences(start, header()), [], "the header moved after the pull")
+        XCTAssertEqual(results()["Play Movie 0"], firstResult, "the results didn't come back to the top")
         app.buttons["Clear search"].firstMatch.tap()
         sleep(1)
         shot("header cleared")
         XCTAssertEqual(differences(start, header()), [], "the header changed when the query was cleared")
+    }
+
+    /// A finger drag down the middle of the screen, between heights given
+    /// as fractions of it.
+    private func drag(from: Double, to: Double, hold: TimeInterval = 0) {
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)),
+                   withVelocity: .default, thenHoldForDuration: hold)
     }
 
     // MARK: Helpers

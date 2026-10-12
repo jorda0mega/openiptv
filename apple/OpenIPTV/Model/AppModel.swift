@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// App state. Everything runs on the device, talking straight to the user's
 /// Emby server and IPTV providers. Screens render from what's cached first
@@ -93,6 +96,12 @@ final class AppModel {
         spotlight = home?.spotlight ?? []
         homeBuiltAt = home?.builtAt
         homeHistory = home?.history ?? []
+        shownBuiltAt = home?.builtAt
+        shownHistory = home?.history ?? []
+        // A launch is a moment Home may change: a build ready in the
+        // first seconds goes straight on the page.
+        homeOpensUntil = Date().addingTimeInterval(Self.homeOpensFor)
+        observeAppState()
         // Watching the connection from the start (speculative work waits
         // until it's known to be unmetered).
         _ = NetworkStatus.shared
@@ -121,30 +130,82 @@ final class AppModel {
     @ObservationIgnored private var homeLoad: Task<Void, Never>?
     @ObservationIgnored private var homeLoadID = UUID()
 
-    /// `full`: rebuild every row. Otherwise, when the saved Home is recent
+    /// Home doesn't change while you look at it, like Netflix's: a Home
+    /// built in the background (new titles, the charts, IMDb's catalog, a
+    /// server's change) waits here for a moment the page may change. The
+    /// moments: a launch or coming back after a long time away (a build
+    /// ready in the first seconds), a pull to refresh, and Home chosen from
+    /// another tab. Its Continue Watching is the newest the server gave.
+    @ObservationIgnored private var stagedHome: HomeContent?
+    /// Until when what's built goes straight on the page: the first
+    /// seconds after a launch or a long time away, while Home still opens.
+    @ObservationIgnored private var homeOpensUntil = Date.distantPast
+    private static let homeOpensFor: TimeInterval = 5
+    /// Until when Continue Watching's cards may move, appear or go: just
+    /// after the player closed, until the server's answer for that stop.
+    @ObservationIgnored private var continueMovesUntil: Date?
+    /// When the page on screen was built, and the recent watches its Top
+    /// picks came from (what's saved; `homeBuiltAt` is the newest build,
+    /// waiting or shown). Watched: see `homePending`.
+    private var shownBuiltAt: Date?
+    @ObservationIgnored private var shownHistory: [String] = []
+
+    /// The first Home is being built (nothing built shown yet, no error):
+    /// the page keeps the hero's space meanwhile.
+    var homePending: Bool {
+        sources.emby != nil && shownBuiltAt == nil && homeError == nil && featured == nil && spotlight.isEmpty
+    }
+    /// When the app last went to the background.
+    @ObservationIgnored private var backgroundedAt: Date?
+    /// Away this long, coming back is like a launch for Home.
+    private static let longAway: TimeInterval = 30 * 60
+
+    /// `full`: rebuild every row. Otherwise, when the newest Home is recent
     /// (six hours), the catalog hasn't changed since and you haven't watched
     /// anything new elsewhere, only Continue Watching is fetched again.
+    /// `show`: put the result on the page when it's ready (pull to refresh,
+    /// a new account); otherwise it waits for the next moment, unless Home
+    /// is still opening.
     /// One build at a time: a full one waits for the one before, any other
     /// joins it.
-    func loadHome(cardWidth: Int, sync: Bool = true, full: Bool = false) async {
+    func loadHome(cardWidth: Int, sync: Bool = true, full: Bool = false, show: Bool = false) async {
         if let running = homeLoad, !full { return await running.value }
         let previous = homeLoad
         let id = UUID()
         homeLoadID = id
         let load = Task {
             await previous?.value
-            await buildHome(cardWidth: cardWidth, sync: sync, full: full)
+            await buildHome(cardWidth: cardWidth, sync: sync, full: full, show: show)
             if homeLoadID == id { homeLoad = nil }
         }
         homeLoad = load
         await load.value
     }
 
-    private func buildHome(cardWidth: Int, sync: Bool, full: Bool) async {
+    /// Home came on screen from another tab (or first, at launch): what
+    /// was built meanwhile goes on now, before the page is drawn.
+    func homeAppeared() {
+        showStagedHome()
+    }
+
+    /// Pull to refresh: every row built afresh, and shown.
+    func refreshHome(cardWidth: Int) async {
+        await loadHome(cardWidth: cardWidth, full: true, show: true)
+    }
+
+    /// Whether a build may go straight on the page: Home is still opening,
+    /// or has nothing built on it yet (only Continue Watching, or nothing).
+    private var homeOpening: Bool {
+        Date() < homeOpensUntil || shownBuiltAt == nil || rows.isEmpty
+    }
+
+    private func buildHome(cardWidth: Int, sync: Bool, full: Bool, show: Bool) async {
         lastCardWidth = cardWidth
         guard let emby else {
             rows = []
             featured = nil
+            spotlight = []
+            stagedHome = nil
             return
         }
         connectLive()
@@ -153,9 +214,11 @@ final class AppModel {
         // before it.
         async let opened: Void = openLibrary(emby)
         var pendingSources: Task<EmbyClient.HomeSources, Error>?
-        // A saved page with no featured title is rebuilt: it was made before
-        // anything could be picked (or by a build that was cut off).
-        if !full, !rows.isEmpty, featured != nil, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600 {
+        // A page with no featured title is rebuilt: it was made before
+        // anything could be picked (or by a build that was cut off). The
+        // newest Home decides (one waiting, else the one shown).
+        let newestFeatured = stagedHome.map(\.featured) ?? featured
+        if !full, !rows.isEmpty, newestFeatured != nil, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600 {
             async let historyChanged = refreshContinueWatching(checkingHistory: true)
             await opened
             if library.changedAt.map({ $0 <= builtAt }) ?? true, await !historyChanged {
@@ -172,12 +235,14 @@ final class AppModel {
             // Nothing on Home yet (first launch, just signed in): Continue
             // Watching shows as soon as it's known; the rest follows.
             let empty = rows.isEmpty
-            let fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
+            var fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
                                                 backdropWidth: Self.backdropWidth, sources: pendingSources,
                                                 early: { [weak self] row in if empty, let self, self.rows.isEmpty { self.rows = [row] } })
+            fresh.rows = variedForTests(fresh.rows)
             // The pictures first (all at once), so the page changes in one go
             // instead of covers popping in; on the very first load, show the
-            // rows straight away and let the pictures follow.
+            // rows straight away and let the pictures follow. A Home that
+            // waits has them ready when it goes on.
             let prefetch = Task { await ImagePipeline.shared.prefetch(Self.visibleImages(fresh)) }
             // Then every other cover on Home into the disk cache (Wi-Fi),
             // so rows further down don't fill in as they scroll into view.
@@ -188,22 +253,17 @@ final class AppModel {
                     await ImagePipeline.shared.store(rest)
                 }
             }
-            if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured {
-                await Self.wait(for: prefetch, atMost: 1.5)
-            }
-            // What was just stopped here, even if the server hasn't caught up.
-            let freshRows = withStops(fresh.rows)
-            if freshRows != rows { rows = freshRows }
-            if fresh.featured != featured { featured = fresh.featured }
-            if (fresh.spotlight ?? []) != spotlight { spotlight = fresh.spotlight ?? [] }
             homeBuiltAt = fresh.builtAt
             homeHistory = fresh.history ?? []
             homeError = nil
-            // Saved as shown (with this device's stops), not as the server
-            // still had it.
-            var saved = fresh
-            saved.rows = freshRows
-            AppCache.save("home.v4.json", saved)
+            if show || homeOpening {
+                if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured {
+                    await Self.wait(for: prefetch, atMost: 1.5)
+                }
+                showHome(fresh)
+            } else {
+                stageHome(fresh)
+            }
             // The first few things you'd tap on Home are ready before you do:
             // how to play them, and their pages.
             let likely = (fresh.featured.map { [$0.card] } ?? []) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(3) }
@@ -215,6 +275,80 @@ final class AppModel {
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
         }
+    }
+
+    /// Puts a built Home on the page, and saves it as shown (with this
+    /// device's stops), not as the server still had it.
+    private func showHome(_ fresh: HomeContent) {
+        stagedHome = nil
+        // What was just stopped here, even if the server hasn't caught up.
+        let freshRows = withStops(fresh.rows)
+        if freshRows != rows { rows = freshRows }
+        if fresh.featured != featured { featured = fresh.featured }
+        if (fresh.spotlight ?? []) != spotlight { spotlight = fresh.spotlight ?? [] }
+        shownBuiltAt = fresh.builtAt
+        shownHistory = fresh.history ?? []
+        saveShownHome()
+    }
+
+    /// Keeps a built Home for the next moment. Its Continue Watching's
+    /// progress shows at once when only that changed.
+    private func stageHome(_ fresh: HomeContent) {
+        stagedHome = fresh
+        offerContinue(reconciled(fresh.rows.first { $0.title == Self.continueTitle }))
+    }
+
+    /// The Home waiting, on the page now (a moment it may change).
+    private func showStagedHome() {
+        guard let staged = stagedHome else { return }
+        showHome(staged)
+    }
+
+    private func saveShownHome() {
+        AppCache.save("home.v4.json", HomeContent(featured: featured, rows: rows, builtAt: shownBuiltAt,
+                                                  history: shownHistory, spotlight: spotlight))
+    }
+
+    /// Back from the background: after a long time away (half an hour),
+    /// Home opens again as at a launch.
+    private func observeAppState() {
+        #if canImport(UIKit)
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.backgroundedAt = Date() }
+        }
+        center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cameBack() }
+        }
+        #endif
+    }
+
+    private func cameBack() {
+        guard let away = backgroundedAt.map({ Date().timeIntervalSince($0) }), away >= Self.longAway else { return }
+        homeOpensUntil = Date().addingTimeInterval(Self.homeOpensFor)
+        showStagedHome()
+        guard emby != nil else { return }
+        Task { await loadHome(cardWidth: lastCardWidth) }
+    }
+
+    /// UI tests, debug builds (OPENREEL_DEBUG_HOME_VARY): each Home built
+    /// comes with its cards in another order and its number after each
+    /// row's name ("Trending now ·12"), and each Continue Watching fetched
+    /// in another order, so one put on the page while you look would show.
+    /// Otherwise the rows as they are.
+    private func variedForTests(_ rows: [HomeRow], numbered: Bool = true) -> [HomeRow] {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["OPENREEL_DEBUG_HOME_VARY"] != nil else { return rows }
+        let build = UserDefaults.standard.integer(forKey: "debugHomeBuild") + 1
+        UserDefaults.standard.set(build, forKey: "debugHomeBuild")
+        return rows.map { row in
+            let turn = row.cards.isEmpty ? 0 : build % row.cards.count
+            let title = numbered && row.title != Self.continueTitle ? "\(row.title) ·\(build)" : row.title
+            return HomeRow(title: title, shape: row.shape, aspect: row.aspect, cards: Array(row.cards[turn...] + row.cards[..<turn]))
+        }
+        #else
+        return rows
+        #endif
     }
 
     private func openLibrary(_ emby: EmbyClient) async {
@@ -716,27 +850,79 @@ final class AppModel {
         return HomeRow(title: "Continue Watching", shape: row?.shape ?? shape.rawValue, aspect: row?.aspect ?? shape.aspect, cards: cards)
     }
 
+    private static let continueTitle = "Continue Watching"
+
     /// Rows with Continue Watching reconciled (first), and the other rows
     /// without what's in it.
     private func withStops(_ rows: [HomeRow]) -> [HomeRow] {
         guard !recentStops.isEmpty else { return rows }
-        let row = reconciled(rows.first { $0.title == "Continue Watching" })
+        return Self.replacingContinue(in: rows, with: reconciled(rows.first { $0.title == Self.continueTitle }))
+    }
+
+    /// These rows with this Continue Watching first (or none), and the
+    /// other rows without what's in it (each title once on the page).
+    private static func replacingContinue(in rows: [HomeRow], with row: HomeRow?) -> [HomeRow] {
         let resumed = Set(row?.cards.flatMap { [$0.id] + [$0.seriesId].compactMap(\.self) } ?? [])
-        var updated = rows.filter { $0.title != "Continue Watching" }.map { other in
+        var updated = rows.filter { $0.title != continueTitle }.map { other in
             HomeRow(title: other.title, shape: other.shape, aspect: other.aspect, cards: other.cards.filter { !resumed.contains($0.id) })
         }.filter { !$0.cards.isEmpty }
         if let row { updated.insert(row, at: 0) }
         return updated
     }
 
+    /// These rows with this Continue Watching first (or none), the other
+    /// rows as they are: what's on the page keeps its place.
+    private static func settingContinue(in rows: [HomeRow], to row: HomeRow?) -> [HomeRow] {
+        var updated = rows.filter { $0.title != continueTitle }
+        if let row { updated.insert(row, at: 0) }
+        return updated
+    }
+
+    /// Continue Watching as the server has it now (with this device's
+    /// stops). On the page at once when Home is still opening, just after
+    /// the player closed, or when only progress changed (the same cards in
+    /// the same order); otherwise it waits with the next Home, so no card
+    /// appears, goes or moves while you look.
+    private func offerContinue(_ row: HomeRow?) {
+        let shown = rows.first { $0.title == Self.continueTitle }
+        let opening = homeOpening
+        let mayMove = opening || continueMovesUntil.map { Date() < $0 } ?? false
+        // The newest Continue Watching always waits too, so a moment
+        // later never puts an older one back.
+        if var staged = stagedHome {
+            staged.rows = Self.replacingContinue(in: staged.rows, with: row)
+            stagedHome = staged
+        }
+        if mayMove || row?.cards.map(\.id) == shown?.cards.map(\.id) {
+            // Opening, the other rows lose what's now in it; otherwise
+            // they stay as they are until the next moment.
+            let updated = opening ? Self.replacingContinue(in: rows, with: row) : Self.settingContinue(in: rows, to: row)
+            if updated != rows {
+                rows = updated
+                saveShownHome()
+            }
+        } else if stagedHome == nil {
+            stagedHome = HomeContent(featured: featured, rows: Self.replacingContinue(in: rows, with: row),
+                                     builtAt: shownBuiltAt, history: shownHistory, spotlight: spotlight)
+        }
+    }
+
     private func patchContinueWatching(_ playback: EmbyPlayback, seconds: Double) {
         guard let emby else { return }
+        // The player closing is a moment for Continue Watching: what the
+        // server said meanwhile goes on first, this stop over it, and the
+        // server's answer for the stop may still move cards.
+        if let staged = stagedHome {
+            let updated = Self.settingContinue(in: rows, to: staged.rows.first { $0.title == Self.continueTitle })
+            if updated != rows { rows = updated }
+        }
+        continueMovesUntil = Date().addingTimeInterval(10)
         let duration = playback.durationSeconds ?? 0
         let finished = duration > 0 && seconds >= duration * 0.9
-        let index = rows.firstIndex { $0.title == "Continue Watching" }
+        let index = rows.firstIndex { $0.title == Self.continueTitle }
         var cards = index.map { rows[$0].cards } ?? []
         let old = cards.firstIndex { $0.id == playback.itemId || $0.episodeId == playback.itemId }.map { cards.remove(at: $0) }
-        func card(_ item: EmbyItem) -> Card? { emby.showRow("Continue Watching", [item], lastCardWidth)?.cards.first }
+        func card(_ item: EmbyItem) -> Card? { emby.showRow(Self.continueTitle, [item], lastCardWidth)?.cards.first }
         var lead: Card?
         if let series = playback.seriesId, let data = shows[series],
            let at = data.episodes.firstIndex(where: { $0.id == playback.itemId }) {
@@ -756,18 +942,16 @@ final class AppModel {
             .progress(duration > 0 ? seconds / duration * 100 : nil)
         }
         recentStops[playback.itemId] = RecentStop(at: Date(), outcome: outcome, seriesId: playback.seriesId)
-        var updated = rows
         let shape = Artwork.Shape.landscape
-        if let index {
-            if cards.isEmpty {
-                updated.remove(at: index)
-            } else {
-                updated[index] = HomeRow(title: rows[index].title, shape: rows[index].shape, aspect: rows[index].aspect, cards: cards)
-            }
-        } else if !cards.isEmpty {
-            updated.insert(HomeRow(title: "Continue Watching", shape: shape.rawValue, aspect: shape.aspect, cards: cards), at: 0)
-        }
+        let row = cards.isEmpty ? nil : HomeRow(title: Self.continueTitle, shape: index.map { rows[$0].shape } ?? shape.rawValue,
+                                                aspect: index.map { rows[$0].aspect } ?? shape.aspect, cards: cards)
+        let updated = Self.settingContinue(in: rows, to: row)
         if updated != rows { rows = updated }
+        // The Home waiting has it too.
+        if var staged = stagedHome {
+            staged.rows = Self.replacingContinue(in: staged.rows, with: row)
+            stagedHome = staged
+        }
     }
 
     /// Loads shows the user is likely to open next, in the background.
@@ -778,12 +962,14 @@ final class AppModel {
     }
 
     /// Continue Watching alone (two small requests), after watching
-    /// something: the other rows stay put, minus anything now in it.
+    /// something: the other rows stay put (see `offerContinue`).
     /// `checkingHistory`: also ask what was finished lately, and return true
     /// (leaving the page alone) when Top picks' recent watches changed, so
     /// the caller rebuilds everything instead.
+    /// `afterStop`: the server's answer for what the player just stopped,
+    /// the last that may move cards on the page.
     @discardableResult
-    func refreshContinueWatching(checkingHistory: Bool = false) async -> Bool {
+    func refreshContinueWatching(checkingHistory: Bool = false, afterStop: Bool = false) async -> Bool {
         guard let emby else { return false }
         async let watching = emby.watching()
         async let nextUp = emby.nextUp()
@@ -794,16 +980,10 @@ final class AppModel {
             return true
         }
         let items = HomeFeed.continueItems(watching: watching, nextUp: (try? await nextUp) ?? [])
-        let row = reconciled(emby.showRow("Continue Watching", items, lastCardWidth))
-        var updated = rows.filter { $0.title != "Continue Watching" }
-        let resumed = Set(row?.cards.map(\.id) ?? [])
-        updated = updated.map { other in
-            HomeRow(title: other.title, shape: other.shape, aspect: other.aspect, cards: other.cards.filter { !resumed.contains($0.id) })
-        }.filter { !$0.cards.isEmpty }
-        if let row { updated.insert(row, at: 0) }
-        if updated != rows { rows = updated }
-        let saved = HomeContent(featured: featured, rows: rows, builtAt: homeBuiltAt, history: homeHistory, spotlight: spotlight)
-        AppCache.save("home.v4.json", saved)
+        let server = emby.showRow(Self.continueTitle, items, lastCardWidth).map { variedForTests([$0], numbered: false)[0] }
+        let row = reconciled(server)
+        offerContinue(row)
+        if afterStop { continueMovesUntil = nil }
         prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
         return false
     }
@@ -811,6 +991,8 @@ final class AppModel {
     // MARK: Live updates from Emby
 
     let live = EmbyLive()
+    /// The newest Home built (waiting or shown): when, and the recent
+    /// watches its Top picks came from.
     private var homeBuiltAt: Date?
     private var homeHistory: [String] = []
     /// What's playing now: its own progress reports don't refresh Home.
@@ -846,7 +1028,8 @@ final class AppModel {
         case .library:
             libraryRefresh?.cancel()
             libraryRefresh = Task {
-                // Additions come in bursts; let them settle.
+                // Additions come in bursts; let them settle. The Home
+                // built from them waits for the next moment (see stagedHome).
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled, let emby else { return }
                 await library.prepare(emby, now: true)
@@ -891,14 +1074,17 @@ final class AppModel {
         coolDown()
         warming = itemId
         prepare([(id: itemId, kind: kind)])
-        warmTask = Task {
+        // Fetched ahead: waiting for it mustn't promote it to the
+        // connections kept for what's on screen.
+        warmTask = Task(priority: .utility) {
             let playback = try? await prepared[itemId]?.task.value
             guard !Task.isCancelled, warming == itemId else { return }
             warming = nil
             guard let playback, warm == nil else { return }
             let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding)
             player.prepareOffscreen()
-            player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm)
+            player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
+                        tracks: playback.tracks)
             warm = (itemId, player, playback)
             // Its preview stills too, so scrubbing has its pictures from
             // the first second of playing.
@@ -1010,7 +1196,8 @@ final class AppModel {
         await library.prepare(emby)
         // IMDb's genres and makers for the library's titles (Wi-Fi, about
         // monthly), in the background; the first time they arrive, Top
-        // picks are remade from them. Hundreds of megabytes, so not in the
+        // picks are remade from them (on the page at the next moment, see
+        // stagedHome). Hundreds of megabytes, so not in the
         // first two minutes: browsing and a first play get the connection,
         // and a quick look doesn't start a download it won't finish.
         let hadCatalog = library.catalog != nil
@@ -1029,14 +1216,15 @@ final class AppModel {
             if !hadCatalog, library.catalog != nil { await loadHome(cardWidth: lastCardWidth, sync: false, full: true) }
         }
         await charts
-        // New titles since Home was built: rebuild its other rows.
+        // New titles since Home was built: its other rows are built again,
+        // and go on at the next moment, not while you look.
         if let changed = library.changedAt, let built = homeBuiltAt, changed > built {
             await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
             return
         }
         // Trending or New & notable arrived for the first time (Home was
-        // built without them): rebuild once. Otherwise the next visit or
-        // refresh picks them up, rather than the page changing under you.
+        // built without them): rebuild once, for the next moment. Otherwise
+        // a later build picks them up.
         if (before.isEmpty && !library.trending.isEmpty) || (!hadNotable && !library.notable.isEmpty) {
             // Full: a recent page (built from the newest additions) would
             // otherwise only refresh Continue Watching.
@@ -1102,7 +1290,7 @@ final class AppModel {
         if warm?.key == playback.itemId || (playback.seriesId != nil && warm?.key == playback.seriesId) { coolDown() }
         if let series = playback.seriesId { prefetchShows([series], force: true) }
         // Only Continue Watching changed; the rest of Home stays as it is.
-        await refreshContinueWatching()
+        await refreshContinueWatching(afterStop: true)
     }
 
     private func enqueueReport(_ work: @escaping @Sendable () async -> Void) -> Task<Void, Never> {
@@ -1137,7 +1325,10 @@ final class AppModel {
         showLoads = [:]
         movieLoads = [:]
         sources.setEmby(account)
-        await loadHome(cardWidth: lastCardWidth, full: true)
+        // Another account's Home: nothing of the last one waits or counts.
+        stagedHome = nil
+        shownBuiltAt = nil
+        await loadHome(cardWidth: lastCardWidth, full: true, show: true)
     }
 
     func signOutOfEmby() async {
@@ -1152,6 +1343,9 @@ final class AppModel {
         rows = []
         featured = nil
         spotlight = []
+        stagedHome = nil
+        shownBuiltAt = nil
+        homeBuiltAt = nil
         coolDown()
         // Title pages carry this account's progress; what was prepared and
         // watched is this account's too.
@@ -1188,6 +1382,10 @@ final class AppModel {
         channelCorpus = SearchCorpus(name: \.name)
         rows = []
         featured = nil
+        spotlight = []
+        stagedHome = nil
+        shownBuiltAt = nil
+        homeBuiltAt = nil
         AppCache.remove("home.v4.json")
         categories = []
         allChannels = []

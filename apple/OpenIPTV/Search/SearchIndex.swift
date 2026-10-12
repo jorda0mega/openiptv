@@ -622,7 +622,10 @@ final class LibraryIndex {
 
     /// Search and the lists from these entries, each title once.
     private func publish(_ entries: [LibraryEntry]) async {
+        let account = server
         let (corpus, versions, byId) = await Self.build(entries, ratings)
+        // Another account opened while it was built: not its search.
+        guard server == account else { return }
         generation += 1
         self.corpus = corpus
         self.versions = versions
@@ -674,6 +677,8 @@ final class LibraryIndex {
             // A new full pass (or the first): learn the size from page one.
             guard let first = try? await Self.retrying({ try await emby.libraryPage(start: 0, limit: Self.pageSize, withTotal: true) })
             else { return }
+            // Signed in elsewhere meanwhile: not this account's page.
+            guard self.server == server else { return }
             pages[0] = first.entries
             total = first.total ?? first.entries.count
             if let total, fresh { pages = pages.filter { $0.key < total } }

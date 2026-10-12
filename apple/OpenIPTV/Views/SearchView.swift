@@ -32,12 +32,24 @@ struct SearchView: View {
     @FocusState private var fieldFocused: Bool
     @Namespace private var scopeUnderline
     #endif
+    /// The device's own title matches, in their order: what the server
+    /// adds later goes after them, never between.
     @State private var library: [Card] = []
+    /// Titles the server's part added (cast matches, people's titles), and
+    /// the text they were found for.
+    @State private var extras: [Card] = []
+    @State private var extrasQuery = ""
     @State private var channels: [LiveChannel] = []
     @State private var onTV: [AppModel.GuideHit] = []
     @State private var completions: [String] = []
     @State private var serverCards: [Card] = []
-    @State private var serverDone = false
+    @State private var serverQuery = ""
+    /// The text the results on screen are for.
+    @State private var shownQuery = ""
+    /// Filters a finished search found nothing for: their "no results"
+    /// stays while the next letter's search runs, until results come,
+    /// rather than blinking off and on at each letter.
+    @State private var finishedEmpty: Set<Scope> = []
     @State private var libraryMatch: SearchCorpus<LibraryEntry>.Match?
     @State private var channelMatch: SearchCorpus<LiveChannel>.Match?
     @State private var loadingCard: String?
@@ -60,29 +72,52 @@ struct SearchView: View {
     private var movies: [Card] { titles.movies }
     private var shows: [Card] { titles.shows }
 
-    /// The library's matches, then the server's that still fit what's typed
-    /// now (no flicker while the next request is in flight) and aren't
-    /// another copy of one already listed (HD and 4K are one title).
+    /// The library's matches, then what the server added that isn't
+    /// another copy of one already listed (HD and 4K are one title): after
+    /// them, never between, so nothing listed moves when the server
+    /// answers. The server's cards from an earlier letter stay while they
+    /// still fit what's typed now (no flicker while the next request is in
+    /// flight).
     private func publishTitles() {
-        var server: [Card] = []
-        if !serverCards.isEmpty {
-            let corpus = SearchCorpus(serverCards) { "\($0.title) \($0.subtitle ?? "")" }
-            server = corpus.search(query).ranked.sorted().map { corpus.items[$0] }
+        let server = fitting(serverCards, foundFor: serverQuery)
+        var seen = Set(library.flatMap { model.library.versions(of: $0.id) })
+        let added = (fitting(extras, foundFor: extrasQuery) + server.filter { $0.kind != "Episode" }).filter { card in
+            guard !seen.contains(card.id) else { return false }
+            seen.formUnion(model.library.versions(of: card.id))
+            return true
         }
-        let known = Set(library.flatMap { model.library.versions(of: $0.id) })
-        let all = library + server.filter { $0.kind != "Episode" && !known.contains($0.id) }
+        let all = library + added
         titles = Titles(all: all, movies: all.filter { $0.kind != "Series" }, shows: all.filter { $0.kind == "Series" },
                         episodes: server.filter { $0.kind == "Episode" })
+        resultsChanged()
+    }
+
+    /// Cards the server found for `text`: all of them for what's typed
+    /// now, else those that still fit it.
+    private func fitting(_ cards: [Card], foundFor text: String) -> [Card] {
+        guard !cards.isEmpty, text != query else { return cards }
+        let corpus = SearchCorpus(cards) { "\($0.title) \($0.subtitle ?? "")" }
+        return corpus.search(query).ranked.sorted().map { corpus.items[$0] }
     }
 
     /// Whether a filter has anything for what's typed (empty ones are dimmed).
     private func hasResults(_ scope: Scope) -> Bool {
+        scope == .all || !isEmpty(scope)
+    }
+
+    private func isEmpty(_ scope: Scope) -> Bool {
         switch scope {
-        case .all: true
-        case .movies: !movies.isEmpty
-        case .shows: !shows.isEmpty || !episodes.isEmpty
-        case .live: !channels.isEmpty || !onTV.isEmpty
+        case .all: moviesAndShows.isEmpty && episodes.isEmpty && channels.isEmpty && onTV.isEmpty
+        case .movies: movies.isEmpty
+        case .shows: shows.isEmpty && episodes.isEmpty
+        case .live: channels.isEmpty && onTV.isEmpty
         }
+    }
+
+    /// Results came: a filter that has some again loses its "no results".
+    private func resultsChanged() {
+        let still = finishedEmpty.filter(isEmpty)
+        if still != finishedEmpty { finishedEmpty = still }
     }
 
     var body: some View {
@@ -97,63 +132,10 @@ struct SearchView: View {
     private var phoneBody: some View {
         NavigationStack(path: $path) {
             List {
-                if scope == .all, !completions.isEmpty {
-                    Section {
-                        ForEach(completions, id: \.self) { completion in
-                            Button { query = completion } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                                    Text(completion).foregroundStyle(Color.primary).lineLimit(1)
-                                }
-                            }
-                        }
-                    }
-                }
-                // One section whatever the filter, so a title shown before
-                // and after a filter tap keeps its row instead of a new one.
-                let shown = scope == .movies ? movies : scope == .shows ? shows : scope == .all ? moviesAndShows : []
-                if !shown.isEmpty {
-                    Section(scope == .movies ? "Movies" : scope == .shows ? "Shows" : "Movies & Shows") {
-                        ForEach(shown) { card in result(card, wide: false) }
-                    }
-                }
-                if scope == .all || scope == .shows, !episodes.isEmpty {
-                    Section("Episodes") {
-                        ForEach(episodes) { card in result(card, wide: true) }
-                    }
-                }
-                if scope == .all || scope == .live, !onTV.isEmpty {
-                    Section("On TV") {
-                        let tuned = onTV.map(\.channel)
-                        ForEach(Array(onTV.enumerated()), id: \.element.id) { index, hit in
-                            Button {
-                                playing = .live(tuned, index)
-                            } label: {
-                                GuideHitRow(hit: hit)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                if scope == .all || scope == .live, !channels.isEmpty {
-                    Section("Channels") {
-                        ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
-                            Button {
-                                playing = .live(channels, index)
-                            } label: {
-                                ChannelRow(channel: channel, slot: model.slot(channel.id), favorite: prefs.isFavorite(channel))
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
-                                       systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
-                                    prefs.toggleFavorite(channel)
-                                }
-                            }
-                            .onAppear { model.appeared(channel.id) }
-                            .onDisappear { model.disappeared(channel.id) }
-                        }
-                    }
+                // Cleared: nothing under "Search everything", not the last
+                // results for a moment.
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    results
                 }
                 if let progress = model.library.progress {
                     VStack(alignment: .leading, spacing: 6) {
@@ -166,7 +148,14 @@ struct SearchView: View {
             }
             .listStyle(.plain)
             .overlay { emptyState }
+            // The name pages opened from here go back to.
             .navigationTitle("Search")
+            // A header of our own instead of the navigation bar's (on this
+            // page only: a title's page keeps its bar): a large title that
+            // collapses and is pulled down with the list moved under the
+            // eyes; this one stays put while the results scroll or bounce.
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) { header }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             #if os(iOS)
@@ -175,9 +164,6 @@ struct SearchView: View {
             // or the keyboard's Search key puts the keyboard away.
             .scrollDismissesKeyboard(.immediately)
             .safeAreaInset(edge: .bottom) { searchField }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if !query.trimmingCharacters(in: .whitespaces).isEmpty { scopeBar }
-            }
             .onAppear { if query.isEmpty { fieldFocused = true } }
             #endif
             // Re-run when the text changes or an index finishes loading.
@@ -189,12 +175,89 @@ struct SearchView: View {
             }
         }
     }
+
+    /// Titles, then what's on and channels, then episodes: the parts that
+    /// come later (the server's) go below, so what's listed never moves
+    /// down when they arrive.
+    @ViewBuilder private var results: some View {
+        if scope == .all, !completions.isEmpty {
+            // One row of suggestions, the same height however many there
+            // are, so the results under it don't move as they change.
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(completions, id: \.self) { completion in
+                        Button { query = completion } label: {
+                            Label(completion, systemImage: "magnifyingglass")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.primary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 12)
+                                .frame(height: 32)
+                                .background(Color(white: 0.15), in: .capsule)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .scrollIndicators(.hidden)
+            .frame(height: 44)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+        }
+        // One section whatever the filter, so a title shown before
+        // and after a filter tap keeps its row instead of a new one.
+        let shown = scope == .movies ? movies : scope == .shows ? shows : scope == .all ? moviesAndShows : []
+        if !shown.isEmpty {
+            Section(scope == .movies ? "Movies" : scope == .shows ? "Shows" : "Movies & Shows") {
+                ForEach(shown) { card in result(card, wide: false) }
+            }
+        }
+        if scope == .all || scope == .live, !onTV.isEmpty {
+            Section("On TV") {
+                let tuned = onTV.map(\.channel)
+                ForEach(Array(onTV.enumerated()), id: \.element.id) { index, hit in
+                    Button {
+                        playing = .live(tuned, index)
+                    } label: {
+                        GuideHitRow(hit: hit)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        if scope == .all || scope == .live, !channels.isEmpty {
+            Section("Channels") {
+                ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
+                    Button {
+                        playing = .live(channels, index)
+                    } label: {
+                        ChannelRow(channel: channel, slot: model.slot(channel.id), favorite: prefs.isFavorite(channel))
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
+                               systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
+                            prefs.toggleFavorite(channel)
+                        }
+                    }
+                    .onAppear { model.appeared(channel.id) }
+                    .onDisappear { model.disappeared(channel.id) }
+                }
+            }
+        }
+        if scope == .all || scope == .shows, !episodes.isEmpty {
+            Section("Episodes") {
+                ForEach(episodes) { card in result(card, wide: true) }
+            }
+        }
+    }
     #endif
 
     #if os(tvOS)
     /// Apple TV, like Apple's TV app: the system search field and keyboard
     /// row under the tab bar, then the results as rows of cards: titles,
-    /// episodes, what's on, channels. Titles open their page; episodes,
+    /// what's on, channels, episodes. Titles open their page; episodes,
     /// programmes and channels play.
     private var tvBody: some View {
         NavigationStack(path: $path) {
@@ -215,12 +278,11 @@ struct SearchView: View {
     private var tvResults: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
+                // Titles, then what's on and channels, then episodes: the
+                // parts that come later (the server's) go below, so a row
+                // never moves down when they arrive.
                 if !moviesAndShows.isEmpty {
                     TVPosterRow(title: "Movies & Shows", cards: moviesAndShows) { openDetails($0) }
-                }
-                if !episodes.isEmpty {
-                    TVContinueRow(row: HomeRow(title: "Episodes", shape: "landscape", aspect: 16.0 / 9, cards: episodes),
-                                  loadingCard: loadingCard, play: { play($0) }, open: { openDetails($0) })
                 }
                 if !onTV.isEmpty {
                     TVShelf(title: "On TV") {
@@ -249,6 +311,10 @@ struct SearchView: View {
                         }
                     }
                 }
+                if !episodes.isEmpty {
+                    TVContinueRow(row: HomeRow(title: "Episodes", shape: "landscape", aspect: 16.0 / 9, cards: episodes),
+                                  loadingCard: loadingCard, play: { play($0) }, open: { openDetails($0) })
+                }
             }
             .padding(.vertical, 20)
             .environment(\.rowInvertsOnFocus, false)
@@ -261,6 +327,34 @@ struct SearchView: View {
     #endif
 
     #if os(iOS)
+    /// "Search", large like the TV app's, and the filters under it, fixed
+    /// above the results (which scroll under it). The filters are always
+    /// there, so the header is the same height with or without a query.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Search")
+                .font(.largeTitle.bold())
+                .padding(.horizontal, 20)
+                .padding(.top, 6)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("search-title")
+            scopeBar
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            Color.black
+                .ignoresSafeArea(edges: .top)
+                .overlay(alignment: .bottom) {
+                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 16)
+                        .offset(y: 16)
+                }
+                .allowsHitTesting(false)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("search-header")
+    }
+
     /// All · Movies · Shows · Live TV, the chosen one underlined.
     private var scopeBar: some View {
         HStack(spacing: 8) {
@@ -272,7 +366,8 @@ struct SearchView: View {
                     Text(option.rawValue)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(selected ? Color.black : Color.white)
-                        .opacity(hasResults(option) || selected ? 1 : 0.4)
+                        // Dimmed when it has nothing for what's typed.
+                        .opacity(query.trimmingCharacters(in: .whitespaces).isEmpty || hasResults(option) || selected ? 1 : 0.4)
                         .padding(.horizontal, 14)
                         .frame(height: 34)
                         .background {
@@ -286,21 +381,13 @@ struct SearchView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("scope-\(option.rawValue)")
             }
             Spacer(minLength: 0)
         }
         .animation(.snappy(duration: 0.25), value: scope)
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
-        .background {
-            Color.black
-                .overlay(alignment: .bottom) {
-                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 16)
-                        .offset(y: 16)
-                }
-                .allowsHitTesting(false)
-        }
     }
 
     private var searchField: some View {
@@ -338,9 +425,10 @@ struct SearchView: View {
         if q.isEmpty {
             ContentUnavailableView("Search everything", systemImage: "magnifyingglass",
                                    description: Text("Movies, shows, episodes, channels, and what's on TV now or later by its name. Results appear as you type."))
-        } else if serverDone, moviesAndShows.isEmpty, episodes.isEmpty, channels.isEmpty, onTV.isEmpty {
+        } else if finishedEmpty.contains(.all), isEmpty(.all) {
+            // Only once the search (the server's part too) has finished.
             ContentUnavailableView.search(text: q)
-        } else if scope != .all, !hasResults(scope), serverDone {
+        } else if scope != .all, finishedEmpty.contains(scope), isEmpty(scope) {
             let what = switch scope {
             case .movies: "movies"
             case .shows: "shows or episodes"
@@ -398,9 +486,9 @@ struct SearchView: View {
             VStack(alignment: .leading, spacing: 3) {
                 // Plain colours, not the button tint.
                 Text(card.title).font(.body.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
-                if let subtitle = card.subtitle {
-                    Text(subtitle).font(.subheadline).foregroundStyle(Color.secondary).lineLimit(1)
-                }
+                // The line kept when there's none, so every row is the
+                // same height and a card gaining one doesn't shift the list.
+                Text(card.subtitle ?? " ").font(.subheadline).foregroundStyle(Color.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
         }
@@ -421,12 +509,18 @@ struct SearchView: View {
         }
     }
 
-    /// Local matches straight away (name, year, genres), then, each as soon
-    /// as it's ready and neither waiting for the other, what's on TV and
+    /// Local matches straight away (name, year, genres), with what's on TV
+    /// when it's ready by then; then, each as soon as it's ready and
+    /// neither waiting for the other, what's on TV (if it wasn't) and
     /// (after a short pause) the server's: cast checks, people named,
     /// episodes. The next letter cancels all of it, background work too.
+    /// Nothing listed moves when a later part comes: it goes after. When
+    /// the device has nothing for the new text, the last results stay until
+    /// the server's part is in, rather than the page going blank between.
     private func search() async {
         let q = query
+        let trimmed = q.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return clearResults() }
         #if DEBUG
         let began = Date()
         func mark(_ stage: String) { NSLog("%@", String(format: "PERF search %@ %.0f ms (%@)", stage, Date().timeIntervalSince(began) * 1000, "\(q.count) letters")) }
@@ -435,6 +529,9 @@ struct SearchView: View {
         let libraryCorpus = model.library.corpus
         let channelCorpus = model.channelCorpus
         let previousLibrary = libraryMatch, previousChannels = channelMatch
+        // What's on TV, looked up beside the titles and channels.
+        let area = prefs.area
+        let guideSearch = Task { await model.searchGuide(q, area: area) }
         let work = Task.detached(priority: .userInitiated) { () -> LocalResults? in
             let (lm, hits) = SmartSearch.local(parsed, corpus: libraryCorpus, previous: previousLibrary)
             guard !Task.isCancelled else { return nil }
@@ -447,28 +544,38 @@ struct SearchView: View {
             let fc = cm.ranked.count < 8 ? channelCorpus.fuzzy(q, limit: 30).filter { !Set(cm.ranked.prefix(60)).contains($0) } : []
             return LocalResults(libraryMatch: lm, hits: hits, channelMatch: cm, typoLibrary: fl, typoChannels: fc)
         }
-        let found = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+        let found = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel(); guideSearch.cancel() }
         guard !Task.isCancelled, let found else { return }
-        let hits = found.hits, cm = found.channelMatch
+        let cm = found.channelMatch
         libraryMatch = found.libraryMatch
         channelMatch = cm
+        // Titles still waiting for a cast check aren't listed until it
+        // passes (listed first, they'd go again); they come after the rest.
+        let hits = found.hits.filter { $0.pending.isEmpty }
         let typos = found.typoLibrary.map { SearchHit(entry: $0, pending: []) }
-        library = cards(hits + typos)
-        publishTitles()
-        channels = (Array(cm.ranked.prefix(60)) + found.typoChannels).map { channelCorpus.items[$0] }
+        let local = Local(titles: cards(hits + typos),
+                          channels: (Array(cm.ranked.prefix(60)) + found.typoChannels).map { channelCorpus.items[$0] })
+        // Shown with the rest when it's ready by then (it usually is), so
+        // its section doesn't come a moment later and push the channels down.
+        let early = await Self.value(of: guideSearch, within: 0.1)
+        guard !Task.isCancelled else { return }
+        let asksServer = trimmed.count >= 2 && model.sources.emby != nil
+        let showsNow = !local.titles.isEmpty || !local.channels.isEmpty || early?.isEmpty == false || !asksServer
+        if showsNow {
+            show(local, onTV: early)
+            let titleNames = (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
+            let channelIndices = Array(cm.ranked.prefix(6)) + Array(found.typoChannels.prefix(3))
+            let channelNames = channelIndices.map { model.title(of: channelCorpus.items[$0]) }
+            updateCompletions(for: q, names: titleNames + channelNames)
+        }
         #if DEBUG
         mark("local")
         #endif
-        let titleNames = (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
-        let channelIndices = Array(cm.ranked.prefix(6)) + Array(found.typoChannels.prefix(3))
-        let channelNames = channelIndices.map { model.title(of: channelCorpus.items[$0]) }
-        completions = Self.completions(for: q, names: titleNames + channelNames)
-        serverDone = false
 
         // Results settled: treat the top title as intent and get it ready,
         // so tapping it starts at once.
-        if let top = library.first {
-            let likely = Array(library.prefix(3))
+        if let top = local.titles.first {
+            let likely = Array(local.titles.prefix(3))
             Task {
                 try? await Task.sleep(for: .milliseconds(450))
                 guard !Task.isCancelled, query == q else { return }
@@ -482,12 +589,22 @@ struct SearchView: View {
             }
         }
 
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await searchOnTV(q) }
-            group.addTask { await searchServer(q, parsed: parsed, hits: hits, typos: typos) }
+        if showsNow {
+            await withTaskGroup(of: Void.self) { group in
+                if early == nil { group.addTask { await showOnTV(guideSearch) } }
+                group.addTask { await searchServer(q, parsed: parsed, hits: found.hits, listed: hits + typos, held: nil) }
+            }
+        } else {
+            // Nothing here yet for the new text: everything together when
+            // the server's part is in.
+            let onTV = await guideSearch.value
+            guard !Task.isCancelled else { return }
+            await searchServer(q, parsed: parsed, hits: found.hits, listed: hits + typos, held: (local, onTV))
         }
+        guard !Task.isCancelled else { return }
+        finishedEmpty = Set(Scope.allCases.filter(isEmpty))
         #if DEBUG
-        if !Task.isCancelled { mark("all") }
+        mark("all")
         #endif
     }
 
@@ -499,44 +616,126 @@ struct SearchView: View {
         let typoChannels: [Int]
     }
 
-    /// What's on: the guide and today's games, by name.
-    private func searchOnTV(_ q: String) async {
-        let hits = await model.searchGuide(q, area: prefs.area)
-        guard !Task.isCancelled else { return }
-        onTV = hits
+    /// What the device found: titles and channels.
+    private struct Local {
+        let titles: [Card]
+        let channels: [LiveChannel]
     }
 
-    private func searchServer(_ q: String, parsed: SearchQuery, hits: [SearchHit], typos: [SearchHit]) async {
+    /// The device's matches on the page. The same text again (an index
+    /// grew meanwhile): what's listed keeps its place, anything new after.
+    private func show(_ local: Local, onTV hits: [AppModel.GuideHit]?) {
+        let again = query == shownQuery
+        library = again ? Self.keepingOrder(library, local.titles) : local.titles
+        channels = again ? Self.keepingOrder(channels, local.channels) : local.channels
+        if let hits { onTV = hits }
+        shownQuery = query
+        publishTitles()
+    }
+
+    /// `fresh`, with the items also in `old` in old's order, then the rest.
+    private static func keepingOrder<Item: Identifiable>(_ old: [Item], _ fresh: [Item]) -> [Item] {
+        let byId = Dictionary(fresh.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let kept = old.compactMap { byId[$0.id] }
+        let keptIds = Set(kept.map(\.id))
+        return kept + fresh.filter { !keptIds.contains($0.id) }
+    }
+
+    /// The search field cleared: nothing listed, nothing waiting.
+    private func clearResults() {
+        library = []
+        extras = []
+        serverCards = []
+        channels = []
+        onTV = []
+        completions = []
+        libraryMatch = nil
+        channelMatch = nil
+        shownQuery = ""
+        finishedEmpty = []
+        publishTitles()
+    }
+
+    /// The task's value if it's ready within `seconds`, else nil (it goes
+    /// on). A task group can't do this: it waits for every child.
+    private static func value<T: Sendable>(of task: Task<T, Never>, within seconds: Double) async -> T? {
+        let first = AsyncStream<T?> { done in
+            Task { done.yield(await task.value) }
+            Task { try? await Task.sleep(for: .seconds(seconds)); done.yield(nil) }
+        }
+        for await value in first { return value }
+        return nil
+    }
+
+    /// What's on: the guide and today's games, by name.
+    private func showOnTV(_ search: Task<[AppModel.GuideHit], Never>) async {
+        let hits = await search.value
+        guard !Task.isCancelled else { return }
+        onTV = hits
+        resultsChanged()
+    }
+
+    /// The server's part: cast checks for the titles waiting on one,
+    /// people the query names, and its own search (episodes, titles the
+    /// index doesn't hold yet). `held`: the device's part, not shown yet.
+    private func searchServer(_ q: String, parsed: SearchQuery, hits: [SearchHit], listed: [SearchHit],
+                              held: (local: Local, onTV: [AppModel.GuideHit])?) async {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2, model.sources.emby != nil else {
+            if let held { show(held.local, onTV: held.onTV) }
             serverCards = []
+            extras = []
             publishTitles()
-            serverDone = true
             return
         }
         try? await Task.sleep(for: .milliseconds(150))
+        #if DEBUG
+        // UI tests: the server's part late (OPENREEL_DEBUG_SEARCH_DELAY,
+        // seconds), to look at the page before it comes.
+        if let delay = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_SEARCH_DELAY"].flatMap(Double.init) {
+            try? await Task.sleep(for: .seconds(delay))
+        }
+        #endif
         guard !Task.isCancelled else { return }
         async let refined = model.refine(parsed, hits: hits)
         let found = await model.serverSearch(trimmed, cardWidth: thumbWidth)
         let (confirmed, people) = await refined
         guard !Task.isCancelled else { return }
-        // Cast checks settled; then titles with people the query names.
-        var titles = Set(confirmed.map(\.entry.titleKey) + typos.map(\.entry.titleKey))
+        // After the titles listed: those whose cast checks passed, then
+        // titles with people the query names.
+        var titles = Set(listed.map(\.entry.titleKey))
+        let castMatches = confirmed.filter { titles.insert($0.entry.titleKey).inserted }
         let withPeople = people.filter { titles.insert($0.item.titleKey).inserted }
             .compactMap { model.card(for: $0.item, width: thumbWidth, with: $0.person) }
-        library = cards(confirmed) + withPeople + cards(typos)
-        if confirmed.count != hits.count || !people.isEmpty {
+        if let held { show(held.local, onTV: held.onTV) }
+        extras = cards(castMatches) + withPeople
+        extrasQuery = q
+        if held != nil || !castMatches.isEmpty || !people.isEmpty {
             // Suggest what matched the whole query, not just its title words.
-            completions = Self.completions(for: q, names: (confirmed.prefix(12) + typos.prefix(6)).map(\.entry.name)
-                                               + people.prefix(6).map(\.item.name) + channels.prefix(3).map(\.name))
+            updateCompletions(for: q, names: (listed.prefix(12) + castMatches.prefix(6)).map(\.entry.name)
+                                  + people.prefix(6).map(\.item.name) + channels.prefix(3).map(\.name))
         }
         serverCards = found
+        serverQuery = q
         publishTitles()
-        serverDone = true
     }
 
     private func cards(_ hits: [SearchHit]) -> [Card] {
         hits.compactMap { model.card(for: $0.entry, width: thumbWidth, with: $0.person) }
+    }
+
+    /// Suggestions for what's typed. When the new text has none, those
+    /// that still fit it stay (also one just typed out in full), so the
+    /// row of suggestions doesn't come and go at each letter.
+    private func updateCompletions(for query: String, names: [String]) {
+        let fresh = Self.completions(for: query, names: names)
+        guard fresh.isEmpty, !completions.isEmpty else {
+            if fresh != completions { completions = fresh }
+            return
+        }
+        let corpus = SearchCorpus(completions) { $0 }
+        let kept = SearchCorpus<String>.fold(query).count > 1 ? corpus.search(query).ranked.sorted().map { corpus.items[$0] } : []
+        if kept != completions { completions = kept }
     }
 
     /// Up to three full titles for what's typed, best match first (the

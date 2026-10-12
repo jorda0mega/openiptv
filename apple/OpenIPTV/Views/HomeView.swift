@@ -31,10 +31,15 @@ struct HomeView: View {
                     let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
                     if !heroes.isEmpty {
                         HomeHero(items: heroes, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                    } else if model.homePending {
+                        // The first Home is on its way: the hero's space is
+                        // kept, so Continue Watching (shown as soon as it's
+                        // known) doesn't move down when the hero comes.
+                        HomeHero.placeholder
                     } else {
                         Color.clear.frame(height: 100)
                     }
-                    if visibleRows.isEmpty, model.featured == nil { emptyState }
+                    if visibleRows.isEmpty, model.featured == nil, !model.homePending { emptyState }
                     ForEach(visibleRows) { row in
                         if row.title == "Continue Watching" {
                             ContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
@@ -49,8 +54,14 @@ struct HomeView: View {
             .ignoresSafeArea(edges: .top)
             .background(Color.black)
             .scrollIndicators(.hidden)
+            // The name pages opened from here go back to.
             .navigationTitle("Home")
             #if os(iOS)
+            // Compact, with no title over the hero (like the TV app's
+            // Home): a large one sat on the picture, and on Continue
+            // Watching while the first Home was still on its way.
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(removing: .title)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingSettings = true } label: { Image(systemName: "gearshape") }
@@ -59,8 +70,9 @@ struct HomeView: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
             #endif
-            .refreshableOnPhone { await model.loadHome(cardWidth: pixelWidth, full: true) }
-            .task { await model.loadHome(cardWidth: pixelWidth) }
+            // Pulling down is one of the moments Home changes (like
+            // Netflix's): everything built afresh, shown when it's ready.
+            .refreshableOnPhone { await model.refreshHome(cardWidth: pixelWidth) }
             .sheet(isPresented: $addingEmby) { AddEmbyView() }
             .sheet(isPresented: $showingSettings) { SettingsView(asSheet: true) }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
@@ -74,6 +86,12 @@ struct HomeView: View {
                 Text(playError ?? "")
             }
         }
+        // On the stack, not its first page: coming back from a title's page
+        // isn't Home appearing. Home chosen from another tab (or at launch)
+        // is: what was built meanwhile goes on before it's drawn, then the
+        // next one is built in the background, to wait for the next time.
+        .onAppear { model.homeAppeared() }
+        .task { await model.loadHome(cardWidth: pixelWidth) }
     }
 
     private var visibleRows: [HomeRow] {
@@ -152,6 +170,18 @@ private struct HomeHero: View {
     @State private var index = 0
     @State private var width: CGFloat = 393
 
+    /// The hero's space while the first Home is built: the same height (a
+    /// page and its dots), with a spinner.
+    static var placeholder: some View {
+        VStack(spacing: 14) {
+            Color.clear
+                .aspectRatio(1 / 1.3, contentMode: .fit)
+                .overlay { ProgressView() }
+            Color.clear.frame(height: 6)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     var body: some View {
         VStack(spacing: 14) {
             TabView(selection: $index) {
@@ -177,6 +207,9 @@ private struct HomeHero: View {
         }
         .frame(maxWidth: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // Other titles (Home changed at a moment): from the first, never
+        // a page past the end (a blank one).
+        .onChange(of: items.map(\.card.id)) { index = 0 }
         // Moves on by itself every eight seconds.
         .task(id: index) {
             try? await Task.sleep(for: .seconds(8))
@@ -198,7 +231,10 @@ private struct HomeHero: View {
                 .contentShape(Rectangle())
                 .onTapGesture { open(item.card) }
             VStack(spacing: 12) {
+                // The same space whether it's the logo, the name, or the
+                // logo still on its way.
                 HeroTitle(logo: item.logo, title: item.card.title)
+                    .frame(minHeight: 96, alignment: .bottom)
                 Text(item.details)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.white.opacity(0.75))
@@ -322,9 +358,9 @@ private struct ContinueRow: View {
                 .clipShape(.rect(cornerRadius: 14))
             HStack(spacing: 8) {
                 Image(systemName: "play.fill").font(.caption2)
-                if let progress = card.progress, progress > 0 {
-                    ProgressBar(value: progress / 100).frame(width: 40, height: 4)
-                }
+                // Always there (an empty track when not started), so the
+                // text beside it doesn't move when progress comes.
+                ProgressBar(value: (card.progress ?? 0) / 100).frame(width: 40, height: 4)
                 Text(card.subtitle ?? "").font(.caption).lineLimit(1)
             }
             .foregroundStyle(.secondary)
