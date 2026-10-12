@@ -695,7 +695,22 @@ enum AppCache {
         writer.async { write(name, value) }
     }
 
+    /// Every saved file whose name starts with one of these (an account's
+    /// title pages), in order with the background writes.
+    static func removeAll(startingWith prefixes: [String]) {
+        let directory = directory
+        writer.async {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path())) ?? []
+            for name in names where prefixes.contains(where: name.hasPrefix) {
+                try? FileManager.default.removeItem(at: directory.appending(path: name))
+            }
+        }
+    }
+
+    /// In order with the background writes: one still queued can't put
+    /// back what's removed (a signed-out account's Home, say).
     static func remove(_ name: String) {
-        try? FileManager.default.removeItem(at: directory.appending(path: name))
+        let url = directory.appending(path: name)
+        writer.async { try? FileManager.default.removeItem(at: url) }
     }
 }

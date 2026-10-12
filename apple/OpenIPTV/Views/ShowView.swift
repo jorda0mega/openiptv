@@ -37,6 +37,7 @@ struct ShowView: View {
     /// Only the season in view is published, when it changes.
     @State private var visible = VisibleRows()
     @State private var seasonOnScreen: Int?
+    @State private var pin: PagePin?
     /// The season just jumped to: highlighted until you scroll yourself,
     /// even when it's too short to fill the screen.
     @State private var jumpedTo: Int?
@@ -167,6 +168,7 @@ struct ShowView: View {
                 model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
             }
             // Draw what's already here at once, then refresh behind it.
+            if pin == nil { pin = model.pin(route.id) }
             _ = model.cachedShow(route.id)
             if await model.loadShow(route.id) == nil, data == nil {
                 error = "Couldn't load this show."

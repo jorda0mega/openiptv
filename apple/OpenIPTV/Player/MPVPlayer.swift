@@ -42,6 +42,12 @@ final class MPVPlayer: @unchecked Sendable {
     /// (up to 2 s) before opening its own: many IPTV accounts allow one
     /// connection, and a second while the first is closing gets refused.
     private static let closing = DispatchGroup()
+    /// Shut down (set at once, so a load still queued is dropped instead of
+    /// opening a stream), and whether a live stream was asked for (only
+    /// those make the next live stream wait for them to close).
+    private let stateLock = NSLock()
+    private var closed = false
+    private var playedLive = false
 
     private var mpv: OpaquePointer?
     private let queue = DispatchQueue(label: "openiptv.mpv", qos: .userInitiated)
@@ -58,6 +64,9 @@ final class MPVPlayer: @unchecked Sendable {
     /// Where the jump under way is going, and where the last one landed.
     private var followTarget: Double?
     private var followShown: Double?
+    /// Whether those were exact frames (else the keyframe before).
+    private var followTargetExact = false
+    private var followShownExact = false
     /// The bar moves a few times a second; every frame (24-60 a second)
     /// used to re-render the player's screen for nothing.
     private var lastTimeEmit: CFAbsoluteTime = 0
@@ -158,8 +167,9 @@ final class MPVPlayer: @unchecked Sendable {
             url = local
             headers = []
         }
+        if !file { stateLock.withLock { playedLive = true } }
         queue.async { [self] in
-            guard let mpv else { return }
+            guard let mpv, !stateLock.withLock({ closed }) else { return }
             if !file { _ = Self.closing.wait(timeout: .now() + 2) }
             apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
@@ -314,7 +324,9 @@ final class MPVPlayer: @unchecked Sendable {
     /// nothing lands after letting go.
     func settle(at seconds: Double, exact: Bool) {
         queue.async { [self] in
-            if followNext == nil, let at = followStarted == nil ? followShown : followTarget, abs(at - seconds) < 0.5 { return }
+            // Kept when it's the same second and at least as precise as asked.
+            let (at, precise) = followStarted == nil ? (followShown, followShownExact) : (followTarget, followTargetExact)
+            if followNext == nil, let at, abs(at - seconds) < 0.5, precise || !exact { return }
             stopFollowing()
             seekStarted = CFAbsoluteTimeGetCurrent()
             command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
@@ -324,6 +336,7 @@ final class MPVPlayer: @unchecked Sendable {
     private func startFollowing(_ seconds: Double, exact: Bool) {
         followStarted = CFAbsoluteTimeGetCurrent()
         followTarget = seconds
+        followTargetExact = exact
         followShown = nil
         followNext = nil
         seekStarted = nil
@@ -342,9 +355,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// moment, and the screen mustn't wait for it.
     func shutdown() {
         onEvent = nil
-        Self.closing.enter()
+        let live = stateLock.withLock { () -> Bool in
+            closed = true
+            return playedLive
+        }
+        if live { Self.closing.enter() }
         queue.async { [self] in
-            defer { Self.closing.leave() }
+            defer { if live { Self.closing.leave() } }
             guard let mpv else { return }
             mpv_set_wakeup_callback(mpv, nil, nil)
             mpv_terminate_destroy(mpv)
@@ -386,6 +403,7 @@ final class MPVPlayer: @unchecked Sendable {
             if followStarted != nil {
                 followStarted = nil
                 followShown = followTarget
+                followShownExact = followTargetExact
                 if let next = followNext { startFollowing(next.seconds, exact: next.exact) }
             }
             if let asked = seekStarted {

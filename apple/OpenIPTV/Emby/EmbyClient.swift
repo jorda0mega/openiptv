@@ -749,6 +749,8 @@ struct EmbyClient {
                 mediaSourceId: String? = nil, playSessionId: String? = nil) async {
         var request = URLRequest(url: Self.api(account.serverURL, event.rawValue))
         request.httpMethod = "POST"
+        // A slow report mustn't hold up the ones behind it (Stopped above all).
+        request.timeoutInterval = 10
         authorize(&request)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: [

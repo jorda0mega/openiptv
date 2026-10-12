@@ -54,6 +54,7 @@ struct TVMovieView: View {
 
     @State private var loading = false
     @State private var playError: String?
+    @State private var pin: PagePin?
 
     var body: some View {
         ScrollView {
@@ -120,6 +121,7 @@ struct TVMovieView: View {
 
     private func load() async {
         model.warmUp(route.id, kind: "Movie", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+        if pin == nil { pin = model.pin(route.id) }
         _ = model.cachedMovie(route.id)
         _ = await model.loadMovie(route.id)
     }
@@ -149,6 +151,7 @@ struct TVShowView: View {
     @Binding var playing: PlayerItem?
 
     @State private var season: Int?
+    @State private var pin: PagePin?
     @State private var loadingItem: String?
     @State private var playError: String?
     @State private var selected: Card?
@@ -271,6 +274,7 @@ struct TVShowView: View {
         } else {
             model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
         }
+        if pin == nil { pin = model.pin(route.id) }
         _ = model.cachedShow(route.id)
         _ = await model.loadShow(route.id)
     }

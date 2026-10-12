@@ -268,12 +268,15 @@ final class AppModel {
     func loadShow(_ id: String) async -> ShowData? {
         if let running = showLoads[id] { return await running.value }
         guard let emby else { return nil }
-        // Saved copy read off the main thread (prefetching several shows
-        // shouldn't read and decode each on it).
         let file = Self.showFile(id)
-        var previous = shows[id]
-        if previous == nil { previous = await Task.detached(priority: .utility) { AppCache.read(file) as ShowData? }.value }
+        let inMemory = shows[id]
+        // Registered before anything waits, so a page opening while the
+        // same show is being fetched ahead joins that fetch.
         let task = Task<ShowData?, Never> {
+            // The saved copy is read off the main thread (prefetching several
+            // shows shouldn't read and decode each on it).
+            var previous = inMemory
+            if previous == nil { previous = await Task.detached(priority: .utility) { AppCache.read(file) as ShowData? }.value }
             if let previous, Date().timeIntervalSince(previous.loadedAt) < 24 * 3600 {
                 async let changes = emby.episodeChanges(of: id, since: previous.loadedAt)
                 async let next = emby.nextEpisode(of: id)
@@ -294,17 +297,34 @@ final class AppModel {
         }
         showLoads[id] = task
         let data = await task.value
-        showLoads[id] = nil
+        if showLoads[id] == task { showLoads[id] = nil }
         if let data {
             if shows.count > 80 {
-                // The oldest go; never the page that's open (it was just loaded).
-                for old in shows.sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) { shows[old.key] = nil }
+                // The oldest go; never a page that's open (or under another).
+                for old in shows.filter({ pinned[$0.key] == nil }).sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) {
+                    shows[old.key] = nil
+                }
             }
             if shows[id] == nil { prefetchArt(data.show) }
             shows[id] = data
             AppCache.save(Self.showFile(id), data)
         }
         return data
+    }
+
+    /// Title pages that exist (on screen or under another page), whose data
+    /// is never evicted.
+    @ObservationIgnored private var pinned: [String: Int] = [:]
+
+    /// Keeps this title's page data for as long as the returned pin lives
+    /// (a page holds it in its state).
+    func pin(_ id: String) -> PagePin {
+        pinned[id, default: 0] += 1
+        return PagePin { [weak self] in Task { @MainActor in self?.unpin(id) } }
+    }
+
+    private func unpin(_ id: String) {
+        if let count = pinned[id], count > 1 { pinned[id] = count - 1 } else { pinned[id] = nil }
     }
 
     // MARK: Films
@@ -337,20 +357,20 @@ final class AppModel {
         let task = Task<MovieData?, Never> {
             async let like = emby.similar(to: id, limit: 20)
             guard let item = await emby.details(id) else { return nil }
-            // The page's own details as soon as they're here; titles like it
-            // (a slower request) follow.
-            if movies[id] == nil {
-                movies[id] = MovieData(item: item, similar: [], loadedAt: .distantPast)
-                prefetchArt(item)
-            }
+            // The page's own details (and where you got to) as soon as
+            // they're here; titles like it (a slower request) follow.
+            if movies[id] == nil { prefetchArt(item) }
+            movies[id] = MovieData(item: item, similar: movies[id]?.similar ?? [], loadedAt: Date())
             return MovieData(item: item, similar: await like, loadedAt: Date())
         }
         movieLoads[id] = task
         let data = await task.value
-        movieLoads[id] = nil
+        if movieLoads[id] == task { movieLoads[id] = nil }
         if let data {
             if movies.count > 80 {
-                for old in movies.sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) { movies[old.key] = nil }
+                for old in movies.filter({ pinned[$0.key] == nil }).sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) {
+                    movies[old.key] = nil
+                }
             }
             movies[id] = data
             AppCache.save(Self.movieFile(id), data)
@@ -428,8 +448,11 @@ final class AppModel {
               let index = data.episodes.firstIndex(where: { $0.id == playback.itemId }) else { return }
         var episodes = data.episodes
         episodes[index].userData = watched(episodes[index].userData)
+        // Finished: the show's Play moves on to the next one at once (as
+        // Continue Watching does).
+        let nextUp = finished ? episodes[(index + 1)...].first { $0.userData?.played != true } : data.nextUp
         // Keep loadedAt: the next update still asks for everything since.
-        shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: data.nextUp, loadedAt: data.loadedAt, similar: data.similar)
+        shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: nextUp, loadedAt: data.loadedAt, similar: data.similar)
     }
 
     /// Continue Watching as it'll be, straight away when playback stops
@@ -691,6 +714,9 @@ final class AppModel {
     }
 
     @ObservationIgnored private var reportChain: Task<Void, Never>?
+    /// The newest position not yet sent: while one progress report waits
+    /// its turn, newer ones replace it rather than queueing behind it.
+    @ObservationIgnored private var queuedProgress: (playback: EmbyPlayback, seconds: Double)?
 
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
         if event == .started { playingItem = playback.itemId }
@@ -702,15 +728,22 @@ final class AppModel {
         }
         // In the order they happened: a progress report sent a moment before
         // Stopped must not land after it and move the resume point back.
-        let previous = reportChain
         let client = emby
-        let send = Task {
-            await previous?.value
+        if event == .progress {
+            let waiting = queuedProgress != nil
+            queuedProgress = (playback, seconds)
+            if waiting { return }
+            await enqueueReport { [weak self] in
+                guard let (playback, seconds) = await self?.takeQueuedProgress() else { return }
+                await client?.report(.progress, itemId: playback.itemId, seconds: seconds,
+                                     mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
+            }.value
+            return
+        }
+        await enqueueReport {
             await client?.report(event, itemId: playback.itemId, seconds: seconds,
                                  mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
-        }
-        reportChain = send
-        await send.value
+        }.value
         guard event == .stopped else { return }
         // Only this title's resume point changed: everything else prepared
         // stays ready.
@@ -719,6 +752,21 @@ final class AppModel {
         if let series = playback.seriesId { prefetchShows([series], force: true) }
         // Only Continue Watching changed; the rest of Home stays as it is.
         await refreshContinueWatching()
+    }
+
+    private func enqueueReport(_ work: @escaping @Sendable () async -> Void) -> Task<Void, Never> {
+        let previous = reportChain
+        let task = Task {
+            await previous?.value
+            await work()
+        }
+        reportChain = task
+        return task
+    }
+
+    private func takeQueuedProgress() -> (playback: EmbyPlayback, seconds: Double)? {
+        defer { queuedProgress = nil }
+        return queuedProgress
     }
 
     // MARK: Accounts
@@ -734,7 +782,13 @@ final class AppModel {
         sources.setEmby(nil)
         rows = []
         featured = nil
+        spotlight = []
+        coolDown()
+        // Title pages carry this account's progress.
+        shows = [:]
+        movies = [:]
         AppCache.remove("home.v4.json")
+        AppCache.removeAll(startingWith: ["show-", "movie-"])
         library.clear()
         serverSearchCache = [:]
     }
@@ -1394,4 +1448,11 @@ final class AppModel {
             self.scheduleNowNext()
         }
     }
+}
+
+/// Held by a title page: its data stays cached while the page exists.
+final class PagePin {
+    private let release: @Sendable () -> Void
+    init(_ release: @escaping @Sendable () -> Void) { self.release = release }
+    deinit { release() }
 }

@@ -19,6 +19,7 @@ struct MovieView: View {
 
     @State private var loading = false
     @State private var playError: String?
+    @State private var pin: PagePin?
 
     @State private var expanded = false
 
@@ -121,6 +122,7 @@ struct MovieView: View {
 
     private func load() async {
         model.warmUp(route.id, kind: "Movie", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+        if pin == nil { pin = model.pin(route.id) }
         _ = model.cachedMovie(route.id)
         _ = await model.loadMovie(route.id)
     }
