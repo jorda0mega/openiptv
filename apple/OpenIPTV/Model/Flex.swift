@@ -92,8 +92,20 @@ enum SourceError: LocalizedError {
 
 /// Shared HTTP plumbing: no cookies, no URL caching of API answers, and
 /// status codes mapped to `SourceError`.
+///
+/// Two sets of connections: what's on screen or asked for, and what's
+/// fetched ahead of time (tasks at utility priority or lower: pages,
+/// playback info and stills got ready in case they're opened). A burst of
+/// the second used to fill every connection to a slow server, and a search
+/// typed meanwhile waited three seconds behind it.
 enum HTTP {
-    static let session: URLSession = {
+    static let session = make(connections: 8)
+    static let ahead = make(connections: 4)
+
+    /// The connections for the current task's priority.
+    static var current: URLSession { Task.currentPriority <= .utility ? ahead : session }
+
+    private static func make(connections: Int) -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         config.httpShouldSetCookies = false
@@ -101,8 +113,9 @@ enum HTTP {
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": "Openreel/\(appVersion)"]
+        config.httpMaximumConnectionsPerHost = connections
         return URLSession(configuration: config)
-    }()
+    }
 
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
@@ -110,7 +123,7 @@ enum HTTP {
 
     static func data(_ request: URLRequest) async throws -> Data {
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await current.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 || code == 403 { throw SourceError.rejected }
             guard (200..<300).contains(code) else { throw SourceError.http(code) }

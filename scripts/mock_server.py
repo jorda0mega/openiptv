@@ -229,6 +229,11 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/embywebsocket" and q.get("api_key") == "tok":
             return self.websocket()
+        # A remote server's round trip (a real one measured 0.8-2.1 s for
+        # API calls and covers), for every request but the video itself.
+        latency = float(os.environ.get("OPENIPTV_MOCK_LATENCY", "0"))
+        if latency and not (path.startswith("/Videos/") or path.endswith((".ts", ".m3u8", ".mkv"))):
+            time.sleep(latency)
         if path == "/mock/push":
             # Announce a change to connected apps, like Emby does.
             if q.get("type") == "library":

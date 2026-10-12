@@ -772,7 +772,7 @@ struct EmbyClient {
         var request = URLRequest(url: parts.url!)
         request.timeoutInterval = 30
         authorize(&request)
-        guard let (data, response) = try? await HTTP.session.data(for: request),
+        guard let (data, response) = try? await HTTP.ahead.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return data
     }
