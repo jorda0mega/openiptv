@@ -166,6 +166,34 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(app.buttons["More Info"].exists, "not signed in")
     }
 
+    /// A film's page opens complete: its poster focused a moment (the page
+    /// is fetched ahead), then 0.4 s after Select the story is there.
+    func testPageOpensComplete() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.right, "next film")
+        sleep(1)
+        remote.press(.select)
+        usleep(400_000)
+        shot("page at 0.4 s")
+        let story = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'a title from the test library'"))
+        XCTAssertTrue(story.firstMatch.exists, "the page wasn't complete 0.4 s after Select")
+    }
+
+    /// A cold launch shows Home with its featured title within a second.
+    func testColdLaunchHome() {
+        app.launchArguments = ["-tvTab", "home"]
+        app.launch()
+        app.terminate()
+        app.launch()
+        sleep(1)
+        shot("home at 1 s")
+        XCTAssertTrue(app.buttons["More Info"].exists, "Home wasn't drawn 1 s after launch")
+    }
+
     /// The live player's bar: playing, then paused (Play/Pause).
     func testLivePlayerBar() {
         app.launchArguments = ["-tvTab", "live"]
