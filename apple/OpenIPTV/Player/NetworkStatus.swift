@@ -26,11 +26,15 @@ final class NetworkStatus: @unchecked Sendable {
         return unmeteredValue
     }
 
-    /// How a file should be buffered: the whole rest of it on disk when the
-    /// connection is unmetered and there's room (leaving 3 GB free, at most
-    /// 6 GB), otherwise a few minutes in memory.
+    /// How a file should be buffered: generously (in memory) when the
+    /// connection is unmetered, otherwise a couple of minutes.
     var fileReadahead: MPVPlayer.Readahead {
-        guard unmetered else { return .modest }
+        unmetered ? .generous : .modest
+    }
+
+    /// Live TV keeps what's been watched on disk only with plenty of room
+    /// (8 GB free): the file grows with the session until it closes.
+    var roomForTimeshift: Bool {
         let caches = FileManager.default.temporaryDirectory
         #if os(tvOS)
         let free = Int64((try? caches.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0)
@@ -38,7 +42,6 @@ final class NetworkStatus: @unchecked Sendable {
         let free = (try? caches.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage ?? 0
         #endif
-        let room = min(free - 3_000_000_000, 6_000_000_000)
-        return room >= 1_000_000_000 ? .whole(bytes: room) : .modest
+        return free >= 8_000_000_000
     }
 }

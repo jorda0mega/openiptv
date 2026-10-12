@@ -22,7 +22,9 @@ struct ShowView: View {
     let route: ShowRoute
     @Binding var playing: PlayerItem?
 
-    @State private var data: AppModel.ShowData?
+    /// The page as last seen (or fetched ahead), complete from the first
+    /// frame; brought up to date in the background.
+    private var data: AppModel.ShowData? { model.shows[route.id] }
     @State private var error: String?
     @State private var loadingItem: String?
     @State private var playError: String?
@@ -146,10 +148,8 @@ struct ShowView: View {
                 model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
             }
             // Draw what's already here at once, then refresh behind it.
-            data = model.cachedShow(route.id)
-            if let fresh = await model.loadShow(route.id) {
-                data = fresh
-            } else if data == nil {
+            _ = model.cachedShow(route.id)
+            if await model.loadShow(route.id) == nil, data == nil {
                 error = "Couldn't load this show."
             }
         }
@@ -163,8 +163,8 @@ struct ShowView: View {
     @ViewBuilder private var header: some View {
         let show = data?.show
         VStack(alignment: .leading, spacing: 14) {
-            TitleHero(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: 1280) },
-                      logo: show.flatMap { model.emby?.logoURL(for: $0, width: 800) },
+            TitleHero(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
+                      logo: show.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                       title: route.title, line: showLine, height: 0.95) {
                 PlayCapsule(label: loadingItem == mainId ? "Starting…" : mainLabel,
                             progress: upNext?.resumeFraction, left: upNext?.timeLeft,

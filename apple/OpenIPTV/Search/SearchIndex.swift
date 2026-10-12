@@ -86,7 +86,9 @@ struct SearchCorpus<Item>: @unchecked Sendable {
             let last = position == words.count - 1
             let allowed = word.count >= 8 ? 2 : word.count >= 4 ? 1 : 0
             var found: [Int32: Int] = [:]
-            for id in byFirst[word[0]] ?? [] {
+            for (n, id) in (byFirst[word[0]] ?? []).enumerated() {
+                // A newer letter was typed: stop (the caller drops this).
+                if n & 1023 == 0, Task.isCancelled { return [] }
                 let candidate = vocabulary[Int(id)]
                 guard let distance = last
                         ? Self.prefixDistance(word, candidate, max: allowed)
@@ -180,7 +182,10 @@ struct SearchCorpus<Item>: @unchecked Sendable {
 
         var scored: [(index: Int, score: Int)] = []
         scored.reserveCapacity(min(candidates.count, 4096))
-        for index in candidates {
+        for (n, index) in candidates.enumerated() {
+            // A newer letter was typed: stop (the caller drops this result,
+            // so it never becomes the next search's starting point).
+            if n & 2047 == 0, Task.isCancelled { return Match(query: q, ranked: [], size: items.count) }
             let key = keys[index]
             var score: Int
             if words.allSatisfy({ Self.contains(key, $0) }) {
@@ -210,6 +215,7 @@ struct SearchCorpus<Item>: @unchecked Sendable {
         guard !needles.isEmpty else { return [] }
         var found: [(index: Int, matched: UInt64, score: Int)] = []
         for index in items.indices {
+            if index & 2047 == 0, Task.isCancelled { return [] }
             var mask: UInt64 = 0
             for (i, needle) in needles.enumerated() where Self.contains(keys[index], needle) { mask |= 1 << UInt64(i) }
             guard mask != 0 else { continue }
@@ -679,6 +685,14 @@ enum AppCache {
     static func write<T: Encodable>(_ name: String, _ value: T) {
         guard let data = try? JSONEncoder().encode(value) else { return }
         try? data.write(to: directory.appending(path: name), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    private static let writer = DispatchQueue(label: "openiptv.cache-writes", qos: .utility)
+
+    /// Writes in the background, in the order asked (a newer copy is never
+    /// overwritten by an older one finishing late).
+    static func save<T: Encodable & Sendable>(_ name: String, _ value: T) {
+        writer.async { write(name, value) }
     }
 
     static func remove(_ name: String) {

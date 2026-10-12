@@ -9,14 +9,21 @@ actor ImagePipeline {
     // NSCache is thread-safe; read directly for images already decoded.
     private nonisolated(unsafe) let memory = NSCache<NSURL, UIImage>()
     private let session: URLSession
+    /// Loads under way: a picture asked for twice at once (a row and its
+    /// prefetch, two rows with the same title) downloads and decodes once.
+    private var inFlight: [URL: Task<UIImage, Error>] = [:]
 
     init() {
         let config = URLSessionConfiguration.default
         config.urlCache = URLCache(memoryCapacity: 32 << 20, diskCapacity: 512 << 20)
         config.requestCachePolicy = .returnCacheDataElseLoad
         config.timeoutIntervalForRequest = 20
+        config.httpMaximumConnectionsPerHost = 8
         session = URLSession(configuration: config)
-        memory.countLimit = 400
+        // By decoded size (a 4K backdrop is 30 MB, a poster under 1 MB), so
+        // a page of backdrops can't push out every poster, or the memory.
+        memory.totalCostLimit = 300 << 20
+        memory.countLimit = 800
     }
 
     /// Loads these (up to eight at a time) so they're ready when shown.
@@ -38,14 +45,24 @@ actor ImagePipeline {
         memory.object(forKey: url as NSURL)
     }
 
+    /// The picture, decoded for display. A view that goes away doesn't
+    /// cancel the load: it's kept for when the view comes back.
     func image(for url: URL) async throws -> UIImage {
         if let hit = memory.object(forKey: url as NSURL) { return hit }
-        let (data, response) = try await session.data(from: url)
-        guard (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: data) else {
-            throw URLError(.cannotDecodeContentData)
+        if let running = inFlight[url] { return try await running.value }
+        let session = session, memory = memory
+        let load = Task<UIImage, Error> {
+            let (data, response) = try await session.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: data) else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            let ready = await image.byPreparingForDisplay() ?? image
+            let bytes = ready.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
+            memory.setObject(ready, forKey: url as NSURL, cost: bytes)
+            return ready
         }
-        let ready = await image.byPreparingForDisplay() ?? image
-        memory.setObject(ready, forKey: url as NSURL)
-        return ready
+        inFlight[url] = load
+        defer { inFlight[url] = nil }
+        return try await load.value
     }
 }

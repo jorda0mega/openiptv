@@ -40,9 +40,21 @@ struct VideoSurface: UIViewRepresentable {
 
 @MainActor
 func makePlayer(prefs: Preferences) -> MPVPlayer {
-    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-    try? AVAudioSession.sharedInstance().setActive(true)
+    PlaybackAudio.activate()
     return MPVPlayer(options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+}
+
+/// The audio session set up for films, off the main thread: activating it
+/// can take a moment, and the player's screen is opening meanwhile.
+enum PlaybackAudio {
+    private static let queue = DispatchQueue(label: "openiptv.audio-session", qos: .userInitiated)
+
+    static func activate() {
+        queue.async {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
+    }
 }
 
 // MARK: - Emby movies and episodes
@@ -89,10 +101,8 @@ struct MoviePlayerView: View {
     @State private var scrubOrigin: Double?
     /// Exact-frame seek once the finger rests.
     @State private var settleSeek: Task<Void, Never>?
-    /// Where the picture was last sent while choosing, and whether to that
-    /// exact frame (else the keyframe before it).
-    @State private var previewAt: Double?
-    @State private var previewExact = false
+    /// Testing the connection while a converted version plays.
+    @State private var probeTask: Task<Void, Never>?
     /// Just after a jump the player still reports where it was for a
     /// moment: until it lands (or this time passes), the bar stays put.
     @State private var jumpUntil: Date?
@@ -200,8 +210,7 @@ struct MoviePlayerView: View {
         if let (warmPlayer, _) = model.takeWarm(playback.itemId) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-            try? AVAudioSession.sharedInstance().setActive(true)
+            PlaybackAudio.activate()
             warmPlayer.onEvent = { event in handle(event) }
             self.player = warmPlayer
             if warmPlayer.hasStarted { handle(.started(0)) }
@@ -209,6 +218,9 @@ struct MoviePlayerView: View {
             warmPlayer.setReadahead(NetworkStatus.shared.fileReadahead)
             warmPlayer.setPaused(false)
         } else {
+            // A player warmed up for something else would only compete for
+            // the connection.
+            model.coolDown()
             let player = makePlayer(prefs: prefs)
             player.onEvent = { event in handle(event) }
             self.player = player
@@ -221,13 +233,13 @@ struct MoviePlayerView: View {
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
-        Task { await probeWhileConverted() }
+        probeTask = Task { await probeWhileConverted() }
     }
 
     /// While playing a converted version, test the connection every 20 s by
     /// fetching 4 MB of the original, so it can return to full quality.
     private func probeWhileConverted() async {
-        while !Task.isCancelled, player != nil || !started {
+        while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(20))
             guard governor?.current != nil, player != nil, !paused else { continue }
             var request = URLRequest(url: playback.url)
@@ -238,9 +250,20 @@ struct MoviePlayerView: View {
                 let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
                 if pair.count == 2 { request.setValue(pair[1], forHTTPHeaderField: pair[0]) }
             }
+            // Streamed and cut off at 4 MB: a server that ignores the range
+            // would otherwise send (and this would hold) the whole film.
             let begun = Date()
-            guard let (data, _) = try? await HTTP.session.data(for: request), data.count > 500_000 else { continue }
-            governor?.noteProbe(bitsPerSecond: Double(data.count * 8) / max(Date().timeIntervalSince(begun), 0.05))
+            guard let (bytes, response) = try? await HTTP.session.bytes(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 206 else { continue }
+            var count = 0
+            do {
+                for try await _ in bytes {
+                    count += 1
+                    if count >= 4_194_304 { break }
+                }
+            } catch { continue }
+            guard count > 500_000 else { continue }
+            governor?.noteProbe(bitsPerSecond: Double(count * 8) / max(Date().timeIntervalSince(begun), 0.05))
         }
     }
 
@@ -328,7 +351,9 @@ struct MoviePlayerView: View {
                 apply(decision)
             }
         case let .network(buffer, bytesPerSecond):
-            if started, !paused, let decision = governor?.observe(buffer: buffer, bytesPerSecond: bytesPerSecond, stalled: false) {
+            // Just after a jump the buffer is refilling: not a slow connection.
+            if started, !paused, scrubbing == nil, Date().timeIntervalSince(lastSeek) > 3,
+               let decision = governor?.observe(buffer: buffer, bytesPerSecond: bytesPerSecond, stalled: false) {
                 apply(decision)
             }
             #if DEBUG
@@ -380,7 +405,9 @@ struct MoviePlayerView: View {
             }
             let newPosition = rawPosition + offset
             position = newPosition
-            if abs(newPosition - lastReport) >= 10 {
+            // Not while choosing where to jump: the picture's previews
+            // aren't where the viewer is.
+            if abs(newPosition - lastReport) >= 10, scrubbing == nil {
                 lastReport = newPosition
                 Task { await model.report(playback, seconds: newPosition, event: .progress) }
             }
@@ -397,6 +424,11 @@ struct MoviePlayerView: View {
 
     private func finish() {
         hideTask?.cancel()
+        probeTask?.cancel()
+        settleSeek?.cancel()
+        #if os(tvOS)
+        holdTask?.cancel()
+        #endif
         if let speed = governor?.speed, speed > 0 { model.knownSpeed = speed }
         let seconds = position
         player?.shutdown()
@@ -454,8 +486,6 @@ struct MoviePlayerView: View {
     private func showPreview(_ target: Double, exact: Bool) {
         player?.follow(to: max(0, target - offset), exact: exact)
         lastSeek = Date()
-        previewAt = target
-        previewExact = exact
     }
 
     /// On release: carry on from the picture on screen, which is already
@@ -465,17 +495,13 @@ struct MoviePlayerView: View {
     /// scrubbing slowly on iPhone).
     private func commitScrub(_ target: Double) {
         settleSeek?.cancel()
-        if let shown = previewAt, abs(shown - target) < 1 {
-            // An exact picture lands on the target; a keyframe's own time
-            // comes from the player.
-            if previewExact { position = target }
-        } else {
-            player?.seek(to: max(0, target - offset), exact: scrubSpeed != nil, report: true)
-            lastSeek = Date()
-            position = target
-            jumpUntil = Date().addingTimeInterval(1.5)
-        }
-        previewAt = nil
+        // Carries on from the picture on screen when it's already there (no
+        // second jump); otherwise one jump, replacing any preview still on
+        // its way, so nothing lands after letting go.
+        player?.settle(at: max(0, target - offset), exact: scrubSpeed != nil)
+        lastSeek = Date()
+        position = target
+        jumpUntil = Date().addingTimeInterval(0.5)
         scrubbing = nil
         scrubOrigin = nil
         if resumeAfterScrub {
@@ -563,7 +589,6 @@ struct MoviePlayerView: View {
         }
         scrubbing = nil
         scrubOrigin = nil
-        previewAt = nil
         if resumeAfterScrub {
             resumeAfterScrub = false
             player?.setPaused(false)

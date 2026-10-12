@@ -84,7 +84,9 @@ struct NowNext: Hashable {
         case let (c?, n?): min(c.stop, n.start)
         case let (c?, nil): c.stop
         case let (nil, n?): n.start
-        default: nil
+        // Nothing known: ask again in a quarter of an hour, not never (an
+        // empty answer used to stay "fresh" and the row blank for good).
+        default: now + 900
         }
         let found = current != nil || upcoming != nil
         return NowNext(now: current, next: upcoming, refreshAt: refresh, source: found ? source : .none)

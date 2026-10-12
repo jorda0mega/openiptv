@@ -421,38 +421,41 @@ struct SearchView: View {
         }
     }
 
-    /// Local matches straight away (name, year, genres), then after a short
-    /// pause the server's: cast checks, people named, episodes.
+    /// Local matches straight away (name, year, genres), then, each as soon
+    /// as it's ready and neither waiting for the other, what's on TV and
+    /// (after a short pause) the server's: cast checks, people named,
+    /// episodes. The next letter cancels all of it, background work too.
     private func search() async {
         let q = query
         let parsed = SearchQuery(q)
         let libraryCorpus = model.library.corpus
         let channelCorpus = model.channelCorpus
         let previousLibrary = libraryMatch, previousChannels = channelMatch
-        let (lm, hits, cm, typoLibrary, typoChannels) = await Task.detached(priority: .userInitiated) {
+        let work = Task.detached(priority: .userInitiated) { () -> LocalResults? in
             let (lm, hits) = SmartSearch.local(parsed, corpus: libraryCorpus, previous: previousLibrary)
+            guard !Task.isCancelled else { return nil }
             let cm = channelCorpus.search(q, refining: previousChannels)
+            guard !Task.isCancelled else { return nil }
             // Few matches: also look for near-misses (typos).
             let shown = Set(hits.map(\.entry.id))
             let fl = hits.count < 8 && !parsed.title.isEmpty
                 ? libraryCorpus.fuzzy(parsed.title).map { libraryCorpus.items[$0] }.filter { !shown.contains($0.id) } : []
             let fc = cm.ranked.count < 8 ? channelCorpus.fuzzy(q, limit: 30).filter { !Set(cm.ranked.prefix(60)).contains($0) } : []
-            return (lm, hits, cm, fl, fc)
-        }.value
-        guard !Task.isCancelled else { return }
-        libraryMatch = lm
+            return LocalResults(libraryMatch: lm, hits: hits, channelMatch: cm, typoLibrary: fl, typoChannels: fc)
+        }
+        let found = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+        guard !Task.isCancelled, let found else { return }
+        let hits = found.hits, cm = found.channelMatch
+        libraryMatch = found.libraryMatch
         channelMatch = cm
-        let typos = typoLibrary.map { SearchHit(entry: $0, pending: []) }
+        let typos = found.typoLibrary.map { SearchHit(entry: $0, pending: []) }
         library = cards(hits + typos)
         publishTitles()
-        channels = (Array(cm.ranked.prefix(60)) + typoChannels).map { channelCorpus.items[$0] }
-        // What's on: the guide and today's games, by name.
-        let guideHits = await model.searchGuide(q, area: prefs.area)
-        guard !Task.isCancelled else { return }
-        onTV = guideHits
-        completions = Self.completions(for: q,
-                                       names: (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
-                                           + (Array(cm.ranked.prefix(6)) + typoChannels.prefix(3)).map { model.title(of: channelCorpus.items[$0]) })
+        channels = (Array(cm.ranked.prefix(60)) + found.typoChannels).map { channelCorpus.items[$0] }
+        let titleNames = (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
+        let channelIndices = Array(cm.ranked.prefix(6)) + Array(found.typoChannels.prefix(3))
+        let channelNames = channelIndices.map { model.title(of: channelCorpus.items[$0]) }
+        completions = Self.completions(for: q, names: titleNames + channelNames)
         serverDone = false
 
         // Results settled: treat the top title as intent and get it ready,
@@ -467,6 +470,28 @@ struct SearchView: View {
             }
         }
 
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await searchOnTV(q) }
+            group.addTask { await searchServer(q, parsed: parsed, hits: hits, typos: typos) }
+        }
+    }
+
+    private struct LocalResults: Sendable {
+        let libraryMatch: SearchCorpus<LibraryEntry>.Match?
+        let hits: [SearchHit]
+        let channelMatch: SearchCorpus<LiveChannel>.Match
+        let typoLibrary: [LibraryEntry]
+        let typoChannels: [Int]
+    }
+
+    /// What's on: the guide and today's games, by name.
+    private func searchOnTV(_ q: String) async {
+        let hits = await model.searchGuide(q, area: prefs.area)
+        guard !Task.isCancelled else { return }
+        onTV = hits
+    }
+
+    private func searchServer(_ q: String, parsed: SearchQuery, hits: [SearchHit], typos: [SearchHit]) async {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2, model.sources.emby != nil else {
             serverCards = []

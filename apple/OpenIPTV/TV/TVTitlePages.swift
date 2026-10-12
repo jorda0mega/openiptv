@@ -52,16 +52,14 @@ struct TVMovieView: View {
     let route: MovieRoute
     @Binding var playing: PlayerItem?
 
-    @State private var item: EmbyItem?
-    @State private var similar: [Card] = []
     @State private var loading = false
     @State private var playError: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 50) {
-                TVTitleHeader(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: 1920)?.absoluteString },
-                              logo: item.flatMap { model.emby?.logoURL(for: $0, width: 900)?.absoluteString },
+                TVTitleHeader(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth)?.absoluteString },
+                              logo: item.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth)?.absoluteString },
                               title: route.title, details: titleDetails(item, model: model, kind: "Movie"),
                               overview: item?.overview) {
                     Button(action: play) {
@@ -110,15 +108,20 @@ struct TVMovieView: View {
         return item?.timeLeft.map { "Continue · \($0)" } ?? "Continue"
     }
 
+    /// The page as last seen (or fetched ahead when it was focused),
+    /// complete from the first frame; brought up to date in the background.
+    private var item: EmbyItem? { model.movies[route.id]?.item }
+
+    private var similar: [Card] {
+        guard let emby = model.emby, let data = model.movies[route.id] else { return [] }
+        return data.similar.filter { $0.userData?.played != true }
+            .map { emby.card($0, context: .poster, shape: .portrait, width: 480) }
+    }
+
     private func load() async {
         model.warmUp(route.id, kind: "Movie", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-        guard let emby = model.emby else { return }
-        async let detail = emby.details(route.id)
-        async let like = emby.similar(to: route.id, limit: 20)
-        item = await detail
-        similar = await like
-            .filter { $0.userData?.played != true }
-            .map { emby.card($0, context: .poster, shape: .portrait, width: 480) }
+        _ = model.cachedMovie(route.id)
+        _ = await model.loadMovie(route.id)
     }
 
     private func play() {
@@ -145,9 +148,6 @@ struct TVShowView: View {
     let route: ShowRoute
     @Binding var playing: PlayerItem?
 
-    @State private var data: AppModel.ShowData?
-    @State private var details: EmbyItem?
-    @State private var similar: [Card] = []
     @State private var season: Int?
     @State private var loadingItem: String?
     @State private var playError: String?
@@ -166,13 +166,23 @@ struct TVShowView: View {
         return (data?.episodes ?? []).compactMap { $0.parentIndexNumber ?? 0 }.filter { seen.insert($0).inserted }
     }
 
+    /// The page as last seen (or fetched ahead when it was focused),
+    /// complete from the first frame; brought up to date in the background.
+    private var data: AppModel.ShowData? { model.shows[route.id] }
+
+    private var similar: [Card] {
+        guard let emby = model.emby else { return [] }
+        return (data?.similar ?? []).filter { $0.userData?.played != true }
+            .map { emby.card($0, context: .poster, shape: .portrait, width: 480) }
+    }
+
     var body: some View {
-        let show = details ?? data?.show
+        let show = data?.show
         let shownSeason = season ?? upNext?.parentIndexNumber ?? seasons.first
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
-                TVTitleHeader(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: 1920)?.absoluteString },
-                              logo: show.flatMap { model.emby?.logoURL(for: $0, width: 900)?.absoluteString },
+                TVTitleHeader(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth)?.absoluteString },
+                              logo: show.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth)?.absoluteString },
                               title: route.title, details: titleDetails(show, model: model, kind: "Series"),
                               overview: show?.overview) {
                     Button { playMain() } label: {
@@ -261,15 +271,8 @@ struct TVShowView: View {
         } else {
             model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
         }
-        data = model.cachedShow(route.id)
-        guard let emby = model.emby else { return }
-        async let detail = emby.details(route.id)
-        async let like = emby.similar(to: route.id, limit: 20)
-        if let fresh = await model.loadShow(route.id) { data = fresh }
-        details = await detail
-        similar = await like
-            .filter { $0.userData?.played != true }
-            .map { emby.card($0, context: .poster, shape: .portrait, width: 480) }
+        _ = model.cachedShow(route.id)
+        _ = await model.loadShow(route.id)
     }
 
     private func playMain() {

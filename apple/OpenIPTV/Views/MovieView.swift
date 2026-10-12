@@ -17,8 +17,6 @@ struct MovieView: View {
     let route: MovieRoute
     @Binding var playing: PlayerItem?
 
-    @State private var item: EmbyItem?
-    @State private var similar: [Card] = []
     @State private var loading = false
     @State private var playError: String?
 
@@ -27,8 +25,8 @@ struct MovieView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                TitleHero(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: 1280) },
-                          logo: item.flatMap { model.emby?.logoURL(for: $0, width: 800) },
+                TitleHero(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
+                          logo: item.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                           title: route.title, line: genreLine) {
                     PlayCapsule(label: loading ? "Starting…" : playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
                                 loading: loading, action: play)
@@ -110,16 +108,21 @@ struct MovieView: View {
         }
     }
 
+    /// The page as last seen (or fetched ahead), complete from the first
+    /// frame; brought up to date in the background.
+    private var item: EmbyItem? { model.movies[route.id]?.item }
+
+    private var similar: [Card] {
+        guard let emby = model.emby, let data = model.movies[route.id] else { return [] }
+        let width = Int(Layout.posterWidth * displayScale)
+        return data.similar.filter { $0.userData?.played != true }
+            .map { emby.card($0, context: .poster, shape: .portrait, width: width) }
+    }
+
     private func load() async {
         model.warmUp(route.id, kind: "Movie", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-        guard let emby = model.emby else { return }
-        async let detail = emby.details(route.id)
-        async let like = emby.similar(to: route.id, limit: 16)
-        item = await detail
-        let width = Int(Layout.posterWidth * displayScale)
-        similar = await like
-            .filter { $0.userData?.played != true }
-            .map { emby.card($0, context: .poster, shape: .portrait, width: width) }
+        _ = model.cachedMovie(route.id)
+        _ = await model.loadMovie(route.id)
     }
 
     private func play() {

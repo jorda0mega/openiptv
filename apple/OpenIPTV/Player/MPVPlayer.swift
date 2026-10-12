@@ -38,6 +38,10 @@ final class MPVPlayer: @unchecked Sendable {
 
     let layer = MPVMetalLayer()
     var onEvent: (@MainActor (Event) -> Void)?
+    /// Players still closing their connection. A live stream waits for them
+    /// (up to 2 s) before opening its own: many IPTV accounts allow one
+    /// connection, and a second while the first is closing gets refused.
+    private static let closing = DispatchGroup()
 
     private var mpv: OpaquePointer?
     private let queue = DispatchQueue(label: "openiptv.mpv", qos: .userInitiated)
@@ -51,35 +55,57 @@ final class MPVPlayer: @unchecked Sendable {
     /// for, and the newest target to show once it lands.
     private var followStarted: CFAbsoluteTime?
     private var followNext: (seconds: Double, exact: Bool)?
+    /// Where the jump under way is going, and where the last one landed.
+    private var followTarget: Double?
+    private var followShown: Double?
+    /// The bar moves a few times a second; every frame (24-60 a second)
+    /// used to re-render the player's screen for nothing.
+    private var lastTimeEmit: CFAbsoluteTime = 0
+    private var lastTimePosition: Double = 0
+    /// `reportedStart`, readable from the screen without waiting for the
+    /// player's queue (busy starting up or opening a file).
+    private let startLock = NSLock()
+    private var startedFlag = false
     /// The first frame is ready (a warmed-up player may already be there).
-    var hasStarted: Bool { queue.sync { reportedStart } }
+    var hasStarted: Bool { startLock.withLock { startedFlag } }
     private var duration: Double?
     private var buffered: Double = 0
     private var downloadSpeed: Double = 0
     private var lastNetworkReport: CFAbsoluteTime = 0
     private var reportsWindow = false
 
-    /// How far ahead to download. Files on an unmetered connection are
-    /// fetched to the end into a temporary file, so any seek ahead (or back
-    /// over what's been played) is instant.
+    /// How far ahead to download, always in memory for files: libmpv's
+    /// disk cache is append-only (every byte downloaded stays in the file
+    /// until playback closes), so a whole 4K film could fill an Apple TV's
+    /// disk. `cache-secs` is set with each, or libmpv's default (far larger)
+    /// overrides the readahead and a "warm" player downloads for minutes.
     enum Readahead: Equatable {
-        /// Live streams: everything since tuning in, on disk, to rewind.
+        /// Live streams: what's been watched since tuning in, to rewind (on
+        /// disk when there's plenty of room: it's only as big as the session).
         case live
-        /// Opened in the background before a tap: a minute, on disk.
+        /// Opened in the background before a tap: a few seconds, enough to
+        /// start at once without taking bandwidth from anything else.
         case warm
-        /// Cellular / low space: five minutes, in memory.
+        /// Cellular / Low Data Mode: two minutes.
         case modest
-        /// Wi-Fi: the whole rest of the file, on disk, up to `bytes`.
-        case whole(bytes: Int64)
+        /// Wi-Fi: as much as fits in 300 MB ahead, 100 MB behind.
+        case generous
     }
 
+    /// Returns at once: libmpv starts up on the player's own queue (its
+    /// initialisation takes a while, and used to hold up the screen that
+    /// opened the player); everything asked of the player queues behind it.
     init(options: [(String, String)], hardwareDecoding: Bool) {
         layer.framebufferOnly = true
         layer.backgroundColor = UIColor.black.cgColor
+        let wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
+        queue.async { [self] in setUp(wid: wid, options: options, hardwareDecoding: hardwareDecoding) }
+    }
 
+    private func setUp(wid: Int64, options: [(String, String)], hardwareDecoding: Bool) {
         guard let mpv = mpv_create() else { return }
         self.mpv = mpv
-        var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
+        var wid = wid
         mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &wid)
         set("vo", "gpu-next")
         set("gpu-api", "vulkan")
@@ -134,11 +160,13 @@ final class MPVPlayer: @unchecked Sendable {
         }
         queue.async { [self] in
             guard let mpv else { return }
+            if !file { _ = Self.closing.wait(timeout: .now() + 2) }
             apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
             reportsWindow = !file
             openedAfter = nil
             reportedStart = false
+            startLock.withLock { startedFlag = false }
             duration = nil
             mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
             mpv_set_property_string(mpv, "stream-lavf-o", file
@@ -163,30 +191,35 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func apply(_ readahead: Readahead, _ mpv: OpaquePointer, opening: Bool = true) {
         func set(_ name: String, _ value: String) { mpv_set_property_string(mpv, name, value) }
+        func ahead(_ seconds: Int) {
+            set("demuxer-readahead-secs", String(seconds))
+            set("cache-secs", String(seconds))
+        }
         switch readahead {
         case .live:
-            // Keeps what's been watched (on disk, up to about an hour of a
-            // typical channel) so live TV can be paused and rewound, and
-            // keeps downloading while paused.
-            if opening { set("cache-on-disk", "yes") }
-            set("demuxer-readahead-secs", "7200")
-            set("demuxer-max-bytes", "1GiB")
-            set("demuxer-max-back-bytes", "1GiB")
+            // Keeps what's been watched (up to about an hour of a typical
+            // channel) so live TV can be paused and rewound, and keeps
+            // downloading while paused.
+            let onDisk = NetworkStatus.shared.roomForTimeshift
+            if opening { set("cache-on-disk", onDisk ? "yes" : "no") }
+            ahead(7200)
+            set("demuxer-max-bytes", onDisk ? "1GiB" : "128MiB")
+            set("demuxer-max-back-bytes", onDisk ? "1GiB" : "256MiB")
         case .warm:
-            if opening { set("cache-on-disk", "yes") }
-            set("demuxer-readahead-secs", "60")
-            set("demuxer-max-bytes", "1GiB")
-            set("demuxer-max-back-bytes", "1GiB")
+            if opening { set("cache-on-disk", "no") }
+            ahead(10)
+            set("demuxer-max-bytes", "96MiB")
+            set("demuxer-max-back-bytes", "32MiB")
         case .modest:
             if opening { set("cache-on-disk", "no") }
-            set("demuxer-readahead-secs", "300")
+            ahead(120)
+            set("demuxer-max-bytes", "128MiB")
+            set("demuxer-max-back-bytes", "64MiB")
+        case .generous:
+            if opening { set("cache-on-disk", "no") }
+            ahead(3600)
             set("demuxer-max-bytes", "300MiB")
             set("demuxer-max-back-bytes", "100MiB")
-        case let .whole(bytes):
-            if opening { set("cache-on-disk", "yes") }
-            set("demuxer-readahead-secs", "86400")
-            set("demuxer-max-bytes", String(bytes))
-            set("demuxer-max-back-bytes", String(bytes))
         }
     }
 
@@ -275,8 +308,23 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    /// Choosing is over: the picture ends on `seconds` and playback carries
+    /// on from there. At once when the last preview already shows it (or is
+    /// about to); otherwise one jump there, replacing any still queued, so
+    /// nothing lands after letting go.
+    func settle(at seconds: Double, exact: Bool) {
+        queue.async { [self] in
+            if followNext == nil, let at = followStarted == nil ? followShown : followTarget, abs(at - seconds) < 0.5 { return }
+            stopFollowing()
+            seekStarted = CFAbsoluteTimeGetCurrent()
+            command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
+        }
+    }
+
     private func startFollowing(_ seconds: Double, exact: Bool) {
         followStarted = CFAbsoluteTimeGetCurrent()
+        followTarget = seconds
+        followShown = nil
         followNext = nil
         seekStarted = nil
         command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
@@ -284,6 +332,8 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func stopFollowing() {
         followStarted = nil
+        followTarget = nil
+        followShown = nil
         followNext = nil
     }
 
@@ -292,7 +342,9 @@ final class MPVPlayer: @unchecked Sendable {
     /// moment, and the screen mustn't wait for it.
     func shutdown() {
         onEvent = nil
+        Self.closing.enter()
         queue.async { [self] in
+            defer { Self.closing.leave() }
             guard let mpv else { return }
             mpv_set_wakeup_callback(mpv, nil, nil)
             mpv_terminate_destroy(mpv)
@@ -326,12 +378,14 @@ final class MPVPlayer: @unchecked Sendable {
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
         case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:
             reportedStart = true
+            startLock.withLock { startedFlag = true }
             seekStarted = nil
             if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
             emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted))
         case MPV_EVENT_PLAYBACK_RESTART:
             if followStarted != nil {
                 followStarted = nil
+                followShown = followTarget
                 if let next = followNext { startFollowing(next.seconds, exact: next.exact) }
             }
             if let asked = seekStarted {
@@ -358,7 +412,13 @@ final class MPVPlayer: @unchecked Sendable {
             case "duration" where property.format == MPV_FORMAT_DOUBLE:
                 duration = value.assumingMemoryBound(to: Double.self).pointee
             case "time-pos" where property.format == MPV_FORMAT_DOUBLE:
-                emit(.time(position: value.assumingMemoryBound(to: Double.self).pointee, duration: duration))
+                // Four times a second, and at once after a jump.
+                let position = value.assumingMemoryBound(to: Double.self).pointee
+                let now = CFAbsoluteTimeGetCurrent()
+                guard now - lastTimeEmit >= 0.25 || abs(position - lastTimePosition) > 1.5 else { break }
+                lastTimeEmit = now
+                lastTimePosition = position
+                emit(.time(position: position, duration: duration))
             case "demuxer-cache-duration" where property.format == MPV_FORMAT_DOUBLE:
                 buffered = value.assumingMemoryBound(to: Double.self).pointee
                 reportNetwork()

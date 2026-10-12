@@ -67,6 +67,18 @@ enum HomeFeed {
         }
     }
 
+    /// Emby's titles most like each of these, in the same order.
+    private nonisolated static func similar(_ emby: EmbyClient, to ids: [String]) async -> [[EmbyItem]] {
+        await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
+            for (order, id) in ids.enumerated() {
+                group.addTask { (order, await emby.similar(to: id)) }
+            }
+            var out = [[EmbyItem]](repeating: [], count: ids.count)
+            for await (order, items) in group { out[order] = items }
+            return out
+        }
+    }
+
     static func load(_ emby: EmbyClient, library: LibraryIndex, cardWidth: Int, backdropWidth: Int) async throws -> HomeContent {
         // Everything that doesn't depend on something else, at once: what
         // you're watching and what's new, and the trending titles with what
@@ -76,6 +88,10 @@ enum HomeFeed {
         let notableIds = library.notable.prefix(100).map(\.id)
         async let notableItems = emby.items(ids: notableIds)
         let sources = try await emby.homeSources()
+        // Top picks only need what was watched: asked for now, alongside the
+        // charts' titles, not after them.
+        let seeds = seeds(watching: sources.watching, played: sources.played)
+        async let similarLists = Self.similar(emby, to: seeds.map(\.id))
         let ratings = library.ratings
         let thisYear = Calendar.current.component(.year, from: Date())
 
@@ -164,15 +180,7 @@ enum HomeFeed {
 
         // Top picks: titles like the five you watched last, one from each in
         // turn (Emby's own ranking of what's most alike within each).
-        let seeds = seeds(watching: sources.watching, played: sources.played)
-        let similar = await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
-            for (order, seed) in seeds.enumerated() {
-                group.addTask { (order, await emby.similar(to: seed.id)) }
-            }
-            var out = [[EmbyItem]](repeating: [], count: seeds.count)
-            for await (order, items) in group { out[order] = items }
-            return out
-        }
+        let similar = await similarLists
         var picks: [EmbyItem] = []
         var queues = similar.map { $0.filter { !watched($0) && worthIt($0) }[...] }
         while picks.count < 20, queues.contains(where: { !$0.isEmpty }) {

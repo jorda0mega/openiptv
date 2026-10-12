@@ -41,6 +41,7 @@ actor GuideStore {
         programmes = cache.programmes
         fetchedAt = cache.fetchedAt
         state = .ready(programmes: programmes.values.reduce(0) { $0 + $1.count }, fetchedAt: cache.fetchedAt)
+        prepareSearch()
     }
 
     func isStale(maxAge: TimeInterval = 6 * 3600) -> Bool {
@@ -75,6 +76,7 @@ actor GuideStore {
         programmes = merged
         fetchedAt = Date()
         state = .ready(programmes: merged.values.reduce(0) { $0 + $1.count }, fetchedAt: fetchedAt!)
+        prepareSearch()
         if let data = try? JSONEncoder().encode(Cache(fetchedAt: fetchedAt!, programmes: merged)) {
             try? data.write(to: cacheURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
@@ -106,16 +108,24 @@ actor GuideStore {
     /// Programmes on now or later whose title has the query's words (each
     /// word in the title or the channel's name, at least one in the title):
     /// the ones on now first, then by start time.
+    /// The search index, built when the guide arrives rather than on the
+    /// first letter typed (it folds every title: a moment for a big guide).
+    private func prepareSearch() {
+        guard searchIndex == nil else { return }
+        searchIndex = programmes.flatMap { id, list in
+            list.map { (epgId: id, programme: $0, folded: GuideStore.fold($0.title)) }
+        }.sorted { $0.programme.start < $1.programme.start }
+    }
+
+    /// Stops early when the search that asked is cancelled (the next letter
+    /// was typed), so letters typed quickly don't queue up whole scans.
     func search(_ words: [String], now: Int64 = Int64(Date().timeIntervalSince1970), limit: Int = 300)
         -> [(epgId: String, programme: Programme)] {
         guard !words.isEmpty else { return [] }
-        if searchIndex == nil {
-            searchIndex = programmes.flatMap { id, list in
-                list.map { (epgId: id, programme: $0, folded: GuideStore.fold($0.title)) }
-            }.sorted { $0.programme.start < $1.programme.start }
-        }
+        prepareSearch()
         var onNow: [(String, Programme)] = [], later: [(String, Programme)] = []
-        for item in searchIndex ?? [] where item.programme.stop > now {
+        for (offset, item) in (searchIndex ?? []).enumerated() where item.programme.stop > now {
+            if offset & 4095 == 0, Task.isCancelled { return [] }
             var inTitle = false
             var matched = true
             for word in words {

@@ -58,6 +58,9 @@ struct RootView: View {
             case .active:
                 model.connectLive()
                 Task { await model.prepareLibrary() }
+                // Watched elsewhere while away (the live connection was
+                // closed): Continue Watching is right when you look.
+                if !model.rows.isEmpty { Task { await model.refreshContinueWatching() } }
             case .background:
                 model.disconnectLive()
             default:

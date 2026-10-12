@@ -132,6 +132,8 @@ struct TVHomeView: View {
 /// The full-screen top of Home: one title at a time, moving on every few
 /// seconds; swiping right on More Info shows the next.
 struct TVHero: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Preferences.self) private var prefs
     let items: [Featured]
     let play: (Card) -> Void
     let open: (Card) -> Void
@@ -161,6 +163,15 @@ struct TVHero: View {
                     }
                     .buttonStyle(.glass)
                     .focused($focus, equals: .play)
+                    // Resting on Play: open it in the background, so Select
+                    // starts it at once.
+                    .task(id: focus == .play ? item.card.id : nil) {
+                        guard focus == .play else { return }
+                        try? await Task.sleep(for: .milliseconds(400))
+                        guard !Task.isCancelled else { return }
+                        model.warmUp(item.card.id, kind: item.card.kind, options: prefs.playerProfile.mpvOptions,
+                                     hardwareDecoding: prefs.hardwareDecoding)
+                    }
                     Button { open(item.card) } label: {
                         Label("More Info", systemImage: "info.circle")
                     }
@@ -239,10 +250,15 @@ struct TVTitleArt: View {
     let logo: String?
     let title: String
     var maxHeight: CGFloat = 170
-    @State private var image: UIImage?
-    @State private var failed = false
+    @State private var loaded: (logo: String, image: UIImage)?
+    @State private var failedLogo: String?
 
     var body: some View {
+        // A logo already decoded (fetched with Home, or seen before) is
+        // drawn at once: the hero's next title arrives complete.
+        let image = logo.flatMap { logo in
+            loaded?.logo == logo ? loaded?.image : URL(string: logo).flatMap(ImagePipeline.shared.cached)
+        }
         Group {
             if let image {
                 Image(uiImage: image)
@@ -251,7 +267,7 @@ struct TVTitleArt: View {
                     .frame(maxWidth: 700, maxHeight: maxHeight, alignment: .leading)
                     .shadow(color: .black.opacity(0.5), radius: 12)
                     .accessibilityLabel(title)
-            } else if logo == nil || failed {
+            } else if logo == nil || failedLogo == logo {
                 Text(title)
                     .font(.system(size: 68, weight: .bold))
                     .lineLimit(2)
@@ -263,10 +279,8 @@ struct TVTitleArt: View {
             }
         }
         .task(id: logo) {
-            image = nil
-            failed = false
-            guard let logo, let url = URL(string: logo) else { return }
-            if let loaded = try? await ImagePipeline.shared.image(for: url) { image = loaded } else { failed = true }
+            guard let logo, let url = URL(string: logo), ImagePipeline.shared.cached(url) == nil else { return }
+            if let image = try? await ImagePipeline.shared.image(for: url) { loaded = (logo, image) } else { failedLogo = logo }
         }
     }
 }
@@ -276,10 +290,13 @@ struct TVTitleArt: View {
 /// Continue Watching: wide pictures with the title, episode and progress on
 /// them. Select plays; press and hold for the show's page.
 struct TVContinueRow: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Preferences.self) private var prefs
     let row: HomeRow
     let loadingCard: String?
     let play: (Card) -> Void
     let open: (Card) -> Void
+    @FocusState private var focused: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -313,6 +330,7 @@ struct TVContinueRow: View {
                                 .tvArtwork()
                         }
                         .buttonStyle(.borderless)
+                        .focused($focused, equals: card.id)
                         .contextMenu {
                             Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
                         }
@@ -323,15 +341,26 @@ struct TVContinueRow: View {
             }
             .tvRowScroll()
         }
+        // Resting on a title: open it in the background (paused where it was
+        // left), so Select starts it at once.
+        .task(id: focused) {
+            guard let id = focused, let card = row.cards.first(where: { $0.id == id }) else { return }
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            model.warmUp(card.episodeId ?? card.id, kind: card.episodeId != nil ? "Episode" : card.kind,
+                         options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+        }
     }
 }
 
 /// A row of portrait posters (artwork only, like the TV app); select opens
 /// the title.
 struct TVPosterRow: View {
+    @Environment(AppModel.self) private var model
     let title: String
     let cards: [Card]
     let select: (Card) -> Void
+    @FocusState private var focused: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -350,12 +379,21 @@ struct TVPosterRow: View {
                                 .tvArtwork()
                         }
                         .buttonStyle(.borderless)
+                        .focused($focused, equals: card.id)
                         .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
                 }
                 .padding(.vertical, 24)
             }
             .tvRowScroll()
+        }
+        // Resting on a poster a moment: fetch its page and pictures, so
+        // Select opens it complete (passing over posters fetches nothing).
+        .task(id: focused) {
+            guard let id = focused, let card = cards.first(where: { $0.id == id }) else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            model.prefetchTitle(card)
         }
     }
 }
