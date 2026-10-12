@@ -23,14 +23,14 @@ struct Scrubber: View {
             let shown = scrubbing ?? position
             let fraction = total > 0 ? min(max(shown / total, 0), 1) : 0
             let active = scrubbing != nil
+            // The Apple TV app's: a thick capsule with no knob, the part
+            // played in white; it grows while a finger is on it.
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.25)).frame(height: active ? 8 : 4)
-                Capsule().fill(.tint).frame(width: width * fraction, height: active ? 8 : 4)
-                Circle()
-                    .fill(.white)
-                    .frame(width: active ? 22 : 14, height: active ? 22 : 14)
-                    .offset(x: width * fraction - (active ? 11 : 7))
+                Capsule().fill(.white.opacity(0.35))
+                Rectangle().fill(.white.opacity(0.92)).frame(width: width * fraction)
             }
+            .frame(height: active ? 14 : 8)
+            .clipShape(Capsule())
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .animation(.easeOut(duration: 0.12), value: active)
@@ -38,7 +38,7 @@ struct Scrubber: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
                         if lastX == nil {
-                            // Touching away from the thumb jumps there first.
+                            // Touching away from where it's at jumps there first.
                             let thumbX = width * fraction
                             value = abs(drag.startLocation.x - thumbX) < 30
                                 ? shown

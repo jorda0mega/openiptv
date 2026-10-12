@@ -88,6 +88,16 @@ struct MoviePlayerView: View {
     /// builds with the stats on).
     @State private var timing: String?
     @State private var warmStart = false
+    /// The file's audio and subtitle tracks, and the picture's badges ("4K",
+    /// "HDR") for the Info panel.
+    @State private var tracks: [MPVPlayer.Track] = []
+    @State private var badges: [String] = []
+    #if os(iOS)
+    /// The Info card, and the picture filling the screen (cropped) rather
+    /// than fitting it.
+    @State private var showInfo = false
+    @State private var filled = false
+    #endif
     #if os(tvOS)
     /// Where the current swipe started from.
     @State private var swipeFrom: Double?
@@ -101,10 +111,6 @@ struct MoviePlayerView: View {
     /// The Info panel or a track menu, and what the remote is on.
     @State private var panel: TVPlayerPanel?
     @State private var focus: TVPlayerFocus = .bar
-    /// The file's audio and subtitle tracks, and the picture's badges ("4K",
-    /// "HDR") for the Info panel.
-    @State private var tracks: [MPVPlayer.Track] = []
-    @State private var badges: [String] = []
     /// The latest track-menu request: an older one finishing late (the
     /// player busy) doesn't open its menu.
     @State private var menuRequest = 0
@@ -152,6 +158,12 @@ struct MoviePlayerView: View {
             if let player {
                 VideoSurface(player: player)
                     .ignoresSafeArea()
+                    #if os(iOS)
+                    .gesture(MagnifyGesture().onEnded { pinch in
+                        if pinch.magnification > 1.08, !filled { setFilled(true) }
+                        if pinch.magnification < 0.92, filled { setFilled(false) }
+                    })
+                    #endif
                     .accessibilityElement()
                     .accessibilityLabel(playback.title)
                     .accessibilityHint("Shows the player controls")
@@ -209,15 +221,103 @@ struct MoviePlayerView: View {
                        info: TVPlayerInfo(heading: playback.subtitle, overview: playback.overview, runtime: runtime, badges: badges),
                        menu: menu)
         #else
-        PlayerChrome(caption: playback.subtitle, title: playback.title, note: note, paused: paused,
-                     busy: (buffering || !started) && error == nil, ready: started,
+        // A film shows its title alone, as in the Apple TV app; an episode
+        // its "S1:E3 · Name" over the show.
+        PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
+                     paused: paused, busy: (buffering || !started) && error == nil, ready: started,
+                     topActions: [fillAction], pills: [PlayerAction(title: "Info") { showInfo = true }],
                      close: { dismiss() }, back: { skip(-10) },
                      playPause: { player?.togglePause() }, forward: { skip(10) }) {
+            trackMenu
+        } accessory: {
             EmptyView()
         } bar: {
             scrubber
         }
+        .sheet(isPresented: $showInfo) {
+            PlayerInfoCard(caption: playback.subtitle, title: playback.title, overview: playback.overview,
+                           runtime: runtime, badges: badges)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
         #endif
+    }
+
+    #if os(iOS)
+    /// Fill the screen (the picture cropped at its edges) or fit it, like
+    /// pinching in the Apple TV app.
+    private var fillAction: PlayerAction {
+        PlayerAction(title: filled ? "Fit to Screen" : "Fill Screen",
+                     systemImage: filled ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
+            setFilled(!filled)
+        }
+    }
+
+    private func setFilled(_ fill: Bool) {
+        filled = fill
+        player?.setFill(fill)
+        showControls()
+    }
+
+    /// "…": the audio track and subtitles, ticked where they are.
+    private var trackMenu: some View {
+        Menu {
+            if audioTracks.count > 1 {
+                Section("Audio") {
+                    ForEach(audioTracks) { track in
+                        Button { pick(track) } label: {
+                            if track.selected { Label(label(track), systemImage: "checkmark") } else { Text(label(track)) }
+                        }
+                    }
+                }
+            }
+            Section("Subtitles") {
+                Button { pickSubtitles(nil) } label: {
+                    if subtitleTracks.contains(where: \.selected) { Text("Off") } else { Label("Off", systemImage: "checkmark") }
+                }
+                ForEach(subtitleTracks) { track in
+                    Button { pickSubtitles(track) } label: {
+                        if track.selected { Label(label(track), systemImage: "checkmark") } else { Text(label(track)) }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Audio and Subtitles")
+        // Open: the controls stay up until something is picked.
+        .simultaneousGesture(TapGesture().onEnded {
+            showControls(autoHide: false)
+            Task { if let player { tracks = await player.tracks() } }
+        })
+    }
+
+    private func pick(_ track: MPVPlayer.Track) {
+        player?.selectAudio(track.id)
+        markSelected(track.id, kind: .audio)
+        showControls()
+    }
+
+    private func pickSubtitles(_ track: MPVPlayer.Track?) {
+        player?.selectSubtitle(track?.id)
+        markSelected(track?.id, kind: .subtitle)
+        showControls()
+    }
+    #endif
+
+    /// The tick moves at once (the player confirms on its own queue).
+    private func markSelected(_ id: Int?, kind: MPVPlayer.Track.Kind) {
+        tracks = tracks.map { track in
+            guard track.kind == kind else { return track }
+            return MPVPlayer.Track(id: track.id, kind: track.kind, title: track.title, language: track.language,
+                                   channels: track.channels, forced: track.forced, selected: track.id == id)
+        }
     }
 
     /// An error, a quality change, or how fast it started (briefly).
@@ -237,8 +337,8 @@ struct MoviePlayerView: View {
         // While scrubbing the picture itself shows where it'll land (no
         // preview box), and a slower drag says its speed at the end.
         #if os(iOS)
-        TimeBar(leading: timeString(scrubbing ?? position),
-                trailing: scrubSpeed ?? "-" + timeString(max(0, total - (scrubbing ?? position)))) {
+        TimeBar(leading: phoneClock(scrubbing ?? position),
+                trailing: scrubSpeed ?? "−" + phoneClock(max(0, total - (scrubbing ?? position)))) {
             Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
                      onChanged: { liveScrub($0) }, onCommit: commitScrub)
         }
@@ -260,6 +360,22 @@ struct MoviePlayerView: View {
         return TVTransportBar(fraction: at / max(total, 1), time: clock(at), remaining: "-" + clock(max(0, total - at)), state: state)
     }
 
+    private var menu: TVTrackMenu? {
+        switch panel {
+        case .audio:
+            TVTrackMenu(heading: "Audio Track", rows: audioTracks.map { .init(label: label($0), checked: $0.selected) })
+        case .subtitles:
+            TVTrackMenu(heading: "Subtitles", rows: [.init(label: "Off", checked: !subtitleTracks.contains(where: \.selected))]
+                + subtitleTracks.map { .init(label: label($0), checked: $0.selected) })
+        default:
+            nil
+        }
+    }
+
+    #endif
+
+    // MARK: Tracks and times (both platforms)
+
     /// "07:48" under an hour, "1:52:07" over, as Apple's player writes it.
     private func clock(_ seconds: Double) -> String {
         let s = Int(seconds.rounded())
@@ -279,16 +395,13 @@ struct MoviePlayerView: View {
     private var audioTracks: [MPVPlayer.Track] { tracks.filter { $0.kind == .audio } }
     private var subtitleTracks: [MPVPlayer.Track] { tracks.filter { $0.kind == .subtitle } }
 
-    private var menu: TVTrackMenu? {
-        switch panel {
-        case .audio:
-            TVTrackMenu(heading: "Audio Track", rows: audioTracks.map { .init(label: label($0), checked: $0.selected) })
-        case .subtitles:
-            TVTrackMenu(heading: "Subtitles", rows: [.init(label: "Off", checked: !subtitleTracks.contains(where: \.selected))]
-                + subtitleTracks.map { .init(label: label($0), checked: $0.selected) })
-        default:
-            nil
-        }
+    /// iPhone, as the Apple TV app writes it: "0:00:03" when the film runs
+    /// an hour or more, "4:05" otherwise.
+    private func phoneClock(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return total >= 3600
+            ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+            : String(format: "%d:%02d", s / 60, s % 60)
     }
 
     /// "English", "English (Commentary)", "Spanish 5.1", "French (Forced)".
@@ -325,7 +438,6 @@ struct MoviePlayerView: View {
             self.badges = badges
         }
     }
-    #endif
 
     /// The preview still for where a jump would land, while the player's
     /// own picture is still on its way there.
@@ -477,9 +589,7 @@ struct MoviePlayerView: View {
             #if DEBUG
             NSLog("%@", "PERF start " + (timing ?? ""))
             #endif
-            #if os(tvOS)
             Task { await loadTrackInfo() }
-            #endif
             thumbnailTask = Task { await loadThumbnails() }
             // Development builds with the stats on: shown for a moment.
             if prefs.performanceStats { showTiming(timing ?? "", for: 5) } else { timing = nil }

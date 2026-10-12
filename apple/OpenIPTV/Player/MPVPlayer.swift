@@ -398,6 +398,14 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    /// Fills the screen with the picture (cropping its edges) or fits it.
+    func setFill(_ fill: Bool) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "panscan", fill ? "1.0" : "0.0")
+        }
+    }
+
     /// Plays this audio track.
     func selectAudio(_ id: Int) {
         queue.async { [self] in

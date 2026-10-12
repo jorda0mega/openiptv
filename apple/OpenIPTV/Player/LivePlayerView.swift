@@ -121,6 +121,7 @@ struct LivePlayerView: View {
         return PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
                             note: note, paused: paused, canGoForward: !(recording == nil && atLive),
                             busy: (buffering || !started) && error == nil, ready: started,
+                            pills: livePills,
                             close: { dismiss() }, back: { skip(-10) },
                             playPause: { error == nil ? togglePause() : retry() }, forward: { skip(10) }) {
             #if os(iOS)
@@ -236,9 +237,18 @@ struct LivePlayerView: View {
         #endif
     }
 
+    /// iPhone: the guide, under the bar like the Apple TV app's pills.
+    private var livePills: [PlayerAction] {
+        #if os(iOS)
+        [PlayerAction(title: "Guide") { showGuide = true }]
+        #else
+        []
+        #endif
+    }
+
     #if os(iOS)
     private func more(info: NowNext?) -> some View {
-        GlassIconButton(systemName: "ellipsis", label: "More", size: 44) {
+        PlayerGlassButton(systemName: "ellipsis", label: "More", size: 44, glyph: 19) {
             showMore = true
             showControls(autoHide: false)
         }
