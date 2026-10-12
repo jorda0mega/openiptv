@@ -138,6 +138,13 @@ final class MPVPlayer: @unchecked Sendable {
         // No log output at all: stream URLs carry credentials.
         set("msg-level", "all=no")
         for (name, value) in options { set(name, value) }
+        #if DEBUG
+        // Tests comparing options: "name=value;name=value".
+        for pair in (ProcessInfo.processInfo.environment["OPENREEL_DEBUG_MPV"] ?? "").split(separator: ";") {
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            if parts.count == 2 { set(parts[0], parts[1]) }
+        }
+        #endif
         mpv_initialize(mpv)
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
@@ -280,6 +287,21 @@ final class MPVPlayer: @unchecked Sendable {
     /// on Apple TV for a 4K film with keyframes 10 s apart.
     func seek(by seconds: Double, exact: Bool = true) {
         queue.async { [self] in
+            #if DEBUG
+            if let mpv {
+                var position: Double = 0
+                mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &position)
+                let ranges = Self.allRanges(mpv).map { String(format: "%.0f-%.0f", $0.0, $0.1) }.joined(separator: ",")
+                func text(_ name: String) -> String {
+                    guard let value = mpv_get_property_string(mpv, name) else { return "?" }
+                    defer { mpv_free(value) }
+                    return String(cString: value)
+                }
+                NSLog("%@", String(format: "PERF cache at %.1f by %+.0f ranges %@ ahead %@ readahead %@ cache-secs %@ max %@",
+                                   position, seconds, ranges, text("demuxer-cache-duration"), text("demuxer-readahead-secs"),
+                                   text("cache-secs"), text("demuxer-max-bytes")))
+            }
+            #endif
             stopFollowing()
             seekStarted = CFAbsoluteTimeGetCurrent()
             command(["seek", String(seconds), exact ? "relative+exact" : "relative+keyframes"])
@@ -466,6 +488,25 @@ final class MPVPlayer: @unchecked Sendable {
             emit(.window(start: window.start, end: window.end, seekable: seekable != 0))
         }
     }
+
+    #if DEBUG
+    private static func allRanges(_ mpv: OpaquePointer) -> [(Double, Double)] {
+        var state = mpv_node()
+        guard mpv_get_property(mpv, "demuxer-cache-state", MPV_FORMAT_NODE, &state) >= 0 else { return [] }
+        defer { mpv_free_node_contents(&state) }
+        func field(_ node: mpv_node, _ name: String) -> mpv_node? {
+            guard node.format == MPV_FORMAT_NODE_MAP, let map = node.u.list?.pointee else { return nil }
+            for i in 0..<Int(map.num) where map.keys[i].map({ String(cString: $0) }) == name { return map.values[i] }
+            return nil
+        }
+        guard let ranges = field(state, "seekable-ranges"), ranges.format == MPV_FORMAT_NODE_ARRAY,
+              let list = ranges.u.list?.pointee else { return [] }
+        return (0..<Int(list.num)).compactMap { i in
+            guard let s = field(list.values[i], "start"), let e = field(list.values[i], "end") else { return nil }
+            return (s.u.double_, e.u.double_)
+        }
+    }
+    #endif
 
     /// The span of the demuxer cache that can be jumped to
     /// (demuxer-cache-state's seekable ranges; the newest one, which a

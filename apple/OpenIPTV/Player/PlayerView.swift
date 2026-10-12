@@ -400,6 +400,7 @@ struct MoviePlayerView: View {
                 apply(decision)
             }
             #if DEBUG
+            NSLog("%@", String(format: "PERF net %.1f Mbps buffer %.1f s at %.1f", bytesPerSecond * 8 / 1e6, buffer, position))
             let quality = governor?.current.map { String(format: "converted %.1f Mbps", Double($0) / 1e6) } ?? "original"
             let file = playback.bitrate.map { String(format: "file %.1f Mbps", Double($0) / 1e6) } ?? "file bitrate ?"
             stats = String(format: "%@ · %@ · speed %.1f Mbps · %.0f s buffered", quality, file,

@@ -16,6 +16,10 @@ final class RemoteFocusTests: XCTestCase {
         if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
             app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
         }
+        // Player options to compare (debug builds).
+        if let options = ProcessInfo.processInfo.environment["MPV_EXTRA"] {
+            app.launchEnvironment["OPENREEL_DEBUG_MPV"] = options
+        }
     }
 
     private func focused() -> String {
