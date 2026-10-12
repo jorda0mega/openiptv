@@ -73,6 +73,49 @@ final class RemoteFocusTests: XCTestCase {
         press(.menu, "menu 2")
     }
 
+    /// Skips: click right four times and left twice, two seconds apart, with
+    /// a screenshot straight after the first (the bar should already be
+    /// there). Debug builds log each jump's time ("PERF seek").
+    func testSkipTiming() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(8)
+        remote.press(.right)
+        shot("right at once")
+        sleep(2)
+        for _ in 0..<3 { remote.press(.right); sleep(2) }
+        shot("after four rights")
+        for _ in 0..<2 { remote.press(.left); sleep(2) }
+        shot("after two lefts")
+        // Swipe-free choose: hold right, release, and it plays from there.
+        remote.press(.right, forDuration: 2)
+        shot("released")
+        sleep(1)
+        shot("a second later")
+    }
+
+    /// The live player's bar: playing, then paused (Play/Pause).
+    func testLivePlayerBar() {
+        app.launchArguments = ["-tvTab", "live"]
+        app.launch()
+        sleep(8)
+        press(.down, "into the page")
+        press(.select, "play channel")
+        sleep(6)
+        press(.select, "controls")
+        shot("live playing")
+        remote.press(.playPause)
+        sleep(2)
+        shot("live paused")
+        press(.menu, "leave")
+    }
+
     private func shot(_ note: String) {
         step += 1
         let name = String(format: "%02d-%@.png", step, note.replacingOccurrences(of: " ", with: "-"))

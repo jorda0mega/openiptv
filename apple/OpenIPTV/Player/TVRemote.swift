@@ -132,32 +132,66 @@ struct TVRemoteSurface: UIViewRepresentable {
     }
 }
 
-/// Apple TV's progress bar: a thin track, how far it's played, and, while
-/// choosing where to jump, a marker there.
-struct TVProgressBar: View {
-    let position: Double
-    let total: Double
-    /// Where a swipe or hold would jump to.
-    let target: Double?
+/// Apple TV's transport bar, as in its own player: a thin track and how
+/// far it's played; under the playhead the time there (a small pause sign
+/// before it while paused), the time left at the end. While choosing where
+/// to jump, the playhead is where it would land (the picture follows) and
+/// a faint mark stays where it was.
+struct TVTransportBar: View {
+    /// The playhead and where a choice started, 0...1.
+    let fraction: Double
+    var origin: Double?
+    let time: String
+    let remaining: String
+    let paused: Bool
+    var choosing = false
+
+    @State private var timeWidth: CGFloat = 0
+    @State private var remainingWidth: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
-            let played = total > 0 ? min(max(position / total, 0), 1) : 0
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.25))
-                Capsule().fill(.white).frame(width: width * played)
-                if let target, total > 0 {
-                    let x = width * min(max(target / total, 0), 1)
-                    Capsule().fill(.white)
-                        .frame(width: 4, height: 28)
-                        .offset(x: x - 2)
+            let x = width * min(max(fraction, 0), 1)
+            let thickness: CGFloat = choosing ? 10 : 6
+            VStack(alignment: .leading, spacing: 14) {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.3))
+                    Capsule().fill(.white).frame(width: max(x, thickness))
+                    if let origin {
+                        Capsule().fill(.white.opacity(0.7))
+                            .frame(width: 3, height: thickness + 12)
+                            .offset(x: width * min(max(origin, 0), 1) - 1.5)
+                    }
                 }
+                .frame(height: thickness)
+                .frame(height: 22)
+                // The time follows the playhead, kept on the bar; the time
+                // left steps aside when they'd touch.
+                let left = min(max(x - timeWidth / 2, 0), max(width - timeWidth, 0))
+                ZStack(alignment: .topLeading) {
+                    Text(remaining)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { remainingWidth = $0 }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .opacity(left + timeWidth + 24 > width - remainingWidth ? 0 : 1)
+                    HStack(spacing: 8) {
+                        if paused { Image(systemName: "pause.fill").font(.caption2) }
+                        Text(time)
+                    }
+                    .foregroundStyle(.white)
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { timeWidth = $0 }
+                    .offset(x: left)
+                }
+                .font(.caption.monospacedDigit().weight(.semibold))
             }
-            .frame(height: 10)
-            .frame(maxHeight: .infinity)
+            .animation(.snappy(duration: 0.2), value: choosing)
         }
-        .frame(height: 28)
+        .frame(height: 70)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(paused ? "Paused" : "Playing")
+        .accessibilityValue("\(time), \(remaining)")
     }
 }
 #endif

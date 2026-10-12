@@ -42,9 +42,11 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         }
     }
 
-    /// Darker at the top and bottom where the controls are; the picture
-    /// stays visible in between.
+    /// iPhone: darker at the top and bottom where the controls are, the
+    /// picture visible in between. Apple TV: only under the controls at the
+    /// bottom, fading in gently so it has no visible edge.
     private var shade: some View {
+        #if os(iOS)
         VStack(spacing: 0) {
             LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom).frame(height: 170)
             Color.black.opacity(0.12)
@@ -52,6 +54,17 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
+        #else
+        // An ease-in curve (opacity rising with the square of the distance).
+        LinearGradient(stops: (0...8).map { step in
+            let t = Double(step) / 8
+            return .init(color: .black.opacity(0.62 * t * t), location: t)
+        }, startPoint: .top, endPoint: .bottom)
+        .frame(height: 560)
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        #endif
     }
 
     /// The caption line starts with the accessory (live: the LIVE badge),
@@ -62,11 +75,11 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                 HStack(spacing: 10) {
                     accessory
                     if let caption, !caption.isEmpty {
-                        Text(caption).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
+                        Text(caption).font(captionFont).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
                     }
                 }
             }
-            Text(title).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(2)
+            Text(title).font(titleFont).foregroundStyle(.white).lineLimit(2)
             if let note {
                 Text(note.text).font(.caption.monospacedDigit()).foregroundStyle(note.color).lineLimit(3)
             }
@@ -74,6 +87,15 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         .shadow(color: .black.opacity(0.4), radius: 8)
         .accessibilityElement(children: .combine)
     }
+
+    #if os(iOS)
+    private var captionFont: Font { .subheadline.weight(.medium) }
+    private var titleFont: Font { .title3.weight(.bold) }
+    #else
+    // The size of Apple TV's own player titles, not a page heading's.
+    private var captionFont: Font { .caption.weight(.medium) }
+    private var titleFont: Font { .headline }
+    #endif
 
     #if os(iOS)
     /// Like the Apple TV app's player: close at the top left; back 10,
@@ -139,7 +161,7 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     }
 
     private var tvBar: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Spacer()
             HStack(alignment: .bottom) {
                 titles
@@ -148,7 +170,7 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
             bar.tint(.white)
         }
         .padding(.horizontal, 90)
-        .padding(.bottom, 60)
+        .padding(.bottom, 44)
     }
     #endif
 }

@@ -213,27 +213,26 @@ struct LivePlayerView: View {
     /// The scrubber: everything kept since tuning in (or the recording),
     /// with where it starts and how far behind live.
     @ViewBuilder private var bar: some View {
+        #if os(iOS)
         if started, error == nil, let span, let position {
             TimeBar(leading: leftLabel, trailing: scrubSpeed ?? rightLabel) {
-                #if os(iOS)
                 Scrubber(position: position - span.lower, total: span.upper - span.lower,
                          scrubbing: $scrubbing, speedLabel: $scrubSpeed,
                          onChanged: scrubMoved, onCommit: scrubEnded)
-                #else
-                HStack(spacing: 20) {
-                    Image(systemName: paused ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                        .frame(width: 32)
-                        .accessibilityLabel(paused ? "Paused" : "Playing")
-                    TVProgressBar(position: position - span.lower, total: max(span.upper - span.lower, 1), target: nil)
-                }
-                #endif
             }
         } else {
             TimeBar(leading: "", trailing: "") {
                 Capsule().fill(.white.opacity(0.25)).frame(height: 4).frame(maxWidth: .infinity)
             }
         }
+        #else
+        if started, error == nil, let span, let position {
+            TVTransportBar(fraction: (position - span.lower) / max(span.upper - span.lower, 1),
+                           time: leftLabel, remaining: rightLabel, paused: paused)
+        } else {
+            TVTransportBar(fraction: 0, time: "", remaining: "", paused: false)
+        }
+        #endif
     }
 
     #if os(iOS)

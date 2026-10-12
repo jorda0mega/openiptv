@@ -84,14 +84,21 @@ struct MoviePlayerView: View {
     #endif
     /// iPhone scrubbing: speed label, and live seeks so the picture follows.
     @State private var scrubSpeed: String?
-    @State private var lastLiveSeek = Date.distantPast
     @State private var resumeAfterScrub = false
     /// Where the current scrub started, for "+1:30" / "−0:45".
     @State private var scrubOrigin: Double?
     /// Exact-frame seek once the finger rests.
     @State private var settleSeek: Task<Void, Never>?
-    /// Where the last exact-frame preview landed (its data is downloaded).
-    @State private var settledAt: Double?
+    /// Where the picture was last sent while choosing, and whether to that
+    /// exact frame (else the keyframe before it).
+    @State private var previewAt: Double?
+    @State private var previewExact = false
+    /// Just after a jump the player still reports where it was for a
+    /// moment: until it lands (or this time passes), the bar stays put.
+    @State private var jumpUntil: Date?
+    /// The last jump: the player waits for data after one, which isn't the
+    /// connection stalling.
+    @State private var lastSeek = Date.distantPast
     /// Picks original vs a server-converted lower bitrate to avoid stalls.
     @State private var governor: QualityGovernor?
     /// Shown briefly when the quality changes.
@@ -149,8 +156,8 @@ struct MoviePlayerView: View {
     private var controls: some View {
         PlayerChrome(caption: playback.subtitle, title: playback.title, note: note, paused: paused,
                      busy: (buffering || !started) && error == nil, ready: started,
-                     close: { dismiss() }, back: { player?.seek(by: -10) },
-                     playPause: { player?.togglePause() }, forward: { player?.seek(by: 10) }) {
+                     close: { dismiss() }, back: { skip(-10) },
+                     playPause: { player?.togglePause() }, forward: { skip(10) }) {
             EmptyView()
         } bar: {
             scrubber
@@ -173,22 +180,19 @@ struct MoviePlayerView: View {
     @ViewBuilder private var scrubber: some View {
         // While scrubbing the picture itself shows where it'll land (no
         // preview box), and a slower drag says its speed at the end.
+        #if os(iOS)
         TimeBar(leading: timeString(scrubbing ?? position),
                 trailing: scrubSpeed ?? "-" + timeString(max(0, total - (scrubbing ?? position)))) {
-            #if os(iOS)
             Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
-                     onChanged: liveScrub, onCommit: commitScrub)
-            #else
-            // Playing or paused, then the bar (with where a jump would land).
-            HStack(spacing: 20) {
-                Image(systemName: paused ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .frame(width: 32)
-                    .accessibilityLabel(paused ? "Paused" : "Playing")
-                TVProgressBar(position: position, total: max(total, 1), target: scrubbing)
-            }
-            #endif
+                     onChanged: { liveScrub($0) }, onCommit: commitScrub)
         }
+        #else
+        let at = scrubbing ?? position
+        let length = max(total, 1)
+        TVTransportBar(fraction: at / length, origin: scrubbing == nil ? nil : scrubOrigin.map { $0 / length },
+                       time: timeString(at), remaining: "−" + timeString(max(0, total - at)),
+                       paused: paused && scrubbing == nil, choosing: scrubbing != nil)
+        #endif
     }
 
     private func start() {
@@ -298,21 +302,29 @@ struct MoviePlayerView: View {
                                 total, playback.resolvedIn, setup, opened, playerSeconds - opened)
             }
             #if DEBUG
-            print("PERF start " + (timing ?? ""))
+            NSLog("%@", "PERF start " + (timing ?? ""))
             #endif
             // Development builds with the stats on: shown for a moment.
             if prefs.performanceStats { showTiming(timing ?? "", for: 5) } else { timing = nil }
             if controlsVisible { showControls() }
             Task { await model.report(playback, seconds: position, event: .started) }
         case let .seeked(seconds):
+            jumpUntil = nil
             if prefs.performanceStats { showTiming(String(format: "Jumped in %.1f s", seconds), for: 3) }
             #if DEBUG
-            print(String(format: "PERF seek %.3f", seconds))
+            NSLog("%@", String(format: "PERF seek %.3f at %.1f", seconds, position))
             #endif
         case let .buffering(isBuffering):
             buffering = isBuffering
+            #if DEBUG
+            NSLog("%@", "PERF buffering \(isBuffering)")
+            #endif
             // A stall: drop quality straight away rather than wait it out.
-            if isBuffering, started, let decision = governor?.observe(buffer: 0, bytesPerSecond: 0, stalled: true) {
+            // Not waiting for data just after a jump (or while choosing),
+            // which used to drop a film to the server-converted version after
+            // a few skips, and every skip after that waited for the server.
+            if isBuffering, started, scrubbing == nil, Date().timeIntervalSince(lastSeek) > 3,
+               let decision = governor?.observe(buffer: 0, bytesPerSecond: 0, stalled: true) {
                 apply(decision)
             }
         case let .network(buffer, bytesPerSecond):
@@ -361,9 +373,13 @@ struct MoviePlayerView: View {
                 if !why.isEmpty, error != nil { error = "Couldn't play. \(why)" }
             }
         case let .time(rawPosition, newDuration):
+            if let newDuration, offset == 0 { duration = newDuration }
+            if let until = jumpUntil {
+                guard Date() >= until else { return }
+                jumpUntil = nil
+            }
             let newPosition = rawPosition + offset
             position = newPosition
-            if let newDuration, offset == 0 { duration = newDuration }
             if abs(newPosition - lastReport) >= 10 {
                 lastReport = newPosition
                 Task { await model.report(playback, seconds: newPosition, event: .progress) }
@@ -410,8 +426,10 @@ struct MoviePlayerView: View {
 
     /// While dragging: pause, and move the picture so it follows the finger:
     /// the exact frame when scrubbing slowly or resting, the nearest
-    /// keyframe while sweeping fast.
-    private func liveScrub(_ target: Double) {
+    /// keyframe while sweeping fast. `settle: false` (a held button, which
+    /// moves on every quarter second): keyframes only, since each exact
+    /// frame costs a moment of decoding the picture would wait for.
+    private func liveScrub(_ target: Double, settle: Bool = true) {
         showControls(autoHide: false)
         if scrubOrigin == nil { scrubOrigin = position }
         if !resumeAfterScrub, !paused {
@@ -421,31 +439,43 @@ struct MoviePlayerView: View {
         // When the finger rests, show the exact frame at that second (the
         // server's thumbnails are 10 s apart, keyframes several seconds).
         settleSeek?.cancel()
-        settleSeek = Task {
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
-            player?.seek(to: max(0, target - offset), exact: true)
-            settledAt = target
+        if settle {
+            settleSeek = Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                showPreview(target, exact: true)
+            }
         }
-        // Moving: a few times a second so it keeps up; keyframes only when
-        // sweeping at full speed, where a pixel is many seconds anyway.
-        guard Date().timeIntervalSince(lastLiveSeek) > 0.12 else { return }
-        lastLiveSeek = Date()
-        player?.seek(to: max(0, target - offset), exact: scrubSpeed != nil)
+        // Moving: keyframes only when sweeping at full speed, where a pixel
+        // is many seconds anyway (the player keeps up as fast as it can).
+        showPreview(target, exact: scrubSpeed != nil)
     }
 
-    /// On release: land on the exact second and carry on playing.
+    private func showPreview(_ target: Double, exact: Bool) {
+        player?.follow(to: max(0, target - offset), exact: exact)
+        lastSeek = Date()
+        previewAt = target
+        previewExact = exact
+    }
+
+    /// On release: carry on from the picture on screen, which is already
+    /// where it was chosen (no second jump, so it plays at once). Only when
+    /// the picture is a moment behind, jump: to the keyframe before the
+    /// target, which plays without decoding up to the second (exact when
+    /// scrubbing slowly on iPhone).
     private func commitScrub(_ target: Double) {
         settleSeek?.cancel()
-        // The exact second when its data is likely here (a short jump, or
-        // one the finger rested on); otherwise the keyframe just before it,
-        // which plays without downloading and decoding up to the second
-        // (a 4K film's jump went from 1.3-2.5 s to well under a second).
-        let near = abs(target - (scrubOrigin ?? position)) < 30
-        let rested = settledAt.map { abs($0 - target) < 0.5 } ?? false
-        player?.seek(to: max(0, target - offset), exact: near || rested, report: true)
-        settledAt = nil
-        position = target
+        if let shown = previewAt, abs(shown - target) < 1 {
+            // An exact picture lands on the target; a keyframe's own time
+            // comes from the player.
+            if previewExact { position = target }
+        } else {
+            player?.seek(to: max(0, target - offset), exact: scrubSpeed != nil, report: true)
+            lastSeek = Date()
+            position = target
+            jumpUntil = Date().addingTimeInterval(1.5)
+        }
+        previewAt = nil
         scrubbing = nil
         scrubOrigin = nil
         if resumeAfterScrub {
@@ -461,8 +491,7 @@ struct MoviePlayerView: View {
     /// - hold left or right: rewind or fast-forward, faster the longer it's
     ///   held, jumping there on release;
     /// - swipe on the touch surface: the picture pauses and follows to where
-    ///   it would jump (a thumbnail when the server has them); click to jump
-    ///   there, Menu to stay;
+    ///   it would jump; click to play from there, Menu to stay;
     /// - click the centre or Play/Pause: pause or play;
     /// - Menu: stop choosing, then hide the controls, then leave.
     private func remote(_ input: TVRemoteSurface.Input) {
@@ -472,9 +501,7 @@ struct MoviePlayerView: View {
             if let target = scrubbing {
                 preview(target + direction * 10)
             } else {
-                player?.seek(by: direction * 10)
-                position = min(max(position + direction * 10, 0), max(total, 1))
-                showControls(autoHide: !paused)
+                skip(direction * 10)
             }
         case let .hold(direction):
             guard started else { return }
@@ -482,7 +509,7 @@ struct MoviePlayerView: View {
             holdTask = Task {
                 var step = 10.0
                 while !Task.isCancelled {
-                    preview((scrubbing ?? position) + direction * step)
+                    preview((scrubbing ?? position) + direction * step, settle: false)
                     try? await Task.sleep(for: .milliseconds(250))
                     // 40 s a second at first, up to 4 minutes a second.
                     step = min(step * 1.12, 60)
@@ -521,19 +548,22 @@ struct MoviePlayerView: View {
     private var secondsPerPoint: Double { max(total, 600) / 4 / 1920 }
 
     /// Moves where a jump would land; the picture pauses and follows.
-    private func preview(_ target: Double) {
+    private func preview(_ target: Double, settle: Bool = true) {
         let clamped = min(max(target, 0), max(total - 1, 0))
         scrubbing = clamped
-        liveScrub(clamped)
+        liveScrub(clamped, settle: settle)
     }
 
     /// Menu while choosing: back to where it was, playing if it was.
     private func cancelScrub() {
         settleSeek?.cancel()
-        if let origin = scrubOrigin { player?.seek(to: max(0, origin - offset), exact: true) }
+        if let origin = scrubOrigin {
+            player?.seek(to: max(0, origin - offset), exact: true)
+            lastSeek = Date()
+        }
         scrubbing = nil
         scrubOrigin = nil
-        settledAt = nil
+        previewAt = nil
         if resumeAfterScrub {
             resumeAfterScrub = false
             player?.setPaused(false)
@@ -548,6 +578,17 @@ struct MoviePlayerView: View {
     }
 
     #endif
+
+    /// Back or forward 10 s, straight away: the bar moves at once, and the
+    /// picture follows from the nearest keyframe past the ten seconds.
+    private func skip(_ seconds: Double) {
+        guard started else { return }
+        player?.seek(by: seconds, exact: false)
+        lastSeek = Date()
+        position = min(max(position + seconds, 0), max(total, 1))
+        jumpUntil = Date().addingTimeInterval(1.5)
+        showControls(autoHide: !paused)
+    }
 
     private func timeString(_ seconds: Double) -> String {
         let s = Int(seconds.rounded())

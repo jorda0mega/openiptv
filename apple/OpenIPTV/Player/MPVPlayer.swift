@@ -47,6 +47,10 @@ final class MPVPlayer: @unchecked Sendable {
     private var reportedStart = false
     /// When the last explicit jump was asked for (not scrubbing previews).
     private var seekStarted: CFAbsoluteTime?
+    /// Choosing where to jump: when the picture's current jump was asked
+    /// for, and the newest target to show once it lands.
+    private var followStarted: CFAbsoluteTime?
+    private var followNext: (seconds: Double, exact: Bool)?
     /// The first frame is ready (a warmed-up player may already be there).
     var hasStarted: Bool { queue.sync { reportedStart } }
     private var duration: Double?
@@ -223,12 +227,16 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in command(["cycle", "pause"]) }
     }
 
-    /// Exact: a relative seek otherwise lands on a keyframe, and with
-    /// keyframes 10 s or more apart, "forward 10" could land where it was.
-    func seek(by seconds: Double) {
+    /// `exact: false` (the remote's skips): the keyframe just past the
+    /// target going forward (just before it going back), so it always moves
+    /// at least that far, and the picture is there at once. An exact seek
+    /// first decodes every frame from the keyframe before the target: 1-2 s
+    /// on Apple TV for a 4K film with keyframes 10 s apart.
+    func seek(by seconds: Double, exact: Bool = true) {
         queue.async { [self] in
+            stopFollowing()
             seekStarted = CFAbsoluteTimeGetCurrent()
-            command(["seek", String(seconds), "relative+exact"])
+            command(["seek", String(seconds), exact ? "relative+exact" : "relative+keyframes"])
         }
     }
 
@@ -238,9 +246,45 @@ final class MPVPlayer: @unchecked Sendable {
     /// the viewer asked for rather than scrubbing previews.
     func seek(to seconds: Double, exact: Bool = true, report: Bool = false) {
         queue.async { [self] in
+            stopFollowing()
             seekStarted = report ? CFAbsoluteTimeGetCurrent() : nil
             command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
         }
+    }
+
+    /// While choosing where to jump (a swipe, a held button, a drag): the
+    /// picture follows as fast as the player can show frames, one jump at a
+    /// time, the newest target next. Sent all at once, each jump cancelled
+    /// the one before when the data had to download, and the picture never
+    /// moved. A jump that hasn't landed in 1.5 s gives way.
+    func follow(to seconds: Double, exact: Bool) {
+        queue.async { [self] in
+            let now = CFAbsoluteTimeGetCurrent()
+            if let started = followStarted, now - started < 1.5 {
+                if followNext == nil {
+                    queue.asyncAfter(deadline: .now() + 1.5 - (now - started)) { [self] in
+                        guard let next = followNext, let started = followStarted,
+                              CFAbsoluteTimeGetCurrent() - started >= 1.45 else { return }
+                        startFollowing(next.seconds, exact: next.exact)
+                    }
+                }
+                followNext = (seconds, exact)
+                return
+            }
+            startFollowing(seconds, exact: exact)
+        }
+    }
+
+    private func startFollowing(_ seconds: Double, exact: Bool) {
+        followStarted = CFAbsoluteTimeGetCurrent()
+        followNext = nil
+        seekStarted = nil
+        command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
+    }
+
+    private func stopFollowing() {
+        followStarted = nil
+        followNext = nil
     }
 
     /// Stops playback and frees libmpv; the network connection closes with
@@ -286,6 +330,10 @@ final class MPVPlayer: @unchecked Sendable {
             if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
             emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted))
         case MPV_EVENT_PLAYBACK_RESTART:
+            if followStarted != nil {
+                followStarted = nil
+                if let next = followNext { startFollowing(next.seconds, exact: next.exact) }
+            }
             if let asked = seekStarted {
                 seekStarted = nil
                 emit(.seeked(CFAbsoluteTimeGetCurrent() - asked))
