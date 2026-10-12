@@ -155,7 +155,7 @@ struct TVLiveView: View {
             ContentUnavailableView {
                 Label("No live TV yet", systemImage: "dot.radiowaves.left.and.right")
             } description: {
-                Text("Add an Xtream Codes login, an M3U playlist or a Stalker portal in Settings.")
+                Text("Add your TV provider in Settings to watch its channels here.")
             } actions: {
                 Button("Open Settings") { tab = "settings" }
             }

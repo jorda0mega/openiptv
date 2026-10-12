@@ -520,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
             if item_id in KNOWN_BY_ID:
                 item = known_item(KNOWN_BY_ID[item_id], played=item_id == "a9")
                 if "People" in q.get("Fields", ""):
-                    item["People"] = [{"Name": n, "Type": t} for n, t in CAST.get(item_id, [])]
+                    item["People"] = [{"Name": n, "Type": t, "Id": "p_" + n.replace(" ", "_")} for n, t in CAST.get(item_id, [])]
                 return self.send(item)
             if item_id.startswith("s"):
                 names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
@@ -604,7 +604,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Users/U1/Items" and "Ids" in q:
             items = [known_item(KNOWN_BY_ID[i], played=i == "a9") for i in q["Ids"].split(",") if i in KNOWN_BY_ID]
             if "People" in q.get("Fields", ""):
-                items = [item | {"People": [{"Name": n, "Type": t} for n, t in CAST.get(item["Id"], [])]} for item in items]
+                items = [item | {"People": [{"Name": n, "Type": t, "Id": "p_" + n.replace(" ", "_")} for n, t in CAST.get(item["Id"], [])]}
+                     for item in items]
             return self.send({"Items": items})
         if path == "/Persons":
             term = q.get("SearchTerm", "").lower()

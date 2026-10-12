@@ -22,6 +22,8 @@ struct MovieView: View {
     @State private var pin: PagePin?
 
     @State private var expanded = false
+    /// Someone from Cast & Crew, whose page is open.
+    @State private var person: EmbyItem.Person?
 
     var body: some View {
         ScrollView {
@@ -47,7 +49,7 @@ struct MovieView: View {
                     }
                 }
                 .padding(.horizontal, 20)
-                CastRow(people: item?.people ?? [])
+                CastRow(people: item?.people ?? []) { person = $0 }
                 if !similar.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("More Like This").font(.title3.weight(.bold)).padding(.horizontal, 20)
@@ -73,6 +75,7 @@ struct MovieView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         #endif
         .task { await load() }
+        .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {

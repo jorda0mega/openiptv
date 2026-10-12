@@ -73,7 +73,7 @@ struct TVMovieView: View {
                     }
                 }
                 if let item, !(item.people ?? []).isEmpty {
-                    TVCastRow(people: item.people ?? [])
+                    TVCastRow(people: item.people ?? []) { person = $0 }
                 }
                 if !similar.isEmpty {
                     TVPosterRow(title: "More Like This", cards: similar) { card in
@@ -94,6 +94,7 @@ struct TVMovieView: View {
                 TVMovieView(route: MovieRoute(id: card.id, title: card.title), playing: $playing)
             }
         }
+        .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -103,6 +104,8 @@ struct TVMovieView: View {
     }
 
     @State private var selected: Card?
+    /// Someone from Cast & Crew, whose page is open.
+    @State private var person: EmbyItem.Person?
 
     private var playLabel: String {
         guard item?.resumeTicks != nil else { return "Play" }
@@ -155,6 +158,8 @@ struct TVShowView: View {
     @State private var loadingItem: String?
     @State private var playError: String?
     @State private var selected: Card?
+    /// Someone from Cast & Crew, whose page is open.
+    @State private var person: EmbyItem.Person?
 
     private var upNext: EmbyItem? {
         // The list's copy: it has the running time, and what you just
@@ -234,7 +239,7 @@ struct TVShowView: View {
                     ProgressView().frame(maxWidth: .infinity)
                 }
                 if let people = show?.people, !people.isEmpty {
-                    TVCastRow(people: people)
+                    TVCastRow(people: people) { person = $0 }
                 }
                 if !similar.isEmpty {
                     TVPosterRow(title: "More Like This", cards: similar) { selected = $0 }
@@ -252,6 +257,7 @@ struct TVShowView: View {
                 TVMovieView(route: MovieRoute(id: card.id, title: card.title), playing: $playing)
             }
         }
+        .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -346,6 +352,8 @@ private struct TVEpisodeCard: View {
 private struct TVCastRow: View {
     @Environment(AppModel.self) private var model
     let people: [EmbyItem.Person]
+    /// Their page (films and shows with them in the library).
+    var open: (EmbyItem.Person) -> Void = { _ in }
 
     var body: some View {
         let shown = Array(people.filter { ["Actor", "Director", "GuestStar", "Writer", "Producer"].contains($0.type ?? "") }.prefix(20))
@@ -355,10 +363,10 @@ private struct TVCastRow: View {
                 LazyHStack(alignment: .top, spacing: 40) {
                     ForEach(Array(shown.enumerated()), id: \.offset) { _, person in
                         VStack(spacing: 12) {
-                            Button {} label: {
+                            Button { open(person) } label: {
                                 ZStack {
                                     Circle().fill(.quaternary)
-                                    Text(initials(person.name)).font(.title2.weight(.semibold)).foregroundStyle(.secondary)
+                                    Text(initials(person.name)).font(.title2.weight(.semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
                                     if let url = model.emby?.personImageURL(person, width: 360) {
                                         CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: "")
                                             .clipShape(.circle)

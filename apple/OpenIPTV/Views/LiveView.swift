@@ -35,7 +35,7 @@ struct LiveView: View {
                     ContentUnavailableView {
                         Label("No IPTV subscription", systemImage: "dot.radiowaves.left.and.right")
                     } description: {
-                        Text("Add an Xtream Codes login, an M3U playlist or a Stalker portal.")
+                        Text("Add your TV provider to watch its channels here.")
                     } actions: {
                         Button("Add subscription") { addingSource = true }.buttonStyle(.glassProminent)
                     }

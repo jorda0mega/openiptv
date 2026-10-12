@@ -114,6 +114,8 @@ struct PlayCapsule: View {
 struct CastRow: View {
     @Environment(AppModel.self) private var model
     let people: [EmbyItem.Person]
+    /// Their page (films and shows with them in the library).
+    var open: (EmbyItem.Person) -> Void = { _ in }
 
     var body: some View {
         let shown = Array(people.filter { ["Actor", "Director", "GuestStar", "Writer"].contains($0.type ?? "") }.prefix(20))
@@ -124,25 +126,9 @@ struct CastRow: View {
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 16) {
                         ForEach(Array(shown.enumerated()), id: \.offset) { _, person in
-                            VStack(spacing: 8) {
-                                ZStack {
-                                    Circle().fill(Color(white: 0.16))
-                                    Text(person.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined())
-                                        .font(.headline).foregroundStyle(.secondary)
-                                    if let url = model.emby?.personImageURL(person, width: 200) {
-                                        CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: "")
-                                    }
-                                }
-                                .frame(width: 76, height: 76)
-                                .clipShape(.circle)
-                                VStack(spacing: 2) {
-                                    Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
-                                    Text(person.role.flatMap { $0.isEmpty ? nil : $0 } ?? (person.type == "GuestStar" ? "Guest Star" : person.type ?? ""))
-                                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                                }
-                                .frame(width: 88)
-                            }
-                            .accessibilityElement(children: .combine)
+                            Button { open(person) } label: { castCard(person) }
+                                .buttonStyle(.plain)
+                                .disabled(person.id == nil)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -150,5 +136,28 @@ struct CastRow: View {
                 .scrollIndicators(.hidden)
             }
         }
+    }
+
+    private func castCard(_ person: EmbyItem.Person) -> some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle().fill(Color(white: 0.16))
+                Text(person.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined())
+                    .font(.headline).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                if let url = model.emby?.personImageURL(person, width: 200) {
+                    CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: "")
+                }
+            }
+            .frame(width: 76, height: 76)
+            .clipShape(.circle)
+            VStack(spacing: 2) {
+                Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
+                Text(person.role.flatMap { $0.isEmpty ? nil : $0 } ?? (person.type == "GuestStar" ? "Guest Star" : person.type ?? ""))
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(width: 88)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
