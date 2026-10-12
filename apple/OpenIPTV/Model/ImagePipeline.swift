@@ -9,9 +9,14 @@ actor ImagePipeline {
     // NSCache is thread-safe; read directly for images already decoded.
     private nonisolated(unsafe) let memory = NSCache<NSURL, UIImage>()
     private let session: URLSession
+    /// Covers stored ahead (see `store`): their own two connections, the
+    /// same disk cache, so they never hold up a picture on screen.
+    private let storeSession: URLSession
     /// Loads under way: a picture asked for twice at once (a row and its
     /// prefetch, two rows with the same title) downloads and decodes once.
     private var inFlight: [URL: Load] = [:]
+    /// Covers being stored ahead; a load of the same picture takes over.
+    private var storing: [URL: RequestHandle] = [:]
 
     private struct Load {
         let task: Task<UIImage, Error>
@@ -25,6 +30,12 @@ actor ImagePipeline {
         config.timeoutIntervalForRequest = 20
         config.httpMaximumConnectionsPerHost = 8
         session = URLSession(configuration: config)
+        let ahead = URLSessionConfiguration.default
+        ahead.urlCache = config.urlCache
+        ahead.requestCachePolicy = .returnCacheDataElseLoad
+        ahead.timeoutIntervalForRequest = 20
+        ahead.httpMaximumConnectionsPerHost = 2
+        storeSession = URLSession(configuration: ahead)
         // By decoded size (a 4K backdrop is 30 MB, a poster under 1 MB), so
         // a page of backdrops can't push out every poster, or the memory.
         memory.totalCostLimit = 300 << 20
@@ -51,20 +62,37 @@ actor ImagePipeline {
     }
 
     /// Downloads these into the disk cache only (not decoded, so no memory
-    /// held), four at a time at low priority: rows further down then open
-    /// from the device. Not while something plays.
+    /// held), two at a time on their own connections: rows further down
+    /// then open from the device. Each once (not one decoded or on its way
+    /// already); stops at once when cancelled or something starts playing.
     func store(_ urls: [URL]) async {
         guard !PlaybackActivity.isPlaying else { return }
-        let session = session
-        await withTaskGroup(of: Void.self) { group in
-            var queue = urls.filter { memory.object(forKey: $0 as NSURL) == nil && inFlight[$0] == nil }[...]
+        var queue = urls[...]
+        var mine: Set<URL> = []
+        await withTaskGroup(of: URL.self) { group in
             func next() {
-                guard let url = queue.popFirst() else { return }
-                group.addTask { _ = try? await RequestHandle(priority: URLSessionTask.lowPriority).fetch(url, with: session) }
+                while let url = queue.popFirst() {
+                    guard memory.object(forKey: url as NSURL) == nil, inFlight[url] == nil, storing[url] == nil else { continue }
+                    let request = RequestHandle(priority: URLSessionTask.lowPriority)
+                    storing[url] = request
+                    mine.insert(url)
+                    let session = storeSession
+                    group.addTask {
+                        _ = try? await request.fetch(url, with: session)
+                        return url
+                    }
+                    return
+                }
             }
-            for _ in 0..<4 { next() }
-            for await _ in group {
-                guard !PlaybackActivity.isPlaying else { break }
+            for _ in 0..<2 { next() }
+            for await url in group {
+                if storing[url] != nil, mine.contains(url) { storing[url] = nil }
+                mine.remove(url)
+                if Task.isCancelled || PlaybackActivity.isPlaying {
+                    for url in mine { storing.removeValue(forKey: url)?.cancel() }
+                    mine = []
+                    break
+                }
                 next()
             }
         }
@@ -81,6 +109,8 @@ actor ImagePipeline {
     /// doesn't cancel the load: it's kept for when the view comes back.
     func image(for url: URL, visible: Bool = true) async throws -> UIImage {
         if let hit = memory.object(forKey: url as NSURL) { return hit }
+        // Being stored ahead: loaded here instead, at this priority.
+        storing.removeValue(forKey: url)?.cancel()
         if let running = inFlight[url] {
             if visible { running.request.raise() }
             return try await running.task.value
@@ -109,8 +139,17 @@ private final class RequestHandle: @unchecked Sendable {
     private let lock = NSLock()
     private var priority: Float
     private var task: URLSessionDataTask?
+    private var cancelled = false
 
     init(priority: Float) { self.priority = priority }
+
+    /// Stops the download (now, or as soon as it starts).
+    func cancel() {
+        lock.withLock {
+            cancelled = true
+            task?.cancel()
+        }
+    }
 
     func raise() {
         lock.withLock {
@@ -120,19 +159,25 @@ private final class RequestHandle: @unchecked Sendable {
     }
 
     func fetch(_ url: URL, with session: URLSession) async throws -> (Data, URLResponse) {
-        try await withCheckedThrowingContinuation { continuation in
-            let task = session.dataTask(with: url) { data, response, error in
-                if let data, let response {
-                    continuation.resume(returning: (data, response))
-                } else {
-                    continuation.resume(throwing: error ?? URLError(.badServerResponse))
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let task = session.dataTask(with: url) { data, response, error in
+                    if let data, let response {
+                        continuation.resume(returning: (data, response))
+                    } else {
+                        continuation.resume(throwing: error ?? URLError(.badServerResponse))
+                    }
                 }
+                let stop = lock.withLock {
+                    task.priority = priority
+                    self.task = task
+                    return cancelled
+                }
+                task.resume()
+                if stop { task.cancel() }
             }
-            lock.withLock {
-                task.priority = priority
-                self.task = task
-            }
-            task.resume()
+        } onCancel: {
+            cancel()
         }
     }
 }
