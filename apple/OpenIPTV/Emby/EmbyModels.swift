@@ -190,7 +190,7 @@ struct EmbyPlayback: Hashable, Identifiable {
     let url: URL
     /// "Name: value" headers the source needs (remote sources only).
     var headers: [String] = []
-    let startSeconds: Double?
+    var startSeconds: Double?
     let durationSeconds: Double?
     var mediaSourceId: String?
     var playSessionId: String?
@@ -214,6 +214,14 @@ struct EmbyPlayback: Hashable, Identifiable {
     var overview: String?
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
+
+    /// The same, starting from this second (back from Picture in Picture).
+    func resuming(at seconds: Double) -> EmbyPlayback {
+        var copy = self
+        copy.startSeconds = seconds
+        copy.requestedAt = Date()
+        return copy
+    }
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {

@@ -36,7 +36,9 @@ final class PlayerLookTests: XCTestCase {
         app.launchArguments = ["-debugSearch", "animals"]
         app.launch()
         sleep(4)
-        app.tabBars.buttons["Search"].firstMatch.tap()
+        // iPhone: the tab bar at the bottom; iPad: the one at the top.
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
         sleep(3)
         let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals'")).firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 8), "no search result")
@@ -55,6 +57,26 @@ final class PlayerLookTests: XCTestCase {
             upright.tap()
             sleep(3)
         }
+    }
+
+    /// Picture in Picture: the film goes on in the floating window and the
+    /// player closes (back on the film's page).
+    func testPictureInPicture() throws {
+        // iPhone simulators have no Picture in Picture (iPads and iPhones do).
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
+        openFilm()
+        app.tap()
+        usleep(600_000)
+        let pip = app.buttons["Picture in Picture"].firstMatch
+        if !pip.waitForExistence(timeout: 3) {
+            print("BUTTONS", app.buttons.allElementsBoundByIndex.map(\.label).joined(separator: " | "))
+            shot("pip missing")
+        }
+        XCTAssertTrue(pip.exists, "no Picture in Picture button")
+        pip.tap()
+        sleep(20)
+        shot("pip started")
+        XCTAssertFalse(app.buttons["Close player"].exists, "the player didn't close for Picture in Picture")
     }
 
     /// The player in portrait and landscape: playing (controls up, then

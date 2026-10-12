@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import AVKit
+#endif
 
 /// A button in the player's top capsule or its row of pills.
 struct PlayerAction: Identifiable {
@@ -115,9 +118,10 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                         .glassEffect(.regular, in: .circle)
                         .accessibilityLabel("Loading")
                 } else {
+                    // The icon changes at once (a symbol animation took
+                    // about half a second).
                     PlayerGlassButton(systemName: paused ? "play.fill" : "pause.fill", label: paused ? "Play" : "Pause",
                                       size: 92, glyph: 42, action: playPause)
-                        .contentTransition(.symbolEffect(.replace))
                 }
             }
             PlayerGlassButton(systemName: "goforward.10", label: "Forward 10 seconds", size: 63, glyph: 30, action: forward)
@@ -195,6 +199,10 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
             PlayerOrientation.shared.toggle()
         }
         return HStack(spacing: 0) {
+            // AirPlay, as in the Apple TV app (to AirPlay speakers and TVs).
+            AirPlayButton()
+                .frame(width: 54, height: 44)
+                .accessibilityLabel("AirPlay")
             ForEach([rotate] + topActions) { item in
                 Button(action: item.action) {
                     Image(systemName: item.systemImage ?? "circle")
@@ -257,10 +265,38 @@ struct PlayerGlassButton: View {
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
                 .contentShape(.circle)
+                .glassEffect(.regular, in: .circle)
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .circle)
+        // A quick press (the interactive glass's own morph was slow to
+        // answer a tap).
+        .buttonStyle(QuickPress())
         .accessibilityLabel(label)
+    }
+}
+#endif
+
+#if os(iOS)
+/// The system's AirPlay button (it lists AirPlay speakers and TVs).
+struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView()
+        picker.tintColor = .white
+        picker.activeTintColor = .systemBlue
+        picker.prioritizesVideoDevices = true
+        picker.backgroundColor = .clear
+        return picker
+    }
+
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+}
+
+/// Pressed: a little smaller and dimmer at once, back as quickly.
+struct QuickPress: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 #endif

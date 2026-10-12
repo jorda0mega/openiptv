@@ -12,8 +12,14 @@ import UIKit
 final class PlayerOrientation {
     static let shared = PlayerOrientation()
 
-    /// What the app reports to iOS as allowed right now.
-    private(set) var allowed: UIInterfaceOrientationMask = .allButUpsideDown
+    /// What the app reports to iOS as allowed right now: on iPhone, upright
+    /// outside the player (like the Apple TV app; pages laid out sideways
+    /// under a film were left that way); iPad, any way.
+    private(set) var allowed: UIInterfaceOrientationMask = PlayerOrientation.browsing
+
+    private static var browsing: UIInterfaceOrientationMask {
+        UIDevice.current.userInterfaceIdiom == .phone ? .portrait : .allButUpsideDown
+    }
     /// Set by the rotate button until the phone itself is turned.
     private var held: UIInterfaceOrientation?
     private var observer: NSObjectProtocol?
@@ -42,7 +48,7 @@ final class PlayerOrientation {
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
         held = nil
         if isLandscape { turn(to: .portrait) }
-        allowed = .allButUpsideDown
+        allowed = Self.browsing
         refresh()
     }
 

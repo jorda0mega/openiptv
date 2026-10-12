@@ -439,24 +439,37 @@ struct SearchView: View {
         }
     }
 
-    /// Shows open their page; movies and episodes play.
-    /// iPhone: the picture plays it straight away (a show from the episode
-    /// you're up to); the rest of the row opens its details (a film's page,
-    /// a show's page, or an episode's show at that episode).
+    /// iPhone, like the Apple TV app's search: the row opens its details
+    /// (a film's page, a show's page, or an episode's show at that
+    /// episode); "…" at its end plays it straight away (a show from the
+    /// episode you're up to) or opens it.
     @ViewBuilder private func result(_ card: Card, wide: Bool) -> some View {
         #if os(iOS)
-        HStack(spacing: 12) {
-            Button { play(card) } label: { thumbnail(card, wide: wide, playBadge: true) }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Play \(card.title)")
+        HStack(spacing: 4) {
             Button { openDetails(card) } label: {
-                info(card)
-                    .contentShape(Rectangle())
+                HStack(spacing: 14) {
+                    thumbnail(card, wide: wide, playBadge: false)
+                    info(card)
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .accessibilityLabel(card.title)
             .accessibilityValue(card.subtitle ?? "")
             .accessibilityHint("Shows details")
+            Menu {
+                Button("Play", systemImage: "play.fill") { play(card) }
+                Button(card.kind == "Series" || card.kind == "Episode" ? "Go to Show" : "Details", systemImage: "info.circle") {
+                    openDetails(card)
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("More for \(card.title)")
         }
         .rowForeground()
         #endif
@@ -485,10 +498,10 @@ struct SearchView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 // Plain colours, not the button tint.
-                Text(card.title).font(.body.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
+                Text(card.title).font(.body).foregroundStyle(Color.primary).lineLimit(1)
                 // The line kept when there's none, so every row is the
                 // same height and a card gaining one doesn't shift the list.
-                Text(card.subtitle ?? " ").font(.subheadline).foregroundStyle(Color.secondary).lineLimit(1)
+                Text(card.subtitle ?? " ").font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
         }

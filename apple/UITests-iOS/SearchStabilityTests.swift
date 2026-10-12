@@ -39,7 +39,7 @@ final class SearchStabilityTests: XCTestCase {
         shot("search answered")
         XCTAssertEqual(differences(local, answered).filter { !$0.hasPrefix("new ") }, [],
                        "results listed before the server answered moved or went")
-        XCTAssertNotNil(answered["Play The Mask of Zorro"], "the server's cast match didn't come")
+        XCTAssertNotNil(answered["More for The Mask of Zorro"], "the server's cast match didn't come")
 
         // One more letter: the last results stay put until it's answered.
         let field = app.textFields.firstMatch
@@ -62,14 +62,14 @@ final class SearchStabilityTests: XCTestCase {
         openSearch("movie")
         sleep(6)
         let start = header()
-        let firstResult = results()["Play Movie 0"]
+        let firstResult = results()["More for Movie 0"]
         shot("header start")
         XCTAssertEqual(start.count, 5, "header parts missing: \(start.keys.sorted())")
         XCTAssertNotNil(firstResult, "no results for “movie”")
         drag(from: 0.7, to: 0.3)
         sleep(1)
         shot("header scrolled")
-        XCTAssertNotEqual(results()["Play Movie 0"], firstResult, "the results didn't scroll")
+        XCTAssertNotEqual(results()["More for Movie 0"], firstResult, "the results didn't scroll")
         XCTAssertEqual(differences(start, header()), [], "the header moved as the results scrolled")
         drag(from: 0.3, to: 0.7)
         drag(from: 0.3, to: 0.7)
@@ -81,7 +81,7 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertEqual(differences(start, header()), [], "the header moved with the pull")
         sleep(1)
         XCTAssertEqual(differences(start, header()), [], "the header moved after the pull")
-        XCTAssertEqual(results()["Play Movie 0"], firstResult, "the results didn't come back to the top")
+        XCTAssertEqual(results()["More for Movie 0"], firstResult, "the results didn't come back to the top")
         app.buttons["Clear search"].firstMatch.tap()
         sleep(1)
         shot("header cleared")
@@ -107,8 +107,10 @@ final class SearchStabilityTests: XCTestCase {
     }
 
     /// The results listed (each one's picture button), with their frames.
+    /// Each result row by its "More for <title>" button (the row's own
+    /// button is labelled with the title alone, like other buttons).
     private func results() -> [String: CGRect] {
-        frames { $0.elementType == .button && $0.label.hasPrefix("Play ") }
+        frames { $0.elementType == .button && $0.label.hasPrefix("More for ") }
     }
 
     /// The header's parts: the title, the filters, and the whole.

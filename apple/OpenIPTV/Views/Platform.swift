@@ -18,7 +18,8 @@ enum Layout {
     static let rowSpacing: CGFloat = 24
     static let cardSpacing: CGFloat = 12
     static let chipStripHeight: CGFloat = 60
-    static let searchThumb: CGFloat = 46
+    /// The Apple TV app's search posters: 54 × 81.
+    static let searchThumb: CGFloat = 54
     static let searchThumbWide: CGFloat = 96
     static let scrubPreviewWidth: CGFloat = 200
     static let featuredAspect: CGFloat = 4 / 3

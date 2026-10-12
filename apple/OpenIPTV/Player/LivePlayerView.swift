@@ -541,7 +541,7 @@ struct LivePlayerView: View {
     /// (not while paused, behind live or scrubbing).
     private func showControls(autoHide: Bool = true) {
         hideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true }
+        withAnimation(.easeOut(duration: 0.12)) { controlsVisible = true }
         guard autoHide, started, error == nil, !paused else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))

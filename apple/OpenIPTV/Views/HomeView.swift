@@ -168,7 +168,6 @@ private struct HomeHero: View {
     let play: (Card) -> Void
     let open: (Card) -> Void
     @State private var index = 0
-    @State private var width: CGFloat = 393
 
     /// The hero's space while the first Home is built: the same height (a
     /// page and its dots), with a spinner.
@@ -184,15 +183,26 @@ private struct HomeHero: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            TabView(selection: $index) {
-                ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
-                    page(item).tag(offset)
+            // The size from the space it's given at every layout, never a
+            // width kept from before: a film played sideways laid Home out
+            // sideways underneath, and a kept width left the hero filling
+            // the screen afterwards. The pages get that exact size (a size
+            // worked out from an aspect ratio left a sliver of the previous
+            // one showing).
+            Color.clear
+                .aspectRatio(1 / 1.3, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    GeometryReader { geo in
+                        TabView(selection: $index) {
+                            ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+                                page(item).tag(offset)
+                            }
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(width: geo.size.width, height: geo.size.height)
+                    }
                 }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            // A fixed size, so pages line up exactly (a size worked out from
-            // an aspect ratio left a sliver of the previous one showing).
-            .frame(width: width, height: (width * 1.3).rounded())
             if items.count > 1 {
                 HStack(spacing: 7) {
                     ForEach(items.indices, id: \.self) { i in
@@ -206,7 +216,6 @@ private struct HomeHero: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // Other titles (Home changed at a moment): from the first, never
         // a page past the end (a blank one).
         .onChange(of: items.map(\.card.id)) { index = 0 }

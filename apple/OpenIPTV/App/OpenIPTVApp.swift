@@ -51,6 +51,17 @@ struct RootView: View {
             PlayerScreen(item: item)
         }
         .task { await model.loadLive() }
+        #if os(iOS)
+        // Picture in Picture: back in the app's player when brought back,
+        // and its progress kept on the server meanwhile.
+        .task {
+            let model = model
+            PictureInPicture.shared.restore = { playing = .vod($0) }
+            PictureInPicture.shared.report = { playback, seconds, event in
+                Task { await model.report(playback, seconds: seconds, event: event) }
+            }
+        }
+        #endif
         .task { await model.prepareLibrary() }
         // Pick up library changes whenever the app comes back.
         .onChange(of: scenePhase) { _, phase in

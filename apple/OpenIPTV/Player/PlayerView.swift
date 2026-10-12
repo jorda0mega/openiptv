@@ -97,6 +97,8 @@ struct MoviePlayerView: View {
     /// than fitting it.
     @State private var showInfo = false
     @State private var filled = false
+    /// The film went on in Picture in Picture: closing here isn't stopping.
+    @State private var handedOff = false
     #endif
     #if os(tvOS)
     /// Where the current swipe started from.
@@ -226,10 +228,14 @@ struct MoviePlayerView: View {
         // its "S1:E3 · Name" over the show.
         PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
                      paused: paused, busy: (buffering || !started) && error == nil, ready: started,
-                     topActions: [fillAction], pills: [PlayerAction(title: "Info") { toggleInfo() }],
+                     topActions: pictureActions, pills: [PlayerAction(title: "Info") { toggleInfo() }],
                      selectedPill: showInfo ? "Info" : nil, panel: showInfo ? infoPanel : nil,
                      close: { dismiss() }, back: { skip(-10) },
-                     playPause: { player?.togglePause() }, forward: { skip(10) }) {
+                     playPause: {
+                         // The button changes at once; the player confirms.
+                         paused.toggle()
+                         player?.togglePause()
+                     }, forward: { skip(10) }) {
             trackMenu
         } accessory: {
             EmptyView()
@@ -266,6 +272,28 @@ struct MoviePlayerView: View {
                      systemImage: filled ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
             setFilled(!filled)
         }
+    }
+
+    /// Picture in Picture (where the device has it), then fill or fit.
+    private var pictureActions: [PlayerAction] {
+        guard PictureInPicture.isSupported, started else { return [fillAction] }
+        return [PlayerAction(title: "Picture in Picture", systemImage: "pip.enter") { startPictureInPicture() }, fillAction]
+    }
+
+    /// The film carries on in the floating window from this second (Emby's
+    /// converted stream at 4 Mbps, plenty for a window); this player closes
+    /// once it's up, and comes back at the second it reached.
+    private func startPictureInPicture() {
+        guard let url = model.convertedURL(for: playback, bitrate: 4_000_000, start: position) else { return }
+        let at = position
+        player?.setPaused(true)
+        PictureInPicture.shared.start(playback, url: url, headers: playback.fallbackHeaders, offset: at, started: {
+            handedOff = true
+            dismiss()
+        }, failed: {
+            player?.setPaused(false)
+            note("Picture in Picture isn't available for this video")
+        })
     }
 
     private func setFilled(_ fill: Bool) {
@@ -509,6 +537,10 @@ struct MoviePlayerView: View {
     }
 
     private func start() {
+        #if os(iOS)
+        // A film in Picture in Picture stops (where it got to) for this one.
+        PictureInPicture.shared.close()
+        #endif
         position = playback.startSeconds ?? 0
         if let (warmPlayer, _) = model.takeWarm(playback.itemId) {
             // Already open and paused at the resume point: just show and play.
@@ -631,6 +663,9 @@ struct MoviePlayerView: View {
             NSLog("%@", "PERF start " + (timing ?? ""))
             #endif
             Task { await loadTrackInfo() }
+            #if DEBUG && os(iOS)
+            NSLog("%@", "PERF pip supported=\(PictureInPicture.isSupported)")
+            #endif
             thumbnailTask = Task { await loadThumbnails() }
             // Development builds with the stats on: shown for a moment.
             if prefs.performanceStats { showTiming(timing ?? "", for: 5) } else { timing = nil }
@@ -764,6 +799,10 @@ struct MoviePlayerView: View {
         let seconds = position
         player?.shutdown()
         player = nil
+        #if os(iOS)
+        // Still playing in Picture in Picture: it reports when it stops.
+        if handedOff { return }
+        #endif
         Task { await model.report(playback, seconds: seconds, event: .stopped) }
     }
 
@@ -778,7 +817,7 @@ struct MoviePlayerView: View {
 
     private func showControls(autoHide: Bool = true) {
         hideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true }
+        withAnimation(.easeOut(duration: 0.12)) { controlsVisible = true }
         guard autoHide, !paused, started, error == nil else { return }
         #if os(tvOS)
         // On a button or in a menu: stays until the remote leaves it.
