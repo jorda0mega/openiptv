@@ -5,8 +5,8 @@ import SwiftUI
 /// back 10, play/pause and forward 10 in the middle (a spinner in play's
 /// place while it opens or buffers); the title (live: a LIVE badge before
 /// its caption) with "…" beside it, and the bar with the times at its ends.
-/// iPhone: Liquid Glass. Apple TV: the system's own look (title, a plain
-/// progress bar and times); the remote does the rest.
+/// iPhone: Liquid Glass. Apple TV: Apple's own player's look and layout
+/// (see TVPlayerLayout); the remote does the rest.
 struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     var caption: String?
     let title: String
@@ -32,21 +32,20 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     #endif
 
     var body: some View {
+        #if os(iOS)
         ZStack {
             shade
-            #if os(iOS)
             phone
-            #else
-            tv
-            #endif
         }
+        #else
+        tv
+        #endif
     }
 
-    /// iPhone: darker at the top and bottom where the controls are, the
-    /// picture visible in between. Apple TV: only under the controls at the
-    /// bottom, fading in gently so it has no visible edge.
+    #if os(iOS)
+    /// Darker at the top and bottom where the controls are, the picture
+    /// visible in between.
     private var shade: some View {
-        #if os(iOS)
         VStack(spacing: 0) {
             LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom).frame(height: 170)
             Color.black.opacity(0.12)
@@ -54,17 +53,6 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        #else
-        // An ease-in curve (opacity rising with the square of the distance).
-        LinearGradient(stops: (0...8).map { step in
-            let t = Double(step) / 8
-            return .init(color: .black.opacity(0.62 * t * t), location: t)
-        }, startPoint: .top, endPoint: .bottom)
-        .frame(height: 560)
-        .frame(maxHeight: .infinity, alignment: .bottom)
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        #endif
     }
 
     /// The caption line starts with the accessory (live: the LIVE badge),
@@ -88,16 +76,9 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         .accessibilityElement(children: .combine)
     }
 
-    #if os(iOS)
     private var captionFont: Font { .subheadline.weight(.medium) }
     private var titleFont: Font { .title3.weight(.bold) }
-    #else
-    // The size of Apple TV's own player titles, not a page heading's.
-    private var captionFont: Font { .caption.weight(.medium) }
-    private var titleFont: Font { .headline }
-    #endif
 
-    #if os(iOS)
     /// Like the Apple TV app's player: close at the top left; back 10,
     /// play/pause and forward 10 in the middle; at the bottom the title with
     /// its round buttons beside it (LIVE, "…", rotate), then the bar with the
@@ -155,22 +136,18 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     #else
     private var tv: some View {
         ZStack {
+            TVPlayerShade(full: true)
             if busy { ProgressView().controlSize(.large) }
-            tvBar
-        }
-    }
-
-    private var tvBar: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Spacer()
-            HStack(alignment: .bottom) {
-                titles
-                Spacer()
+            TVPlayerLayout(showsBelow: false) {
+                TVPlayerTitles(caption: caption, title: title, note: note) { accessory }
+            } buttons: {
+                trailing
+            } bar: {
+                bar
+            } below: {
+                EmptyView()
             }
-            bar.tint(.white)
         }
-        .padding(.horizontal, 90)
-        .padding(.bottom, 44)
     }
     #endif
 }

@@ -28,17 +28,19 @@ struct HomeContent: Codable, Hashable {
 /// - Continue Watching: what you're partway through, then the next episode
 ///   of each show you're watching (right under the featured pick, where
 ///   resuming is quickest);
-/// - Top picks for you: one row of titles like your last five watches,
-///   taken from each in turn so it stays varied;
-/// - Trending now: titles on the server that are popular worldwide this
-///   week (TMDb), unwatched;
+/// - Top picks for you: one row of titles like your last five watches by
+///   IMDb's data (who made them, genres, era), taken from each in turn so it
+///   stays varied;
+/// - Trending now: titles on the server most in demand this week (TMDb's
+///   popularity and IMDb's votes gained, together), unwatched;
 /// - New & notable: titles on the server released in the last year that
 ///   IMDb voters rate 6.5 or more, most voted first.
 /// A few rows that each do one job, like Netflix and IMDb's homes. Movies
 /// and shows mix, and each title appears once on the page however many
-/// libraries hold a copy (HD and 4K are one title). Top picks choose
-/// first, then New & notable, and Trending fills from what's left of the
-/// week's trending titles, so no row is emptied by another.
+/// libraries hold a copy (HD and 4K are one title): the featured titles
+/// choose first, then Top picks, then New & notable, and Trending fills
+/// from what's left of the week's trending titles, so no row repeats
+/// another or the featured titles.
 @MainActor
 enum HomeFeed {
     /// The titles watched most recently (a show for an episode), newest
@@ -67,11 +69,25 @@ enum HomeFeed {
         }
     }
 
-    /// Emby's titles most like each of these, in the same order.
-    private nonisolated static func similar(_ emby: EmbyClient, to ids: [String]) async -> [[EmbyItem]] {
-        await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
-            for (order, id) in ids.enumerated() {
-                group.addTask { (order, await emby.similar(to: id)) }
+    /// The library's titles most like each of these by IMDb's data (who
+    /// made them, genres, era, rating), in the same order, fetched in one
+    /// request with what's been watched of them. Emby's own suggestions
+    /// only for a title IMDb's data doesn't cover yet.
+    private static func similar(_ emby: EmbyClient, library: LibraryIndex, to ids: [String]) async -> [[EmbyItem]] {
+        var alike: [[String]] = []
+        for id in ids { alike.append(await library.imdbSimilar(to: id, limit: 20).map(\.id)) }
+        var seen = Set<String>()
+        let all = alike.flatMap { $0 }.filter { seen.insert($0).inserted }
+        let items = await emby.items(ids: all)
+        let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return await withTaskGroup(of: (Int, [EmbyItem]).self) { group in
+            for (order, list) in alike.enumerated() {
+                if list.isEmpty {
+                    group.addTask { (order, await emby.similar(to: ids[order])) }
+                } else {
+                    let found = list.compactMap { byId[$0] }
+                    group.addTask { (order, found) }
+                }
             }
             var out = [[EmbyItem]](repeating: [], count: ids.count)
             for await (order, items) in group { out[order] = items }
@@ -94,7 +110,7 @@ enum HomeFeed {
         // Top picks only need what was watched: asked for now, alongside the
         // charts' titles, not after them.
         let seeds = seeds(watching: sources.watching, played: sources.played)
-        async let similarLists = Self.similar(emby, to: seeds.map(\.id))
+        async let similarLists = Self.similar(emby, library: library, to: seeds.map(\.id))
         let ratings = library.ratings
         let thisYear = Calendar.current.component(.year, from: Date())
 
@@ -161,7 +177,7 @@ enum HomeFeed {
         // top of Home is never empty.
         let added = popular.isEmpty && fresh.isEmpty
             ? await emby.recentlyAdded().filter { !watched($0) && !isShown($0) } : []
-        let pool = !popular.isEmpty ? popular : !fresh.isEmpty ? Array(fresh.prefix(20)) : added
+        let pool = (!popular.isEmpty ? popular : !fresh.isEmpty ? Array(fresh.prefix(20)) : added).filter { !isShown($0) }
         let withBackdrop = pool.filter { emby.backdropURL(for: $0, width: backdropWidth) != nil }
         // The same pick all day (one of the top few recent ones, by date),
         // so refreshing doesn't swap the top of the screen.
@@ -176,16 +192,20 @@ enum HomeFeed {
                             logo: emby.logoURL(for: item, width: 900)?.absoluteString)
         }
         let featured = pick.flatMap(featuring)
-        if let pick, featured != nil { show(pick) }
         // The hero's turn: today's pick first, then the other recent
-        // popular titles with a backdrop.
+        // popular titles with a backdrop. Each is on the page already, so
+        // the rows below leave them out.
         let others = (recent.isEmpty ? withBackdrop : recent).prefix(6)
         let rotation = choices.isEmpty ? [] : (0..<choices.count).map { choices[(day + $0) % choices.count] }
-        var spotlightIds = Set<String>()
-        let spotlight = (rotation + others).filter { spotlightIds.insert($0.id).inserted }.prefix(6).compactMap(featuring)
+        var spotlight: [Featured] = []
+        for item in rotation + others where spotlight.count < 6 && !isShown(item) {
+            guard let hero = featuring(item) else { continue }
+            spotlight.append(hero)
+            show(item)
+        }
 
         // Top picks: titles like the five you watched last, one from each in
-        // turn (Emby's own ranking of what's most alike within each).
+        // turn (IMDb's data ranking what's most alike within each).
         let similar = await similarLists
         var picks: [EmbyItem] = []
         var queues = similar.map { $0.filter { !watched($0) && worthIt($0) }[...] }
@@ -217,6 +237,6 @@ enum HomeFeed {
         if newRow.count >= 4, let row = posterRow("New & notable", newRow) { rows.append(row) }
         // Cut off halfway, the requests above came back empty: not a page.
         try Task.checkCancellation()
-        return HomeContent(featured: featured, rows: rows, builtAt: Date(), history: seeds.map(\.id), spotlight: Array(spotlight))
+        return HomeContent(featured: featured, rows: rows, builtAt: Date(), history: seeds.map(\.id), spotlight: spotlight)
     }
 }

@@ -113,6 +113,51 @@ final class RemoteFocusTests: XCTestCase {
         shot("a second later")
     }
 
+    /// The player's look in each state, to set beside Apple's own player:
+    /// paused (title, bar, time with its pause sign, Info tab, audio
+    /// button), a jump while paused (the bar alone), playing, up to the
+    /// audio button and its menu, and down to the Info panel.
+    func testPlayerLook() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(8)
+        shot("look playing")
+        remote.press(.playPause)
+        usleep(1_300_000)
+        shot("look paused")
+        remote.press(.right)
+        usleep(500_000)
+        shot("look paused jump")
+        remote.press(.playPause)
+        usleep(1_300_000)
+        shot("look resumed")
+        sleep(6)
+        shot("look hidden")
+        remote.press(.up)
+        usleep(800_000)
+        shot("look up")
+        remote.press(.select)
+        usleep(1_000_000)
+        shot("look audio menu")
+        remote.press(.menu)
+        usleep(800_000)
+        shot("look menu closed")
+        remote.press(.down)
+        usleep(800_000)
+        remote.press(.down)
+        usleep(1_000_000)
+        shot("look info")
+        remote.press(.menu)
+        usleep(800_000)
+        shot("look info closed")
+    }
+
     /// Home's focus motion, for a screen recording: down into the rows,
     /// along one, open a title, and back.
     func testHomeMotion() {

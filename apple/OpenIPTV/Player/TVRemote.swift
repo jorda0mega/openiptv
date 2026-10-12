@@ -15,6 +15,9 @@ struct TVRemoteSurface: UIViewRepresentable {
         case released
         /// A swipe: how far across the touch surface since it began.
         case swipe(began: Bool, distance: CGFloat, ended: Bool)
+        /// Up or down: a click on the ring's top or bottom, or a swipe.
+        case up
+        case down
         case select
         case playPause
         /// From the player's `onExitCommand` (see `pressesEnded`).
@@ -38,6 +41,9 @@ struct TVRemoteSurface: UIViewRepresentable {
         /// Turns a press into a hold once it's been down long enough.
         private var holdTimer: Task<Void, Never>?
         private var holding = false
+        /// Which way the current swipe goes, once it's clear: across moves
+        /// through the film, up or down is one press of the ring.
+        private var vertical: Bool?
 
         override var canBecomeFocused: Bool { true }
 
@@ -57,11 +63,23 @@ struct TVRemoteSurface: UIViewRepresentable {
         }
 
         @objc private func panned(_ pan: UIPanGestureRecognizer) {
-            let distance = pan.translation(in: self).x
+            let moved = pan.translation(in: self)
             switch pan.state {
-            case .began: handle(.swipe(began: true, distance: 0, ended: false))
-            case .changed: handle(.swipe(began: false, distance: distance, ended: false))
-            case .ended, .cancelled, .failed: handle(.swipe(began: false, distance: distance, ended: true))
+            case .began:
+                vertical = nil
+            case .changed:
+                if vertical == nil, max(abs(moved.x), abs(moved.y)) > 24 {
+                    vertical = abs(moved.y) > abs(moved.x)
+                    if vertical == false { handle(.swipe(began: true, distance: 0, ended: false)) }
+                }
+                if vertical == false { handle(.swipe(began: false, distance: moved.x, ended: false)) }
+            case .ended, .cancelled, .failed:
+                if vertical == false {
+                    handle(.swipe(began: false, distance: moved.x, ended: true))
+                } else if vertical == true, pan.state == .ended {
+                    handle(moved.y > 0 ? .down : .up)
+                }
+                vertical = nil
             default: break
             }
         }
@@ -86,7 +104,7 @@ struct TVRemoteSurface: UIViewRepresentable {
                         self.holding = true
                         self.handle(.hold(direction))
                     }
-                } else if ![.select, .playPause].contains(press.type) {
+                } else if ![.select, .playPause, .upArrow, .downArrow].contains(press.type) {
                     rest.insert(press)
                 }
             }
@@ -109,6 +127,8 @@ struct TVRemoteSurface: UIViewRepresentable {
                     switch press.type {
                     case .select: handle(.select)
                     case .playPause: handle(.playPause)
+                    case .upArrow: handle(.up)
+                    case .downArrow: handle(.down)
                     // Menu goes on to SwiftUI (the player's onExitCommand):
                     // the full-screen cover takes it before this view does.
                     default: rest.insert(press)
@@ -132,66 +152,4 @@ struct TVRemoteSurface: UIViewRepresentable {
     }
 }
 
-/// Apple TV's transport bar, as in its own player: a thin track and how
-/// far it's played; under the playhead the time there (a small pause sign
-/// before it while paused), the time left at the end. While choosing where
-/// to jump, the playhead is where it would land (the picture follows) and
-/// a faint mark stays where it was.
-struct TVTransportBar: View {
-    /// The playhead and where a choice started, 0...1.
-    let fraction: Double
-    var origin: Double?
-    let time: String
-    let remaining: String
-    let paused: Bool
-    var choosing = false
-
-    @State private var timeWidth: CGFloat = 0
-    @State private var remainingWidth: CGFloat = 0
-
-    var body: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-            let x = width * min(max(fraction, 0), 1)
-            let thickness: CGFloat = choosing ? 10 : 6
-            VStack(alignment: .leading, spacing: 14) {
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.3))
-                    Capsule().fill(.white).frame(width: max(x, thickness))
-                    if let origin {
-                        Capsule().fill(.white.opacity(0.7))
-                            .frame(width: 3, height: thickness + 12)
-                            .offset(x: width * min(max(origin, 0), 1) - 1.5)
-                    }
-                }
-                .frame(height: thickness)
-                .frame(height: 22)
-                // The time follows the playhead, kept on the bar; the time
-                // left steps aside when they'd touch.
-                let left = min(max(x - timeWidth / 2, 0), max(width - timeWidth, 0))
-                ZStack(alignment: .topLeading) {
-                    Text(remaining)
-                        .foregroundStyle(.white.opacity(0.6))
-                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { remainingWidth = $0 }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .opacity(left + timeWidth + 24 > width - remainingWidth ? 0 : 1)
-                    HStack(spacing: 8) {
-                        if paused { Image(systemName: "pause.fill").font(.caption2) }
-                        Text(time)
-                    }
-                    .foregroundStyle(.white)
-                    .fixedSize()
-                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { timeWidth = $0 }
-                    .offset(x: left)
-                }
-                .font(.caption.monospacedDigit().weight(.semibold))
-            }
-            .animation(.snappy(duration: 0.2), value: choosing)
-        }
-        .frame(height: 70)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(paused ? "Paused" : "Playing")
-        .accessibilityValue("\(time), \(remaining)")
-    }
-}
 #endif

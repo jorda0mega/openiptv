@@ -459,7 +459,9 @@ struct EmbyClient {
             if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s):E\(e) · " }
             return (item.seriesName ?? item.name, "\(code)\(item.name)")
         }
-        return (item.name, item.productionYear.map(String.init))
+        // "2024 · Drama", as Apple's player puts it over the title.
+        let line = [item.productionYear.map(String.init), item.genres?.first].compactMap(\.self).joined(separator: " · ")
+        return (item.name, line.isEmpty ? nil : line)
     }
 
     func imageURL(_ candidate: Artwork.Candidate, width: Int, shape: Artwork.Shape) -> URL {
@@ -583,6 +585,7 @@ struct EmbyClient {
         }
         playback.bitrate = info?.MediaSources?.first?.Bitrate
         playback.seriesId = item.seriesId
+        playback.overview = item.overview
         // Some servers only honour the token as a header; send it both ways
         // for Emby's own stream addresses (not for remote files).
         let auth = ["X-Emby-Token: \(account.accessToken)"]

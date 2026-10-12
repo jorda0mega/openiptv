@@ -375,6 +375,101 @@ final class MPVPlayer: @unchecked Sendable {
         followNext = nil
     }
 
+    /// An audio or subtitle track of the file.
+    struct Track: Identifiable, Hashable, Sendable {
+        enum Kind: Sendable { case audio, subtitle }
+        let id: Int
+        let kind: Kind
+        let title: String?
+        /// ISO 639 code ("eng"), when the file says.
+        let language: String?
+        let channels: Int?
+        let forced: Bool
+        let selected: Bool
+    }
+
+    /// The file's audio and subtitle tracks, as they are now.
+    func tracks() async -> [Track] {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard let mpv else { return continuation.resume(returning: []) }
+                continuation.resume(returning: Self.trackList(mpv))
+            }
+        }
+    }
+
+    /// Plays this audio track.
+    func selectAudio(_ id: Int) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "aid", String(id))
+        }
+    }
+
+    /// Shows this subtitle track (nil: none).
+    func selectSubtitle(_ id: Int?) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "sid", id.map(String.init) ?? "no")
+        }
+    }
+
+    /// The picture's height and transfer ("pq", "hlg" for HDR), once it's
+    /// playing: the Info panel's 4K / HD and HDR badges.
+    func videoFormat() async -> (height: Int, gamma: String?)? {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard let mpv else { return continuation.resume(returning: nil) }
+                var height: Int64 = 0
+                guard mpv_get_property(mpv, "video-params/h", MPV_FORMAT_INT64, &height) >= 0, height > 0 else {
+                    return continuation.resume(returning: nil)
+                }
+                var gamma: String?
+                if let value = mpv_get_property_string(mpv, "video-params/gamma") {
+                    gamma = String(cString: value)
+                    mpv_free(value)
+                }
+                continuation.resume(returning: (Int(height), gamma))
+            }
+        }
+    }
+
+    private static func trackList(_ mpv: OpaquePointer) -> [Track] {
+        var node = mpv_node()
+        guard mpv_get_property(mpv, "track-list", MPV_FORMAT_NODE, &node) >= 0 else { return [] }
+        defer { mpv_free_node_contents(&node) }
+        guard node.format == MPV_FORMAT_NODE_ARRAY, let list = node.u.list?.pointee else { return [] }
+        return (0..<Int(list.num)).compactMap { i in
+            let track = list.values[i]
+            guard track.format == MPV_FORMAT_NODE_MAP, let map = track.u.list?.pointee else { return nil }
+            var fields: [String: mpv_node] = [:]
+            for k in 0..<Int(map.num) {
+                if let key = map.keys[k] { fields[String(cString: key)] = map.values[k] }
+            }
+            func text(_ name: String) -> String? {
+                guard let value = fields[name], value.format == MPV_FORMAT_STRING, let s = value.u.string else { return nil }
+                return String(cString: s)
+            }
+            func number(_ name: String) -> Int? {
+                guard let value = fields[name], value.format == MPV_FORMAT_INT64 else { return nil }
+                return Int(value.u.int64)
+            }
+            func flag(_ name: String) -> Bool {
+                guard let value = fields[name], value.format == MPV_FORMAT_FLAG else { return false }
+                return value.u.flag != 0
+            }
+            let kind: Track.Kind
+            switch text("type") {
+            case "audio": kind = .audio
+            case "sub": kind = .subtitle
+            default: return nil
+            }
+            guard let id = number("id") else { return nil }
+            return Track(id: id, kind: kind, title: text("title"), language: text("lang"),
+                         channels: number("demux-channel-count"), forced: flag("forced"), selected: flag("selected"))
+        }
+    }
+
     /// Stops playback and frees libmpv; the network connection closes with
     /// it. Returns at once: closing a connection mid-download can take a
     /// moment, and the screen mustn't wait for it.

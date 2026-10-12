@@ -34,7 +34,12 @@ struct IMDbRatings: Sendable {
 
     func rating(_ imdbId: String?) -> Rating? {
         guard let imdbId, let number = Self.number(imdbId) else { return nil }
-        return data.withUnsafeBytes { raw -> Rating? in
+        return rating(number: number)
+    }
+
+    /// By title number (tt0076759 → 76759).
+    func rating(number: UInt32) -> Rating? {
+        data.withUnsafeBytes { raw -> Rating? in
             func id(_ i: Int) -> UInt32 { raw.loadUnaligned(fromByteOffset: 8 + i * Self.recordSize, as: UInt32.self).littleEndian }
             var low = 0, high = count - 1
             while low <= high {

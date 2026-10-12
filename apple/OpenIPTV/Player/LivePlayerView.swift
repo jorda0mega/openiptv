@@ -229,9 +229,9 @@ struct LivePlayerView: View {
         #else
         if started, error == nil, let span, let position {
             TVTransportBar(fraction: (position - span.lower) / max(span.upper - span.lower, 1),
-                           time: leftLabel, remaining: rightLabel, paused: paused)
+                           time: leftLabel, remaining: rightLabel, state: paused ? .paused : .playing)
         } else {
-            TVTransportBar(fraction: 0, time: "", remaining: "", paused: false)
+            TVTransportBar(fraction: 0, time: "", remaining: "")
         }
         #endif
     }

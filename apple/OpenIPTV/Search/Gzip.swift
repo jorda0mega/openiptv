@@ -14,12 +14,22 @@ enum Gzip {
         var line: [UInt8] = []
         line.reserveCapacity(256)
         while let chunk = try filter.readData(ofLength: 1 << 20), !chunk.isEmpty {
-            for byte in chunk {
-                if byte == 10 {
+            // Whole lines at a time between newlines (found with memchr),
+            // not byte by byte: the datasets are a gigabyte uncompressed.
+            chunk.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+                let bytes = raw.bindMemory(to: UInt8.self)
+                guard let base = bytes.baseAddress else { return }
+                var start = 0
+                while start < bytes.count {
+                    guard let found = memchr(base + start, 10, bytes.count - start) else {
+                        line.append(contentsOf: bytes[start...])
+                        return
+                    }
+                    let end = base.distance(to: found.assumingMemoryBound(to: UInt8.self))
+                    line.append(contentsOf: bytes[start..<end])
                     each(line)
                     line.removeAll(keepingCapacity: true)
-                } else {
-                    line.append(byte)
+                    start = end + 1
                 }
             }
         }

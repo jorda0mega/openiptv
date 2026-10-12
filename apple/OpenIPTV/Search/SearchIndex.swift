@@ -303,8 +303,11 @@ struct LibraryEntry: Codable, Hashable, Identifiable, Sendable {
 /// sync, plus a weekly full pass to drop deleted items (search keeps the
 /// old pages until each is replaced). Runs in the background from app
 /// launch. Each title is listed once however many libraries hold a copy
-/// (the copies are its versions). IMDb ratings and TMDb popularity,
-/// downloaded weekly, rank search and pick what's trending.
+/// (the copies are its versions). What everyone else watches and rates
+/// ranks search and makes every recommendation, from whichever public
+/// data does each job best: TMDb's daily popularity and IMDb's votes gained
+/// a day for Trending now, IMDb's ratings for New & notable, IMDb's genres
+/// and makers for titles alike. Each source is one signal among others.
 @Observable
 @MainActor
 final class LibraryIndex {
@@ -312,7 +315,7 @@ final class LibraryIndex {
     /// Every copy's id → all copies of that title (only titles with more
     /// than one), the one listed first.
     private(set) var versions: [String: [String]] = [:]
-    /// The most popular titles on the server right now, most popular first.
+    /// The titles on the server most in demand right now, most first.
     private(set) var trending: [LibraryEntry] = []
     /// This year's and last year's titles that IMDb voters rate well, most
     /// voted first: New & notable.
@@ -331,7 +334,15 @@ final class LibraryIndex {
     private var outdated = false
     private(set) var ratings: IMDbRatings?
     private(set) var popularity: TMDbPopularity?
+    /// IMDb's genres and makers for the library's titles, and titles alike
+    /// by them.
+    private(set) var catalog: IMDbCatalog?
+    private var similarity: IMDbSimilarity?
+    private var votes = IMDbVoteHistory()
+    /// Every copy's id → its title (the copy listed in search).
+    private var entryById: [String: LibraryEntry] = [:]
     private var chartsTask: Task<Void, Never>?
+    private var catalogTask: Task<Void, Never>?
     /// Bumped whenever the entries change, so a ranking made from older
     /// entries (the index loaded meanwhile) is redone, not kept.
     private var generation = 0
@@ -422,24 +433,29 @@ final class LibraryIndex {
         }
     }
 
-    /// Loads IMDb ratings and TMDb popularity from the device, and
-    /// downloads fresh copies when they're over a week old (on Wi-Fi; on any
-    /// connection after a month, or if there are none yet). Search re-ranks
-    /// and the trending list updates as they arrive.
+    /// Loads IMDb's ratings and TMDb's popularity from the device, and
+    /// downloads today's when a copy is a day old (on Wi-Fi; on any
+    /// connection after a month, or if there's none yet): each ratings
+    /// download adds to the vote history. Search re-ranks and the lists
+    /// update as they arrive.
     func refreshCharts(unmetered: Bool) async {
         if let running = chartsTask { return await running.value }
         func due(_ age: TimeInterval?) -> Bool {
-            age.map { $0 > 7 * 24 * 3600 && (unmetered || $0 > 30 * 24 * 3600) } ?? true
+            age.map { $0 > 20 * 3600 && (unmetered || $0 > 30 * 24 * 3600) } ?? true
         }
         let task = Task {
             await loadCachedCharts()
-            if due(IMDbRatings.age()),
-               let fresh = try? await Task.detached(priority: .utility, operation: { try await IMDbRatings.download() }).value {
-                await apply(fresh)
-            }
-            if due(TMDbPopularity.age()),
-               let fresh = try? await Task.detached(priority: .utility, operation: { try await TMDbPopularity.download() }).value {
-                await apply(fresh)
+            let ratingsDue = due(IMDbRatings.age()), popularityDue = due(TMDbPopularity.age())
+            async let ratings: IMDbRatings? = ratingsDue
+                ? try? await Task.detached(priority: .utility, operation: { try await IMDbRatings.download() }).value : nil
+            async let popularity: TMDbPopularity? = popularityDue
+                ? try? await Task.detached(priority: .utility, operation: { try await TMDbPopularity.download() }).value : nil
+            let newPopularity = await popularity
+            if let newPopularity { self.popularity = newPopularity }
+            if let fresh = await ratings {
+                await apply(fresh, downloaded: true)
+            } else if newPopularity != nil {
+                await rank()
             }
         }
         chartsTask = task
@@ -447,42 +463,102 @@ final class LibraryIndex {
         chartsTask = nil
     }
 
-    /// Ratings and popularity saved on the device, if not loaded yet.
-    func loadCachedCharts() async {
-        if ratings == nil, let cached = await Task.detached(priority: .utility, operation: { IMDbRatings.cached() }).value {
-            await apply(cached)
+    /// IMDb's genres and makers for the library's titles: on Wi-Fi only
+    /// (about 300 MB to read), monthly, or after three days when over a
+    /// twentieth of the library's titles aren't in it yet. Call once the
+    /// library has loaded.
+    func refreshCatalog(unmetered: Bool) async {
+        if let running = catalogTask { return await running.value }
+        let wanted = Set(corpus.items.compactMap { $0.imdb.flatMap(IMDbRatings.number) })
+        // Not while something plays: the stream gets the connection.
+        guard unmetered, !PlaybackActivity.isPlaying, !wanted.isEmpty else { return }
+        let task = Task {
+            if catalog == nil { catalog = await Task.detached(priority: .utility) { IMDbCatalog.cached() }.value }
+            let age = catalog.map { Date().timeIntervalSince($0.builtAt) }
+            let missing = catalog.map { $0.coverage(of: wanted) < 0.95 } ?? true
+            guard age.map({ $0 > 30 * 24 * 3600 || (missing && $0 > 3 * 24 * 3600) }) ?? true,
+                  let fresh = try? await Task.detached(priority: .background, operation: { try await IMDbCatalog.build(for: wanted) }).value
+            else { return await rank() }
+            catalog = fresh
+            await rank()
         }
+        catalogTask = task
+        await task.value
+        catalogTask = nil
+    }
+
+    /// Ratings, popularity, vote history and IMDb's catalog saved on the
+    /// device, if not loaded yet.
+    func loadCachedCharts() async {
+        var loaded = false
         if popularity == nil, let cached = await Task.detached(priority: .utility, operation: { TMDbPopularity.cached() }).value {
-            await apply(cached)
+            popularity = cached
+            loaded = true
+        }
+        if votes.snapshots.isEmpty { votes = await Task.detached(priority: .utility) { IMDbVoteHistory.cached() }.value }
+        if catalog == nil { catalog = await Task.detached(priority: .utility) { IMDbCatalog.cached() }.value }
+        if ratings == nil, let cached = await Task.detached(priority: .utility, operation: { IMDbRatings.cached() }).value {
+            await apply(cached, downloaded: false)
+        } else if loaded {
+            await rank()
         }
     }
 
-    private func apply(_ ratings: IMDbRatings) async {
+    private func apply(_ ratings: IMDbRatings, downloaded: Bool) async {
         self.ratings = ratings
+        if downloaded {
+            let titles = Set(corpus.items.compactMap { $0.imdb.flatMap(IMDbRatings.number) })
+            let history = votes
+            if !titles.isEmpty, let updated = await Task.detached(priority: .utility, operation: { () -> IMDbVoteHistory? in
+                var next = history
+                return next.record(ratings, for: titles) ? next : nil
+            }).value {
+                votes = updated
+            }
+        }
         let start = generation
         let boosted = await Self.boost(corpus, ratings)
-        let notable = await Self.notable(boosted.items, ratings)
-        guard generation == start else { return await apply(ratings) }
+        guard generation == start else { return await apply(ratings, downloaded: false) }
         corpus = boosted
-        self.notable = notable
+        await rank()
     }
 
-    private func apply(_ popularity: TMDbPopularity) async {
-        self.popularity = popularity
+    /// Every list made from the public data, again (new entries, ratings,
+    /// popularity, votes or catalog), off the main thread.
+    private func rank() async {
+        guard ratings != nil || popularity != nil else { return }
         let start = generation
-        let trending = await Self.trending(corpus.items, popularity)
-        guard generation == start else { return await apply(popularity) }
-        self.trending = trending
+        let entries = corpus.items, gain = votes.dailyGain(), catalog = catalog
+        let ratings = ratings, popularity = popularity
+        async let notable = Self.notable(entries, ratings)
+        async let trending = Self.trending(entries, ratings: ratings, popularity: popularity, gain: gain)
+        async let similarity = Task.detached(priority: .utility) {
+            catalog.map { IMDbSimilarity(entries: entries, catalog: $0, ratings: ratings) }
+        }.value
+        let (n, t, s) = await (notable, trending, similarity)
+        guard generation == start else { return await rank() }
+        self.notable = n
+        self.trending = t
+        self.similarity = s
     }
 
-    /// Search and the trending list from these entries, each title once.
+    /// Search and the lists from these entries, each title once.
     private func publish(_ entries: [LibraryEntry]) async {
         let (corpus, versions) = await Self.build(entries, ratings)
         generation += 1
         self.corpus = corpus
         self.versions = versions
-        if let popularity { trending = await Self.trending(corpus.items, popularity) }
-        if let ratings { notable = await Self.notable(corpus.items, ratings) }
+        entryById = Dictionary(corpus.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        await rank()
+    }
+
+    /// The library's titles most like this one (by any copy's id) by IMDb's
+    /// data, best first; empty when IMDb's data doesn't cover it.
+    func imdbSimilar(to id: String, limit: Int = 20) async -> [LibraryEntry] {
+        guard let similarity,
+              let entry = entryById[id] ?? versions[id]?.lazy.compactMap({ self.entryById[$0] }).first,
+              let imdb = entry.imdb else { return [] }
+        return await Task.detached(priority: .userInitiated) { similarity.similar(toIMDb: imdb, limit: limit) }.value
     }
 
     /// Every copy of the title with this id (just the id when there's one).
@@ -556,6 +632,8 @@ final class LibraryIndex {
         corpus = SearchCorpus(name: \.name)
         generation += 1
         versions = [:]
+        entryById = [:]
+        similarity = nil
         trending = []
         notable = []
         pages = [:]
@@ -635,19 +713,62 @@ final class LibraryIndex {
         }.value
     }
 
-    /// The 300 most popular titles right now.
-    private nonisolated static func trending(_ entries: [LibraryEntry], _ popularity: TMDbPopularity) async -> [LibraryEntry] {
-        await Task.detached(priority: .utility) {
-            entries.compactMap { entry in popularity.popularity(entry).map { (entry, $0) } }
-                .sorted { $0.1 > $1.1 }
+    /// The 300 titles most in demand right now, by every crowd signal at
+    /// hand: TMDb's daily popularity (what people view, look up and add to
+    /// watchlists) and votes gained a day on IMDb (what people just
+    /// watched). Each signal ranks the library on its own and a title's
+    /// place is the average of its ranks, so no one source decides and
+    /// another plugs in the same way. With neither yet: the last three
+    /// years' titles by IMDb votes a year since they came out.
+    private nonisolated static func trending(_ entries: [LibraryEntry], ratings: IMDbRatings?, popularity: TMDbPopularity?,
+                                             gain: [UInt32: Double]?) async -> [LibraryEntry] {
+        let year = Calendar.current.component(.year, from: Date())
+        return await Task.detached(priority: .utility) {
+            let titles = entries.indices.filter { entries[$0].kind == "Movie" || entries[$0].kind == "Series" }
+            func imdb(_ i: Int) -> (UInt32, IMDbRatings.Rating)? {
+                guard let ratings, let number = entries[i].imdb.flatMap(IMDbRatings.number),
+                      let rating = ratings.rating(number: number) else { return nil }
+                return (number, rating)
+            }
+            var signals: [[Int: Double]] = []
+            if let popularity {
+                signals.append(Dictionary(uniqueKeysWithValues: titles.compactMap { i in popularity.popularity(entries[i]).map { (i, $0) } }))
+            }
+            if let gain {
+                // Titles with a few hundred votes swing on a handful.
+                signals.append(Dictionary(uniqueKeysWithValues: titles.compactMap { i in
+                    imdb(i).flatMap { number, rating in rating.votes >= 500 ? gain[number].map { (i, $0) } : nil }
+                }))
+            }
+            if signals.allSatisfy(\.isEmpty) {
+                signals = [Dictionary(uniqueKeysWithValues: titles.compactMap { i -> (Int, Double)? in
+                    guard let (_, rating) = imdb(i), rating.votes >= 500, let released = entries[i].year, released >= year - 2 else { return nil }
+                    return (i, Double(rating.votes) / max(0.5, Double(year - released) + 0.5))
+                })]
+            }
+            // Each signal's ranks as 0 … 1 (1 the most; equal values share
+            // one), averaged over the signals that know the title.
+            var sum: [Int: Double] = [:], count: [Int: Double] = [:]
+            for signal in signals where signal.count > 1 {
+                let ordered = signal.sorted { $0.value < $1.value }
+                var place = 0
+                for (k, (i, value)) in ordered.enumerated() {
+                    if k > 0, value != ordered[k - 1].value { place = k }
+                    sum[i, default: 0] += Double(place) / Double(ordered.count - 1)
+                    count[i, default: 0] += 1
+                }
+            }
+            return sum.map { ($0.key, $0.value / count[$0.key]!) }
+                .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
                 .prefix(300)
-                .map(\.0)
+                .map { entries[$0.0] }
         }.value
     }
 
     /// Released this year or last, rated 6.5 or more by at least a
     /// thousand IMDb voters; the 300 most voted.
-    private nonisolated static func notable(_ entries: [LibraryEntry], _ ratings: IMDbRatings) async -> [LibraryEntry] {
+    private nonisolated static func notable(_ entries: [LibraryEntry], _ ratings: IMDbRatings?) async -> [LibraryEntry] {
+        guard let ratings else { return [] }
         let year = Calendar.current.component(.year, from: Date())
         return await Task.detached(priority: .utility) {
             entries.filter { ($0.kind == "Movie" || $0.kind == "Series") && ($0.year ?? 0) >= year - 1 }
@@ -676,6 +797,18 @@ final class LibraryIndex {
 /// Small JSON files in Caches: display data only, never logins or stream URLs.
 enum AppCache {
     static let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+
+    /// Downloads cut off when the app last closed, which the system leaves
+    /// in the temporary folder (a dataset is hundreds of megabytes). Only
+    /// ones untouched for ten minutes: not any under way now.
+    static func removeStaleDownloads() {
+        let folder = FileManager.default.temporaryDirectory
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for file in files where file.lastPathComponent.hasPrefix("CFNetworkDownload_") {
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if Date().timeIntervalSince(modified) > 600 { try? FileManager.default.removeItem(at: file) }
+        }
+    }
 
     static func read<T: Decodable>(_ name: String) -> T? {
         guard let data = try? Data(contentsOf: directory.appending(path: name)) else { return nil }

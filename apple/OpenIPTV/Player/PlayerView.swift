@@ -91,8 +91,20 @@ struct MoviePlayerView: View {
     #if os(tvOS)
     /// Where the current swipe started from.
     @State private var swipeFrom: Double?
-    /// Rewinding or fast-forwarding while left or right is held.
+    /// Rewinding or fast-forwarding while left or right is held, and which
+    /// way (+1 forward, −1 back).
     @State private var holdTask: Task<Void, Never>?
+    @State private var holdDirection: Double?
+    /// The bar alone, as in Apple's player while playing or just after a
+    /// jump; paused, the title, buttons and Info tab too.
+    @State private var compact = true
+    /// The Info panel or a track menu, and what the remote is on.
+    @State private var panel: TVPlayerPanel?
+    @State private var focus: TVPlayerFocus = .bar
+    /// The file's audio and subtitle tracks, and the picture's badges ("4K",
+    /// "HDR") for the Info panel.
+    @State private var tracks: [MPVPlayer.Track] = []
+    @State private var badges: [String] = []
     #endif
     /// iPhone scrubbing: speed label, and live seeks so the picture follows.
     @State private var scrubSpeed: String?
@@ -184,8 +196,16 @@ struct MoviePlayerView: View {
     }
 
     /// Minimal, like the streaming apps (see PlayerChrome): the episode and
-    /// show at the bottom over one bar with the times and rotate.
+    /// show at the bottom over one bar with the times and rotate. Apple TV:
+    /// Apple's own player's look (see TVMovieOverlay).
     private var controls: some View {
+        #if os(tvOS)
+        TVMovieOverlay(caption: playback.subtitle, title: playback.title, note: note,
+                       busy: (buffering || !started) && error == nil, bar: transportBar, compact: compact,
+                       panel: panel, focus: focus, hasSubtitles: tracks.contains { $0.kind == .subtitle },
+                       info: TVPlayerInfo(heading: playback.subtitle, overview: playback.overview, runtime: runtime, badges: badges),
+                       menu: menu)
+        #else
         PlayerChrome(caption: playback.subtitle, title: playback.title, note: note, paused: paused,
                      busy: (buffering || !started) && error == nil, ready: started,
                      close: { dismiss() }, back: { skip(-10) },
@@ -194,6 +214,7 @@ struct MoviePlayerView: View {
         } bar: {
             scrubber
         }
+        #endif
     }
 
     /// An error, a quality change, or how fast it started (briefly).
@@ -219,13 +240,89 @@ struct MoviePlayerView: View {
                      onChanged: { liveScrub($0) }, onCommit: commitScrub)
         }
         #else
-        let at = scrubbing ?? position
-        let length = max(total, 1)
-        TVTransportBar(fraction: at / length, origin: scrubbing == nil ? nil : scrubOrigin.map { $0 / length },
-                       time: timeString(at), remaining: "−" + timeString(max(0, total - at)),
-                       paused: paused && scrubbing == nil, choosing: scrubbing != nil)
+        transportBar
         #endif
     }
+
+    #if os(tvOS)
+    private var transportBar: TVTransportBar {
+        let at = scrubbing ?? position
+        let state: TVTransportBar.State = if let holdDirection {
+            holdDirection > 0 ? .forward : .backward
+        } else if paused, scrubbing == nil {
+            .paused
+        } else {
+            .playing
+        }
+        return TVTransportBar(fraction: at / max(total, 1), time: clock(at), remaining: "-" + clock(max(0, total - at)), state: state)
+    }
+
+    /// "07:48" under an hour, "1:52:07" over, as Apple's player writes it.
+    private func clock(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return s >= 3600
+            ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+            : String(format: "%02d:%02d", s / 60, s % 60)
+    }
+
+    /// "10 min", "1 hr 52 min".
+    private var runtime: String? {
+        guard total > 0 else { return nil }
+        let minutes = Int((total / 60).rounded())
+        guard minutes >= 60 else { return "\(minutes) min" }
+        return minutes % 60 == 0 ? "\(minutes / 60) hr" : "\(minutes / 60) hr \(minutes % 60) min"
+    }
+
+    private var audioTracks: [MPVPlayer.Track] { tracks.filter { $0.kind == .audio } }
+    private var subtitleTracks: [MPVPlayer.Track] { tracks.filter { $0.kind == .subtitle } }
+
+    private var menu: TVTrackMenu? {
+        switch panel {
+        case .audio:
+            TVTrackMenu(heading: "Audio Track", rows: audioTracks.map { .init(label: label($0), checked: $0.selected) })
+        case .subtitles:
+            TVTrackMenu(heading: "Subtitles", rows: [.init(label: "Off", checked: !subtitleTracks.contains(where: \.selected))]
+                + subtitleTracks.map { .init(label: label($0), checked: $0.selected) })
+        default:
+            nil
+        }
+    }
+
+    /// "English", "English (Commentary)", "Spanish 5.1", "French (Forced)".
+    private func label(_ track: MPVPlayer.Track) -> String {
+        let language = track.language.flatMap { $0 == "und" ? nil : Locale.current.localizedString(forLanguageCode: $0) }
+        var text: String
+        if let title = track.title, !title.isEmpty {
+            if let language, !title.localizedCaseInsensitiveContains(language) {
+                text = "\(language) (\(title))"
+            } else {
+                text = title
+            }
+        } else {
+            text = language ?? "Unknown language"
+            if track.kind == .audio, let channels = track.channels {
+                switch channels {
+                case 6: text += " 5.1"
+                case 8: text += " 7.1"
+                default: break
+                }
+            }
+        }
+        if track.forced { text += " (Forced)" }
+        return text
+    }
+
+    /// The tracks, and the picture's size and range, once it's playing.
+    private func loadTrackInfo() async {
+        guard let player else { return }
+        tracks = await player.tracks()
+        if let format = await player.videoFormat() {
+            var badges = [format.height >= 1800 ? "4K" : format.height >= 700 ? "HD" : "SD"]
+            if format.gamma == "pq" || format.gamma == "hlg" { badges.append("HDR") }
+            self.badges = badges
+        }
+    }
+    #endif
 
     /// The preview still for where a jump would land, while the player's
     /// own picture is still on its way there.
@@ -370,6 +467,9 @@ struct MoviePlayerView: View {
             #if DEBUG
             NSLog("%@", "PERF start " + (timing ?? ""))
             #endif
+            #if os(tvOS)
+            Task { await loadTrackInfo() }
+            #endif
             // Development builds with the stats on: shown for a moment.
             if prefs.performanceStats { showTiming(timing ?? "", for: 5) } else { timing = nil }
             if controlsVisible { showControls() }
@@ -462,6 +562,12 @@ struct MoviePlayerView: View {
             }
         case let .paused(isPaused):
             paused = isPaused
+            #if os(tvOS)
+            // Paused by the viewer (not to choose where to jump): the title,
+            // buttons and Info tab; playing, the bar alone.
+            if isPaused, scrubbing == nil, !resumeAfterScrub { compact = false }
+            if !isPaused { compact = true }
+            #endif
             if isPaused { showControls(autoHide: false) } else { showControls() }
         case .ended:
             position = total
@@ -501,10 +607,17 @@ struct MoviePlayerView: View {
         hideTask?.cancel()
         withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true }
         guard autoHide, !paused, started, error == nil else { return }
+        #if os(tvOS)
+        // On a button or in a menu: stays until the remote leaves it.
+        guard focus == .bar, panel == nil else { return }
+        #endif
         hideTask = Task {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled, error == nil else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
+            #if os(tvOS)
+            compact = true
+            #endif
         }
     }
 
@@ -568,14 +681,20 @@ struct MoviePlayerView: View {
     /// - click left or right: back or forward 10 seconds, straight away;
     /// - hold left or right: rewind or fast-forward, faster the longer it's
     ///   held, jumping there on release;
-    /// - swipe on the touch surface: the picture pauses and follows to where
-    ///   it would jump; click to play from there, Menu to stay;
+    /// - swipe across the touch surface: the picture pauses and follows to
+    ///   where it would jump; click to play from there, Menu to stay;
     /// - click the centre or Play/Pause: pause or play;
-    /// - Menu: stop choosing, then hide the controls, then leave.
+    /// - up: the round buttons (subtitles, audio), whose menus open with a
+    ///   click; down: the Info panel and "From Beginning";
+    /// - Menu: close a menu or the panel, stop choosing, hide the controls,
+    ///   then leave.
     private func remote(_ input: TVRemoteSurface.Input) {
+        if let panel { return inPanel(panel, input) }
+        if focus == .audio || focus == .subtitles { return onButtons(input) }
         switch input {
         case let .click(direction):
             guard started else { return }
+            compact = true
             if let target = scrubbing {
                 preview(target + direction * 10)
             } else {
@@ -583,6 +702,8 @@ struct MoviePlayerView: View {
             }
         case let .hold(direction):
             guard started else { return }
+            compact = true
+            holdDirection = direction
             holdTask?.cancel()
             holdTask = Task {
                 var step = 10.0
@@ -596,13 +717,25 @@ struct MoviePlayerView: View {
         case .released:
             holdTask?.cancel()
             holdTask = nil
+            holdDirection = nil
             if let target = scrubbing { commitScrub(target) }
         case let .swipe(began, distance, ended):
             guard started else { return }
+            compact = true
             if began { swipeFrom = scrubbing ?? position }
             guard let from = swipeFrom else { return }
             if distance != 0 { preview(from + Double(distance) * secondsPerPoint) }
             if ended { swipeFrom = nil }
+        case .up:
+            guard started, scrubbing == nil else { return }
+            compact = false
+            focus = .audio
+            showControls(autoHide: false)
+        case .down:
+            guard started, scrubbing == nil else { return }
+            panel = .info
+            focus = .fromBeginning
+            showControls(autoHide: false)
         case .select, .playPause:
             if let target = scrubbing {
                 commitScrub(target)
@@ -619,6 +752,112 @@ struct MoviePlayerView: View {
                 dismiss()
             }
         }
+    }
+
+    /// On the round buttons: left and right between them, a click opens
+    /// its menu, down or Menu back to the bar.
+    private func onButtons(_ input: TVRemoteSurface.Input) {
+        switch input {
+        case let .click(direction):
+            guard !subtitleTracks.isEmpty else { return }
+            focus = direction < 0 ? .subtitles : .audio
+        case .select:
+            openMenu(focus == .subtitles ? .subtitles : .audio)
+        case .playPause:
+            togglePlay()
+        case .down, .menu:
+            backToBar()
+        default:
+            break
+        }
+    }
+
+    /// The Info panel or a menu open: up and down through a menu, a click
+    /// picks, Menu (or up, from the Info panel) closes it.
+    private func inPanel(_ open: TVPlayerPanel, _ input: TVRemoteSurface.Input) {
+        let rows = menu?.rows.count ?? 0
+        let button: TVPlayerFocus = open == .subtitles ? .subtitles : .audio
+        switch (open, input) {
+        case (.info, .select):
+            restart()
+            panel = nil
+            backToBar()
+        case (.info, .up), (.info, .menu):
+            panel = nil
+            backToBar()
+        case (_, .playPause):
+            togglePlay()
+        case (_, .up):
+            if case let .row(i) = focus { focus = .row(max(i - 1, 0)) }
+        case (_, .down):
+            if case let .row(i) = focus { focus = .row(min(i + 1, rows - 1)) }
+        case (_, .select):
+            if case let .row(i) = focus { choose(i, in: open) }
+            panel = nil
+            focus = button
+        case (_, .menu):
+            panel = nil
+            focus = button
+        default:
+            break
+        }
+    }
+
+    /// Back on the bar: playing, the controls hide again in a moment.
+    private func backToBar() {
+        focus = .bar
+        if !paused { compact = true }
+        showControls(autoHide: !paused)
+    }
+
+    /// A track menu, on the track in use.
+    private func openMenu(_ kind: TVPlayerPanel) {
+        Task {
+            if let player { tracks = await player.tracks() }
+            let chosen = kind == .audio
+                ? audioTracks.firstIndex(where: \.selected) ?? 0
+                : subtitleTracks.firstIndex(where: \.selected).map { $0 + 1 } ?? 0
+            panel = kind
+            focus = .row(chosen)
+            showControls(autoHide: false)
+        }
+    }
+
+    /// Plays the audio track in this row, or shows these subtitles (row 0:
+    /// none); the tick moves at once.
+    private func choose(_ row: Int, in kind: TVPlayerPanel) {
+        guard let player else { return }
+        let trackKind: MPVPlayer.Track.Kind = kind == .audio ? .audio : .subtitle
+        let list = tracks.filter { $0.kind == trackKind }
+        let id: Int?
+        if kind == .audio {
+            guard list.indices.contains(row) else { return }
+            id = list[row].id
+            player.selectAudio(list[row].id)
+        } else {
+            id = row > 0 && list.indices.contains(row - 1) ? list[row - 1].id : nil
+            player.selectSubtitle(id)
+        }
+        tracks = tracks.map { track in
+            guard track.kind == trackKind else { return track }
+            return MPVPlayer.Track(id: track.id, kind: track.kind, title: track.title, language: track.language,
+                                   channels: track.channels, forced: track.forced, selected: track.id == id)
+        }
+    }
+
+    /// "From Beginning": the start, playing.
+    private func restart() {
+        if offset > 0, let bitrate = governor?.current,
+           let url = model.convertedURL(for: playback, bitrate: bitrate, start: 0) {
+            offset = 0
+            player?.load(url, headers: playback.fallbackHeaders, file: false)
+        } else {
+            player?.seek(to: 0, exact: true)
+        }
+        lastSeek = Date()
+        position = 0
+        jumpUntil = Date().addingTimeInterval(1.5)
+        if paused { player?.setPaused(false) }
     }
 
     /// A swipe across the whole touch surface (about the screen's width)

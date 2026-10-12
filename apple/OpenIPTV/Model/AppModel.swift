@@ -98,6 +98,7 @@ final class AppModel {
         _ = NetworkStatus.shared
         // Title pages not visited in a month.
         AppCache.prune(startingWith: ["show-", "movie-"], olderThan: 30)
+        Task.detached(priority: .background) { AppCache.removeStaleDownloads() }
         // The first screen's pictures, decoded from the disk cache while the
         // app is still drawing its first frame, so Home opens with them.
         if let home {
@@ -311,7 +312,7 @@ final class AppModel {
             if let previous, Date().timeIntervalSince(previous.loadedAt) < 24 * 3600 {
                 async let changes = emby.episodeChanges(of: id, since: previous.loadedAt)
                 async let next = emby.nextEpisode(of: id)
-                async let like: [EmbyItem]? = previous.similar == nil ? emby.similar(to: id, limit: 20) : previous.similar
+                async let like: [EmbyItem]? = previous.similar == nil ? moreLikeThis(id, emby: emby) : previous.similar
                 if let changed = try? await changes {
                     return ShowData(show: previous.show, episodes: Self.merge(previous.episodes, changed),
                                     nextUp: (try? await next) ?? previous.nextUp, loadedAt: Date(), similar: await like)
@@ -322,7 +323,7 @@ final class AppModel {
             async let item = emby.details(id)
             async let list = emby.episodes(of: id, season: nil)
             async let next = emby.nextEpisode(of: id)
-            async let like = emby.similar(to: id, limit: 20)
+            async let like = moreLikeThis(id, emby: emby)
             guard let show = await item, let episodes = try? await list else { return nil }
             return ShowData(show: show, episodes: episodes, nextUp: try? await next, loadedAt: Date(), similar: await like)
         }
@@ -494,13 +495,22 @@ final class AppModel {
 
     private static func movieFile(_ id: String) -> String { "movie-\(id).json" }
 
+    /// The library's titles most like this one by IMDb's data (who made
+    /// them, genres, era, rating), with what's been watched of them; Emby's
+    /// own suggestions for a title IMDb's data doesn't cover yet.
+    private func moreLikeThis(_ id: String, emby: EmbyClient) async -> [EmbyItem] {
+        let alike = await library.imdbSimilar(to: id, limit: 20).map(\.id)
+        guard !alike.isEmpty else { return await emby.similar(to: id, limit: 20) }
+        return await emby.items(ids: alike)
+    }
+
     /// Details and titles like it, at once; one load at a time per film.
     func loadMovie(_ id: String) async -> MovieData? {
         if let running = movieLoads[id] { return await running.value }
         guard let emby else { return nil }
         let account = accountGeneration
         let task = Task<MovieData?, Never> {
-            async let like = emby.similar(to: id, limit: 20)
+            async let like = moreLikeThis(id, emby: emby)
             guard let item = await emby.details(id), account == accountGeneration else { return nil }
             // The page's own details (and where you got to) as soon as
             // they're here; titles like it (a slower request) follow.
@@ -878,6 +888,18 @@ final class AppModel {
         let hadNotable = !library.notable.isEmpty
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
         await library.prepare(emby)
+        // IMDb's genres and makers for the library's titles (Wi-Fi, about
+        // monthly), in the background; the first time they arrive, Top
+        // picks are remade from them. Hundreds of megabytes, so not in the
+        // first two minutes: browsing and a first play get the connection,
+        // and a quick look doesn't start a download it won't finish.
+        let hadCatalog = library.catalog != nil
+        Task(priority: .background) { [weak self] in
+            try? await Task.sleep(for: .seconds(120))
+            guard let self else { return }
+            await library.refreshCatalog(unmetered: NetworkStatus.shared.knownUnmetered)
+            if !hadCatalog, library.catalog != nil { await loadHome(cardWidth: lastCardWidth, sync: false, full: true) }
+        }
         await charts
         // New titles since Home was built: rebuild its other rows.
         if let changed = library.changedAt, let built = homeBuiltAt, changed > built {
@@ -1485,15 +1507,17 @@ final class AppModel {
         }
         var people: [(item: EmbyItem, person: String)] = []
         if let person = await persons.first {
-            let popularity = library.popularity
+            let popularity = library.popularity, ratings = library.ratings
             people = await emby.titles(withPerson: person.id)
                 .map { (item: $0, person: person.name) }
                 .sorted {
                     let a = query.yearDistance($0.item.productionYear), b = query.yearDistance($1.item.productionYear)
                     if a != b { return a < b }
+                    // Then the most popular now (TMDb), else the most voted (IMDb).
                     let pa = popularity?.popularity($0.item.tmdb, $0.item.kind == "Series" ? .show : .movie) ?? 0
                     let pb = popularity?.popularity($1.item.tmdb, $1.item.kind == "Series" ? .show : .movie) ?? 0
-                    return pa > pb
+                    if pa != pb { return pa > pb }
+                    return (ratings?.rating($0.item.imdb)?.votes ?? 0) > (ratings?.rating($1.item.imdb)?.votes ?? 0)
                 }
         }
         return (refined, people)

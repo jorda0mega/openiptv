@@ -205,6 +205,8 @@ struct EmbyPlayback: Hashable, Identifiable {
     var bitrate: Int?
     /// The show an episode belongs to.
     var seriesId: String?
+    /// The story, for the player's Info panel.
+    var overview: String?
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {
