@@ -35,6 +35,7 @@
 		199695CF489DC54ED1DF885A /* lcms2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */; };
 		1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF28B344CA01BCD1800A4E3 /* LiveModels.swift */; };
 		1B688B589825F83E58DA4E1B /* hogweed.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4962C0F389044958A1E2BE4 /* hogweed.xcframework */; };
+		1CE08F6192353FDD760D3939 /* LibraryIndexFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */; };
 		1D626F013984C6DFB17DDA92 /* TVLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B020D0F87B72E286D9A48D /* TVLiveView.swift */; };
 		1FFCAB2944137C5D0E16CC38 /* gmp.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 363AD3E84AD3778E05926FBC /* gmp.xcframework */; };
 		21102DA03C0F276A1F777950 /* XtreamProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B14B5E25BA30ECE2BD6E701 /* XtreamProvider.swift */; };
@@ -69,6 +70,7 @@
 		4BF7485C9768C25D84338A8F /* libiconv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 4842B481085D3917305982E1 /* libiconv.tbd */; };
 		4C9338B92D678D172D89E014 /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */; };
 		4CE8D1C0AE1570EBE3561ECD /* Libfreetype.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5183C151FC323F23D289CE6E /* Libfreetype.xcframework */; };
+		4CF9404E0D9798C453F590CD /* LibraryIndexFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */; };
 		4FA8FBF2F779CEEA8E158953 /* Libuchardet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */; };
 		500CE028575089ED5DE60A5C /* MovieView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E895C7A337E5874B38A8020C /* MovieView.swift */; };
 		507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */; };
@@ -259,6 +261,7 @@
 		4B0770E7215519F6AED0BA2C /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 		4FF14463A6C22E095CC94044 /* IOSurface.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOSurface.framework; path = System/Library/Frameworks/IOSurface.framework; sourceTree = SDKROOT; };
 		5183C151FC323F23D289CE6E /* Libfreetype.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libfreetype.xcframework; path = Vendor/Libfreetype.xcframework; sourceTree = "<group>"; };
+		51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryIndexFile.swift; sourceTree = "<group>"; };
 		57788799C7CF36103C03E61C /* nettle.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = nettle.xcframework; path = Vendor/nettle.xcframework; sourceTree = "<group>"; };
 		58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libfribidi.xcframework; path = Vendor/Libfribidi.xcframework; sourceTree = "<group>"; };
 		58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalArea.swift; sourceTree = "<group>"; };
@@ -637,6 +640,7 @@
 				6C97593A755F65E9694219D4 /* IMDbCatalog.swift */,
 				C6C136886855C91760BFF6EF /* IMDbRatings.swift */,
 				E1FD9D66654217AC33F67CB5 /* IMDbSignals.swift */,
+				51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */,
 				312496694F477570E1827C77 /* SearchIndex.swift */,
 				9D955785FF1529F49B082EE5 /* SmartSearch.swift */,
 				9007B25996DDA88FE40D727B /* TMDbPopularity.swift */,
@@ -863,6 +867,7 @@
 				76660492F23C6EF6024B38F5 /* IMDbSignals.swift in Sources */,
 				C2B3A024AC7BEF379F2E4C4A /* ImagePipeline.swift in Sources */,
 				53650932E226B2B55FA992A1 /* Keychain.swift in Sources */,
+				1CE08F6192353FDD760D3939 /* LibraryIndexFile.swift in Sources */,
 				84F1C24A345749B9277FDA29 /* LiveModels.swift in Sources */,
 				6D5968936DF5594E32D6D529 /* LiveOrganizer.swift in Sources */,
 				976B05916C747916000E1666 /* LivePlayerView.swift in Sources */,
@@ -933,6 +938,7 @@
 				4A04418C373899BEE64BEB0D /* IMDbSignals.swift in Sources */,
 				507615D003B161A71506C5B6 /* ImagePipeline.swift in Sources */,
 				4209B928261B700D9F0978FA /* Keychain.swift in Sources */,
+				4CF9404E0D9798C453F590CD /* LibraryIndexFile.swift in Sources */,
 				1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */,
 				6AAED15590593E71877BC43A /* LiveOrganizer.swift in Sources */,
 				9F06D59EE7F81D0590BE65AE /* LivePlayerView.swift in Sources */,

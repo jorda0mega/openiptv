@@ -42,20 +42,32 @@ struct SearchCorpus<Item>: @unchecked Sendable {
             return Self.fold(String(name[..<open.lowerBound])).count
         }
         compact = keys.map { $0.filter { $0 != 32 } }
-        var ids: [[UInt8]: Int32] = [:]
+        // Words looked up as small Strings (stored inline, no allocation
+        // up to 15 bytes): about a third of the time byte-array keys took.
+        var ids: [String: Int32] = [:]
+        ids.reserveCapacity(keys.count)
         var vocabulary: [[UInt8]] = []
         var postings: [[Int32]] = []
         for (index, key) in keys.enumerated() {
-            for word in key.split(separator: 32) where word.count >= 2 {
-                let w = Array(word)
-                let id: Int32
-                if let known = ids[w] { id = known } else {
-                    id = Int32(vocabulary.count)
-                    ids[w] = id
-                    vocabulary.append(w)
-                    postings.append([])
+            key.withUnsafeBufferPointer { buffer in
+                var start = 1
+                while start < buffer.count {
+                    var end = start
+                    while end < buffer.count, buffer[end] != 32 { end += 1 }
+                    if end - start >= 2 {
+                        let word = UnsafeBufferPointer(rebasing: buffer[start..<end])
+                        let text = String(decoding: word, as: UTF8.self)
+                        let id: Int32
+                        if let known = ids[text] { id = known } else {
+                            id = Int32(vocabulary.count)
+                            ids[text] = id
+                            vocabulary.append(Array(word))
+                            postings.append([])
+                        }
+                        if postings[Int(id)].last != Int32(index) { postings[Int(id)].append(Int32(index)) }
+                    }
+                    start = end + 1
                 }
-                if postings[Int(id)].last != Int32(index) { postings[Int(id)].append(Int32(index)) }
             }
         }
         var byFirst: [UInt8: [Int32]] = [:]
@@ -230,6 +242,7 @@ struct SearchCorpus<Item>: @unchecked Sendable {
     /// Lowercase, accent-free words separated by single spaces, with a
     /// leading space. Apostrophes join ("Grey's" → "greys").
     static func fold(_ text: String) -> [UInt8] {
+        if let plain = foldASCII(text) { return plain }
         let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
         var out: [UInt8] = [32]
         out.reserveCapacity(folded.utf8.count + 1)
@@ -239,12 +252,37 @@ struct SearchCorpus<Item>: @unchecked Sendable {
             if scalar.properties.isAlphabetic || scalar.properties.numericType != nil {
                 if pendingSpace, out.count > 1 { out.append(32) }
                 pendingSpace = false
-                out.append(contentsOf: String(scalar).utf8)
+                UTF8.encode(scalar) { out.append($0) }
             } else {
                 pendingSpace = true
             }
         }
         return out
+    }
+
+    /// `fold` for plain ASCII (most titles), byte by byte: the same result
+    /// without Foundation's folding, about ten times faster. Nil for any
+    /// other text.
+    private static func foldASCII(_ text: String) -> [UInt8]? {
+        var text = text
+        return text.withUTF8 { bytes -> [UInt8]? in
+            var out: [UInt8] = [32]
+            out.reserveCapacity(bytes.count + 1)
+            var pendingSpace = false
+            for byte in bytes {
+                if byte >= 128 { return nil }
+                if byte == 39 { continue }
+                let lower = byte >= 65 && byte <= 90 ? byte + 32 : byte
+                if (lower >= 97 && lower <= 122) || (byte >= 48 && byte <= 57) {
+                    if pendingSpace, out.count > 1 { out.append(32) }
+                    pendingSpace = false
+                    out.append(lower)
+                } else {
+                    pendingSpace = true
+                }
+            }
+            return out
+        }
     }
 
     @inline(__always)
@@ -358,7 +396,9 @@ final class LibraryIndex {
 
     /// 2: entries carry IMDb ids. 3: and TMDb ids. 4: and genres.
     private nonisolated static let version = 4
-    private nonisolated static let file = "library-index.json"
+    private nonisolated static let file = "library-index.bin"
+    /// The JSON copy earlier builds saved: read once, then replaced.
+    private nonisolated static let legacyFile = "library-index.json"
     private nonisolated static let pageSize = 5000
     private nonisolated static let parallel = 4
     private nonisolated static let changesEvery: TimeInterval = 10 * 60
@@ -422,12 +462,14 @@ final class LibraryIndex {
             outdated = false
             corpus = SearchCorpus(name: \.name)
             generation += 1
-            if let cache = await Self.readCache(), cache.server == server {
+            if let (cache, legacy) = await Self.readCache(), cache.server == server {
                 pages = cache.pages
                 total = cache.total
                 syncedAt = cache.syncedAt
                 fullSyncAt = cache.fullSyncAt
                 outdated = (cache.version ?? 1) < Self.version
+                // Saved by an earlier build as JSON: in the quicker form now.
+                if legacy { save() }
                 await publish(ordered())
             }
         }
@@ -544,11 +586,11 @@ final class LibraryIndex {
 
     /// Search and the lists from these entries, each title once.
     private func publish(_ entries: [LibraryEntry]) async {
-        let (corpus, versions) = await Self.build(entries, ratings)
+        let (corpus, versions, byId) = await Self.build(entries, ratings)
         generation += 1
         self.corpus = corpus
         self.versions = versions
-        entryById = Dictionary(corpus.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        entryById = byId
         await rank()
     }
 
@@ -644,14 +686,18 @@ final class LibraryIndex {
         outdated = false
         progress = nil
         AppCache.remove(Self.file)
+        AppCache.remove(Self.legacyFile)
     }
 
     private func save() {
         guard let server else { return }
         // Outdated pages are saved as such, so an interrupted fresh pass resumes.
-        let cache = Cache(version: outdated ? 1 : Self.version, server: server, syncedAt: syncedAt,
-                          fullSyncAt: fullSyncAt, total: total, pages: pages)
-        Task.detached(priority: .utility) { AppCache.write(Self.file, cache) }
+        let snapshot = pages
+        let header = LibraryIndexFile.Header(version: outdated ? 1 : Self.version, server: server, syncedAt: syncedAt,
+                                             fullSyncAt: fullSyncAt, total: total,
+                                             pages: snapshot.keys.sorted().map { [$0, snapshot[$0]?.count ?? 0] })
+        AppCache.saveData(Self.file) { LibraryIndexFile.encode(header, pages: snapshot) }
+        AppCache.remove(Self.legacyFile)
     }
 
     /// Three tries with a short pause, so one slow page doesn't sink the load.
@@ -685,9 +731,15 @@ final class LibraryIndex {
     /// The search corpus with each title once (copies in other libraries,
     /// and pages overlapping mid-refresh, folded in), ranked by IMDb
     /// popularity when ratings are loaded, and the copies of each title.
+    /// The corpus, each copy's id → all copies, and each title by id: off
+    /// the main thread (a large library is 100,000 titles and more).
     private nonisolated static func build(_ entries: [LibraryEntry], _ ratings: IMDbRatings?) async
-        -> (SearchCorpus<LibraryEntry>, [String: [String]]) {
+        -> (SearchCorpus<LibraryEntry>, [String: [String]], [String: LibraryEntry]) {
         await Task.detached(priority: .userInitiated) {
+            #if DEBUG
+            let started = CFAbsoluteTimeGetCurrent()
+            defer { NSLog("%@", String(format: "PERF index build %.0f ms (%d titles)", (CFAbsoluteTimeGetCurrent() - started) * 1000, entries.count)) }
+            #endif
             var seenIds = Set<String>()
             seenIds.reserveCapacity(entries.count)
             var groupOf: [String: Int] = [:]
@@ -709,7 +761,8 @@ final class LibraryIndex {
                 for id in ids { versions[id] = ids }
             }
             let corpus = SearchCorpus(titles, name: \.name)
-            return (ratings.map { boosted(corpus, $0) } ?? corpus, versions)
+            let byId = Dictionary(titles.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            return (ratings.map { boosted(corpus, $0) } ?? corpus, versions, byId)
         }.value
     }
 
@@ -789,8 +842,20 @@ final class LibraryIndex {
         return corpus.boosted(corpus.items.map { ratings.popularity($0.imdb, year: $0.year, currentYear: year) })
     }
 
-    private nonisolated static func readCache() async -> Cache? {
-        await Task.detached(priority: .userInitiated) { AppCache.read(file) as Cache? }.value
+    /// The saved index, and whether it was the older JSON copy.
+    private nonisolated static func readCache() async -> (Cache, Bool)? {
+        await Task.detached(priority: .userInitiated) {
+            #if DEBUG
+            let started = CFAbsoluteTimeGetCurrent()
+            defer { NSLog("%@", String(format: "PERF index read %.0f ms", (CFAbsoluteTimeGetCurrent() - started) * 1000)) }
+            #endif
+            if let data = try? Data(contentsOf: AppCache.directory.appending(path: file), options: .alwaysMapped),
+               let (header, pages) = LibraryIndexFile.decode(data) {
+                return (Cache(version: header.version, server: header.server, syncedAt: header.syncedAt,
+                              fullSyncAt: header.fullSyncAt, total: header.total, pages: pages), false)
+            }
+            return (AppCache.read(legacyFile) as Cache?).map { ($0, true) }
+        }.value
     }
 }
 
@@ -826,6 +891,15 @@ enum AppCache {
     /// overwritten by an older one finishing late).
     static func save<T: Encodable & Sendable>(_ name: String, _ value: T) {
         writer.async { write(name, value) }
+    }
+
+    /// The same for a file in its own format, made on the writer's queue.
+    static func saveData(_ name: String, _ make: @escaping @Sendable () -> Data?) {
+        let url = directory.appending(path: name)
+        writer.async {
+            guard let data = make() else { return }
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
     }
 
     /// Saved files starting with one of these that haven't been written for

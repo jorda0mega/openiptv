@@ -148,16 +148,21 @@ final class AppModel {
             return
         }
         connectLive()
-        // Trending and versions come from the index and charts on the device.
-        await library.open(emby)
-        await library.loadCachedCharts()
+        // Trending and versions come from the index and charts on the
+        // device: opened while Continue Watching is asked of the server, not
+        // before it.
+        async let opened: Void = openLibrary(emby)
         // A saved page with no featured title is rebuilt: it was made before
         // anything could be picked (or by a build that was cut off).
-        if !full, !rows.isEmpty, featured != nil, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600,
-           library.changedAt.map({ $0 <= builtAt }) ?? true,
-           await !refreshContinueWatching(checkingHistory: true) {
-            if sync { Task { await syncLibrary(emby) } }
-            return
+        if !full, !rows.isEmpty, featured != nil, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600 {
+            async let historyChanged = refreshContinueWatching(checkingHistory: true)
+            await opened
+            if library.changedAt.map({ $0 <= builtAt }) ?? true, await !historyChanged {
+                if sync { Task { await syncLibrary(emby) } }
+                return
+            }
+        } else {
+            await opened
         }
         do {
             // Nothing on Home yet (first launch, just signed in): Continue
@@ -191,6 +196,11 @@ final class AppModel {
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
         }
+    }
+
+    private func openLibrary(_ emby: EmbyClient) async {
+        await library.open(emby)
+        await library.loadCachedCharts()
     }
 
     /// Waits for `task`, but no longer than `seconds` (a task group can't do
