@@ -189,20 +189,17 @@ private struct HomeHero: View {
     let open: (Card) -> Void
     @State private var index = 0
 
-    /// The hero's space while the first Home is built: the same height (a
-    /// page and its dots), with a spinner.
+    /// The hero's space while the first Home is built: the same height,
+    /// with a spinner.
     static var placeholder: some View {
-        VStack(spacing: 14) {
-            Color.clear
-                .aspectRatio(1 / 1.3, contentMode: .fit)
-                .overlay { ProgressView() }
-            Color.clear.frame(height: 6)
-        }
-        .frame(maxWidth: .infinity)
+        Color.clear
+            .aspectRatio(1 / 1.3, contentMode: .fit)
+            .overlay { ProgressView() }
+            .frame(maxWidth: .infinity)
     }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
             // The size from the space it's given at every layout, never a
             // width kept from before: a film played sideways laid Home out
             // sideways underneath, and a kept width left the hero filling
@@ -225,19 +222,24 @@ private struct HomeHero: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                     }
                 }
-            if items.count > 1 {
-                // The Apple TV app's: 7.7-point dots, the shown one a
-                // 26-point pill.
-                HStack(spacing: 9.6) {
-                    ForEach(items.indices, id: \.self) { i in
-                        Capsule()
-                            .fill(.white.opacity(i == index ? 0.9 : 0.3))
-                            .frame(width: i == index ? 26 : 7.7, height: 7.7)
+                // On the picture, near its bottom, as in the Apple TV app
+                // (they sat under it, on black): 7.7-point dots, the shown
+                // one a 26-point pill.
+                .overlay(alignment: .bottom) {
+                    if items.count > 1 {
+                        HStack(spacing: 9.6) {
+                            ForEach(items.indices, id: \.self) { i in
+                                Capsule()
+                                    .fill(.white.opacity(i == index ? 0.9 : 0.3))
+                                    .frame(width: i == index ? 26 : 7.7, height: 7.7)
+                            }
+                        }
+                        .animation(.snappy, value: index)
+                        .padding(.bottom, 20)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                     }
                 }
-                .animation(.snappy, value: index)
-                .accessibilityHidden(true)
-            }
         }
         .frame(maxWidth: .infinity)
         // Other titles (Home changed at a moment): from the first, never
@@ -255,9 +257,10 @@ private struct HomeHero: View {
         ZStack(alignment: .bottom) {
             Color.black
                 .overlay { CoverImage(images: [CardImage(url: item.backdrop, contain: false)], title: item.card.title, backdrop: true) }
+                .overlay { ArtBand(url: item.backdrop) }
                 .overlay {
                     LinearGradient(stops: [.init(color: .black.opacity(0.35), location: 0), .init(color: .clear, location: 0.25),
-                                           .init(color: .clear, location: 0.5), .init(color: .black, location: 1)],
+                                           .init(color: .clear, location: 0.5), .init(color: .black.opacity(0.3), location: 1)],
                                    startPoint: .top, endPoint: .bottom)
                 }
                 .clipped()
@@ -288,7 +291,8 @@ private struct HomeHero: View {
                 }
             }
             .padding(.horizontal, 24)
-            .padding(.bottom, 20)
+            // Room under the buttons for the page dots.
+            .padding(.bottom, 48)
         }
         .accessibilityElement(children: .contain)
     }

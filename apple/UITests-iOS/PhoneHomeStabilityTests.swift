@@ -238,6 +238,26 @@ final class PhoneHomeStabilityTests: XCTestCase {
         return CGSize(width: CGFloat(right - left) / scale, height: CGFloat(bottom - top + 1) / scale)
     }
 
+    /// The bottom of Home's hero is in its picture's colours, as in the
+    /// Apple TV app (it faded to black).
+    func testHeroArtBand() {
+        app.launch()
+        sleep(8)
+        let width = app.frame.width
+        // The hero is 1.3 times as tall as it is wide; 10 points above its
+        // bottom, at the left (away from the title and buttons).
+        let point = CGPoint(x: 16, y: width * 1.3 - 10)
+        let picture = XCUIScreen.main.screenshot()
+        guard let image = picture.image.cgImage, let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else {
+            return XCTFail("no screenshot")
+        }
+        let scale = CGFloat(image.width) / width
+        let i = Int(point.y * scale) * image.bytesPerRow + Int(point.x * scale) * (image.bitsPerPixel / 8)
+        let brightest = max(bytes[i], bytes[i + 1], bytes[i + 2])
+        shot("hero band")
+        XCTAssertGreaterThan(brightest, 20, "the bottom of the hero is black, not its picture's colours")
+    }
+
     private enum Layout100 {
         static let width: CGFloat = 100
         static let height: CGFloat = 150

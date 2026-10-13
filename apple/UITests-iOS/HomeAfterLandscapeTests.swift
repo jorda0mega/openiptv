@@ -20,9 +20,11 @@ final class HomeAfterLandscapeTests: XCTestCase {
     }
 
     /// The hero's Play button's frame: where the hero ends.
+    /// The shown hero page's Play (the hero turns every eight seconds:
+    /// the other pages' Play buttons sit off the screen beside it).
     private func heroPlay() -> CGRect? {
-        let play = app.buttons.matching(NSPredicate(format: "label == 'Play'")).firstMatch
-        return play.exists ? play.frame : nil
+        app.buttons.matching(NSPredicate(format: "label == 'Play'")).allElementsBoundByIndex
+            .map(\.frame).first { $0.minX >= 0 && $0.maxX <= app.frame.width }
     }
 
     func testHeroSizeAfterLandscapePlayback() {

@@ -22,9 +22,10 @@ struct TitleHero<Buttons: View>: View {
                         CoverImage(images: [CardImage(url: backdrop.absoluteString, contain: false)], title: title, backdrop: true)
                     }
                 }
+                .overlay { ArtBand(url: backdrop?.absoluteString) }
                 .overlay {
                     LinearGradient(stops: [.init(color: .black.opacity(0.4), location: 0), .init(color: .clear, location: 0.22),
-                                           .init(color: .clear, location: 0.45), .init(color: .black, location: 1)],
+                                           .init(color: .clear, location: 0.45), .init(color: .black.opacity(0.3), location: 1)],
                                    startPoint: .top, endPoint: .bottom)
                 }
                 .clipped()
@@ -107,6 +108,27 @@ struct PlayCapsule: View {
         // back from the player doesn't move the title and button up. Not
         // animated: "Play" turning into "Continue" faded one into the other.
         .padding(.bottom, 28)
+    }
+}
+
+/// The bottom of a hero in its own picture's colours (blurred and
+/// darkened, the title and buttons over it), as in the Apple TV app, where
+/// it faded to black.
+struct ArtBand: View {
+    let url: String?
+
+    var body: some View {
+        if let url {
+            CoverImage(images: [CardImage(url: url, contain: false)], title: "", backdrop: true)
+                .blur(radius: 40, opaque: true)
+                .overlay(Color.black.opacity(0.45))
+                .mask {
+                    LinearGradient(stops: [.init(color: .clear, location: 0.45), .init(color: .black, location: 0.72)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 }
 
