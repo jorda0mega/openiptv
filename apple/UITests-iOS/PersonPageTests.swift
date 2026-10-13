@@ -223,6 +223,7 @@ final class PersonPageTests: XCTestCase {
         XCTAssertTrue(film.waitForExistence(timeout: 8), "no search result")
         film.tap()
         sleep(2)
+        shot("story")
         let more = app.buttons["More of the story"].firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 5), "no MORE under a long story")
         // The story opens out when tapped, so it counts as a button.

@@ -41,8 +41,13 @@ CONTROL = {}
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
                         "who destroyed his family. Facing a choice between the love of his life and the fate of the known "
                         "universe, he endeavors to prevent a terrible future only he can foresee."}
+# Its other copy (k8, the same film) tells the same story.
+LONG_OVERVIEWS["k8"] = LONG_OVERVIEWS["a8"]
 # The test user's My List (favorites), by item id.
 FAVORITES = []
+# Where each title was last reported (Progress and Stopped), in ticks: its
+# resume point from then on, as on Emby.
+POSITIONS = {}
 # Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
 SHOW_IMDB = {"Forensic Files": "tt0247882", "Forensic Files II": "tt11840612",
              "The Office": "tt0290978", "The Office (US)": "tt0386676"}
@@ -113,7 +118,8 @@ def known_item(entry, played=False):
             "BackdropImageTags": [f"b{id_}"], "Overview": LONG_OVERVIEWS.get(id_, f"{name} ({year}), a title from the test library."),
             "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
             "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None,
-                         "IsFavorite": id_ in FAVORITES},
+                         "IsFavorite": id_ in FAVORITES} | (
+                {"PlaybackPositionTicks": POSITIONS[id_]} if POSITIONS.get(id_) else {}),
             "Genres": GENRES.get(id_, []),
             # Where it was made (which language it starts in), when asked.
             "ProductionLocations": [c for c in os.environ.get("OPENIPTV_MOCK_COUNTRIES", "").split(",") if c]} | (
@@ -256,6 +262,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == "tok":
             return self.send(b"", status=204)
         if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == "tok":
+            # "ignore_reports": a server that hasn't heard (or kept) them.
+            if self.path.split("?")[0].endswith(("/Progress", "/Stopped")) and body.get("ItemId") \
+                    and CONTROL.get("ignore_reports") != "1":
+                POSITIONS[body["ItemId"]] = int(float(body.get("PositionTicks") or 0))
             return self.send(b"", status=204)
         if "/Users/U1/FavoriteItems/" in self.path and self.headers.get("X-Emby-Token") == "tok":
             item = urlparse(self.path).path.rsplit("/", 1)[1]
@@ -285,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
             if "reset" in q:
                 CONTROL.clear()
                 FAVORITES.clear()
+                POSITIONS.clear()
             else:
                 CONTROL.update(q)
             return self.send(dict(CONTROL))

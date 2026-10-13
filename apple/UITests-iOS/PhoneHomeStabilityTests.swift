@@ -244,9 +244,9 @@ final class PhoneHomeStabilityTests: XCTestCase {
         app.launch()
         sleep(8)
         let width = app.frame.width
-        // The hero is 1.3 times as tall as it is wide; 10 points above its
-        // bottom, at the left (away from the title and buttons).
-        let point = CGPoint(x: 16, y: width * 1.3 - 10)
+        // 10 points above the hero's bottom, at the left (away from the
+        // title and buttons).
+        let point = CGPoint(x: 16, y: heroBottom() - 10)
         let picture = XCUIScreen.main.screenshot()
         guard let image = picture.image.cgImage, let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else {
             return XCTFail("no screenshot")
@@ -256,6 +256,28 @@ final class PhoneHomeStabilityTests: XCTestCase {
         let brightest = max(bytes[i], bytes[i + 1], bytes[i + 2])
         shot("hero band")
         XCTAssertGreaterThan(brightest, 20, "the bottom of the hero is black, not its picture's colours")
+    }
+
+    /// Home's hero is about four fifths of the screen, as in the Apple TV
+    /// app, with the first row's name in view under it (it was 1.3 times
+    /// the width: 60% of an iPhone 17 Pro, half the rows' space lost).
+    func testHeroHeight() {
+        app.launch()
+        sleep(8)
+        let screen = app.frame.height
+        let hero = heroBottom()
+        let heading = app.staticTexts["Continue Watching"].firstMatch
+        shot("hero height")
+        XCTAssertEqual(hero / screen, 0.78, accuracy: 0.03, "the hero is \(hero) of \(screen) points")
+        // Above the tab bar.
+        XCTAssertLessThan(heading.frame.maxY, screen - 90, "Continue Watching's name isn't in view under the hero")
+    }
+
+    /// Where Home's hero ends: the rows start 30 points under it.
+    private func heroBottom() -> CGFloat {
+        let heading = app.staticTexts["Continue Watching"].firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 20), "no Continue Watching")
+        return heading.frame.minY - 30
     }
 
     private enum Layout100 {

@@ -77,7 +77,7 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     /// title and times are; much more under the Info panel's text.
     private var shade: some View {
         ZStack {
-            Color.black.opacity(panel == nil ? 0.32 : 0.7)
+            Color.black.opacity(panel == nil ? 0.32 : 0.82)
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
                 .frame(height: 320)
                 .frame(maxHeight: .infinity, alignment: .bottom)

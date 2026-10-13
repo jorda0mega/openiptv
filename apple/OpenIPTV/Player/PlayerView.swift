@@ -48,8 +48,8 @@ struct PlayerScreen: View {
 }
 
 #if os(iOS)
-/// The player's "…": the audio and subtitle tracks, ticked where they are.
-/// Its own view, drawn again only when the tracks change: drawn again with
+/// The player's subtitles button: the audio and subtitle tracks, ticked
+/// where they are. Its own view, drawn again only when the tracks change: drawn again with
 /// the player (several times a second while the film plays), an open menu
 /// closed at once, so subtitles could only be changed with the film paused.
 struct TrackMenuButton: View, Equatable {
@@ -80,19 +80,19 @@ struct TrackMenuButton: View, Equatable {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 19, weight: .bold))
+            // The subtitles icon, as in the Apple TV app ("…" hid what it
+            // was for).
+            Image(systemName: "captions.bubble")
+                .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .contentShape(.circle)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MenuPress(pressed: opened))
         // Audio, then Subtitles from Off, as written: opened from the
         // bottom, iOS would turn the list upside down.
         .menuOrder(.fixed)
         .accessibilityLabel("Audio and Subtitles")
-        .simultaneousGesture(TapGesture().onEnded { opened() })
     }
 
     @ViewBuilder private func item(_ track: MPVPlayer.Track) -> some View {
@@ -101,6 +101,57 @@ struct TrackMenuButton: View, Equatable {
         } else {
             Text(MoviePlayerView.label(track))
         }
+    }
+}
+
+/// A menu's look when pressed, and word that it's opening: a menu has no
+/// "opened" of its own, and a tap gesture on one never fired, so the
+/// controls hid with the menu open (and the player closed with them).
+struct MenuPress: ButtonStyle {
+    let pressed: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .onChange(of: configuration.isPressed) { _, down in if down { pressed() } }
+    }
+}
+
+/// The playback speed, as in the Apple TV app: half to double, ticked
+/// where it is. Its own view for the same reason as the subtitles button.
+struct SpeedMenuButton: View, Equatable {
+    static let speeds: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
+    let speed: Double
+    let pick: (Double) -> Void
+    let opened: () -> Void
+
+    static func == (a: Self, b: Self) -> Bool { a.speed == b.speed }
+
+    var body: some View {
+        Menu {
+            Section("Playback Speed") {
+                ForEach(Self.speeds, id: \.self) { value in
+                    Button { pick(value) } label: {
+                        if value == speed { Label(Self.name(value), systemImage: "checkmark") } else { Text(Self.name(value)) }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "gauge.with.dots.needle.67percent")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(MenuPress(pressed: opened))
+        .menuOrder(.fixed)
+        .accessibilityLabel("Playback Speed")
+        .accessibilityValue(Self.name(speed))
+    }
+
+    /// "1×", "1.25×", "0.5×".
+    static func name(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...2))) + "×"
     }
 }
 #endif
@@ -247,6 +298,11 @@ struct MoviePlayerView: View {
     /// Debug builds: "72.4 playing" (the player's second, and whether it
     /// plays), for UI tests.
     @State private var positionReadout = ""
+    /// Playback speed (1: normal), for this playback only.
+    @State private var speed = 1.0
+    /// Debug builds: how it started ("warm 0.3": a player kept or opened
+    /// ahead; "cold 2.1": opened on the tap), and where.
+    @State private var startReadout = ""
     #endif
 
     var body: some View {
@@ -309,21 +365,18 @@ struct MoviePlayerView: View {
                     .accessibilityIdentifier("player-note")
             }
             #if DEBUG
-            Text(trackReadout)
-                .font(.caption2)
-                .opacity(0.02)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("debug-tracks")
-            Text(qualityReadout)
-                .font(.caption2)
-                .opacity(0.02)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("debug-quality")
-            Text(positionReadout)
-                .font(.caption2)
-                .opacity(0.02)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("debug-position")
+            // Readouts for the UI tests, one point each in a corner: over the
+            // play button, the tests tapped its corner instead, outside the
+            // circle, and hid the controls.
+            ZStack {
+                debugReadout(trackReadout, "debug-tracks")
+                debugReadout(qualityReadout, "debug-quality")
+                debugReadout(positionReadout, "debug-position")
+                debugReadout(startReadout, "debug-start")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
             #endif
             #if os(tvOS)
             // On top and see-through: it takes the remote.
@@ -432,24 +485,18 @@ struct MoviePlayerView: View {
         return [PlayerAction(title: "Picture in Picture", systemImage: "pip.enter") { startPictureInPicture() }, fillAction]
     }
 
-    /// The film carries on in the floating window from this second (Emby's
-    /// converted stream at 4 Mbps, plenty for a window); this player closes
-    /// once it's up, and comes back at the second it reached.
-    /// The film carries on here while the window gets ready (it paused for
-    /// the seconds the server took), and the window takes over at the
-    /// second it has reached then. The window's stream: the film's own
-    /// video copied as it is (starts in about a second; converting it took
-    /// seconds and stalled on a slow server), or the lower quality this
-    /// film already plays at on a slow connection.
+    /// This player's picture moves into the floating window and the film
+    /// plays on there, the same playback (see PictureInPicture); this
+    /// screen closes once the window is up, leaving the player running.
     private func startPictureInPicture() {
-        let converted = governor?.current
-        let bitrate = converted ?? (playback.bitrate ?? 18_000_000) + 2_000_000
-        guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, copy: converted == nil) else { return }
-        PictureInPicture.shared.start(playback, url: url, headers: playback.fallbackHeaders, offset: position, total: total,
-                                      now: { position }, started: {
+        guard let player else { return }
+        // The picture's way out changes (a moment's refresh): not a stall
+        // to lower the quality for.
+        trackSwitched()
+        PictureInPicture.shared.start(player, playback: playback, offset: offset, position: position, total: total, paused: paused,
+                                      started: {
             handedOff = true
-            player?.setPaused(true)
-            dismiss()
+            if let closePlayer { closePlayer() } else { dismiss() }
         }, failed: {
             note("Picture in Picture isn't available for this video")
         })
@@ -461,18 +508,34 @@ struct MoviePlayerView: View {
         showControls()
     }
 
-    /// "…": the audio track and subtitles, ticked where they are.
+    /// Subtitles (with the audio track) and speed, in one capsule over the
+    /// bar's end, as in the Apple TV app.
     private var trackMenu: some View {
-        TrackMenuButton(tracks: tracks, pick: { pick($0) }, pickSubtitles: { pickSubtitles($0) }) {
-            // Open: the controls stay up until something is picked.
-            showControls(autoHide: false)
-            Task {
-                guard let player else { return }
-                let fresh = await player.tracks()
-                if fresh != tracks { tracks = fresh }
+        HStack(spacing: 0) {
+            TrackMenuButton(tracks: tracks, pick: { pick($0) }, pickSubtitles: { pickSubtitles($0) }) {
+                // Open: the controls stay up until something is picked.
+                showControls(autoHide: false)
+                Task {
+                    guard let player else { return }
+                    let fresh = await player.tracks()
+                    if fresh != tracks { tracks = fresh }
+                }
             }
+            .equatable()
+            SpeedMenuButton(speed: speed, pick: { value in
+                speed = value
+                player?.setSpeed(value)
+                showControls()
+            }, opened: {
+                #if DEBUG
+                NSLog("%@", "PERF menu opened speed")
+                #endif
+                showControls(autoHide: false)
+            })
+            .equatable()
         }
-        .equatable()
+        .padding(.horizontal, 4)
+        .glassEffect(.regular.interactive(), in: .capsule)
     }
 
     private func pick(_ track: MPVPlayer.Track) {
@@ -726,6 +789,12 @@ struct MoviePlayerView: View {
 
     private func start() {
         #if os(iOS)
+        // Back from Picture in Picture (or chosen again while it's there):
+        // the same player, where it has got to.
+        if let back = PictureInPicture.shared.takeBack(playback.itemId) {
+            adopt(back)
+            return
+        }
         // A film in Picture in Picture stops (where it got to) for this one.
         PictureInPicture.shared.close()
         #endif
@@ -739,7 +808,7 @@ struct MoviePlayerView: View {
             }
         }
         #endif
-        if let (warmPlayer, _) = model.takeWarm(playback.itemId) {
+        if let (warmPlayer, _) = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
             PlaybackAudio.activate()
@@ -767,6 +836,28 @@ struct MoviePlayerView: View {
         showControls()
         probeTask = Task { await probeWhileConverted() }
     }
+
+    #if os(iOS)
+    /// The player from Picture in Picture, drawing on this screen again.
+    private func adopt(_ back: (player: MPVPlayer, offset: Double, position: Double, paused: Bool)) {
+        PlaybackAudio.activate()
+        offset = back.offset
+        position = back.position
+        paused = back.paused
+        started = true
+        startedOnce = true
+        warmStart = true
+        back.player.onEvent = { event in handle(event) }
+        player = back.player
+        trackSwitched()
+        back.player.drawOnScreen()
+        if governor == nil, prefs.adaptiveQuality, offset == 0 { governor = QualityGovernor(original: playback.bitrate) }
+        Task { await loadTrackInfo() }
+        thumbnailTask = Task { await loadThumbnails() }
+        if paused { showControls(autoHide: false) } else { showControls() }
+        probeTask = Task { await probeWhileConverted() }
+    }
+    #endif
 
     /// While playing a converted version, test the connection every 20 s by
     /// fetching 4 MB of the original, so it can return to full quality.
@@ -859,6 +950,7 @@ struct MoviePlayerView: View {
             }
             #if DEBUG
             NSLog("%@", "PERF start " + (timing ?? ""))
+            startReadout = String(format: "%@ %.1f at %.0f", warmStart ? "warm" : "cold", total, position)
             #endif
             Task { await loadTrackInfo() }
             #if DEBUG && os(iOS)
@@ -997,12 +1089,21 @@ struct MoviePlayerView: View {
         #endif
         if let speed = governor?.speed, speed > 0 { model.knownSpeed = speed }
         let seconds = closedAt ?? position
-        player?.shutdown()
-        player = nil
         #if os(iOS)
-        // Still playing in Picture in Picture: it reports when it stops.
-        if handedOff { return }
+        // Playing on in Picture in Picture: the window has the player now,
+        // and reports when it stops.
+        if handedOff {
+            player = nil
+            return
+        }
         #endif
+        // Kept, paused here, for a moment: chosen again, it carries on at
+        // once (it closed, and the next tap waited for the server and a
+        // new stream, then started where the server last heard).
+        if let player {
+            if started, offset == 0, error == nil { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
+        }
+        player = nil
         let noted = closedAt != nil
         Task { await model.report(playback, seconds: seconds, event: .stopped, noted: noted) }
     }
@@ -1022,7 +1123,22 @@ struct MoviePlayerView: View {
         if let closePlayer { closePlayer() } else { dismiss() }
     }
 
+    #if DEBUG
+    private func debugReadout(_ text: String, _ id: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .lineLimit(1)
+            .frame(width: 1, height: 1)
+            .opacity(0.02)
+            .accessibilityLabel(text)
+            .accessibilityIdentifier(id)
+    }
+    #endif
+
     private func toggleControls() {
+        #if DEBUG
+        NSLog("%@", "PERF picture tapped controls=\(controlsVisible)")
+        #endif
         if controlsVisible {
             hideTask?.cancel()
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }

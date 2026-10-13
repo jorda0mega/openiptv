@@ -631,8 +631,10 @@ final class RemoteFocusTests: XCTestCase {
 
     /// Live TV with no channels (the lineup failed, or hasn't loaded): Left
     /// opens no empty list, and Menu goes to the tab bar instead of quitting.
-    /// Run with the test server stopped and no saved lineup.
-    func testLiveEmpty() {
+    /// Run with the test server stopped, no saved lineup and LIVE_EMPTY=1
+    /// (TEST_RUNNER_LIVE_EMPTY): with channels, Left opens the list.
+    func testLiveEmpty() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["LIVE_EMPTY"] != nil, "needs the test server stopped")
         app.launchArguments = ["-tvTab", "live"]
         app.launch()
         sleep(8)

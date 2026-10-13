@@ -189,26 +189,31 @@ private struct HomeHero: View {
     let open: (Card) -> Void
     @State private var index = 0
 
+    /// Of the height above the tab bar: about 78% of the screen, as in the
+    /// Apple TV app, with the first row's name under the hero (1.3 times
+    /// the width was 60% of a phone; 78% of this space was only 71%).
+    static let share: CGFloat = 0.85
+
     /// The hero's space while the first Home is built: the same height,
     /// with a spinner.
     static var placeholder: some View {
         Color.clear
-            .aspectRatio(1 / 1.3, contentMode: .fit)
-            .overlay { ProgressView() }
             .frame(maxWidth: .infinity)
+            .containerRelativeFrame(.vertical) { height, _ in (height * share).rounded() }
+            .overlay { ProgressView() }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             // The size from the space it's given at every layout, never a
-            // width kept from before: a film played sideways laid Home out
+            // size kept from before: a film played sideways laid Home out
             // sideways underneath, and a kept width left the hero filling
             // the screen afterwards. The pages get that exact size (a size
             // worked out from an aspect ratio left a sliver of the previous
             // one showing).
             Color.clear
-                .aspectRatio(1 / 1.3, contentMode: .fit)
                 .frame(maxWidth: .infinity)
+                .containerRelativeFrame(.vertical) { height, _ in (height * Self.share).rounded() }
                 .overlay {
                     GeometryReader { geo in
                         TabView(selection: $index) {

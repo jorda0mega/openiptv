@@ -425,6 +425,13 @@ final class AppModel {
 
     func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
         let started = Date()
+        // Just closed here, and kept: no need to ask the server anything.
+        if let warm, warm.parked, warm.key == itemId {
+            var playback = warm.playback
+            playback.resolvedIn = 0
+            playback.requestedAt = started
+            return playback
+        }
         let task: Task<EmbyPlayback, Error>
         if let ready = prepared[itemId], Date().timeIntervalSince(ready.at) < 180 {
             task = ready.task
@@ -443,6 +450,7 @@ final class AppModel {
             guard let emby else { throw error }
             playback = try await emby.playback(versions: library.versions(of: itemId), kind: kind, maxWidth: Self.maxWidth)
         }
+        playback = withLocalResume(playback)
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
         return playback
@@ -1095,7 +1103,8 @@ final class AppModel {
     /// its resume point in a hidden player, so selecting it starts at once.
     /// `key` is what was tapped (a show for Play next episode); `playback`
     /// says which episode or movie is actually open.
-    private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback)?
+    /// `parked`: the player just closed, kept paused where it stopped.
+    private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback, parked: Bool)?
     private var warmExpiry: Task<Void, Never>?
     /// The warm-up under way (still working out how to play it): owned, so
     /// a newer one or a cool-down stops it before it opens a stream nobody
@@ -1114,7 +1123,7 @@ final class AppModel {
         // Fetched ahead: waiting for it mustn't promote it to the
         // connections kept for what's on screen.
         warmTask = Task(priority: .utility) {
-            let playback = try? await prepared[itemId]?.task.value
+            let playback = (try? await prepared[itemId]?.task.value).map(withLocalResume)
             guard !Task.isCancelled, warming == itemId else { return }
             warming = nil
             guard let playback, warm == nil else { return }
@@ -1122,7 +1131,7 @@ final class AppModel {
             player.prepareOffscreen()
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
                         tracks: playback.tracks)
-            warm = (itemId, player, playback)
+            warm = (itemId, player, playback, false)
             // Its preview stills too, so scrubbing has its pictures from
             // the first second of playing.
             // By what plays (a show resolves to one of its episodes).
@@ -1166,12 +1175,49 @@ final class AppModel {
         previews.first { $0.id == itemId }?.data
     }
 
-    /// Hands over the warmed-up player for this episode or movie, if any.
-    func takeWarm(_ itemId: String) -> (MPVPlayer, EmbyPlayback)? {
+    /// Hands over the warmed-up player for this episode or movie, if it's
+    /// open at `start` (one opened at another second, say before the last
+    /// stop reached the server, would play from there: "the same frame
+    /// again").
+    func takeWarm(_ itemId: String, at start: Double?) -> (MPVPlayer, EmbyPlayback)? {
         guard let warm, warm.playback.itemId == itemId else { return nil }
+        guard abs((warm.playback.startSeconds ?? 0) - (start ?? 0)) < 2 else {
+            coolDown()
+            return nil
+        }
         self.warm = nil
         warmExpiry?.cancel()
         return (warm.player, warm.playback)
+    }
+
+    /// Keeps a player that just closed, paused where it stopped, for five
+    /// minutes: the title chosen again carries on at once. Not at the end
+    /// (the next episode, or the start, plays then).
+    func park(_ player: MPVPlayer, _ playback: EmbyPlayback) {
+        let seconds = playback.startSeconds ?? 0
+        guard let duration = playback.durationSeconds, duration > 0, seconds < duration * 0.9 else { return player.shutdown() }
+        coolDown()
+        player.onEvent = nil
+        player.setPaused(true)
+        player.setReadahead(.warm)
+        warm = (playback.itemId, player, playback, true)
+        warmExpiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(300))
+            guard !Task.isCancelled else { return }
+            self?.coolDown()
+        }
+    }
+
+    /// Where this device last stopped a title (0: finished), for half an
+    /// hour: it wins over the server's resume point, which may not have
+    /// heard yet.
+    @ObservationIgnored private var stops: [String: (seconds: Double, at: Date)] = [:]
+
+    private func withLocalResume(_ playback: EmbyPlayback) -> EmbyPlayback {
+        guard let stop = stops[playback.itemId], Date().timeIntervalSince(stop.at) < 1800 else { return playback }
+        var playback = playback
+        playback.startSeconds = stop.seconds > 0 ? stop.seconds : nil
+        return playback
     }
 
     func coolDown() {
@@ -1283,6 +1329,8 @@ final class AppModel {
     /// appears as it will stay (nothing changes on it after).
     func noteStop(_ playback: EmbyPlayback, seconds: Double) {
         playingItem = nil
+        let duration = playback.durationSeconds ?? 0
+        stops[playback.itemId] = (duration > 0 && seconds >= duration * 0.9 ? 0 : seconds, Date())
         #if DEBUG
         debugStop = "stop noted player=\(debugPlayerUp ? "up" : "gone")"
         #endif
@@ -1341,7 +1389,11 @@ final class AppModel {
         // A show prepared by its series (titles in rotation, Home) now has
         // a different next episode or resume point.
         if let series = playback.seriesId { prepared[series] = nil }
-        if warm?.key == playback.itemId || (playback.seriesId != nil && warm?.key == playback.seriesId) { coolDown() }
+        // A player kept for this title stays if it's where this stopped.
+        if let warm, warm.key == playback.itemId || (playback.seriesId != nil && warm.key == playback.seriesId),
+           warm.playback.itemId != playback.itemId || abs((warm.playback.startSeconds ?? 0) - seconds) >= 2 {
+            coolDown()
+        }
         if let series = playback.seriesId { prefetchShows([series], force: true) }
         // Only Continue Watching changed; the rest of Home stays as it is.
         await refreshContinueWatching(afterStop: true)
@@ -1377,6 +1429,7 @@ final class AppModel {
         homeLoadID = UUID()
         stagedHome = nil
         recentStops = [:]
+        stops = [:]
         previews = []
         previewLoads = [:]
         catalogJob?.cancel()
@@ -1395,6 +1448,7 @@ final class AppModel {
         homeLoadID = UUID()
         stagedHome = nil
         recentStops = [:]
+        stops = [:]
         catalogJob?.cancel()
         showLoads = [:]
         movieLoads = [:]

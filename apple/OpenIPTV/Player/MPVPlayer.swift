@@ -1,6 +1,10 @@
 import Libmpv
 import QuartzCore
 import UIKit
+#if os(iOS)
+import Accelerate
+import AVFoundation
+#endif
 
 /// CAMetalLayer that ignores MoltenVK's 1×1 drawable resize, which otherwise
 /// causes flicker (mpv-player/mpv#13651).
@@ -87,6 +91,16 @@ final class MPVPlayer: @unchecked Sendable {
     private var downloadSpeed: Double = 0
     private var lastNetworkReport: CFAbsoluteTime = 0
     private var reportsWindow = false
+    /// How it decodes on screen (the hardware's output goes straight to the
+    /// GPU), to go back to after Picture in Picture.
+    private let hardwareDecoding: Bool
+    #if os(iOS)
+    /// Picture in Picture: the picture drawn into the window's layer.
+    private var frameTap: FrameTap?
+    /// The picture drawn on screen again: shown once it is (the screen's
+    /// surface still holds a frame from before the window).
+    private var revealPending = false
+    #endif
 
     /// How far ahead to download, always in memory for files: libmpv's
     /// disk cache is append-only (every byte downloaded stays in the file
@@ -110,6 +124,7 @@ final class MPVPlayer: @unchecked Sendable {
     /// initialisation takes a while, and used to hold up the screen that
     /// opened the player); everything asked of the player queues behind it.
     init(options: [(String, String)], hardwareDecoding: Bool) {
+        self.hardwareDecoding = hardwareDecoding
         layer.framebufferOnly = true
         layer.backgroundColor = UIColor.black.cgColor
         let wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
@@ -271,6 +286,14 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in
             guard let mpv else { return }
             mpv_set_property_string(mpv, "mute", muted ? "yes" : "no")
+        }
+    }
+
+    /// Playback speed (1: normal); the sound keeps its pitch.
+    func setSpeed(_ speed: Double) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "speed", String(speed))
         }
     }
 
@@ -550,6 +573,14 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in
             defer { if live { Self.closing.leave() } }
             guard let mpv else { return }
+            #if os(iOS)
+            // libmpv's renderer goes before libmpv does.
+            if let tap = frameTap {
+                frameTap = nil
+                mpv_set_property_string(mpv, "vo", "null")
+                tap.close()
+            }
+            #endif
             mpv_set_wakeup_callback(mpv, nil, nil)
             mpv_terminate_destroy(mpv)
             self.mpv = nil
@@ -577,6 +608,15 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     private func handle(_ event: mpv_event) {
+        #if os(iOS)
+        // Back on screen after Picture in Picture: shown once libmpv has
+        // drawn the picture where it is now.
+        if revealPending, event.event_id == MPV_EVENT_VIDEO_RECONFIG || event.event_id == MPV_EVENT_PLAYBACK_RESTART {
+            revealPending = false
+            let layer = layer
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { layer.isHidden = false }
+        }
+        #endif
         switch event.event_id {
         case MPV_EVENT_HOOK:
             guard let data = event.data, let mpv else { return }
@@ -710,6 +750,214 @@ final class MPVPlayer: @unchecked Sendable {
         Task { @MainActor in handler?(event) }
     }
 }
+
+#if os(iOS)
+extension MPVPlayer {
+    /// Picture in Picture: the same playback (nothing reopens, pauses or
+    /// jumps), its picture drawn into `layer` by the CPU instead of onto
+    /// the screen by the GPU. iOS's floating window shows only its own
+    /// kinds of layer, and an app in the background can't use the GPU.
+    /// `drawn`: the first frame is in the layer.
+    func drawFrames(into layer: AVSampleBufferDisplayLayer, drawn: @escaping @Sendable () -> Void) {
+        queue.async { [self] in
+            guard let mpv, frameTap == nil else { return }
+            // The picture's shape, at most 1280 wide: plenty for the
+            // window, and quick to draw.
+            var width: Int64 = 0, height: Int64 = 0
+            mpv_get_property(mpv, "video-params/dw", MPV_FORMAT_INT64, &width)
+            mpv_get_property(mpv, "video-params/dh", MPV_FORMAT_INT64, &height)
+            if width <= 0 || height <= 0 { (width, height) = (1280, 720) }
+            let w = Int(min(width, 1280)) & ~1
+            let h = max(2, Int((Double(w) * Double(height) / Double(width)).rounded()) & ~1)
+            guard let tap = FrameTap(mpv: mpv, layer: layer, width: w, height: h, drawn: drawn) else { return }
+            frameTap = tap
+            mpv_set_property_string(mpv, "sw-fast", "yes")
+            // Decoded frames copied back from the decoder for the CPU.
+            mpv_set_property_string(mpv, "hwdec", hardwareDecoding ? "videotoolbox-copy" : "no")
+            let switched = mpv_set_property_string(mpv, "vo", "libmpv")
+            #if DEBUG
+            NSLog("%@", "PERF pip frames \(w)x\(h) vo=\(switched)")
+            #endif
+        }
+    }
+
+    /// Back on screen from Picture in Picture (the screen's layer is in a
+    /// window again): the GPU draws it, as before.
+    func drawOnScreen() {
+        guard stateLock.withLock({ !closed }) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.isHidden = true
+        CATransaction.commit()
+        queue.async { [self] in
+            guard let mpv, let tap = frameTap else { return }
+            frameTap = nil
+            revealPending = true
+            mpv_set_property_string(mpv, "vo", "gpu-next")
+            mpv_set_property_string(mpv, "hwdec", hardwareDecoding ? "videotoolbox" : "no")
+            tap.close()
+            // Shown in any case after a moment (a paused picture may not
+            // say it's drawn).
+            let layer = layer
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { layer.isHidden = false }
+        }
+    }
+}
+
+/// Draws libmpv's picture into frames for an AVSampleBufferDisplayLayer, on
+/// its own thread, each when libmpv says it's due. libmpv draws RGB; the
+/// frames go out as video's own 4:2:0 YUV.
+private final class FrameTap: @unchecked Sendable {
+    private let context: OpaquePointer
+    private let layer: AVSampleBufferDisplayLayer
+    private let width: Int
+    private let height: Int
+    private let drawn: @Sendable () -> Void
+    private let queue = DispatchQueue(label: "openiptv.pip-frames", qos: .userInteractive)
+    private let lock = NSLock()
+    private var closed = false
+    private var waiting = false
+    private var pool: CVPixelBufferPool?
+    private var format: CMVideoFormatDescription?
+    private var count = 0
+    #if DEBUG
+    private var updates = 0
+    #endif
+    /// libmpv's RGB picture, before it's converted.
+    private let rgb: UnsafeMutableRawPointer
+    private let rgbStride: Int
+    private var conversion = vImage_ARGBToYpCbCr()
+
+    init?(mpv: OpaquePointer, layer: AVSampleBufferDisplayLayer, width: Int, height: Int, drawn: @escaping @Sendable () -> Void) {
+        self.layer = layer
+        self.width = width
+        self.height = height
+        self.drawn = drawn
+        rgbStride = (width * 4 + 63) & ~63
+        var memory: UnsafeMutableRawPointer?
+        guard posix_memalign(&memory, 64, rgbStride * height) == 0, let memory else { return nil }
+        rgb = memory
+        var made: OpaquePointer?
+        let api = strdup("sw")
+        defer { free(api) }
+        var params = [mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(api)),
+                      mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)]
+        guard mpv_render_context_create(&made, mpv, &params) >= 0, let made else {
+            free(memory)
+            return nil
+        }
+        context = made
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+            // The floating window draws them with the GPU, in another process.
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+        ]
+        CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pool)
+        // Video range, HD colours.
+        var range = vImage_YpCbCrPixelRange(Yp_bias: 16, CbCr_bias: 128, YpRangeMax: 235, CbCrRangeMax: 240,
+                                            YpMax: 235, YpMin: 16, CbCrMax: 240, CbCrMin: 16)
+        vImageConvert_ARGBToYpCbCr_GenerateConversion(kvImage_ARGBToYpCbCrMatrix_ITU_R_709_2, &range, &conversion,
+                                                      kvImageARGB8888, kvImage420Yp8_CbCr8, vImage_Flags(kvImageNoFlags))
+        mpv_render_context_set_update_callback(context, { raw in
+            guard let raw else { return }
+            Unmanaged<FrameTap>.fromOpaque(raw).takeUnretainedValue().due()
+        }, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    /// Called by libmpv (any thread; nothing of libmpv's may be called here).
+    private func due() {
+        let skip = lock.withLock { () -> Bool in
+            if closed || waiting { return true }
+            waiting = true
+            return false
+        }
+        if !skip { queue.async { [self] in draw() } }
+    }
+
+    private func draw() {
+        guard lock.withLock({ waiting = false; return !closed }) else { return }
+        let flags = mpv_render_context_update(context)
+        #if DEBUG
+        updates += 1
+        if updates % 60 == 1 { NSLog("%@", "PERF pip update \(updates) flags=\(flags) drawn=\(count)") }
+        #endif
+        guard flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0, let pool else { return }
+        var size: [Int32] = [Int32(width), Int32(height)]
+        var stride = rgbStride
+        var rendered: Int32 = 0
+        let pixels = strdup("bgr0")
+        size.withUnsafeMutableBufferPointer { size in
+            withUnsafeMutablePointer(to: &stride) { stride in
+                var params = [mpv_render_param(type: MPV_RENDER_PARAM_SW_SIZE, data: UnsafeMutableRawPointer(size.baseAddress)),
+                              mpv_render_param(type: MPV_RENDER_PARAM_SW_FORMAT, data: UnsafeMutableRawPointer(pixels)),
+                              mpv_render_param(type: MPV_RENDER_PARAM_SW_STRIDE, data: UnsafeMutableRawPointer(stride)),
+                              mpv_render_param(type: MPV_RENDER_PARAM_SW_POINTER, data: rgb),
+                              mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)]
+                rendered = mpv_render_context_render(context, &params)
+            }
+        }
+        free(pixels)
+        var made: CVPixelBuffer?
+        let pooled = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made)
+        #if DEBUG
+        if rendered < 0 || pooled != kCVReturnSuccess { NSLog("%@", "PERF pip frame lost render=\(rendered) pool=\(pooled)") }
+        #endif
+        guard rendered >= 0, pooled == kCVReturnSuccess, let buffer = made else { return }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        var source = vImage_Buffer(data: rgb, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rgbStride)
+        var luma = vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 0), height: vImagePixelCount(height),
+                                 width: vImagePixelCount(width), rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0))
+        var chroma = vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 1), height: vImagePixelCount(height / 2),
+                                   width: vImagePixelCount(width / 2), rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1))
+        // Memory order B, G, R, (unused): read as A, R, G, B.
+        let order: [UInt8] = [3, 2, 1, 0]
+        vImageConvert_ARGB8888To420Yp8_CbCr8(&source, &luma, &chroma, &conversion, order, vImage_Flags(kvImageNoFlags))
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+        if format == nil {
+            CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer, formatDescriptionOut: &format)
+        }
+        guard let format else { return }
+        let now = layer.controlTimebase.map { CMTimebaseGetTime($0) } ?? CMClockGetTime(CMClockGetHostTimeClock())
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: now, decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: format,
+                                                 sampleTiming: &timing, sampleBufferOut: &sample)
+        guard let sample else { return }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true), CFArrayGetCount(attachments) > 0 {
+            let first = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(first, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        let renderer = layer.sampleBufferRenderer
+        // Interrupted (the app was away, or the phone locked): start over.
+        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding { renderer.flush() }
+        renderer.enqueue(sample)
+        count += 1
+        if count == 1 { drawn() }
+        #if DEBUG
+        if count % 60 == 1 {
+            NSLog("%@", "PERF pip frame \(count) render=\(rendered) status=\(renderer.status.rawValue) error=\(renderer.error?.localizedDescription ?? "none")")
+        }
+        #endif
+    }
+
+    /// Stops drawing and lets go of libmpv's renderer (after the player
+    /// has gone back to drawing on screen).
+    func close() {
+        lock.withLock { closed = true }
+        queue.sync {}
+        mpv_render_context_set_update_callback(context, nil, nil)
+        mpv_render_context_free(context)
+        free(rgb)
+    }
+}
+#endif
 
 /// Hosts the player's Metal layer and keeps it sized to the view, including
 /// its drawable size so rotation re-creates mpv's swapchain at full size.

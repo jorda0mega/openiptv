@@ -15,7 +15,9 @@ final class PlayerLookTests: XCTestCase {
         if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
             app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
         }
-        // Player options to compare (debug builds).
+        if let hold = ProcessInfo.processInfo.environment["PIP_HOLD"] {
+            app.launchEnvironment["OPENREEL_DEBUG_PIP_HOLD"] = hold
+        }
         if let options = ProcessInfo.processInfo.environment["MPV_EXTRA"] {
             app.launchEnvironment["OPENREEL_DEBUG_MPV"] = options
         }
@@ -44,7 +46,9 @@ final class PlayerLookTests: XCTestCase {
         let tab = app.tabBars.buttons["Search"].firstMatch
         (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
         sleep(3)
-        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals'")).firstMatch
+        // The film, not the show "Animals." (first on a fresh simulator,
+        // before IMDb's ratings have come to rank them).
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals' AND NOT label BEGINSWITH 'Animals.'")).firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 8), "no search result")
         result.tap()
         sleep(2)
@@ -86,7 +90,8 @@ final class PlayerLookTests: XCTestCase {
         controlsUp()
         let before = position()
         print("PIP before \(before ?? -1)")
-        // The server takes 6 s to start the window's stream (a conversion).
+        // The server takes 6 s to start a converted stream: the window
+        // must not wait for one (it plays the same playback).
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["hls_delay": "6"])
         defer { configure(server, ["reset": "1"]) }
@@ -95,6 +100,8 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(pip.waitForExistence(timeout: 3), "no Picture in Picture button")
         pip.tap()
         let asked = Date()
+        usleep(1_000_000)
+        shot("pip starting")
         var up: Date?
         while Date().timeIntervalSince(asked) < 11 {
             if up == nil, pipState() != nil { up = Date() }
@@ -115,13 +122,23 @@ final class PlayerLookTests: XCTestCase {
         // it plays on, and the window takes over where it has got to.
         XCTAssertGreaterThan(first.seconds, before + sinceTap - 2.5,
                              "the film paused while Picture in Picture got ready: \(first.seconds) s, \(sinceTap) s after \(before) s")
-        XCTAssertLessThan(first.startMs, 9000, "Picture in Picture took \(first.startMs) ms to start")
-        XCTAssertLessThan(up.timeIntervalSince(asked), 10, "Picture in Picture took \(up.timeIntervalSince(asked)) s to show")
+        // Regression: it took 5 s on a real server (a second stream had to
+        // start); the same playback moves into the window at once.
+        XCTAssertLessThan(first.startMs, 2500, "Picture in Picture took \(first.startMs) ms to start")
+        XCTAssertLessThan(up.timeIntervalSince(asked), 3, "Picture in Picture took \(up.timeIntervalSince(asked)) s to show")
         // Regressions: it paused after the handoff; it showed the film from
         // 0:00 while it reported the start plus that clock (episodes got
         // marked watched, "skipped"). The test server's converted stream is
         // the whole film from 0:00, as Emby's, so its clock is the film's.
         XCTAssertTrue(later.playing, "Picture in Picture paused")
+        // The film shows in the window (the test film's colour bars), not
+        // black. Simulators draw this window black for any app's frames, so
+        // only a device can check it.
+        let window = XCUIApplication(bundleIdentifier: "com.apple.springboard").otherElements["Video"].firstMatch
+        XCTAssertTrue(window.exists, "no Picture in Picture window")
+        #if !targetEnvironment(simulator)
+        XCTAssertGreaterThan(brightestPixel(in: window.frame), 120, "the Picture in Picture window is black")
+        #endif
         XCTAssertGreaterThanOrEqual(later.seconds - first.seconds, 5, "Picture in Picture isn't moving on")
         XCTAssertLessThan(abs(first.clock - before), 25, "Picture in Picture shows \(first.clock) s, not near \(before) s")
         XCTAssertLessThan(abs(first.seconds - first.clock), 3, "Picture in Picture reports \(first.seconds) s but shows \(first.clock) s")
@@ -131,20 +148,80 @@ final class PlayerLookTests: XCTestCase {
         board.otherElements["Video"].firstMatch.tap()
         let restore = board.buttons["Restore fullscreen"].firstMatch
         XCTAssertTrue(restore.waitForExistence(timeout: 3), "no Restore fullscreen in the window")
+        let leaving = pipState()
+        let leftAt = Date()
         restore.tap()
         sleep(5)
-        app.tap()
-        usleep(600_000)
         let back = position()
+        let backAt = Date()
         sleep(4)
-        app.tap()
-        usleep(600_000)
         let after = position()
         shot("pip restored")
-        print("PIP restored at \(back ?? -1) then \(after ?? -1)")
-        guard let back, let after else { return XCTFail("the app's player didn't come back") }
-        XCTAssertLessThan(abs(back - later.seconds), 20, "came back at \(back) s, not near \(later.seconds) s")
-        XCTAssertGreaterThanOrEqual(after - back, 2, "the app's player came back paused")
+        print("PIP left at \(leaving?.seconds ?? -1), restored at \(back ?? -1) then \(after ?? -1)")
+        guard let back, let after, let leaving else { return XCTFail("the app's player didn't come back") }
+        // Regression: it came back at an older second (a player opened
+        // meanwhile at the server's resume point, "the same frame again").
+        let expected = leaving.seconds + backAt.timeIntervalSince(leftAt)
+        XCTAssertLessThan(abs(back - expected), 3, "came back at \(back) s, not \(expected) s (left the window at \(leaving.seconds) s)")
+        XCTAssertGreaterThanOrEqual(after - back, 3, "the app's player came back paused")
+    }
+
+    /// Closed and chosen again, a film carries on at once where it stopped,
+    /// without waiting for the server, even when the server didn't keep
+    /// the stop. Regression: the next tap waited for the server and a new
+    /// stream, and started where the server last heard ("the same frame").
+    func testReopenCarriesOnAtOnce() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["ignore_reports": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm()
+        for _ in 0..<6 {
+            controlsUp()
+            app.buttons["Forward 10 seconds"].firstMatch.tap()
+            usleep(400_000)
+        }
+        sleep(3)
+        controlsUp()
+        let closed = try XCTUnwrap(position(), "no position")
+        app.buttons["Close player"].firstMatch.tap()
+        sleep(2)
+        // A slow server from here on: any question to it shows.
+        configure(server, ["latency": "2.5"])
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "no play button")
+        play.tap()
+        let start = app.staticTexts["debug-start"].firstMatch
+        let began = Date()
+        while Date().timeIntervalSince(began) < 10, !start.label.contains(" at ") { usleep(200_000) }
+        shot("reopened")
+        let readout = start.label
+        print("REOPEN closed at \(closed), started \(readout)")
+        let parts = readout.split(separator: " ")
+        guard parts.count == 4, let seconds = Double(parts[1]), let at = Double(parts[3]) else {
+            return XCTFail("no start readout: \(readout)")
+        }
+        XCTAssertEqual(parts[0], "warm", "it opened again from scratch: \(readout)")
+        XCTAssertLessThan(seconds, 1.5, "it took \(seconds) s to start again")
+        XCTAssertLessThan(abs(at - closed), 3, "it started at \(at) s, not where it stopped (\(closed) s)")
+    }
+
+    /// The brightest colour channel inside `area` of the screen (0-255).
+    private func brightestPixel(in area: CGRect) -> UInt8 {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage,
+              let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return 0 }
+        let scale = CGFloat(image.width) / XCUIScreen.main.screenshot().image.size.width
+        let perPixel = image.bitsPerPixel / 8
+        var best: UInt8 = 0
+        // Inside the rounded corners (the page behind shows there).
+        let inset = Int(24 * scale)
+        for y in stride(from: Int(area.minY * scale) + inset, to: Int(area.maxY * scale) - inset, by: 6) {
+            for x in stride(from: Int(area.minX * scale) + inset, to: Int(area.maxX * scale) - inset, by: 6)
+            where x >= 0 && y >= 0 && x < image.width && y < image.height {
+                let i = y * image.bytesPerRow + x * perPixel
+                best = max(best, bytes[i], bytes[i + 1], bytes[i + 2])
+            }
+        }
+        return best
     }
 
     /// The player's controls on screen (a tap on the picture shows them,
@@ -382,6 +459,42 @@ final class PlayerLookTests: XCTestCase {
         return readout.label
     }
 
+    /// Playback speed, as in the Apple TV app: a button beside subtitles;
+    /// 2× plays twice as fast, and the button says so.
+    func testPlaybackSpeed() {
+        openFilm()
+        controlsUp()
+        let button = app.buttons["Playback Speed"].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 3), "no Playback Speed button")
+        button.tap()
+        // Regression: the controls went while the menu was open (5 s on).
+        sleep(5)
+        shot("speed menu")
+        XCTAssertTrue(app.buttons["Close player"].firstMatch.exists, "the controls went with the menu open")
+        app.buttons["2×"].firstMatch.tap()
+        sleep(1)
+        guard let first = playerState() else { return XCTFail("no position readout") }
+        let from = Date()
+        sleep(4)
+        guard let later = playerState() else { return XCTFail("no position readout") }
+        let rate = (later.seconds - first.seconds) / Date().timeIntervalSince(from)
+        XCTAssertGreaterThan(rate, 1.6, "2× played at \(rate)×")
+        controlsUp()
+        XCTAssertEqual(app.buttons["Playback Speed"].firstMatch.value as? String, "2×")
+    }
+
+    /// Regression: with the film playing, the subtitles menu stayed open
+    /// while the controls hid under it, and the player closed with them.
+    func testSubtitlesMenuKeepsControls() {
+        openFilm()
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        sleep(5)
+        shot("subtitles menu after 5 s")
+        XCTAssertTrue(app.buttons["Off"].firstMatch.exists, "the menu closed")
+        XCTAssertTrue(app.buttons["Close player"].firstMatch.exists, "the controls went with the menu open")
+    }
+
     /// The player in portrait and landscape: playing (controls up, then
     /// gone), paused (controls up). The picture must keep its size in each.
     func testPlayerLook() {
@@ -394,6 +507,9 @@ final class PlayerLookTests: XCTestCase {
         shot("portrait controls again")
         app.buttons["Pause"].firstMatch.tap()
         sleep(1)
+        // Regression: the tests' readouts over the button sent the tap to
+        // its corner, which hid the controls instead.
+        XCTAssertEqual(playerState()?.playing, false, "Pause didn't pause")
         shot("portrait paused")
         app.buttons["Audio and Subtitles"].firstMatch.tap()
         sleep(1)
