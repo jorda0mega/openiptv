@@ -68,7 +68,7 @@ struct TVHomeView: View {
                         if row.title == "Continue Watching" {
                             TVContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
                         } else {
-                            TVPosterRow(title: row.title, cards: row.cards) { open($0) }
+                            TVPosterRow(title: row.title, cards: row.cards, captions: .focused) { open($0) }
                         }
                     }
                     if model.rows.isEmpty, model.featured == nil, !model.homePending {
@@ -382,9 +382,12 @@ struct TVPosterRow: View {
     @Environment(AppModel.self) private var model
     let title: String
     let cards: [Card]
-    /// Search and a person's page: the title and year under each poster
-    /// (several editions of one name tell apart), in room kept for them.
-    var captions = false
+    /// The title and year under the posters, in room kept for them (nothing
+    /// moves when they show): under every poster (Search, a person's page:
+    /// several editions of one name tell apart), or under the focused one
+    /// only (Home, More Like This), as in the TV app.
+    enum Captions { case none, always, focused }
+    var captions: Captions = .none
     let select: (Card) -> Void
     @FocusState private var focused: String?
 
@@ -408,14 +411,14 @@ struct TVPosterRow: View {
                             .buttonStyle(.borderless)
                             .focused($focused, equals: card.id)
                             .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
-                            if captions {
+                            if captions != .none {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(card.title).font(.system(size: 26, weight: .semibold)).lineLimit(1)
                                     Text(card.subtitle ?? " ").font(.system(size: 22)).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 .frame(width: 240, height: 64, alignment: .topLeading)
                                 // Lifted with the focused poster, brighter.
-                                .opacity(focused == card.id ? 1 : 0.7)
+                                .opacity(focused == card.id ? 1 : captions == .always ? 0.7 : 0)
                                 .offset(y: focused == card.id ? 14 : 0)
                                 .animation(.easeOut(duration: 0.2), value: focused == card.id)
                                 .accessibilityHidden(true)

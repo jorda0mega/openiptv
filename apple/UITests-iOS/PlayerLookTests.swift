@@ -189,6 +189,43 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng")
     }
 
+    /// Of two English subtitle tracks, the one picked (SDH) comes back,
+    /// not just its language. Needs the test server with a file holding
+    /// English and English SDH subtitles (OPENIPTV_MOCK_VIDEO=multi-sdh.mkv;
+    /// run with TEST_RUNNER_SDH_TRACKS=1). Regression: only the language
+    /// was kept, so the plain English track came back.
+    func testPickedSDHSubtitlesStay() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SDH_TRACKS"] != nil, "needs the SDH test file")
+        openFilm(["-forgetTrackChoices", "YES"])
+        app.tap()
+        usleep(600_000)
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        sleep(1)
+        let sdh = app.buttons.matching(NSPredicate(format: "label CONTAINS 'SDH'")).firstMatch
+        XCTAssertTrue(sdh.waitForExistence(timeout: 3), "no SDH subtitles in the menu")
+        sdh.tap()
+        sleep(2)
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng+sdh", "the SDH subtitles didn't come on")
+        app.tap()
+        usleep(600_000)
+        app.buttons["Close player"].firstMatch.tap()
+        sleep(2)
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        play.tap()
+        sleep(6)
+        shot("sdh reopened")
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng+sdh")
+    }
+
+    /// A film made in a Spanish-speaking country starts in Spanish, with no
+    /// subtitles. Needs the test server with the multi-track file and
+    /// OPENIPTV_MOCK_COUNTRIES=Mexico (run with TEST_RUNNER_SPANISH_FILM=1).
+    func testSpanishFilmStartsInSpanish() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SPANISH_FILM"] != nil, "needs a Spanish-made test film")
+        openFilm(["-forgetTrackChoices", "YES"])
+        XCTAssertEqual(tracksPlaying(), "audio=spa subtitles=off")
+    }
+
     /// The app's debug readout of the tracks playing ("audio=eng subtitles=off").
     private func tracksPlaying() -> String {
         let readout = app.staticTexts["debug-tracks"].firstMatch

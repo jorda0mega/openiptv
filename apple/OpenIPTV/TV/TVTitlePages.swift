@@ -76,7 +76,7 @@ struct TVMovieView: View {
                     TVCastRow(people: item.people ?? []) { person = $0 }
                 }
                 if !similar.isEmpty {
-                    TVPosterRow(title: "More Like This", cards: similar) { card in
+                    TVPosterRow(title: "More Like This", cards: similar, captions: .focused) { card in
                         // Pushes another page on the same stack.
                         selected = card
                     }
@@ -242,7 +242,7 @@ struct TVShowView: View {
                     TVCastRow(people: people) { person = $0 }
                 }
                 if !similar.isEmpty {
-                    TVPosterRow(title: "More Like This", cards: similar) { selected = $0 }
+                    TVPosterRow(title: "More Like This", cards: similar, captions: .focused) { selected = $0 }
                 }
             }
             .padding(.bottom, 80)

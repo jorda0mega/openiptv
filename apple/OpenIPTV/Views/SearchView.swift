@@ -282,7 +282,7 @@ struct SearchView: View {
                 // parts that come later (the server's) go below, so a row
                 // never moves down when they arrive.
                 if !moviesAndShows.isEmpty {
-                    TVPosterRow(title: "Movies & Shows", cards: moviesAndShows, captions: true) { openDetails($0) }
+                    TVPosterRow(title: "Movies & Shows", cards: moviesAndShows, captions: .always) { openDetails($0) }
                 }
                 if !onTV.isEmpty {
                     TVShelf(title: "On TV") {

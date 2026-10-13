@@ -356,14 +356,14 @@ struct MoviePlayerView: View {
     private func pick(_ track: MPVPlayer.Track) {
         player?.selectAudio(track.id)
         markSelected(track.id, kind: .audio)
-        TrackChoice.rememberAudio(track.language, for: trackKey)
+        TrackChoice.rememberAudio(track.language, role: track.role, for: trackKey)
         showControls()
     }
 
     private func pickSubtitles(_ track: MPVPlayer.Track?) {
         player?.selectSubtitle(track?.id)
         markSelected(track?.id, kind: .subtitle)
-        TrackChoice.rememberSubtitles(track?.language, for: trackKey)
+        TrackChoice.rememberSubtitles(track?.language, role: track?.role, for: trackKey)
         showControls()
         #if DEBUG
         Task { await readTracks() }
@@ -371,36 +371,21 @@ struct MoviePlayerView: View {
     }
     #endif
 
-    /// The tracks the plan calls for, with the viewer's newest picks: a
-    /// player got ready before a pick (or from a playback prepared before
-    /// it) opened with the old plan.
+    /// The tracks the plan calls for, with the viewer's newest picks. The
+    /// player picks them before the file plays; this corrects one that got
+    /// ready before a pick (a playback prepared ahead) with the old plan.
     private func enforceTracks() {
         guard let plan = playback.tracks?.refreshed(), let player else { return }
-        func matches(_ track: MPVPlayer.Track, _ codes: [String]) -> Bool {
-            let wanted = Set(codes.compactMap(TrackChoice.normalized))
-            return track.language.flatMap(TrackChoice.normalized).map(wanted.contains) ?? false
+        let choice = TrackChoice.choose(tracks, plan: plan)
+        let audioNow = tracks.first { $0.kind == .audio && $0.selected }?.id
+        if let audio = choice.audio, audio != audioNow {
+            player.selectAudio(audio)
+            markSelected(audio, kind: .audio)
         }
-        let audio = tracks.filter { $0.kind == .audio }
-        let subtitles = tracks.filter { $0.kind == .subtitle }
-        var chosenAudio = audio.first(where: \.selected)
-        if let current = chosenAudio, !matches(current, plan.audio), let better = audio.first(where: { matches($0, plan.audio) }) {
-            player.selectAudio(better.id)
-            markSelected(better.id, kind: .audio)
-            chosenAudio = better
-        }
-        let shownSubtitles = subtitles.first(where: \.selected)
-        if let wanted = plan.subtitles {
-            if shownSubtitles.map({ !matches($0, wanted) }) ?? true, let track = subtitles.first(where: { matches($0, wanted) && !$0.forced }) {
-                player.selectSubtitle(track.id)
-                markSelected(track.id, kind: .subtitle)
-            }
-        } else if let shown = shownSubtitles, !shown.forced {
-            // None, except forced ones in the audio's language.
-            let forced = subtitles.first { track in
-                track.forced && (chosenAudio.map { matches(track, [$0.language ?? ""]) } ?? false)
-            }
-            player.selectSubtitle(forced?.id)
-            markSelected(forced?.id, kind: .subtitle)
+        let subtitlesNow = tracks.first { $0.kind == .subtitle && $0.selected }?.id
+        if choice.subtitle != subtitlesNow {
+            player.selectSubtitle(choice.subtitle)
+            markSelected(choice.subtitle, kind: .subtitle)
         }
     }
 
@@ -409,13 +394,15 @@ struct MoviePlayerView: View {
     private var trackKey: String { playback.seriesId ?? playback.itemId }
 
     #if DEBUG
-    /// What the player plays once the choices are in, for UI tests.
+    /// What the player plays once the choices are in, for UI tests
+    /// ("audio=eng subtitles=eng+sdh": a language, then the kind of track).
     private func readTracks() async {
         try? await Task.sleep(for: .milliseconds(500))
         guard let player else { return }
         let playing = await player.tracks()
         let audio = playing.first { $0.kind == .audio && $0.selected }?.language ?? "none"
-        let subtitles = playing.first { $0.kind == .subtitle && $0.selected }?.language ?? "off"
+        let shown = playing.first { $0.kind == .subtitle && $0.selected }
+        let subtitles = shown.map { ($0.language ?? "und") + ($0.role.map { "+" + $0 } ?? "") } ?? "off"
         trackReadout = "audio=\(audio) subtitles=\(subtitles)"
     }
     #endif
@@ -424,8 +411,9 @@ struct MoviePlayerView: View {
     private func markSelected(_ id: Int?, kind: MPVPlayer.Track.Kind) {
         tracks = tracks.map { track in
             guard track.kind == kind else { return track }
-            return MPVPlayer.Track(id: track.id, kind: track.kind, title: track.title, language: track.language,
-                                   channels: track.channels, forced: track.forced, selected: track.id == id)
+            var marked = track
+            marked.selected = track.id == id
+            return marked
         }
     }
 
@@ -549,6 +537,8 @@ struct MoviePlayerView: View {
             }
         }
         if track.forced { text += " (Forced)" }
+        // Two tracks in one language told apart (the file's flag, no title).
+        if track.hearingImpaired, !text.localizedCaseInsensitiveContains("SDH") { text += " SDH" }
         return text
     }
 
@@ -1119,17 +1109,18 @@ struct MoviePlayerView: View {
             guard list.indices.contains(row) else { return }
             id = list[row].id
             player.selectAudio(list[row].id)
-            TrackChoice.rememberAudio(list[row].language, for: trackKey)
+            TrackChoice.rememberAudio(list[row].language, role: list[row].role, for: trackKey)
         } else {
             let track = row > 0 && list.indices.contains(row - 1) ? list[row - 1] : nil
             id = track?.id
             player.selectSubtitle(id)
-            TrackChoice.rememberSubtitles(track?.language, for: trackKey)
+            TrackChoice.rememberSubtitles(track?.language, role: track?.role, for: trackKey)
         }
         tracks = tracks.map { track in
             guard track.kind == trackKind else { return track }
-            return MPVPlayer.Track(id: track.id, kind: track.kind, title: track.title, language: track.language,
-                                   channels: track.channels, forced: track.forced, selected: track.id == id)
+            var marked = track
+            marked.selected = track.id == id
+            return marked
         }
     }
 

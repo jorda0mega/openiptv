@@ -55,6 +55,8 @@ final class MPVPlayer: @unchecked Sendable {
     private var mpv: OpaquePointer?
     private let queue = DispatchQueue(label: "openiptv.mpv", qos: .userInitiated)
     private var loadStarted = CFAbsoluteTimeGetCurrent()
+    /// The file's audio and subtitles to pick (the player's queue).
+    private var trackPlan: TrackPlan?
     /// When the file was open (headers read), for the start-up breakdown.
     private(set) var openedAfter: Double?
     private var reportedStart = false
@@ -152,6 +154,8 @@ final class MPVPlayer: @unchecked Sendable {
         mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "demuxer-cache-duration", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "cache-speed", MPV_FORMAT_INT64)
+        // A file's tracks are known, none picked yet: see handle(_:).
+        mpv_hook_add(mpv, 0, "on_preloaded", 50)
         mpv_set_wakeup_callback(mpv, { context in
             guard let context else { return }
             Unmanaged<MPVPlayer>.fromOpaque(context).takeUnretainedValue().drainEvents()
@@ -197,6 +201,7 @@ final class MPVPlayer: @unchecked Sendable {
             // exact second; precise seeking comes back once it's playing.
             mpv_set_property_string(mpv, "hr-seek", start == nil ? "default" : "no")
             Self.apply(tracks, mpv)
+            trackPlan = tracks
             command(["loadfile", url.absoluteString, "replace"])
         }
     }
@@ -386,7 +391,20 @@ final class MPVPlayer: @unchecked Sendable {
         let language: String?
         let channels: Int?
         let forced: Bool
-        let selected: Bool
+        var selected: Bool
+        /// Subtitles for the deaf and hard of hearing (the file says so).
+        var hearingImpaired = false
+
+        /// What the track is for besides its language: "commentary", "sdh",
+        /// "forced", or nil (the main one). Two English subtitle tracks,
+        /// say, are told apart by it.
+        var role: String? {
+            let words = Set((title ?? "").lowercased().split { !$0.isLetter }.map(String.init))
+            if words.contains("commentary") { return "commentary" }
+            if hearingImpaired || !words.isDisjoint(with: ["sdh", "cc", "hoh"]) { return "sdh" }
+            if forced { return "forced" }
+            return nil
+        }
     }
 
     /// The file's audio and subtitle tracks, as they are now.
@@ -506,7 +524,8 @@ final class MPVPlayer: @unchecked Sendable {
             }
             guard let id = number("id") else { return nil }
             return Track(id: id, kind: kind, title: text("title"), language: text("lang"),
-                         channels: number("demux-channel-count"), forced: flag("forced"), selected: flag("selected"))
+                         channels: number("demux-channel-count"), forced: flag("forced"), selected: flag("selected"),
+                         hearingImpaired: flag("hearing-impaired"))
         }
     }
 
@@ -551,6 +570,18 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func handle(_ event: mpv_event) {
         switch event.event_id {
+        case MPV_EVENT_HOOK:
+            guard let data = event.data, let mpv else { return }
+            let hook = data.assumingMemoryBound(to: mpv_event_hook.self).pointee
+            // The plan's exact tracks (language and kind, with the viewer's
+            // newest picks) before anything is decoded: nothing switches
+            // once it plays (a switch just after the start could stall it).
+            if String(cString: hook.name) == "on_preloaded", let plan = trackPlan?.refreshed() {
+                let choice = TrackChoice.choose(Self.trackList(mpv), plan: plan)
+                if let audio = choice.audio { mpv_set_property_string(mpv, "aid", String(audio)) }
+                mpv_set_property_string(mpv, "sid", choice.subtitle.map(String.init) ?? "no")
+            }
+            mpv_hook_continue(mpv, hook.id)
         case MPV_EVENT_FILE_LOADED:
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
         case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:

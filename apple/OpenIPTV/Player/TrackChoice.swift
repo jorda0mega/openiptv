@@ -9,6 +9,10 @@ struct TrackPlan: Hashable, Sendable {
     /// Subtitle languages; nil: none, except forced ones (signs, foreign
     /// lines) in the audio's language.
     var subtitles: [String]?
+    /// The kind of track picked for this title besides its language
+    /// ("sdh", "commentary"; nil: the main one).
+    var audioRole: String? = nil
+    var subtitleRole: String? = nil
     /// What it was made from, to make it again with the viewer's newest
     /// picks (a playback got ready before a pick still has the old plan).
     var basis: Basis?
@@ -58,7 +62,34 @@ enum TrackChoice {
             subtitles = codes("en") + codes("es")
         }
         return TrackPlan(audio: codes(wanted), subtitles: subtitles,
+                         audioRole: kept?.audio == wanted ? kept?.audioRole : nil,
+                         subtitleRole: subtitles == nil ? nil : kept?.subtitleRole,
                          basis: TrackPlan.Basis(audio: audio, countries: countries, key: key))
+    }
+
+    /// The plan's tracks among a file's: its audio (nil: the player's own
+    /// choice) and subtitles (nil: none). In the plan's languages, the kind
+    /// picked for the title (SDH, commentary), else the main track; no
+    /// subtitles asked for: forced ones in the audio's language only.
+    static func choose(_ tracks: [MPVPlayer.Track], plan: TrackPlan) -> (audio: Int?, subtitle: Int?) {
+        func matches(_ track: MPVPlayer.Track, _ codes: [String]) -> Bool {
+            let wanted = Set(codes.compactMap(normalized))
+            return track.language.flatMap(normalized).map(wanted.contains) ?? false
+        }
+        func best(_ list: [MPVPlayer.Track], _ codes: [String], role: String?) -> MPVPlayer.Track? {
+            let found = list.filter { matches($0, codes) }
+            return found.first { $0.role == role } ?? found.first { $0.role == nil } ?? found.first
+        }
+        let audio = tracks.filter { $0.kind == .audio }
+        let subtitles = tracks.filter { $0.kind == .subtitle }
+        let chosen = best(audio, plan.audio, role: plan.audioRole)
+        if let wanted = plan.subtitles {
+            let shown = subtitles.filter { !$0.forced || plan.subtitleRole == "forced" }
+            return (chosen?.id, best(shown, wanted, role: plan.subtitleRole)?.id)
+        }
+        let spoken = (chosen ?? audio.first)?.language
+        let forced = subtitles.first { track in track.forced && (spoken.map { matches(track, [$0]) } ?? false) }
+        return (chosen?.id, forced?.id)
     }
 
     /// "eng", "en", "en-US" → "en"; "spa", "es-419", "esl" → "es".
@@ -95,6 +126,9 @@ enum TrackChoice {
         var audio: String?
         /// A language, or "off".
         var subtitles: String?
+        /// "sdh", "commentary", …; nil: the main track.
+        var audioRole: String?
+        var subtitleRole: String?
     }
 
     private static let defaultsKey = "trackChoices"
@@ -105,15 +139,22 @@ enum TrackChoice {
         all()[key]
     }
 
-    /// The viewer chose this audio track (its language) for the title.
-    static func rememberAudio(_ language: String?, for key: String) {
+    /// The viewer chose this audio track (its language and kind) for the title.
+    static func rememberAudio(_ language: String?, role: String?, for key: String) {
         guard let language = language.flatMap(normalized) else { return }
-        update(key) { $0.audio = language }
+        update(key) {
+            $0.audio = language
+            $0.audioRole = role
+        }
     }
 
-    /// The viewer chose these subtitles (nil: off) for the title.
-    static func rememberSubtitles(_ language: String?, for key: String) {
-        update(key) { $0.subtitles = language.flatMap(normalized) ?? "off" }
+    /// The viewer chose these subtitles (nil: off; their language and
+    /// kind) for the title.
+    static func rememberSubtitles(_ language: String?, role: String?, for key: String) {
+        update(key) {
+            $0.subtitles = language.flatMap(normalized) ?? "off"
+            $0.subtitleRole = language == nil ? nil : role
+        }
     }
 
     private static func all() -> [String: Kept] {

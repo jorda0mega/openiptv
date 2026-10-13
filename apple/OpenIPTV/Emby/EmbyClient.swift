@@ -432,14 +432,26 @@ struct EmbyClient {
         let found = try await items("Users/\(account.userId)/Items", [
             .init(name: "SearchTerm", value: term), .init(name: "Recursive", value: "true"),
             .init(name: "IncludeItemTypes", value: "Movie,Series,Episode"), .init(name: "Limit", value: "40"),
-            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear"),
+            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,Genres"),
             .init(name: "ImageTypeLimit", value: "1"), .init(name: "EnableImageTypes", value: "Primary,Thumb,Backdrop"),
             .init(name: "EnableUserData", value: "false"), .init(name: "EnableTotalRecordCount", value: "false"),
         ])
         return found.map { item in
             let landscape = item.kind == "Episode"
-            return card(item, context: landscape ? .landscape : .poster, shape: landscape ? .landscape : .portrait, width: cardWidth)
+            let base = card(item, context: landscape ? .landscape : .poster, shape: landscape ? .landscape : .portrait, width: cardWidth)
+            guard !landscape else { return base }
+            return Card(id: base.id, kind: base.kind, title: base.title,
+                        subtitle: Self.searchLine(kind: item.kind, year: item.productionYear, genre: item.genres?.first),
+                        images: base.images, progress: base.progress, playable: base.playable,
+                        episodeId: base.episodeId, seriesId: base.seriesId)
         }
+    }
+
+    /// A search result's line, as in the Apple TV app's: "Drama · 2019" for
+    /// a film, "TV Show · Thriller" for a show; then its IMDb score.
+    static func searchLine(kind: String, year: Int?, genre: String?, rating: String? = nil) -> String {
+        let parts: [String?] = kind == "Series" ? ["TV Show", genre] : [genre ?? "Movie", year.map(String.init)]
+        return (parts + [rating]).compactMap(\.self).joined(separator: " · ")
     }
 
     /// A card for an on-device index entry (poster from its image tag),
@@ -452,10 +464,9 @@ struct EmbyClient {
             images.append(CardImage(url: imageURL(candidate, width: width, shape: .portrait).absoluteString,
                                     contain: candidate.contain(in: .portrait)))
         }
-        let kind = entry.kind == "Series" ? "Show" : "Movie"
-        let details = [kind, entry.year.map(String.init), rating.map(IMDbRatings.label)].compactMap(\.self)
         return Card(id: entry.id, kind: entry.kind, title: entry.name,
-                    subtitle: details.joined(separator: " · "),
+                    subtitle: Self.searchLine(kind: entry.kind, year: entry.year, genre: entry.genres?.first,
+                                              rating: rating.map(IMDbRatings.label)),
                     images: images, progress: nil, playable: true)
     }
 
