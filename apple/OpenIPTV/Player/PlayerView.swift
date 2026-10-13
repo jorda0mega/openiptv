@@ -288,6 +288,8 @@ struct MoviePlayerView: View {
     @State private var startedOnce = false
     /// Where the player was when it was closed (already on the page behind).
     @State private var closedAt: Double?
+    /// Playback speed (1: normal), for this playback only.
+    @State private var speed = 1.0
     #if DEBUG
     /// Debug builds: current quality, measured speed and buffer.
     @State private var stats = ""
@@ -298,8 +300,6 @@ struct MoviePlayerView: View {
     /// Debug builds: "72.4 playing" (the player's second, and whether it
     /// plays), for UI tests.
     @State private var positionReadout = ""
-    /// Playback speed (1: normal), for this playback only.
-    @State private var speed = 1.0
     /// Debug builds: how it started ("warm 0.3": a player kept or opened
     /// ahead; "cold 2.1": opened on the tap), and where.
     @State private var startReadout = ""
