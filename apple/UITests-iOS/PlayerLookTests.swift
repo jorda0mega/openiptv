@@ -80,12 +80,13 @@ final class PlayerLookTests: XCTestCase {
         controlsUp()
         let before = position()
         print("PIP before \(before ?? -1)")
-        let pip = app.buttons["Picture in Picture"].firstMatch
-        XCTAssertTrue(pip.waitForExistence(timeout: 3), "no Picture in Picture button")
         // The server takes 6 s to start the window's stream (a conversion).
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["hls_delay": "6"])
         defer { configure(server, ["reset": "1"]) }
+        controlsUp()
+        let pip = app.buttons["Picture in Picture"].firstMatch
+        XCTAssertTrue(pip.waitForExistence(timeout: 3), "no Picture in Picture button")
         pip.tap()
         let asked = Date()
         var up: Date?
@@ -150,8 +151,11 @@ final class PlayerLookTests: XCTestCase {
         }
     }
 
-    /// The bar's position in seconds ("Playback position" "00:01:12").
+    /// The player's second: from the app's debug readout (there whether
+    /// or not the controls are up), else the bar ("Playback position"
+    /// "00:01:12").
     private func position() -> Double? {
+        if let state = playerState() { return state.seconds.rounded() }
         let bar = app.otherElements["Playback position"].firstMatch
         let value = (bar.exists ? bar : app.descendants(matching: .any)["Playback position"].firstMatch).value as? String
         return value.map { $0.split(separator: ":").compactMap { Double($0) }.reduce(0) { $0 * 60 + $1 } }
