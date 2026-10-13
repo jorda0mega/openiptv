@@ -31,7 +31,7 @@ struct MovieView: View {
                 TitleHero(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
                           logo: item.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                           title: route.title, line: genreLine) {
-                    PlayCapsule(label: loading ? "Starting…" : playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
+                    PlayCapsule(label: playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
                                 loading: loading, action: play)
                 }
                 VStack(alignment: .leading, spacing: 10) {

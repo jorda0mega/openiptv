@@ -66,6 +66,71 @@ final class PersonPageTests: XCTestCase {
                       "Inception's page didn't open from More Like This")
     }
 
+    /// A show's page lists Specials after its seasons, as in the Apple TV
+    /// app. Regression: it opened on Specials, its seasons far below.
+    func testSpecialsLast() {
+        app.launchArguments = ["-debugSearch", "forensic"]
+        app.launch()
+        sleep(4)
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
+        sleep(3)
+        let show = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Forensic Files'")).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 8), "no search result")
+        show.tap()
+        sleep(3)
+        shot("show")
+        let seasons = app.buttons.matching(NSPredicate(format: "label == 'Specials' OR label BEGINSWITH 'Season '")).allElementsBoundByIndex
+            .sorted { $0.frame.minX < $1.frame.minX }.map(\.label)
+        XCTAssertGreaterThan(seasons.count, 1, "no season tabs: \(seasons)")
+        XCTAssertEqual(seasons.last, "Specials", "Specials isn't last: \(seasons)")
+    }
+
+    /// A show's episodes are all the same height, Up Next's too.
+    /// Regression: its "UP NEXT" line made it 2 points taller, so the list
+    /// moved when Up Next did.
+    func testEpisodeRowsSameHeight() {
+        openForensicFiles()
+        for _ in 0..<3 { app.swipeUp(); sleep(1) }
+        shot("episodes")
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Case '")).allElementsBoundByIndex
+            .filter { $0.frame.height > 40 }
+        let heights = Set(rows.map { Int(($0.frame.height * 2).rounded()) })
+        XCTAssertGreaterThan(rows.count, 3, "no episode rows")
+        XCTAssertEqual(heights.count, 1, "episode rows differ in height: \(rows.map { "\($0.label.prefix(20)) \($0.frame.height)" })")
+    }
+
+    /// The main button keeps its width while the episode starts (a slow
+    /// server). Regression: its label turned into "Starting…", narrower.
+    func testMainButtonKeepsWidthWhileStarting() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        openForensicFiles()
+        let main = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(main.waitForExistence(timeout: 5), "no Continue button")
+        let before = main.frame.width
+        configure(server, ["latency": "3"])
+        defer { configure(server, ["reset": "1"]) }
+        main.tap()
+        let during = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(during.exists, "the button's label changed while starting")
+        XCTAssertEqual(during.frame.width, before, accuracy: 0.5, "the button changed width while starting")
+        shot("starting")
+    }
+
+    /// Forensic Files' page, from Search.
+    private func openForensicFiles() {
+        app.launchArguments = ["-debugSearch", "forensic"]
+        app.launch()
+        sleep(4)
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
+        sleep(3)
+        let show = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Forensic Files'")).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 8), "no search result")
+        show.tap()
+        sleep(3)
+    }
+
     /// Antonio Banderas's page, from The Mask of Zorro's Cast & Crew.
     private func openPerson() {
         app.launchArguments = ["-debugSearch", "zorro"]

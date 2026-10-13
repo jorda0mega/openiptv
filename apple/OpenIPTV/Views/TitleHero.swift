@@ -19,7 +19,7 @@ struct TitleHero<Buttons: View>: View {
             Color.black
                 .overlay {
                     if let backdrop {
-                        CoverImage(images: [CardImage(url: backdrop.absoluteString, contain: false)], title: title)
+                        CoverImage(images: [CardImage(url: backdrop.absoluteString, contain: false)], title: title, backdrop: true)
                     }
                 }
                 .overlay {

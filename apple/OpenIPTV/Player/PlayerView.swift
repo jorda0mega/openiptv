@@ -193,6 +193,19 @@ struct MoviePlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
+            if let qualityNote, !controlsVisible {
+                Text(qualityNote)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .glassEffect(.regular, in: .capsule)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 12)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("player-note")
+            }
             #if DEBUG
             Text(trackReadout)
                 .font(.caption2)
@@ -610,6 +623,15 @@ struct MoviePlayerView: View {
         PictureInPicture.shared.close()
         #endif
         position = playback.startSeconds ?? 0
+        #if DEBUG
+        // UI tests (OPENREEL_DEBUG_NOTE_AFTER=seconds): a quality note then.
+        if let after = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NOTE_AFTER"].flatMap(Double.init) {
+            Task {
+                try? await Task.sleep(for: .seconds(after))
+                note("Lower quality for a smoother picture")
+            }
+        }
+        #endif
         if let (warmPlayer, _) = model.takeWarm(playback.itemId) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
@@ -700,12 +722,13 @@ struct MoviePlayerView: View {
         }
     }
 
+    /// A quality change or a short message: a small note at the top for a
+    /// few seconds (it brought up every control for four seconds mid-film).
     private func note(_ text: String) {
-        qualityNote = text
-        showControls()
+        withAnimation(.easeOut(duration: 0.2)) { qualityNote = text }
         Task {
             try? await Task.sleep(for: .seconds(4))
-            if qualityNote == text { qualityNote = nil }
+            if qualityNote == text { withAnimation(.easeIn(duration: 0.3)) { qualityNote = nil } }
         }
     }
 

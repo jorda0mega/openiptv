@@ -54,16 +54,22 @@ struct TVHomeView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 56) {
                     let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
-                    if !heroes.isEmpty {
-                        TVHero(items: heroes, play: { play($0) }, open: { open($0) })
-                    } else if model.homePending {
-                        // The first Home is on its way: the hero's space is
-                        // kept, so the rows don't move down when it comes.
-                        Color.clear.frame(height: TVHero.height).overlay { ProgressView() }
-                    } else {
-                        // No hero to sit under the tab bar: start below it.
-                        Color.clear.frame(height: 110)
+                    // The first hero fades in over its placeholder.
+                    ZStack(alignment: .top) {
+                        if !heroes.isEmpty {
+                            TVHero(items: heroes, play: { play($0) }, open: { open($0) })
+                                .transition(.opacity)
+                        } else if model.homePending {
+                            // The first Home is on its way: the hero's space is
+                            // kept, so the rows don't move down when it comes.
+                            Color.clear.frame(height: TVHero.height).overlay { ProgressView() }
+                                .transition(.opacity)
+                        } else {
+                            // No hero to sit under the tab bar: start below it.
+                            Color.clear.frame(height: 110)
+                        }
                     }
+                    .animation(.easeOut(duration: 0.25), value: heroes.isEmpty)
                     ForEach(model.rows.filter { !prefs.hiddenRows.contains($0.title) }) { row in
                         if row.title == "Continue Watching" {
                             TVContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
@@ -148,6 +154,8 @@ struct TVHero: View {
     let open: (Card) -> Void
     @State private var index = 0
     @State private var turn = 0
+    /// The last title, under the next one while that fades in.
+    @State private var behind: Int?
     @FocusState private var focus: Control?
 
     enum Control: Hashable { case play, info }
@@ -159,9 +167,17 @@ struct TVHero: View {
     var body: some View {
         let item = items[min(index, items.count - 1)]
         ZStack(alignment: .bottomLeading) {
-            TVBackdrop(url: item.backdrop, title: item.card.title)
-                .id(item.backdrop)
-                .transition(.opacity)
+            // The next picture fades in over the last, which stays at full
+            // brightness under it until it's covered (both fading at once
+            // dimmed the hero by a tenth halfway, every turn).
+            // Every title's picture stays drawn (decoded once, never black
+            // again); only the shown one and, while it fades in over it, the
+            // last one are visible.
+            ForEach(Array(items.enumerated()), id: \.element.card.id) { i, entry in
+                TVBackdrop(url: entry.backdrop, title: entry.card.title)
+                    .opacity(i == min(index, items.count - 1) || i == behind ? 1 : 0)
+                    .zIndex(i == min(index, items.count - 1) ? 2 : i == behind ? 1 : 0)
+            }
             VStack(alignment: .leading, spacing: 18) {
                 // The same space for every title (logo or name, long story
                 // or none), so the hero's text doesn't jump as it turns.
@@ -235,15 +251,34 @@ struct TVHero: View {
         }
         // Other titles (Home changed at a moment): from the first, with
         // focus staying on the same button.
-        .onChange(of: items.map(\.card.id)) { index = 0 }
+        .onChange(of: items.map(\.card.id)) { old, new in
+            #if DEBUG
+            NSLog("%@", "PERF hero items changed \(old.count) -> \(new.count) first \(old.first == new.first)")
+            #endif
+            index = 0
+        }
     }
 
+    /// The next title, once its picture is decoded: drawn in the first
+    /// frame of the cross-fade (an undecoded one faded in as black first,
+    /// and the hero dimmed halfway).
     private func advance(by step: Int) {
         guard items.count > 1 else { return }
-        withAnimation(.easeInOut(duration: 0.5)) {
-            index = (index + step + items.count) % items.count
+        let next = (index + step + items.count) % items.count
+        Task {
+            if let url = URL(string: items[next].backdrop), ImagePipeline.shared.cached(url) == nil {
+                _ = try? await ImagePipeline.shared.image(for: url)
+            }
+            let last = index
+            #if DEBUG
+            NSLog("%@", "PERF hero turn \(last) -> \(next)")
+            #endif
+            behind = last
+            withAnimation(.easeInOut(duration: 0.5)) { index = next }
+            turn += 1
+            try? await Task.sleep(for: .milliseconds(650))
+            if behind == last { behind = nil }
         }
-        turn += 1
     }
 }
 
@@ -257,7 +292,7 @@ struct TVBackdrop: View {
         Color.black
             .overlay {
                 if let url {
-                    CoverImage(images: [CardImage(url: url, contain: false)], title: title)
+                    CoverImage(images: [CardImage(url: url, contain: false)], title: title, backdrop: true)
                 }
             }
             .overlay {

@@ -64,7 +64,11 @@ struct TVMovieView: View {
                               title: route.title, details: titleDetails(item, model: model, kind: "Movie"),
                               overview: item?.overview) {
                     Button(action: play) {
-                        Label(loading ? "Starting…" : playLabel, systemImage: "play.fill").padding(.horizontal, 14)
+                        // The label stays (the button keeps its width); a
+                        // spinner over it while the film starts.
+                        Label(playLabel, systemImage: "play.fill").padding(.horizontal, 14)
+                            .opacity(loading ? 0 : 1)
+                            .overlay { if loading { ProgressView() } }
                     }
                     .buttonStyle(.glass)
                     .disabled(loading)
@@ -166,6 +170,7 @@ struct TVShowView: View {
     @FocusState private var focusedSeason: Int?
     @FocusState private var focusedEpisode: String?
 
+
     private var shownSeason: Int? { season ?? upNext?.parentIndexNumber ?? seasons.first }
 
     private var upNext: EmbyItem? {
@@ -183,7 +188,7 @@ struct TVShowView: View {
 
     private var seasons: [Int] {
         var seen = Set<Int>()
-        return (data?.episodes ?? []).compactMap { $0.parentIndexNumber ?? 0 }.filter { seen.insert($0).inserted }
+        return ShowView.specialsLast((data?.episodes ?? []).compactMap { $0.parentIndexNumber ?? 0 }.filter { seen.insert($0).inserted })
     }
 
     /// The page as last seen (or fetched ahead when it was focused),
@@ -206,7 +211,9 @@ struct TVShowView: View {
                               title: route.title, details: titleDetails(show, model: model, kind: "Series"),
                               overview: show?.overview) {
                     Button { playMain() } label: {
-                        Label(loadingItem == mainId ? "Starting…" : mainLabel, systemImage: "play.fill").padding(.horizontal, 14)
+                        Label(mainLabel, systemImage: "play.fill").padding(.horizontal, 14)
+                            .opacity(loadingItem == mainId ? 0 : 1)
+                            .overlay { if loadingItem == mainId { ProgressView() } }
                     }
                     .buttonStyle(.glass)
                     .disabled(loadingItem != nil)

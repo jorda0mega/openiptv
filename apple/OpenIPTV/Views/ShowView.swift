@@ -69,7 +69,13 @@ struct ShowView: View {
             if grouped[number] == nil { order.append(number) }
             grouped[number, default: []].append(episode)
         }
-        return order.map { (number: $0, episodes: grouped[$0] ?? []) }
+        return Self.specialsLast(order).map { (number: $0, episodes: grouped[$0] ?? []) }
+    }
+
+    /// Specials (season 0) after the last season, as in the Apple TV app
+    /// (first, the page opened on them, not on the show's own seasons).
+    static func specialsLast(_ seasons: [Int]) -> [Int] {
+        seasons.filter { $0 != 0 } + (seasons.contains(0) ? [0] : [])
     }
 
     /// The season with the most episodes on screen (rows peeking out from
@@ -134,7 +140,8 @@ struct ShowView: View {
                         SeasonBar(seasons: seasons.map(\.number), current: seasonInView(seasons), pinY: pinY,
                                   unwatchedOnly: $unwatchedOnly, newestFirst: $newestFirst) { number in
                             jumpedTo = number
-                            proxy.scrollTo("season-\(number)", anchor: .top)
+                            // Followed by the eye (it jumped there in one frame).
+                            withAnimation(.snappy(duration: 0.35)) { proxy.scrollTo("season-\(number)", anchor: .top) }
                         }
                         #else
                         filterBar(proxy, seasons: seasons)
@@ -196,7 +203,7 @@ struct ShowView: View {
             TitleHero(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
                       logo: show.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                       title: route.title, line: showLine, height: 0.95) {
-                PlayCapsule(label: loadingItem == mainId ? "Starting…" : mainLabel,
+                PlayCapsule(label: mainLabel,
                             progress: upNext?.resumeFraction, left: upNext?.timeLeft,
                             loading: loadingItem == mainId) { playMain() }
             }
@@ -452,10 +459,18 @@ private struct EpisodeRow: View {
                 .overlay {
                     if upNext { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.9), lineWidth: 2) }
                 }
-            VStack(alignment: .leading, spacing: 3) {
-                if upNext {
-                    Text("UP NEXT").font(.caption2.weight(.bold)).foregroundStyle(.white.opacity(0.7))
+                // On the picture, so every row is the same height (a line
+                // over the title made that row 2 points taller, and the list
+                // moved when Up Next did).
+                .overlay(alignment: .topLeading) {
+                    if upNext {
+                        Text("UP NEXT").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(.black.opacity(0.65), in: .capsule)
+                            .padding(6)
+                    }
                 }
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(title).font(.subheadline.weight(.semibold)).lineLimit(2)
                     if episode.userData?.played == true {

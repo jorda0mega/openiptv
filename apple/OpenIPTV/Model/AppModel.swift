@@ -276,7 +276,9 @@ final class AppModel {
             // Signed out or into another account meanwhile: not its Home.
             guard account == accountGeneration else { return }
             if show || homeOpening {
-                if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured {
+                // The hero's titles too: a new one undecoded showed black
+                // for a moment.
+                if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured || (fresh.spotlight ?? []) != spotlight {
                     await Self.wait(for: prefetch, atMost: 1.5)
                 }
                 guard account == accountGeneration else { return }

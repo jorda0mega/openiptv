@@ -235,6 +235,20 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertFalse(main.label.hasPrefix("Play"), "the page still says \(main.label)")
     }
 
+    /// A quality change mid-film: a small note at the top, the controls
+    /// stay hidden. Regression: every control came up for four seconds.
+    func testQualityNoteKeepsControlsHidden() {
+        app.launchEnvironment["OPENREEL_DEBUG_NOTE_AFTER"] = "12"
+        openFilm()
+        // The controls hide again after the start (openFilm tapped once).
+        sleep(5)
+        XCTAssertFalse(app.buttons["Close player"].isHittable, "the controls are still up before the note")
+        let note = app.descendants(matching: .any)["player-note"].firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 8), "no note")
+        shot("quality note")
+        XCTAssertFalse(app.buttons["Close player"].isHittable, "the note brought up the controls")
+    }
+
     /// A film made in a Spanish-speaking country starts in Spanish, with no
     /// subtitles. Needs the test server with the multi-track file and
     /// OPENIPTV_MOCK_COUNTRIES=Mexico (run with TEST_RUNNER_SPANISH_FILM=1).

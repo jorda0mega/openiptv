@@ -30,16 +30,22 @@ struct HomeView: View {
                 // back after pull to refresh stops it halfway, stuck down.
                 VStack(alignment: .leading, spacing: 30) {
                     let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
-                    if !heroes.isEmpty {
-                        HomeHero(items: heroes, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
-                    } else if model.homePending {
-                        // The first Home is on its way: the hero's space is
-                        // kept, so Continue Watching (shown as soon as it's
-                        // known) doesn't move down when the hero comes.
-                        HomeHero.placeholder
-                    } else {
-                        Color.clear.frame(height: 100)
+                    // One over the other while the first hero fades in over
+                    // its placeholder (it appeared in one frame).
+                    ZStack(alignment: .top) {
+                        if !heroes.isEmpty {
+                            HomeHero(items: heroes, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                                .transition(.opacity)
+                        } else if model.homePending {
+                            // The first Home is on its way: the hero's space is
+                            // kept, so Continue Watching (shown as soon as it's
+                            // known) doesn't move down when the hero comes.
+                            HomeHero.placeholder.transition(.opacity)
+                        } else {
+                            Color.clear.frame(height: 100)
+                        }
                     }
+                    .animation(.easeOut(duration: 0.25), value: heroes.isEmpty)
                     if visibleRows.isEmpty, model.featured == nil, !model.homePending { emptyState }
                     ForEach(visibleRows) { row in
                         if row.title == "Continue Watching" {
@@ -198,7 +204,9 @@ private struct HomeHero: View {
                 .overlay {
                     GeometryReader { geo in
                         TabView(selection: $index) {
-                            ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+                            // Keyed by title: after Home changed, a page kept
+                            // by position kept the old title's logo.
+                            ForEach(Array(items.enumerated()), id: \.element.card.id) { offset, item in
                                 page(item).tag(offset)
                             }
                         }
@@ -233,7 +241,7 @@ private struct HomeHero: View {
     private func page(_ item: Featured) -> some View {
         ZStack(alignment: .bottom) {
             Color.black
-                .overlay { CoverImage(images: [CardImage(url: item.backdrop, contain: false)], title: item.card.title) }
+                .overlay { CoverImage(images: [CardImage(url: item.backdrop, contain: false)], title: item.card.title, backdrop: true) }
                 .overlay {
                     LinearGradient(stops: [.init(color: .black.opacity(0.35), location: 0), .init(color: .clear, location: 0.25),
                                            .init(color: .clear, location: 0.5), .init(color: .black, location: 1)],
@@ -278,6 +286,14 @@ struct HeroTitle: View {
     @State private var image: UIImage?
     @State private var failed = false
 
+    init(logo: String?, title: String) {
+        self.logo = logo
+        self.title = title
+        // Already decoded: drawn in the first frame (an empty slot, then
+        // the logo popping in, on every hero page and title page).
+        _image = State(initialValue: logo.flatMap(URL.init(string:)).flatMap { ImagePipeline.shared.cached($0) })
+    }
+
     var body: some View {
         Group {
             if let image {
@@ -297,7 +313,18 @@ struct HeroTitle: View {
         .foregroundStyle(.white)
         .shadow(color: .black.opacity(0.4), radius: 10)
         .task(id: logo) {
-            guard let logo, let url = URL(string: logo) else { return }
+            guard let logo, let url = URL(string: logo) else {
+                image = nil
+                return
+            }
+            // Another title's logo: not the last one's meanwhile.
+            if let hit = ImagePipeline.shared.cached(url) {
+                image = hit
+                failed = false
+                return
+            }
+            image = nil
+            failed = false
             if let loaded = try? await ImagePipeline.shared.image(for: url) { image = loaded } else { failed = true }
         }
     }
@@ -442,6 +469,9 @@ struct ProgressBar: View {
                 Capsule().fill(.white.opacity(0.3))
                 Capsule().fill(.white).frame(width: geo.size.width * min(max(value, 0), 1))
             }
+            // Progress from another device slides to its new width (it
+            // jumped); the card itself never moves.
+            .animation(.easeInOut(duration: 0.3), value: value)
         }
         #if os(tvOS)
         .frame(height: 6)
@@ -457,14 +487,18 @@ struct ProgressBar: View {
 struct CoverImage: View {
     let images: [CardImage]
     let title: String
+    /// Full-bleed art on black (a hero, a page's backdrop): black until the
+    /// picture comes, not grey (it went black, grey, picture).
+    var backdrop = false
 
     @State private var image: UIImage?
     @State private var contain = false
     @State private var failed = false
 
-    init(images: [CardImage], title: String) {
+    init(images: [CardImage], title: String, backdrop: Bool = false) {
         self.images = images
         self.title = title
+        self.backdrop = backdrop
         // Already decoded (a row coming back, a filter switched): drawn at
         // once, not blank and then faded in.
         let hit = images.first.flatMap { URL(string: $0.url) }.flatMap { ImagePipeline.shared.cached($0) }
@@ -474,7 +508,7 @@ struct CoverImage: View {
 
     var body: some View {
         ZStack {
-            Rectangle().fill(.quaternary)
+            if backdrop { Color.black } else { Rectangle().fill(.quaternary) }
             if let image {
                 Image(uiImage: image)
                     .resizable()
