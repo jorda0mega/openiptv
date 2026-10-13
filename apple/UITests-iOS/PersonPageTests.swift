@@ -192,7 +192,7 @@ final class PersonPageTests: XCTestCase {
         }
         XCTAssertTrue(add.exists, "no + on the film's page")
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Continue'")).firstMatch
-        XCTAssertEqual(add.frame.height, 50, accuracy: 1, "+ isn't as tall as Play")
+        XCTAssertEqual(add.frame.height, 48, accuracy: 1, "+ isn't as tall as Play (48, as in the Apple TV app)")
         XCTAssertEqual(add.frame.midY, play.frame.midY, accuracy: 1, "+ isn't level with Play")
         add.tap()
         XCTAssertTrue(app.buttons["Remove from My List"].waitForExistence(timeout: 3), "+ didn't turn into a tick")
@@ -208,6 +208,30 @@ final class PersonPageTests: XCTestCase {
         let inRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals'")).allElementsBoundByIndex
             .filter { $0.frame.minY > heading.frame.maxY && $0.frame.minY < heading.frame.maxY + 300 }
         XCTAssertFalse(inRow.isEmpty, "the film isn't in My List")
+    }
+
+    /// A film's story: two lines and MORE, as in the Apple TV app; MORE
+    /// shows the rest.
+    func testStoryMore() {
+        app.launchArguments = ["-debugSearch", "dune"]
+        app.launch()
+        sleep(4)
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
+        sleep(3)
+        let film = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dune: Part Two'")).firstMatch
+        XCTAssertTrue(film.waitForExistence(timeout: 8), "no search result")
+        film.tap()
+        sleep(2)
+        let more = app.buttons["More of the story"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "no MORE under a long story")
+        // The story opens out when tapped, so it counts as a button.
+        let story = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Paul Atreides'")).firstMatch
+        let cut = story.frame.height
+        more.tap()
+        sleep(1)
+        XCTAssertFalse(app.buttons["More of the story"].exists, "MORE stayed")
+        XCTAssertGreaterThan(story.frame.height, cut + 10, "the story didn't open out")
     }
 
     /// Antonio Banderas's page, from The Mask of Zorro's Cast & Crew.

@@ -50,6 +50,12 @@ final class PlayerLookTests: XCTestCase {
         sleep(2)
         shot("film page")
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        // A fresh simulator can still be filling the results in as the
+        // first tap lands: once more if the page didn't open.
+        if !play.waitForExistence(timeout: 8), result.exists {
+            result.tap()
+            sleep(2)
+        }
         XCTAssertTrue(play.waitForExistence(timeout: 8), "no play button")
         play.tap()
         sleep(6)
@@ -278,6 +284,19 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(note.waitForExistence(timeout: 8), "no note")
         shot("quality note")
         XCTAssertFalse(app.buttons["Close player"].isHittable, "the note brought up the controls")
+    }
+
+    /// The sound button at the top right, as in the Apple TV app: Mute, then
+    /// Unmute.
+    func testMuteButton() {
+        openFilm()
+        controlsUp()
+        let mute = app.buttons["Mute"].firstMatch
+        XCTAssertTrue(mute.waitForExistence(timeout: 3), "no Mute button")
+        XCTAssertGreaterThan(mute.frame.minX, app.frame.width * 0.7, "Mute isn't at the right: \(mute.frame)")
+        XCTAssertLessThan(mute.frame.minY, 120, "Mute isn't at the top: \(mute.frame)")
+        mute.tap()
+        XCTAssertTrue(app.buttons["Unmute"].waitForExistence(timeout: 2), "Mute didn't turn into Unmute")
     }
 
     /// A film made in a Spanish-speaking country starts in Spanish, with no

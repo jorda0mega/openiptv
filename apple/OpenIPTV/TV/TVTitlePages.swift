@@ -389,10 +389,17 @@ private struct TVEpisodeCard: View {
             .buttonStyle(.borderless)
             .accessibilityLabel("\(episode.indexNumber.map { "Episode \($0), " } ?? "")\(episode.name)")
             VStack(alignment: .leading, spacing: 4) {
+                // As in the TV app: "EPISODE 3", the name, two lines of the
+                // story (their room kept, so every card is the same height).
                 Text([episode.indexNumber.map { "Episode \($0)" }, upNext ? "Up Next" : nil].compactMap(\.self).joined(separator: " · "))
                     .font(.caption.weight(.semibold))
+                    .textCase(.uppercase)
                     .foregroundStyle(upNext ? Color.white : .secondary)
                 Text(episode.name).font(.callout.weight(.medium)).lineLimit(1)
+                Text(episode.overview ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: true)
                 if let minutes = episode.runTimeTicks.map({ Int($0 / 600_000_000) }), minutes > 0 {
                     Text("\(minutes) min").font(.caption).foregroundStyle(.secondary)
                 }

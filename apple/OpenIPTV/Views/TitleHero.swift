@@ -70,7 +70,7 @@ struct PlayCapsule: View {
                 .lineLimit(1)
                 .padding(.horizontal, 28)
                 .frame(minWidth: 178)
-                .frame(height: 50)
+                .frame(height: 48)
                 .opacity(loading ? 0 : 1)
                 .overlay { if loading { ProgressView().tint(.black) } }
                 .contentShape(.capsule)
@@ -126,7 +126,7 @@ struct MyListButton: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 50, height: 50)
+                .frame(width: 48, height: 48)
                 .contentShape(.circle)
                 .glassEffect(.regular.interactive(), in: .circle)
         }

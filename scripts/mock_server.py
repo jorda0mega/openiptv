@@ -37,6 +37,10 @@ SOCKETS = set()
 # "video_delay" (seconds before each video response), "hls_delay" (seconds
 # before a converted stream's playlist: a server starting a conversion).
 CONTROL = {}
+# Stories long enough to be cut to two lines on a title's page.
+LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
+                        "who destroyed his family. Facing a choice between the love of his life and the fate of the known "
+                        "universe, he endeavors to prevent a terrible future only he can foresee."}
 # The test user's My List (favorites), by item id.
 FAVORITES = []
 # Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
@@ -106,7 +110,7 @@ def known_item(entry, played=False):
     providers = {"Tmdb": tmdb} | ({"Imdb": imdb} if imdb else {})
     return {"Id": id_, "Name": name, "Type": kind, "ProductionYear": year, "ProviderIds": providers,
             "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{len(id_) * 7 + int(id_[1:])}"},
-            "BackdropImageTags": [f"b{id_}"], "Overview": f"{name} ({year}), a title from the test library.",
+            "BackdropImageTags": [f"b{id_}"], "Overview": LONG_OVERVIEWS.get(id_, f"{name} ({year}), a title from the test library."),
             "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
             "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None,
                          "IsFavorite": id_ in FAVORITES},

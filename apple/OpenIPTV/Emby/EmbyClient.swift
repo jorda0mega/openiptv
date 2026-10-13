@@ -252,7 +252,7 @@ struct EmbyClient {
             let base = card(item, context: .landscape, shape: shape, width: width)
             guard item.kind == "Episode", let series = item.seriesId else { return base }
             var code = ""
-            if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s):E\(e) · " }
+            if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s), E\(e) · " }
             return Card(id: series, kind: "Series", title: item.seriesName ?? base.title, subtitle: code + item.name,
                         images: base.images, progress: base.progress, playable: true, episodeId: item.id)
         }
@@ -494,7 +494,7 @@ struct EmbyClient {
     private static func titles(_ item: EmbyItem) -> (String, String?) {
         if item.kind == "Episode" {
             var code = ""
-            if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s):E\(e) · " }
+            if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s), E\(e) · " }
             return (item.seriesName ?? item.name, "\(code)\(item.name)")
         }
         // "2024 · Drama", as Apple's player puts it over the title.

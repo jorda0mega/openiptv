@@ -183,6 +183,9 @@ final class PhoneHomeStabilityTests: XCTestCase {
             // at full size): its words sit inside the card's 170 points,
             // along the bottom.
             XCTAssertEqual(card.frame.width, 240, accuracy: 1, "Continue Watching card: \(card.frame)")
+            // Episodes written as in the Apple TV app ("S2, E3").
+            let show = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Case 3'")).firstMatch
+            XCTAssertTrue(show.label.contains("S2, E3"), "not \"S2, E3\": \(show.label)")
             // The card starts 12 points under the row's name.
             let top = heading.frame.maxY + 12
             let words = card.staticTexts.allElementsBoundByIndex.map(\.frame)
@@ -192,6 +195,14 @@ final class PhoneHomeStabilityTests: XCTestCase {
                 XCTAssertLessThan(frame.maxY, top + 170, "the card's words are below the card: \(frame)")
             }
         }
+        // The hero's buttons as in the Apple TV app: Play 160 × 48, then a
+        // 48-point round button.
+        // (Measured on the screen: a button's frame here is its words'.)
+        let label = app.buttons["Play"].firstMatch
+        XCTAssertTrue(label.exists, "no Play in the hero")
+        let capsule = whiteRun(XCUIScreen.main.screenshot(), through: CGPoint(x: label.frame.midX, y: label.frame.midY))
+        XCTAssertEqual(capsule.width, 160, accuracy: 3, "hero Play isn't 160 wide: \(capsule)")
+        XCTAssertEqual(capsule.height, 48, accuracy: 3, "hero Play isn't 48 tall: \(capsule)")
         drag(from: 0.75, to: 0.35)
         sleep(1)
         let posters = app.buttons.allElementsBoundByIndex.filter { abs($0.frame.width - Layout100.width) < 1 && abs($0.frame.height - Layout100.height) < 1 }
@@ -201,6 +212,30 @@ final class PhoneHomeStabilityTests: XCTestCase {
         if posters.count >= 2, posters[0].frame.minY == posters[1].frame.minY {
             XCTAssertEqual(posters[1].frame.minX - posters[0].frame.maxX, 12, accuracy: 1, "posters aren't 12 apart")
         }
+    }
+
+    /// The white area around a point of the screen (in points): how far
+    /// white runs across and up and down from it.
+    private func whiteRun(_ shot: XCUIScreenshot, through point: CGPoint) -> CGSize {
+        guard let image = shot.image.cgImage,
+              let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return .zero }
+        let scale = CGFloat(image.width) / app.frame.width
+        let perRow = image.bytesPerRow, perPixel = image.bitsPerPixel / 8
+        func white(_ x: Int, _ y: Int) -> Bool {
+            guard x >= 0, y >= 0, x < image.width, y < image.height else { return false }
+            let i = y * perRow + x * perPixel
+            return bytes[i] > 235 && bytes[i + 1] > 235 && bytes[i + 2] > 235
+        }
+        let cx = Int(point.x * scale), cy = Int(point.y * scale)
+        // From the middle, past the words (dark), to the capsule's edges.
+        var left = cx, right = cx, top = cy, bottom = cy
+        while left > 0, (white(left - 1, cy) || left > cx - Int(60 * scale)) { left -= 1; if !white(left, cy) && left < cx - Int(60 * scale) { break } }
+        while right < image.width - 1, (white(right + 1, cy) || right < cx + Int(60 * scale)) { right += 1; if !white(right, cy) && right > cx + Int(60 * scale) { break } }
+        // Inside the straight part (past the rounded end), before the words.
+        let edgeX = left + Int(30 * scale)
+        while top > 0, white(edgeX, top - 1) { top -= 1 }
+        while bottom < image.height - 1, white(edgeX, bottom + 1) { bottom += 1 }
+        return CGSize(width: CGFloat(right - left) / scale, height: CGFloat(bottom - top + 1) / scale)
     }
 
     private enum Layout100 {

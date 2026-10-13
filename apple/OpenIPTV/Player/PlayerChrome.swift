@@ -38,6 +38,10 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     /// title and bar; the play controls move up above it).
     var selectedPill: String?
     var panel: PlayerInfoPanel?
+    /// Sound off, and the button at the top right that turns it off and
+    /// on (as in the Apple TV app); none without `toggleMute`.
+    var muted = false
+    var toggleMute: (() -> Void)? = nil
     let close: () -> Void
     let back: () -> Void
     let playPause: () -> Void
@@ -139,6 +143,10 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                 PlayerGlassButton(systemName: "xmark", label: "Close player", size: 44, glyph: 19, action: close)
                 topCapsule
                 Spacer(minLength: 0)
+                if let toggleMute {
+                    PlayerGlassButton(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                                      label: muted ? "Unmute" : "Mute", size: 44, glyph: 17, action: toggleMute)
+                }
             }
             if let panel, landscape {
                 // Landscape (little height): the play controls beside the

@@ -226,11 +226,13 @@ private struct HomeHero: View {
                     }
                 }
             if items.count > 1 {
-                HStack(spacing: 7) {
+                // The Apple TV app's: 7.7-point dots, the shown one a
+                // 26-point pill.
+                HStack(spacing: 9.6) {
                     ForEach(items.indices, id: \.self) { i in
                         Capsule()
                             .fill(.white.opacity(i == index ? 0.9 : 0.3))
-                            .frame(width: i == index ? 18 : 6, height: 6)
+                            .frame(width: i == index ? 26 : 7.7, height: 7.7)
                     }
                 }
                 .animation(.snappy, value: index)
@@ -267,20 +269,22 @@ private struct HomeHero: View {
                 HeroTitle(logo: item.logo, title: item.card.title)
                     .frame(minHeight: 96, alignment: .bottom)
                 Text(item.details)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.9))
                 HStack(spacing: 12) {
+                    // Play 160 × 48 and a 48-point round button, as in the
+                    // Apple TV app.
                     Button { play(item.card) } label: {
                         Label("Play", systemImage: "play.fill")
                             .font(.body.weight(.semibold))
-                            .frame(width: 150, height: 44)
+                            .frame(width: 160, height: 48)
                             .opacity(loadingCard == item.card.id ? 0 : 1)
                             .overlay { if loadingCard == item.card.id { ProgressView().tint(.black) } }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.black)
                     .background(.white, in: .capsule)
-                    GlassIconButton(systemName: "info", label: "Details") { open(item.card) }
+                    GlassIconButton(systemName: "info", label: "Details", size: 48) { open(item.card) }
                 }
             }
             .padding(.horizontal, 24)
@@ -309,7 +313,7 @@ struct HeroTitle: View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFit()
-                    .frame(maxWidth: 260, maxHeight: 96)
+                    .frame(maxWidth: 340, maxHeight: 96)
                     .accessibilityLabel(title)
             } else if logo == nil || failed {
                 Text(title)

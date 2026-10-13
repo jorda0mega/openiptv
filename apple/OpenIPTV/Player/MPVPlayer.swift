@@ -266,6 +266,14 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    /// Sound off or on (the film plays on).
+    func setMuted(_ muted: Bool) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "mute", muted ? "yes" : "no")
+        }
+    }
+
     func setPaused(_ paused: Bool) {
         queue.async { [self] in
             guard let mpv else { return }

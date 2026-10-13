@@ -182,6 +182,7 @@ struct MoviePlayerView: View {
     /// than fitting it.
     @State private var showInfo = false
     @State private var filled = false
+    @State private var muted = false
     /// The film went on in Picture in Picture: closing here isn't stopping.
     @State private var handedOff = false
     #endif
@@ -376,6 +377,11 @@ struct MoviePlayerView: View {
                      paused: paused, busy: (buffering || !started) && error == nil, ready: started,
                      topActions: pictureActions, pills: [PlayerAction(title: "Info") { toggleInfo() }],
                      selectedPill: showInfo ? "Info" : nil, panel: showInfo ? infoPanel : nil,
+                     muted: muted, toggleMute: {
+                         muted.toggle()
+                         player?.setMuted(muted)
+                         showControls()
+                     },
                      close: { close() }, back: { skip(-10) },
                      playPause: {
                          // The button changes at once; the player confirms.

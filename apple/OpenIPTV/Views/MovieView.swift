@@ -41,13 +41,21 @@ struct MovieView: View {
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     if let overview = item?.overview, !overview.isEmpty {
+                        // Two lines and MORE, as in the Apple TV app.
                         Text(overview)
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.8))
-                            .lineLimit(expanded ? nil : 3)
+                            .lineLimit(expanded ? nil : 2)
                             .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
                             .accessibilityAddTraits(.isButton)
                             .accessibilityHint(expanded ? "Shows less" : "Shows the whole story")
+                        if !expanded, overview.count > 90 {
+                            Button("MORE") { withAnimation(.snappy) { expanded = true } }
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("More of the story")
+                        }
                     }
                     if !facts.isEmpty {
                         Text(facts).font(.footnote).foregroundStyle(.secondary)
