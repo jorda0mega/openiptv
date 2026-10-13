@@ -104,9 +104,9 @@ struct PlayCapsule: View {
             }
         }
         // The bar's room is kept even before there's progress, so coming
-        // back from the player doesn't move the title and button up.
+        // back from the player doesn't move the title and button up. Not
+        // animated: "Play" turning into "Continue" faded one into the other.
         .padding(.bottom, 28)
-        .animation(.easeOut(duration: 0.18), value: hasProgress)
     }
 }
 

@@ -57,6 +57,16 @@ struct RootView: View {
             PlayerScreen(item: item)
         }
         .task { await model.loadLive() }
+        #if DEBUG
+        // UI tests: when the last stop reached the page (see noteStop).
+        .overlay(alignment: .topTrailing) {
+            Text(model.debugStop)
+                .font(.caption2)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("debug-stop")
+        }
+        #endif
         #if DEBUG && os(iOS)
         // UI tests: what Picture in Picture is doing.
         .overlay(alignment: .topLeading) {

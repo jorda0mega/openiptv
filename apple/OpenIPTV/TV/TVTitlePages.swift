@@ -160,6 +160,13 @@ struct TVShowView: View {
     @State private var selected: Card?
     /// Someone from Cast & Crew, whose page is open.
     @State private var person: EmbyItem.Person?
+    /// Where the remote is in the season chips and the episode row: coming
+    /// down into them, it lands on the season shown and the episode you're
+    /// up to (it landed on the first chip, Specials, and on Episode 1).
+    @FocusState private var focusedSeason: Int?
+    @FocusState private var focusedEpisode: String?
+
+    private var shownSeason: Int? { season ?? upNext?.parentIndexNumber ?? seasons.first }
 
     private var upNext: EmbyItem? {
         // The list's copy: it has the running time, and what you just
@@ -167,6 +174,11 @@ struct TVShowView: View {
         if let id = route.episodeId ?? data?.nextUp?.id,
            let episode = data?.episodes.first(where: { $0.id == id }) { return episode }
         return data?.nextUp
+    }
+
+    /// The episode you're up to, when it's in this list.
+    private func upNextIn(_ episodes: [EmbyItem]) -> String? {
+        upNext.flatMap { next in episodes.contains { $0.id == next.id } ? next.id : nil }
     }
 
     private var seasons: [Int] {
@@ -186,7 +198,7 @@ struct TVShowView: View {
 
     var body: some View {
         let show = data?.show
-        let shownSeason = season ?? upNext?.parentIndexNumber ?? seasons.first
+        let shownSeason = shownSeason
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
                 TVTitleHeader(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth)?.absoluteString },
@@ -205,11 +217,18 @@ struct TVShowView: View {
                             ForEach(seasons, id: \.self) { number in
                                 Button(ShowView.seasonName(number)) { season = number }
                                     .buttonStyle(TVChipStyle(selected: number == shownSeason))
+                                    .focused($focusedSeason, equals: number)
                             }
                         }
                         .padding(.vertical, 10)
                     }
                     .tvRowScroll()
+                    .focusSection()
+                    .defaultFocus($focusedSeason, shownSeason)
+                    .onChange(of: focusedSeason) { before, now in
+                        // Coming in from above or below: the season shown.
+                        if before == nil, let now, let shown = self.shownSeason, now != shown { focusedSeason = shown }
+                    }
                 }
                 let episodes = (data?.episodes ?? []).filter { ($0.parentIndexNumber ?? 0) == (shownSeason ?? 0) }
                 if !episodes.isEmpty {
@@ -224,11 +243,18 @@ struct TVShowView: View {
                                             play(episode.id, kind: "Episode")
                                         }
                                         .id(episode.id)
+                                        .focused($focusedEpisode, equals: episode.id)
                                     }
                                 }
                                 .padding(.vertical, 24)
                             }
                             .tvRowScroll()
+                            .focusSection()
+                            .defaultFocus($focusedEpisode, upNextIn(episodes))
+                            .onChange(of: focusedEpisode) { before, now in
+                                // Coming in from above or below: the episode you're up to.
+                                if before == nil, let now, let target = upNextIn(episodes), now != target { focusedEpisode = target }
+                            }
                             .onAppear {
                                 // The episode you're up to, in view with the row's margin.
                                 if let id = upNext?.id, id != episodes.first?.id { proxy.scrollTo(id, anchor: .center) }

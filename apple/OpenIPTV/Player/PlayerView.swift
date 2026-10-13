@@ -149,6 +149,8 @@ struct MoviePlayerView: View {
     @State private var lastConverted: Int?
     /// The first start has been reported (later starts are quality switches).
     @State private var startedOnce = false
+    /// Where the player was when it was closed (already on the page behind).
+    @State private var closedAt: Double?
     #if DEBUG
     /// Debug builds: current quality, measured speed and buffer.
     @State private var stats = ""
@@ -173,7 +175,7 @@ struct MoviePlayerView: View {
                     .accessibilityHint("Shows the player controls")
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { showControls() }
-                    .accessibilityAction(.escape) { dismiss() }
+                    .accessibilityAction(.escape) { close() }
             }
             // Choosing where to jump: the still for that moment, full-screen,
             // until the player has the frame itself.
@@ -215,9 +217,17 @@ struct MoviePlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
-        .onAppear { PlaybackActivity.began() }
+        .onAppear {
+            PlaybackActivity.began()
+            #if DEBUG
+            model.debugPlayerUp = true
+            #endif
+        }
         .onDisappear {
             PlaybackActivity.ended()
+            #if DEBUG
+            model.debugPlayerUp = false
+            #endif
             finish()
         }
     }
@@ -227,10 +237,16 @@ struct MoviePlayerView: View {
     /// Apple's own player's look (see TVMovieOverlay).
     private var controls: some View {
         #if os(tvOS)
-        TVMovieOverlay(caption: playback.subtitle, title: playback.title, note: note,
+        // A film: its title alone over the bar, and in Info its name with
+        // the year and length under it (it showed the year as the heading);
+        // an episode: "S1:E3 · Name" over the show, and as Info's heading.
+        let film = playback.seriesId == nil
+        return TVMovieOverlay(caption: film ? nil : playback.subtitle, title: playback.title, note: note,
                        busy: (buffering || !started) && error == nil, bar: transportBar, compact: compact,
                        panel: panel, focus: focus, hasSubtitles: tracks.contains { $0.kind == .subtitle },
-                       info: TVPlayerInfo(heading: playback.subtitle, overview: playback.overview, runtime: runtime, badges: badges),
+                       info: TVPlayerInfo(heading: film ? playback.title : playback.subtitle, overview: playback.overview,
+                                          runtime: film ? [playback.subtitle, runtime].compactMap(\.self).joined(separator: " · ") : runtime,
+                                          badges: badges),
                        menu: menu)
         #else
         // A film shows its title alone, as in the Apple TV app; an episode
@@ -239,7 +255,7 @@ struct MoviePlayerView: View {
                      paused: paused, busy: (buffering || !started) && error == nil, ready: started,
                      topActions: pictureActions, pills: [PlayerAction(title: "Info") { toggleInfo() }],
                      selectedPill: showInfo ? "Info" : nil, panel: showInfo ? infoPanel : nil,
-                     close: { dismiss() }, back: { skip(-10) },
+                     close: { close() }, back: { skip(-10) },
                      playPause: {
                          // The button changes at once; the player confirms.
                          paused.toggle()
@@ -831,7 +847,7 @@ struct MoviePlayerView: View {
             if isPaused { showControls(autoHide: false) } else { showControls() }
         case .ended:
             position = total
-            dismiss()
+            close()
         case let .previewShown(seconds):
             previewShown = seconds
         case .window:
@@ -848,14 +864,30 @@ struct MoviePlayerView: View {
         holdTask?.cancel()
         #endif
         if let speed = governor?.speed, speed > 0 { model.knownSpeed = speed }
-        let seconds = position
+        let seconds = closedAt ?? position
         player?.shutdown()
         player = nil
         #if os(iOS)
         // Still playing in Picture in Picture: it reports when it stops.
         if handedOff { return }
         #endif
-        Task { await model.report(playback, seconds: seconds, event: .stopped) }
+        let noted = closedAt != nil
+        Task { await model.report(playback, seconds: seconds, event: .stopped, noted: noted) }
+    }
+
+    /// Closes the player. The stop goes on the page behind (its resume
+    /// point, Continue Watching's order) first, with no animation, while
+    /// the player still covers it: the page appears as it will stay.
+    /// Changing it after it showed made "Play" fade into "Continue" and
+    /// Continue Watching's cards swap places under the viewer's eyes.
+    private func close() {
+        if closedAt == nil {
+            closedAt = position
+            var quiet = Transaction(animation: nil)
+            quiet.disablesAnimations = true
+            withTransaction(quiet) { model.noteStop(playback, seconds: position) }
+        }
+        dismiss()
     }
 
     private func toggleControls() {
@@ -1013,7 +1045,7 @@ struct MoviePlayerView: View {
                 hideTask?.cancel()
                 withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
             } else {
-                dismiss()
+                close()
             }
         }
     }

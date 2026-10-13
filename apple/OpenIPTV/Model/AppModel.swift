@@ -1266,26 +1266,43 @@ final class AppModel {
     /// its turn, newer ones replace it rather than queueing behind it.
     @ObservationIgnored private var queuedProgress: (playback: EmbyPlayback, seconds: Double)?
 
-    func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent) async {
+    /// The title's page and Home as they'll be after this stop, before the
+    /// server hears; called while the player is still up, so the page
+    /// appears as it will stay (nothing changes on it after).
+    func noteStop(_ playback: EmbyPlayback, seconds: Double) {
+        playingItem = nil
+        #if DEBUG
+        debugStop = "stop noted player=\(debugPlayerUp ? "up" : "gone")"
+        #endif
+        #if DEBUG
+        let began = CFAbsoluteTimeGetCurrent()
+        #endif
+        noteProgress(playback, seconds: seconds)
+        #if DEBUG
+        let noted = CFAbsoluteTimeGetCurrent()
+        #endif
+        patchContinueWatching(playback, seconds: seconds)
+        #if DEBUG
+        NSLog("%@", String(format: "PERF stop note %.1f ms, continue watching %.1f ms",
+                           (noted - began) * 1000, (CFAbsoluteTimeGetCurrent() - noted) * 1000))
+        #endif
+    }
+
+    #if DEBUG
+    /// UI tests: whether the last stop reached the page while the player
+    /// still covered it ("stop noted player=up"), and whether it's up.
+    var debugStop = ""
+    @ObservationIgnored var debugPlayerUp = false
+    #endif
+
+    /// `noted`: a stop already on the page (see noteStop).
+    func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent, noted: Bool = false) async {
         if event == .started {
             playingItem = playback.itemId
             notePlay(playback.seriesId ?? playback.itemId, kind: playback.seriesId != nil ? "Series" : "Movie")
         }
-        if event == .stopped {
-            playingItem = nil
-            // The title's page, then Home, as they'll be, before the server hears.
-            #if DEBUG
-            let began = CFAbsoluteTimeGetCurrent()
-            #endif
-            noteProgress(playback, seconds: seconds)
-            #if DEBUG
-            let noted = CFAbsoluteTimeGetCurrent()
-            #endif
-            patchContinueWatching(playback, seconds: seconds)
-            #if DEBUG
-            NSLog("%@", String(format: "PERF stop note %.1f ms, continue watching %.1f ms",
-                               (noted - began) * 1000, (CFAbsoluteTimeGetCurrent() - noted) * 1000))
-            #endif
+        if event == .stopped, !noted {
+            noteStop(playback, seconds: seconds)
         }
         // In the order they happened: a progress report sent a moment before
         // Stopped must not land after it and move the resume point back.

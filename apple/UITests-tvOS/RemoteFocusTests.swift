@@ -182,6 +182,106 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(card.exists, "the film just stopped isn't in Continue Watching")
     }
 
+    /// Home: Down from the tab bar lands on the hero's Play, and Up and
+    /// Down reach every row from any card. Regression: Down went past the
+    /// hero into Continue Watching; Down from the end of a row with nothing
+    /// straight below went nowhere; Up from there skipped Continue Watching.
+    func testHomeRowsReachable() {
+        app.launch()
+        sleep(6)
+        press(.down, "into the page")
+        XCTAssertTrue(focused().contains("label='Play'"), "Down from the tab bar didn't land on Play: \(focused())")
+        press(.down, "to Continue Watching")
+        XCTAssertTrue(focused().contains("id='continue-"), "not on Continue Watching: \(focused())")
+        press(.down, "to the next row")
+        for _ in 0..<6 { press(.right, "along the row") }
+        let end = focused()
+        press(.down, "down from the row's end")
+        XCTAssertNotEqual(focused(), end, "Down from the end of a row went nowhere")
+        press(.up, "back up")
+        press(.up, "up again")
+        XCTAssertTrue(focused().contains("id='continue-"), "Up skipped Continue Watching: \(focused())")
+    }
+
+    /// A show's page: Down from its main button lands on the season shown,
+    /// then on the episode you're up to. Regression: on the first chip
+    /// (Specials), then on Episode 1.
+    func testShowPageFocus() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "forensic"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to the results")
+        for _ in 0..<6 where !focused().contains("label='Forensic Files") { press(.right, "along the results") }
+        press(.select, "open the show")
+        sleep(3)
+        let main = focused()
+        XCTAssertTrue(main.contains("Continue"), "not on the show's Continue button: \(main)")
+        press(.down, "to the seasons")
+        XCTAssertTrue(focused().contains("label='Season 2'"), "Down didn't land on the season shown: \(focused())")
+        press(.down, "to the episodes")
+        XCTAssertTrue(focused().contains("Case 3"), "Down didn't land on the episode you're up to: \(focused())")
+    }
+
+    /// A film's Info panel is headed by its name, and no bare year shows.
+    /// Regression: the heading (and the line over the title) was "2026".
+    func testFilmInfoHeading() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(6)
+        remote.press(.playPause)
+        usleep(1_300_000)
+        remote.press(.down)
+        usleep(800_000)
+        remote.press(.down)
+        usleep(1_000_000)
+        shot("film info")
+        // The film's own year alone (pages behind the player list others).
+        XCTAssertFalse(app.staticTexts["2026"].exists, "the film's year shows on its own, as a heading")
+        XCTAssertTrue(app.staticTexts["Animals"].exists, "the film's name isn't shown")
+    }
+
+    /// Closing the player over Home: Continue Watching is in its new order
+    /// when Home shows, and stays so. Regression: the cards swapped places
+    /// about 200 ms after Home came back (the stop reached Home only after
+    /// the player had closed).
+    func testContinueWatchingStillAfterClose() {
+        app.launch()
+        sleep(6)
+        for _ in 0..<5 where !focused().contains("id='continue-") { press(.down, "down to Continue Watching") }
+        press(.right, "second card")
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        let id = card.identifier
+        XCTAssertTrue(id.hasPrefix("continue-"), "not on a Continue Watching card: \(focused())")
+        press(.select, "play")
+        sleep(10)
+        press(.right, "skip")
+        press(.right, "skip")
+        // Menu until the player has gone (the first may only hide its bar).
+        let played = app.buttons[id]
+        for _ in 0..<3 where !played.exists || !played.isHittable {
+            remote.press(.menu)
+            usleep(300_000)
+        }
+        let stop = app.staticTexts["debug-stop"].firstMatch
+        XCTAssertEqual(stop.label, "stop noted player=up", "the stop reached Home after the player had closed")
+        let first = played.frame
+        var moves: [String] = []
+        for step in 0..<10 {
+            usleep(200_000)
+            let now = played.frame
+            if abs(now.minX - first.minX) > 1 || abs(now.minY - first.minY) > 1 { moves.append("\(step): \(first) → \(now)") }
+        }
+        shot("home after close")
+        XCTAssertEqual(moves, [], "the card moved after Home came back")
+    }
+
     /// Paused, up to the audio button, then Play/Pause: playing again with
     /// the remote back on the bar, so a click right still skips (it used to
     /// stay on the hidden button and do nothing).

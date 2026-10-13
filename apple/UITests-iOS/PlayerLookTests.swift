@@ -217,6 +217,24 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng+sdh")
     }
 
+    /// Closing the player: the film's page shows "Continue" from its first
+    /// frame. Regression: it showed "Play", then faded into "Continue" (the
+    /// stop reached the page only after the page was back on screen).
+    func testPageReadyWhenPlayerCloses() {
+        openFilm()
+        sleep(4)
+        app.tap()
+        usleep(600_000)
+        app.buttons["Close player"].firstMatch.tap()
+        let stop = app.staticTexts["debug-stop"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 3), "no stop readout")
+        XCTAssertEqual(stop.label, "stop noted player=up", "the stop reached the page after the player had closed")
+        let main = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Continue' OR label BEGINSWITH 'Resume'")).firstMatch
+        XCTAssertTrue(main.waitForExistence(timeout: 3), "no play button on the page")
+        shot("page after close")
+        XCTAssertFalse(main.label.hasPrefix("Play"), "the page still says \(main.label)")
+    }
+
     /// A film made in a Spanish-speaking country starts in Spanish, with no
     /// subtitles. Needs the test server with the multi-track file and
     /// OPENIPTV_MOCK_COUNTRIES=Mexico (run with TEST_RUNNER_SPANISH_FILM=1).

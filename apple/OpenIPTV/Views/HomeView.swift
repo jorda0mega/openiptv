@@ -18,8 +18,9 @@ struct HomeView: View {
     @State private var playError: String?
     @State private var addingEmby = false
     @State private var showingSettings = false
-    @State private var path: [ShowRoute] = []
-    @State private var movie: MovieRoute?
+    /// Shows and films opened from Home, and from their pages (More Like
+    /// This links by route: a film's page opened here needs a film route).
+    @State private var path = NavigationPath()
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -78,7 +79,7 @@ struct HomeView: View {
             .sheet(isPresented: $addingEmby) { AddEmbyView() }
             .sheet(isPresented: $showingSettings) { SettingsView(asSheet: true) }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
-            .navigationDestination(item: $movie) { MovieView(route: $0, playing: $playing) }
+            .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             // The first thing in Continue Watching opens the moment it's tapped.
             .task(id: model.rows.first?.cards.first?.id) { warmFirst() }
             .onAppear { warmFirst() }
@@ -139,7 +140,7 @@ struct HomeView: View {
         if card.kind == "Series" {
             path.append(ShowRoute(id: card.id, title: card.title, episodeId: card.episodeId))
         } else {
-            movie = MovieRoute(id: card.id, title: card.title)
+            path.append(MovieRoute(id: card.id, title: card.title))
         }
     }
 

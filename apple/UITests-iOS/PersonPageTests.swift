@@ -45,6 +45,27 @@ final class PersonPageTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(titles.count, 2, "Try Again didn't list their films")
     }
 
+    /// A film opened from Home: a More Like This film opens its page.
+    /// Regression: the tap did nothing (Home's stack had no film route).
+    func testMoreLikeThisFromHome() {
+        app.launch()
+        sleep(6)
+        let dune = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dune: Part Two'")).firstMatch
+        for _ in 0..<5 where !dune.isHittable { app.swipeUp(); sleep(1) }
+        XCTAssertTrue(dune.isHittable, "no Dune: Part Two on Home")
+        dune.tap()
+        sleep(3)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '2024'")).firstMatch.exists, "Dune's page didn't open")
+        let similar = app.buttons["Inception"].firstMatch
+        for _ in 0..<5 where !similar.isHittable { app.swipeUp(); sleep(1) }
+        XCTAssertTrue(similar.isHittable, "no Inception in More Like This")
+        similar.tap()
+        sleep(3)
+        shot("more-like-this")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '2010'")).firstMatch.exists,
+                      "Inception's page didn't open from More Like This")
+    }
+
     /// Antonio Banderas's page, from The Mask of Zorro's Cast & Crew.
     private func openPerson() {
         app.launchArguments = ["-debugSearch", "zorro"]

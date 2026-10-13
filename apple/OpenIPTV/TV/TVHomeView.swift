@@ -209,6 +209,15 @@ struct TVHero: View {
                 }
                 .padding(.top, 6)
                 .tint(.white)
+                // The buttons' row reaches across the screen: Down from any
+                // tab lands in it, on Play, as in the TV app (it went straight
+                // past the hero into Continue Watching).
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .focusSection()
+                .defaultFocus($focus, .play)
+                .onChange(of: focus) { before, now in
+                    if before == nil, now == .info { focus = .play }
+                }
             }
             .padding(.leading, 90)
             .padding(.bottom, 70)
@@ -362,6 +371,9 @@ struct TVContinueRow: View {
             }
             .tvRowScroll()
         }
+        // Up and Down reach the row from anywhere across the screen (they
+        // skipped it when no card was straight above or below).
+        .focusSection()
         // Resting on a title: open it in the background (paused where it was
         // left), so Select starts it at once.
         .task(id: focused) {
@@ -430,6 +442,9 @@ struct TVPosterRow: View {
             }
             .tvRowScroll()
         }
+        // Up and Down reach the row from anywhere across the screen (they
+        // went nowhere when no poster was straight above or below).
+        .focusSection()
         // Resting on a poster a moment: fetch its page (and pictures), so
         // Select opens it complete; then the next one along, where focus
         // usually goes. Sweeping across posters fetches nothing.
