@@ -111,6 +111,27 @@ struct EmbyClient {
         _ = try? await HTTP.data(request)
     }
 
+    // MARK: My List
+
+    /// Puts a film or show on the viewer's My List (Emby's favorites), or
+    /// takes it off.
+    func setFavorite(_ itemId: String, _ on: Bool) async throws {
+        var request = URLRequest(url: Self.api(account.serverURL, "Users/\(account.userId)/FavoriteItems/\(itemId)"))
+        request.httpMethod = on ? "POST" : "DELETE"
+        authorize(&request)
+        _ = try await HTTP.data(request)
+    }
+
+    /// The films and shows on the viewer's My List.
+    func favorites() async throws -> [EmbyItem] {
+        try await items("Users/\(account.userId)/Items", [
+            .init(name: "Filters", value: "IsFavorite"), .init(name: "Recursive", value: "true"),
+            .init(name: "IncludeItemTypes", value: "Movie,Series"), .init(name: "Limit", value: "100"),
+            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,Genres"),
+            .init(name: "EnableImageTypes", value: "Primary,Thumb,Backdrop"),
+        ])
+    }
+
     // MARK: Home
 
     /// What Home is built from, fetched at once.

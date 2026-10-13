@@ -8,11 +8,14 @@ struct EmbyItem: Codable, Hashable {
         var played: Bool?
         /// ISO 8601, as the server sends it (sorts as text).
         var lastPlayedDate: String?
+        /// On the viewer's My List (Emby's favorites).
+        var isFavorite: Bool?
         enum CodingKeys: String, CodingKey {
             case playbackPositionTicks = "PlaybackPositionTicks"
             case playedPercentage = "PlayedPercentage"
             case played = "Played"
             case lastPlayedDate = "LastPlayedDate"
+            case isFavorite = "IsFavorite"
         }
     }
 

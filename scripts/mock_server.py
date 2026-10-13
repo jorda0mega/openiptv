@@ -37,6 +37,8 @@ SOCKETS = set()
 # "video_delay" (seconds before each video response), "hls_delay" (seconds
 # before a converted stream's playlist: a server starting a conversion).
 CONTROL = {}
+# The test user's My List (favorites), by item id.
+FAVORITES = []
 # Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
 SHOW_IMDB = {"Forensic Files": "tt0247882", "Forensic Files II": "tt11840612",
              "The Office": "tt0290978", "The Office (US)": "tt0386676"}
@@ -106,7 +108,8 @@ def known_item(entry, played=False):
             "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{len(id_) * 7 + int(id_[1:])}"},
             "BackdropImageTags": [f"b{id_}"], "Overview": f"{name} ({year}), a title from the test library.",
             "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
-            "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None},
+            "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None,
+                         "IsFavorite": id_ in FAVORITES},
             "Genres": GENRES.get(id_, []),
             # Where it was made (which language it starts in), when asked.
             "ProductionLocations": [c for c in os.environ.get("OPENIPTV_MOCK_COUNTRIES", "").split(",") if c]} | (
@@ -229,6 +232,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_DELETE(self):
+        path = urlparse(self.path).path
+        if path.startswith("/emby/Users/U1/FavoriteItems/") and self.headers.get("X-Emby-Token") == "tok":
+            item = path.rsplit("/", 1)[1]
+            if item in FAVORITES:
+                FAVORITES.remove(item)
+            return self.send({"IsFavorite": False})
+        self.send({"error": "not found"}, status=404)
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length).decode()
@@ -241,6 +253,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"", status=204)
         if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == "tok":
             return self.send(b"", status=204)
+        if "/Users/U1/FavoriteItems/" in self.path and self.headers.get("X-Emby-Token") == "tok":
+            item = urlparse(self.path).path.rsplit("/", 1)[1]
+            if item not in FAVORITES:
+                FAVORITES.append(item)
+            return self.send({"IsFavorite": True})
         if os.environ.get("OPENIPTV_MOCK_LOG"):
             print(f"{time.time():.2f} POST {self.path.split('?')[0]}", flush=True)
         if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == "tok":
@@ -263,6 +280,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/mock/set":
             if "reset" in q:
                 CONTROL.clear()
+                FAVORITES.clear()
             else:
                 CONTROL.update(q)
             return self.send(dict(CONTROL))
@@ -599,6 +617,9 @@ class Handler(BaseHTTPRequestHandler):
             if video and os.path.exists(video):
                 return self.send_file(video)
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
+        # My List (before the library listing, which would answer it).
+        if path == "/Users/U1/Items" and q.get("Filters") == "IsFavorite":
+            return self.send({"Items": [known_item(KNOWN_BY_ID[i]) for i in reversed(FAVORITES) if i in KNOWN_BY_ID]})
         if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q \
                 and "PersonIds" not in q:
             # The library index: movies plus a few real-looking show names.

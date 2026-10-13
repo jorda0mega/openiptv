@@ -168,6 +168,46 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertTrue(pageNumbers().isEmpty, "the old account's rows came back after signing out")
     }
 
+    /// Home's cards as in the Apple TV app: Continue Watching 240 × 170
+    /// (the title and progress inside it), posters 100 × 150, 12 apart.
+    func testHomeCardSizes() {
+        app.launch()
+        sleep(8)
+        let heading = app.staticTexts["Continue Watching"].firstMatch
+        XCTAssertTrue(heading.exists, "no Continue Watching")
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        let card: XCUIElement? = first.waitForExistence(timeout: 3) ? first : nil
+        XCTAssertNotNil(card, "no Continue Watching card")
+        if let card {
+            // Its height can't be read (its picture, cut to the card, counts
+            // at full size): its words sit inside the card's 170 points,
+            // along the bottom.
+            XCTAssertEqual(card.frame.width, 240, accuracy: 1, "Continue Watching card: \(card.frame)")
+            // The card starts 12 points under the row's name.
+            let top = heading.frame.maxY + 12
+            let words = card.staticTexts.allElementsBoundByIndex.map(\.frame)
+            XCTAssertFalse(words.isEmpty, "no title or episode on the card")
+            for frame in words {
+                XCTAssertGreaterThan(frame.minY, top + 110, "the card's words aren't along its bottom: \(frame)")
+                XCTAssertLessThan(frame.maxY, top + 170, "the card's words are below the card: \(frame)")
+            }
+        }
+        drag(from: 0.75, to: 0.35)
+        sleep(1)
+        let posters = app.buttons.allElementsBoundByIndex.filter { abs($0.frame.width - Layout100.width) < 1 && abs($0.frame.height - Layout100.height) < 1 }
+            .sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
+        shot("card sizes")
+        XCTAssertGreaterThanOrEqual(posters.count, 2, "no 100 × 150 posters")
+        if posters.count >= 2, posters[0].frame.minY == posters[1].frame.minY {
+            XCTAssertEqual(posters[1].frame.minX - posters[0].frame.maxX, 12, accuracy: 1, "posters aren't 12 apart")
+        }
+    }
+
+    private enum Layout100 {
+        static let width: CGFloat = 100
+        static let height: CGFloat = 150
+    }
+
     // MARK: Helpers
 
     /// Sets how the test server behaves (see CONTROL in mock_server.py).

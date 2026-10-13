@@ -286,6 +286,39 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertEqual(dips, [], "the hero dimmed while turning")
     }
 
+    /// Home's hero shows its title, story and buttons over its picture.
+    /// Regression: the picture was drawn over them (Play could be focused,
+    /// but not seen).
+    func testHeroTextShows() {
+        app.launch()
+        sleep(6)
+        let play = app.buttons["Play"].firstMatch
+        XCTAssertTrue(play.exists, "no Play in the hero")
+        let picture = XCUIScreen.main.screenshot()
+        let light = brightest(picture, in: play.frame)
+        print("HERO play brightest \(Int(light))")
+        XCTAssertGreaterThan(light, 200, "Play's label can't be seen (brightest \(Int(light)))")
+    }
+
+    /// Brightest pixel (0-255) of an area of a screenshot, in points.
+    private func brightest(_ shot: XCUIScreenshot, in rect: CGRect) -> Double {
+        guard let image = shot.image.cgImage else { return 0 }
+        let scale = CGFloat(image.width) / app.frame.width
+        let pixels = CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale).integral
+        guard let crop = image.cropping(to: pixels) else { return 0 }
+        let width = crop.width, height = crop.height
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &data, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var best = 0.0
+        for i in stride(from: 0, to: data.count, by: 4) {
+            best = max(best, 0.2126 * Double(data[i]) + 0.7152 * Double(data[i + 1]) + 0.0722 * Double(data[i + 2]))
+        }
+        return best
+    }
+
     /// Mean brightness (0-255) of an area of a screenshot, in points.
     private func luminance(_ shot: XCUIScreenshot, in rect: CGRect) -> Double {
         guard let image = shot.image.cgImage else { return 0 }
@@ -304,6 +337,45 @@ final class RemoteFocusTests: XCTestCase {
             total += 0.2126 * Double(data[i]) + 0.7152 * Double(data[i + 1]) + 0.0722 * Double(data[i + 2])
         }
         return total / Double(side * side)
+    }
+
+    /// "+" beside Play puts a film on My List, as in the TV app, and Home
+    /// has a My List row with it (kept on the server: there after a relaunch).
+    func testMyList() throws {
+        let raw = try XCTUnwrap(ProcessInfo.processInfo.environment["DEBUG_EMBY"], "no test server account")
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        let server = try XCTUnwrap((json["serverURL"] as? String).flatMap(URL.init(string:)))
+        func reset() {
+            let done = expectation(description: "reset")
+            URLSession.shared.dataTask(with: server.appending(path: "mock/set").appending(queryItems: [.init(name: "reset", value: "1")])) { _, _, _ in
+                done.fulfill()
+            }.resume()
+            wait(for: [done], timeout: 10)
+        }
+        reset()
+        defer { reset() }
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.right, "to +")
+        XCTAssertTrue(focused().contains("Add to My List"), "+ isn't next to Play: \(focused())")
+        press(.select, "add to My List")
+        XCTAssertTrue(app.buttons["Remove from My List"].exists, "+ didn't turn into a tick")
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        sleep(6)
+        // Down past the hero and Continue Watching: the next row is My List.
+        press(.down, "to Play")
+        press(.down, "to Continue Watching")
+        press(.down, "to My List")
+        shot("my list on home")
+        XCTAssertTrue(app.staticTexts["My List"].exists, "no My List row on Home")
+        XCTAssertTrue(focused().contains("Animals"), "My List doesn't start with the film: \(focused())")
     }
 
     /// Closing the player over Home: Continue Watching is in its new order

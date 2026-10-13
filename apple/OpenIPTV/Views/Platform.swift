@@ -14,7 +14,8 @@ enum Layout {
     /// Home's featured pick: cinema-wide on a TV.
     static let featuredAspect: CGFloat = 21 / 9
     #else
-    static let posterWidth: CGFloat = 118
+    /// The Apple TV app's posters: 100 × 150, 12 apart (about 3.7 across).
+    static let posterWidth: CGFloat = 100
     static let rowSpacing: CGFloat = 24
     static let cardSpacing: CGFloat = 12
     static let chipStripHeight: CGFloat = 60

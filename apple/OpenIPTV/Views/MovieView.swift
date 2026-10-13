@@ -31,8 +31,13 @@ struct MovieView: View {
                 TitleHero(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
                           logo: item.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                           title: route.title, line: genreLine) {
-                    PlayCapsule(label: playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
-                                loading: loading, action: play)
+                    HStack(alignment: .top, spacing: 12) {
+                        PlayCapsule(label: playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
+                                    loading: loading, action: play)
+                        #if os(iOS)
+                        MyListButton(item: item)
+                        #endif
+                    }
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     if let overview = item?.overview, !overview.isEmpty {
@@ -55,7 +60,7 @@ struct MovieView: View {
                         Text("More Like This").font(.title3.weight(.bold)).padding(.horizontal, 20)
                             .accessibilityAddTraits(.isHeader)
                         ScrollView(.horizontal) {
-                            LazyHStack(spacing: 10) {
+                            LazyHStack(spacing: 12) {
                                 ForEach(similar) { card in moreLikeThis(card) }
                             }
                             .padding(.horizontal, 20)
@@ -103,7 +108,7 @@ struct MovieView: View {
     @ViewBuilder private func moreLikeThis(_ card: Card) -> some View {
         let label = CoverImage(images: card.images, title: card.title)
             .frame(width: Layout.posterWidth, height: Layout.posterWidth * 1.5)
-            .clipShape(.rect(cornerRadius: 10))
+            .clipShape(.rect(cornerRadius: 12))
             .accessibilityLabel(card.title)
         if card.kind == "Series" {
             NavigationLink(value: ShowRoute(id: card.id, title: card.title)) { label }.buttonStyle(.plain)

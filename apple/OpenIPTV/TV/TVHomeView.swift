@@ -70,9 +70,12 @@ struct TVHomeView: View {
                         }
                     }
                     .animation(.easeOut(duration: 0.25), value: heroes.isEmpty)
-                    ForEach(model.rows.filter { !prefs.hiddenRows.contains($0.title) }) { row in
+                    let rows = model.rows.filter { !prefs.hiddenRows.contains($0.title) }
+                    if !rows.contains(where: { $0.title == "Continue Watching" }) { myListRow }
+                    ForEach(rows) { row in
                         if row.title == "Continue Watching" {
                             TVContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                            myListRow
                         } else {
                             TVPosterRow(title: row.title, cards: row.cards, captions: .focused) { open($0) }
                         }
@@ -101,6 +104,7 @@ struct TVHomeView: View {
         // next one is built in the background, to wait for the next time.
         .onAppear { model.homeAppeared() }
         .task { await model.loadHome(cardWidth: 480) }
+        .task { await model.loadMyList(cardWidth: 480) }
     }
 
     @ViewBuilder private var emptyState: some View {
@@ -115,6 +119,13 @@ struct TVHomeView: View {
     }
 
     /// A title's page.
+    /// My List, as in the TV app: what you put there with "+", newest first.
+    @ViewBuilder private var myListRow: some View {
+        if !model.myList.isEmpty {
+            TVPosterRow(title: "My List", cards: model.myList, captions: .focused) { open($0) }
+        }
+    }
+
     private func open(_ card: Card) {
         if card.kind == "Series" {
             path.append(ShowRoute(id: card.id, title: card.title, episodeId: card.episodeId))
@@ -173,10 +184,15 @@ struct TVHero: View {
             // Every title's picture stays drawn (decoded once, never black
             // again); only the shown one and, while it fades in over it, the
             // last one are visible.
-            ForEach(Array(items.enumerated()), id: \.element.card.id) { i, entry in
-                TVBackdrop(url: entry.backdrop, title: entry.card.title)
-                    .opacity(i == min(index, items.count - 1) || i == behind ? 1 : 0)
-                    .zIndex(i == min(index, items.count - 1) ? 2 : i == behind ? 1 : 0)
+            // In their own stack: their order is among themselves, all under
+            // the text (ordered with it, the shown picture covered the title,
+            // story and buttons).
+            ZStack {
+                ForEach(Array(items.enumerated()), id: \.element.card.id) { i, entry in
+                    TVBackdrop(url: entry.backdrop, title: entry.card.title)
+                        .opacity(i == min(index, items.count - 1) || i == behind ? 1 : 0)
+                        .zIndex(i == min(index, items.count - 1) ? 2 : i == behind ? 1 : 0)
+                }
             }
             VStack(alignment: .leading, spacing: 18) {
                 // The same space for every title (logo or name, long story

@@ -105,12 +105,17 @@ struct ShowView: View {
 
     var body: some View {
         let seasons = seasons
+        GeometryReader { page in
         ScrollViewReader { proxy in
             List {
                 header
                     .listRowInsets(EdgeInsets())
                     #if os(iOS)
                     .listRowSeparator(.hidden)
+                    // Up under the (see-through) top bar, as on a film's page
+                    // and in the Apple TV app; the list keeps its top inset,
+                    // so the season tabs still pin just under the back button.
+                    .padding(.top, -page.safeAreaInsets.top)
                     #endif
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
@@ -174,7 +179,13 @@ struct ShowView: View {
                 }
             }
         }
+        }
+        #if os(iOS)
+        // No bar over the art (a black one with the show's name sat over it).
+        .toolbarBackground(.hidden, for: .navigationBar)
+        #else
         .navigationTitle(route.title)
+        #endif
         .inlineTitle()
         .task {
             // The main button starts the moment it's tapped.
@@ -203,9 +214,14 @@ struct ShowView: View {
             TitleHero(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
                       logo: show.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                       title: route.title, line: showLine, height: 0.95) {
-                PlayCapsule(label: mainLabel,
-                            progress: upNext?.resumeFraction, left: upNext?.timeLeft,
-                            loading: loadingItem == mainId) { playMain() }
+                HStack(alignment: .top, spacing: 12) {
+                    PlayCapsule(label: mainLabel,
+                                progress: upNext?.resumeFraction, left: upNext?.timeLeft,
+                                loading: loadingItem == mainId) { playMain() }
+                    #if os(iOS)
+                    MyListButton(item: show)
+                    #endif
+                }
             }
             if let overview = show?.overview, !overview.isEmpty {
                 Text(overview)

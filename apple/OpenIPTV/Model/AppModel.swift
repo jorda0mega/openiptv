@@ -22,6 +22,10 @@ final class AppModel {
     var spotlight: [Featured] = []
     var homeError: String?
     private var lastCardWidth = 360
+    /// The viewer's My List (Emby's favorites), newest first, and which
+    /// titles are on it (nil: not loaded yet).
+    private(set) var myList: [Card] = []
+    private(set) var myListIDs: Set<String>?
 
     // MARK: Live TV
 
@@ -2103,3 +2107,60 @@ final class TitleState<Value> {
     var value: Value?
     init(_ value: Value?) { self.value = value }
 }
+
+// MARK: - My List
+
+extension AppModel {
+    private static let myListOrderKey = "myListAdded"
+
+    /// When each title was put on My List here (newest first on the row).
+    private var myListAdded: [String: Double] {
+        get { (UserDefaults.standard.dictionary(forKey: Self.myListOrderKey) as? [String: Double]) ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: Self.myListOrderKey) }
+    }
+
+    /// My List from the server, newest additions first.
+    func loadMyList(cardWidth: Int) async {
+        guard let emby, let found = try? await emby.favorites() else { return }
+        let added = myListAdded
+        let order = Dictionary(found.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let items = found.sorted { (added[$0.id] ?? 0, -(order[$0.id] ?? 0)) > (added[$1.id] ?? 0, -(order[$1.id] ?? 0)) }
+        let cards = items.map { emby.card($0, context: .poster, shape: .portrait, width: cardWidth) }
+        if cards != myList { myList = cards }
+        let ids = Set(found.map(\.id))
+        if ids != myListIDs { myListIDs = ids }
+    }
+
+    /// Whether a title is on My List (what the server said of the title
+    /// itself until the list is loaded).
+    func isOnMyList(_ id: String, item: EmbyItem?) -> Bool {
+        myListIDs?.contains(id) ?? (item?.userData?.isFavorite == true)
+    }
+
+    /// Puts a title on My List or takes it off: on screen at once (the row
+    /// on Home too), then on the server; back as it was if that fails.
+    func toggleMyList(_ item: EmbyItem, cardWidth: Int = 360) {
+        guard let emby else { return }
+        let on = !isOnMyList(item.id, item: item)
+        let before = (myList, myListIDs)
+        var ids = myListIDs ?? []
+        if on {
+            ids.insert(item.id)
+            myList.removeAll { $0.id == item.id }
+            myList.insert(emby.card(item, context: .poster, shape: .portrait, width: cardWidth), at: 0)
+            myListAdded[item.id] = Date().timeIntervalSince1970
+        } else {
+            ids.remove(item.id)
+            myList.removeAll { $0.id == item.id }
+            myListAdded[item.id] = nil
+        }
+        myListIDs = ids
+        Task {
+            do { try await emby.setFavorite(item.id, on) } catch {
+                myList = before.0
+                myListIDs = before.1
+            }
+        }
+    }
+}
+

@@ -33,6 +33,26 @@ private struct TVTitleHeader<Buttons: View>: View {
     }
 }
 
+/// "+" beside Play, as in the TV app: puts the title on My List (a tick
+/// once it's there).
+private struct TVMyListButton: View {
+    @Environment(AppModel.self) private var model
+    let item: EmbyItem?
+
+    var body: some View {
+        let on = item.map { model.isOnMyList($0.id, item: $0) } ?? false
+        Button {
+            if let item { model.toggleMyList(item, cardWidth: 480) }
+        } label: {
+            Image(systemName: on ? "checkmark" : "plus")
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.glass)
+        .disabled(item == nil)
+        .accessibilityLabel(on ? "Remove from My List" : "Add to My List")
+    }
+}
+
 /// "2024 · 2 h 46 min · IMDb 8.4 · Science Fiction, Adventure"
 @MainActor
 private func titleDetails(_ item: EmbyItem?, model: AppModel, kind: String) -> String {
@@ -72,6 +92,7 @@ struct TVMovieView: View {
                     }
                     .buttonStyle(.glass)
                     .disabled(loading)
+                    TVMyListButton(item: item)
                     if let progress = item?.resumeFraction {
                         ProgressBar(value: progress).frame(width: 220)
                     }
@@ -217,6 +238,7 @@ struct TVShowView: View {
                     }
                     .buttonStyle(.glass)
                     .disabled(loadingItem != nil)
+                    TVMyListButton(item: show)
                 }
                 if seasons.count > 1 {
                     ScrollView(.horizontal) {

@@ -110,6 +110,33 @@ struct PlayCapsule: View {
     }
 }
 
+#if os(iOS)
+/// "+" beside Play, as in the Apple TV app: puts the title on My List (a
+/// tick once it's there). Round glass, as tall as the Play button.
+struct MyListButton: View {
+    @Environment(AppModel.self) private var model
+    let item: EmbyItem?
+
+    var body: some View {
+        let on = item.map { model.isOnMyList($0.id, item: $0) } ?? false
+        Button {
+            if let item { model.toggleMyList(item) }
+        } label: {
+            Image(systemName: on ? "checkmark" : "plus")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 50, height: 50)
+                .contentShape(.circle)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+        .buttonStyle(QuickPress())
+        .disabled(item == nil)
+        .accessibilityLabel(on ? "Remove from My List" : "Add to My List")
+    }
+}
+#endif
+
 /// Cast & Crew: round photos with name and part.
 struct CastRow: View {
     @Environment(AppModel.self) private var model

@@ -47,9 +47,11 @@ struct HomeView: View {
                     }
                     .animation(.easeOut(duration: 0.25), value: heroes.isEmpty)
                     if visibleRows.isEmpty, model.featured == nil, !model.homePending { emptyState }
+                    if !visibleRows.contains(where: { $0.title == "Continue Watching" }) { myListRow }
                     ForEach(visibleRows) { row in
                         if row.title == "Continue Watching" {
                             ContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                            myListRow
                         } else {
                             PosterRow(title: row.title, cards: row.cards, open: { open($0) }, play: { play($0) })
                         }
@@ -101,6 +103,15 @@ struct HomeView: View {
         // next one is built in the background, to wait for the next time.
         .onAppear { model.homeAppeared() }
         .task { await model.loadHome(cardWidth: pixelWidth) }
+        .task { await model.loadMyList(cardWidth: pixelWidth) }
+    }
+
+    /// My List, as in the Apple TV app and Netflix: what you put there with
+    /// "+", newest first.
+    @ViewBuilder private var myListRow: some View {
+        if !model.myList.isEmpty {
+            PosterRow(title: "My List", cards: model.myList, open: { open($0) }, play: { play($0) })
+        }
     }
 
     private var visibleRows: [HomeRow] {
@@ -363,6 +374,7 @@ private struct ContinueRow: View {
                             .contextMenu {
                                 Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
                             }
+                            .accessibilityIdentifier("continue-\(card.id)")
                     }
                 }
                 .padding(.horizontal, 20)
@@ -380,33 +392,40 @@ private struct ContinueRow: View {
         }
     }
 
+    /// As in the Apple TV app: the picture fills a 240 × 170 card, and the
+    /// title, how far in and the episode sit inside it on a frosted band
+    /// (they were under a wider, shorter card).
     private func cardView(_ card: Card) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            CoverImage(images: card.images, title: card.title)
-                .frame(width: 280, height: 158)
-                .overlay(alignment: .bottomLeading) {
+        CoverImage(images: card.images, title: card.title)
+            .frame(width: 240, height: 170)
+            .overlay(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(card.title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
                         .lineLimit(1)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom))
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill").font(.caption2)
+                        // Always there (an empty track when not started), so
+                        // the text beside it doesn't move when progress comes.
+                        ProgressBar(value: (card.progress ?? 0) / 100).frame(width: 36, height: 4)
+                        Text(card.subtitle ?? "").font(.caption).lineLimit(1)
+                    }
+                    .foregroundStyle(.white.opacity(0.85))
                 }
-                .overlay { if loadingCard == card.id { ProgressView().tint(.white) } }
-                .clipShape(.rect(cornerRadius: 14))
-            HStack(spacing: 8) {
-                Image(systemName: "play.fill").font(.caption2)
-                // Always there (an empty track when not started), so the
-                // text beside it doesn't move when progress comes.
-                ProgressBar(value: (card.progress ?? 0) / 100).frame(width: 40, height: 4)
-                Text(card.subtitle ?? "").font(.caption).lineLimit(1)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.ultraThinMaterial)
+                .environment(\.colorScheme, .dark)
             }
-            .foregroundStyle(.secondary)
-            .frame(width: 280, alignment: .leading)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Plays it")
+            .overlay { if loadingCard == card.id { ProgressView().tint(.white) } }
+            .clipShape(.rect(cornerRadius: 14))
+            // One element the card's size (combined, it took the size of a
+            // picture spilling past the card before it's cut to shape).
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
+            .accessibilityHint("Plays it")
     }
 }
 
@@ -424,14 +443,14 @@ private struct PosterRow: View {
         VStack(alignment: .leading, spacing: 12) {
             RowTitle(title: title)
             ScrollView(.horizontal) {
-                LazyHStack(spacing: 10) {
+                LazyHStack(spacing: 12) {
                     ForEach(cards) { card in
                         Button { open(card) } label: {
                             CoverImage(images: card.images, title: card.title)
                                 .frame(width: Layout.posterWidth, height: Layout.posterWidth * 1.5)
-                                .clipShape(.rect(cornerRadius: 10))
+                                .clipShape(.rect(cornerRadius: 12))
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08), lineWidth: 1)
                                 }
                         }
                         .buttonStyle(.plain)

@@ -117,6 +117,43 @@ final class PersonPageTests: XCTestCase {
         shot("starting")
     }
 
+    /// A show's page: its picture runs up under the top bar, as on a film's
+    /// page and in the Apple TV app, with no name in a bar over it; scrolled
+    /// down, the season tabs stay just under the back button. Regression: a
+    /// black bar with the show's name sat over the top of the picture.
+    func testShowArtAtTop() {
+        openForensicFiles()
+        let top = luminance(XCUIScreen.main.screenshot(), in: CGRect(x: 120, y: 70, width: 160, height: 40))
+        shot("show-top")
+        XCTAssertGreaterThan(top, 25, "the top of the show's page is a black bar, not its picture (\(Int(top)))")
+        XCTAssertFalse(app.navigationBars.staticTexts["Forensic Files"].exists, "the show's name sits in a bar over its picture")
+        for _ in 0..<3 { app.swipeUp(); sleep(1) }
+        let tab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Season '")).firstMatch
+        XCTAssertTrue(tab.exists, "no season tabs")
+        shot("show-scrolled")
+        XCTAssertGreaterThan(tab.frame.minY, 50, "the season tabs went up under the status bar: \(tab.frame)")
+        XCTAssertLessThan(tab.frame.minY, 160, "the season tabs didn't stay at the top: \(tab.frame)")
+    }
+
+    /// Mean brightness (0-255) of an area of a screenshot, in points.
+    private func luminance(_ shot: XCUIScreenshot, in rect: CGRect) -> Double {
+        guard let image = shot.image.cgImage else { return 0 }
+        let scale = CGFloat(image.width) / app.frame.width
+        let pixels = CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale).integral
+        guard let crop = image.cropping(to: pixels) else { return 0 }
+        let side = 16
+        var data = [UInt8](repeating: 0, count: side * side * 4)
+        guard let context = CGContext(data: &data, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: side, height: side))
+        var total = 0.0
+        for i in stride(from: 0, to: data.count, by: 4) {
+            total += 0.2126 * Double(data[i]) + 0.7152 * Double(data[i + 1]) + 0.0722 * Double(data[i + 2])
+        }
+        return total / Double(side * side)
+    }
+
     /// Forensic Files' page, from Search.
     private func openForensicFiles() {
         app.launchArguments = ["-debugSearch", "forensic"]
@@ -129,6 +166,48 @@ final class PersonPageTests: XCTestCase {
         XCTAssertTrue(show.waitForExistence(timeout: 8), "no search result")
         show.tap()
         sleep(3)
+    }
+
+    /// "+" beside Play puts a film on My List, as in the Apple TV app: the
+    /// button turns into a tick, and Home has a My List row with the film
+    /// (kept on the server: there after a relaunch).
+    func testMyList() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-debugSearch", "animals"]
+        app.launch()
+        sleep(4)
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
+        sleep(3)
+        let film = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals'")).firstMatch
+        XCTAssertTrue(film.waitForExistence(timeout: 8), "no search result")
+        film.tap()
+        sleep(2)
+        let add = app.buttons["Add to My List"].firstMatch
+        if !add.waitForExistence(timeout: 5) {
+            shot("no-plus")
+            print("BUTTONS \(app.buttons.allElementsBoundByIndex.prefix(14).map { "\($0.label)|\(Int($0.frame.minY))" })")
+        }
+        XCTAssertTrue(add.exists, "no + on the film's page")
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertEqual(add.frame.height, 50, accuracy: 1, "+ isn't as tall as Play")
+        XCTAssertEqual(add.frame.midY, play.frame.midY, accuracy: 1, "+ isn't level with Play")
+        add.tap()
+        XCTAssertTrue(app.buttons["Remove from My List"].waitForExistence(timeout: 3), "+ didn't turn into a tick")
+        shot("my-list-added")
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        sleep(6)
+        let heading = app.staticTexts["My List"].firstMatch
+        for _ in 0..<4 where !heading.isHittable { app.swipeUp(); sleep(1) }
+        shot("my-list-row")
+        XCTAssertTrue(heading.exists, "no My List row on Home")
+        let inRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals'")).allElementsBoundByIndex
+            .filter { $0.frame.minY > heading.frame.maxY && $0.frame.minY < heading.frame.maxY + 300 }
+        XCTAssertFalse(inRow.isEmpty, "the film isn't in My List")
     }
 
     /// Antonio Banderas's page, from The Mask of Zorro's Cast & Crew.
