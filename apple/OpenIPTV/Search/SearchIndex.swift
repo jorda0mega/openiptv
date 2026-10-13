@@ -668,6 +668,39 @@ final class LibraryIndex {
         ratings?.rating(entry.imdb)
     }
 
+    /// A genre's titles, best-known first (a genre tile's page).
+    func titles(inGenre genre: String, limit: Int) -> [LibraryEntry] {
+        let found: [LibraryEntry] = corpus.items.filter { $0.genres?.contains(genre) == true }
+        let scored: [(entry: LibraryEntry, votes: Int)] = found.map { ($0, rating($0)?.votes ?? 0) }
+        let sorted = scored.sorted { a, b in a.votes != b.votes ? a.votes > b.votes : a.entry.name < b.entry.name }
+        return Array(sorted.prefix(limit).map(\.entry))
+    }
+
+    private var genresMade: (key: String, list: [(name: String, entry: LibraryEntry)])?
+
+    /// The genres with the most titles, most first, each with its best-known
+    /// title that has a poster (Search's tiles before anything is typed).
+    /// Worked out once per version of the index.
+    func topGenres(limit: Int) -> [(name: String, entry: LibraryEntry)] {
+        let key = "\(count)|\(changedAt?.timeIntervalSince1970 ?? 0)|\(ratings != nil)|\(limit)"
+        if let made = genresMade, made.key == key { return made.list }
+        var counts: [String: Int] = [:]
+        var best: [String: (entry: LibraryEntry, votes: Int)] = [:]
+        for entry in corpus.items {
+            guard let genres = entry.genres, !genres.isEmpty else { continue }
+            let votes = rating(entry)?.votes ?? 0
+            for genre in genres {
+                counts[genre, default: 0] += 1
+                if entry.imageTag != nil, votes >= (best[genre]?.votes ?? -1) { best[genre] = (entry, votes) }
+            }
+        }
+        let list = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .compactMap { genre in best[genre.key].map { (name: genre.key, entry: $0.entry) } }
+            .prefix(limit)
+        genresMade = (key, Array(list))
+        return Array(list)
+    }
+
     /// The whole catalog, resuming from whatever pages are already here. A
     /// fresh pass (weekly, or when the cache is outdated) fetches every page
     /// again, replacing the old ones as the new arrive.

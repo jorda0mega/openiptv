@@ -58,6 +58,28 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertFalse(results().isEmpty, "nothing for “zorro antonio b”")
     }
 
+    /// Nothing typed: the library's genres as tiles, three across, as in
+    /// the Apple TV app; a tile opens its genre's titles.
+    func testGenreTiles() {
+        openSearch("")
+        sleep(3)
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-'")).allElementsBoundByIndex
+            .sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
+        shot("genre tiles")
+        XCTAssertGreaterThanOrEqual(tiles.count, 6, "no genre tiles")
+        guard tiles.count >= 3 else { return }
+        XCTAssertEqual(tiles[0].frame.minY, tiles[2].frame.minY, accuracy: 1, "not three across")
+        XCTAssertEqual(tiles[0].frame.height / tiles[0].frame.width, 1.5, accuracy: 0.05, "not poster-shaped")
+        let name = tiles[0].label
+        tiles[0].tap()
+        sleep(2)
+        shot("genre page")
+        XCTAssertTrue(app.navigationBars[name].exists || app.staticTexts[name].exists, "no \(name) page")
+        // The test library's most common genre is Adventure (the Zorro films).
+        let titles = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Zorro'"))
+        XCTAssertGreaterThanOrEqual(titles.count, 2, "the \(name) page doesn't list its titles")
+    }
+
     /// One bar at the bottom while searching, as in the Apple TV app: the
     /// search field in the tab bar (with a Home button), not a field of our
     /// own stacked over the whole tab bar.

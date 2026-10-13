@@ -159,6 +159,7 @@ struct SearchView: View {
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             #if os(iOS)
+            .navigationDestination(for: GenreRoute.self) { GenreView(route: $0) }
             // The system's search field, in the tab bar at the bottom, as in
             // the Apple TV app (Home, the field, close), instead of a field
             // of our own over the whole tab bar (two bars). Scrolling the
@@ -397,11 +398,64 @@ struct SearchView: View {
 
     #endif
 
+    #if os(iOS)
+    /// Before anything is typed: the library's genres as tiles, as in the
+    /// Apple TV app (each with its best-known title's poster); a tap
+    /// searches that genre.
+    private var genreTiles: [(name: String, card: Card)] {
+        model.library.topGenres(limit: 12).compactMap { genre in
+            model.card(for: genre.entry, width: thumbWidth * 2).map { (genre.name, $0) }
+        }
+    }
+
+    private var genreGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                ForEach(genreTiles, id: \.name) { tile in
+                    Button {
+                        fieldFocused = false
+                        path.append(GenreRoute(name: tile.name))
+                    } label: {
+                        Color.clear
+                            .aspectRatio(2 / 3, contentMode: .fit)
+                            .overlay { CoverImage(images: tile.card.images, title: tile.name) }
+                            .overlay(alignment: .bottomLeading) {
+                                Text(tile.name)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(2)
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom))
+                            }
+                            .clipShape(.rect(cornerRadius: 14))
+                    }
+                    .buttonStyle(QuickPress())
+                    .accessibilityLabel(tile.name)
+                    .accessibilityIdentifier("genre-\(tile.name)")
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+        }
+        .scrollIndicators(.hidden)
+    }
+    #endif
+
     @ViewBuilder private var emptyState: some View {
         let q = query.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
+            #if os(iOS)
+            if !genreTiles.isEmpty {
+                genreGrid
+            } else {
+                ContentUnavailableView("Search everything", systemImage: "magnifyingglass",
+                                       description: Text("Movies, shows, episodes, channels, and what's on TV now or later by its name. Results appear as you type."))
+            }
+            #else
             ContentUnavailableView("Search everything", systemImage: "magnifyingglass",
                                    description: Text("Movies, shows, episodes, channels, and what's on TV now or later by its name. Results appear as you type."))
+            #endif
         } else if finishedEmpty.contains(.all), isEmpty(.all) {
             // Only once the search (the server's part too) has finished.
             ContentUnavailableView.search(text: q)
@@ -821,3 +875,52 @@ struct GuideHitRow: View {
         return date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 }
+
+#if os(iOS)
+struct GenreRoute: Hashable {
+    let name: String
+}
+
+/// A genre's titles in the library, best-known first: a Search tile's page,
+/// as in the Apple TV app. From the index on the device, so it's complete
+/// at once.
+struct GenreView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.displayScale) private var displayScale
+    let route: GenreRoute
+    private let columns = [GridItem(.adaptive(minimum: Layout.posterWidth), spacing: 12, alignment: .top)]
+
+    var body: some View {
+        let width = Int(Layout.posterWidth * 2 * displayScale)
+        let cards = model.library.titles(inGenre: route.name, limit: 150).compactMap { model.card(for: $0, width: width) }
+        ScrollView {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                ForEach(cards) { card in
+                    if card.kind == "Series" {
+                        NavigationLink(value: ShowRoute(id: card.id, title: card.title)) { poster(card) }.buttonStyle(.plain)
+                    } else {
+                        NavigationLink(value: MovieRoute(id: card.id, title: card.title)) { poster(card) }.buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 30)
+        }
+        .navigationTitle(route.name)
+    }
+
+    private func poster(_ card: Card) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Color.clear
+                .aspectRatio(2 / 3, contentMode: .fit)
+                .overlay { CoverImage(images: card.images, title: card.title) }
+                .clipShape(.rect(cornerRadius: 12))
+            Text(card.title).font(.footnote.weight(.semibold)).lineLimit(1)
+            Text(card.subtitle ?? " ").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
+    }
+}
+#endif
+
