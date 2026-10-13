@@ -159,11 +159,16 @@ struct SearchView: View {
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             #if os(iOS)
-            // One field with one clear button, instead of the system bar's
-            // clear and close buttons side by side. Scrolling the results
-            // or the keyboard's Search key puts the keyboard away.
+            // The system's search field, in the tab bar at the bottom, as in
+            // the Apple TV app (Home, the field, close), instead of a field
+            // of our own over the whole tab bar (two bars). Scrolling the
+            // results or the keyboard's Search key puts the keyboard away.
+            .searchable(text: $query, prompt: "Movies, shows, people, what's on TV")
+            .searchFocused($fieldFocused)
+            .onSubmit(of: .search) { fieldFocused = false }
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
             .scrollDismissesKeyboard(.immediately)
-            .safeAreaInset(edge: .bottom) { searchField }
             .onAppear { if query.isEmpty { fieldFocused = true } }
             #endif
             // Re-run when the text changes or an index finishes loading.
@@ -363,18 +368,18 @@ struct SearchView: View {
                 // No animation for the results: they change at once; only
                 // the pill slides (below).
                 Button { scope = option } label: {
+                    // As in the Apple TV app: the chosen one in a blue pill,
+                    // the others plain.
                     Text(option.rawValue)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(selected ? Color.black : Color.white)
+                        .foregroundStyle(.white)
                         // Dimmed when it has nothing for what's typed.
                         .opacity(query.trimmingCharacters(in: .whitespaces).isEmpty || hasResults(option) || selected ? 1 : 0.4)
                         .padding(.horizontal, 14)
-                        .frame(height: 34)
+                        .frame(height: 32)
                         .background {
                             if selected {
-                                Capsule().fill(.white).matchedGeometryEffect(id: "scope", in: scopeUnderline)
-                            } else {
-                                Capsule().fill(Color(white: 0.15))
+                                Capsule().fill(Color.blue).matchedGeometryEffect(id: "scope", in: scopeUnderline)
                             }
                         }
                         .contentShape(Capsule())
@@ -390,34 +395,6 @@ struct SearchView: View {
         .padding(.vertical, 8)
     }
 
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Movies, shows, people, what's on TV", text: $query)
-                .focused($fieldFocused)
-                .submitLabel(.search)
-                .onSubmit { fieldFocused = false }
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                    fieldFocused = true
-                } label: {
-                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 48)
-        .contentShape(.capsule)
-        .onTapGesture { fieldFocused = true }
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .padding(.horizontal)
-        .padding(.bottom, 8)
-    }
     #endif
 
     @ViewBuilder private var emptyState: some View {
@@ -476,6 +453,8 @@ struct SearchView: View {
                     .frame(width: 36, height: 44)
                     .contentShape(Rectangle())
             }
+            // Grey, as in the Apple TV app (it took the blue tint).
+            .tint(.secondary)
             .accessibilityLabel("More for \(card.title)")
         }
         .rowForeground()
@@ -515,6 +494,9 @@ struct SearchView: View {
     }
 
     private func openDetails(_ card: Card) {
+        #if DEBUG
+        NSLog("%@", "PERF search open \(card.id) \(card.title) \(card.subtitle ?? "")")
+        #endif
         switch card.kind {
         case "Series":
             path.append(ShowRoute(id: card.id, title: card.title))

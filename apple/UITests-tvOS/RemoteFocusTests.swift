@@ -378,6 +378,25 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(focused().contains("Animals"), "My List doesn't start with the film: \(focused())")
     }
 
+    /// Search: Select opens the result that has focus (its page shows the
+    /// same year). Regression: focus was on "Animals" 2019, and the 2009
+    /// one opened.
+    func testSearchOpensFocusedResult() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        let card = focused()
+        let year = card.range(of: #"\b(19|20)\d\d\b"#, options: .regularExpression).map { String(card[$0]) }
+        XCTAssertNotNil(year, "no year on the focused result: \(card)")
+        press(.select, "open it")
+        sleep(2)
+        shot("search opened")
+        let details = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", year ?? "?")).firstMatch
+        XCTAssertTrue(details.exists, "focused \(card), but the page that opened isn't from \(year ?? "?")")
+    }
+
     /// Closing the player over Home: Continue Watching is in its new order
     /// when Home shows, and stays so. Regression: the cards swapped places
     /// about 200 ms after Home came back (the stop reached Home only after

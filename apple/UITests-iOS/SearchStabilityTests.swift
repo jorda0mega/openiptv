@@ -45,7 +45,7 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertNotNil(answered["More for The Mask of Zorro"], "the server's cast match didn't come")
 
         // One more letter: the last results stay put until it's answered.
-        let field = app.textFields.firstMatch
+        let field = app.searchFields.firstMatch
         field.tap()
         field.typeText(" b")
         sleep(1)
@@ -56,6 +56,18 @@ final class SearchStabilityTests: XCTestCase {
         sleep(6)
         shot("search next letter answered")
         XCTAssertFalse(results().isEmpty, "nothing for “zorro antonio b”")
+    }
+
+    /// One bar at the bottom while searching, as in the Apple TV app: the
+    /// search field in the tab bar (with a Home button), not a field of our
+    /// own stacked over the whole tab bar.
+    func testOneBarAtTheBottom() {
+        openSearch("zorro")
+        sleep(3)
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.exists, "no search field")
+        XCTAssertGreaterThan(field.frame.minY, app.frame.height * 0.8, "the search field isn't at the bottom: \(field.frame)")
+        XCTAssertFalse(app.tabBars.buttons["Live TV"].firstMatch.isHittable, "the whole tab bar shows under the search field")
     }
 
     /// The header (title and filters) stays exactly where it is while the
@@ -85,7 +97,7 @@ final class SearchStabilityTests: XCTestCase {
         sleep(1)
         XCTAssertEqual(differences(start, header()), [], "the header moved after the pull")
         XCTAssertEqual(results()["More for Movie 0"], firstResult, "the results didn't come back to the top")
-        app.buttons["Clear search"].firstMatch.tap()
+        app.searchFields.firstMatch.buttons.firstMatch.tap()
         sleep(1)
         shot("header cleared")
         XCTAssertEqual(differences(start, header()), [], "the header changed when the query was cleared")

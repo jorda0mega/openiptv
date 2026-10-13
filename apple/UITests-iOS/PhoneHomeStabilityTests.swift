@@ -221,7 +221,15 @@ final class PhoneHomeStabilityTests: XCTestCase {
     /// The build numbers of the rows on the page, on screen or not
     /// ("Trending now ·12"), without scrolling (which counts as browsing).
     private func pageNumbers() -> Set<String> {
-        let headings = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '·'")).allElementsBoundByIndex.map(\.label)
+        // In one snapshot: element by element, a heading could go between
+        // listing and reading it (Home changing is what's being watched).
+        guard let root = try? app.snapshot() else { return [] }
+        var headings: [String] = []
+        func walk(_ element: XCUIElementSnapshot) {
+            if element.elementType == .staticText, element.label.contains("·") { headings.append(element.label) }
+            element.children.forEach(walk)
+        }
+        walk(root)
         return rowNumbers(Dictionary(headings.map { ("text:" + $0, CGRect.zero) }, uniquingKeysWith: { a, _ in a }))
     }
 
