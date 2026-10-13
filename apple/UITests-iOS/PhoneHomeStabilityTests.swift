@@ -106,6 +106,35 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertNotEqual(later, saved, "the slow first build never went on the page")
     }
 
+    /// Coming back after a long time away is a moment Home may change (the
+    /// Home built meanwhile goes on); a short trip away isn't. Here "long"
+    /// is 8 seconds (OPENREEL_DEBUG_LONG_AWAY).
+    func testHomeChangesOnlyAfterLongAway() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        app.launchEnvironment["OPENREEL_DEBUG_LONG_AWAY"] = "8"
+        app.launch()
+        sleep(10)
+        let before = pageNumbers()
+        XCTAssertFalse(before.isEmpty, "no numbered rows on Home")
+        // The library changes: a new Home is built and waits.
+        push(server, "library")
+        sleep(8)
+        XCTAssertEqual(pageNumbers(), before, "Home changed while on screen")
+        // A short trip away: still the same Home.
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        app.activate()
+        sleep(3)
+        XCTAssertEqual(pageNumbers(), before, "Home changed after a short time away")
+        // A long time away: the Home built meanwhile goes on.
+        XCUIDevice.shared.press(.home)
+        sleep(10)
+        app.activate()
+        sleep(4)
+        shot("back after long away")
+        XCTAssertNotEqual(pageNumbers(), before, "Home didn't change after a long time away")
+    }
+
     /// Signed out while Home is being built: the old account's Home doesn't
     /// come back when the build ends. Regression: it did (rows and pictures
     /// of the account just signed out of).

@@ -33,7 +33,9 @@ SOCKETS = set()
 # How the server behaves, set by UI tests at run time (GET /mock/set?k=v,
 # /mock/set?reset=1): "latency" (seconds per request), "home_delay" (seconds
 # for Continue Watching), "fail=persons" (a person's titles fail),
-# "resume_episode" (the episode a show's Continue Watching card is on).
+# "resume_episode" (the episode a show's Continue Watching card is on),
+# "video_delay" (seconds before each video response), "hls_delay" (seconds
+# before a converted stream's playlist: a server starting a conversion).
 CONTROL = {}
 # Real IMDb ids for the mock shows (ratings come from IMDb's public dataset).
 SHOW_IMDB = {"Forensic Files": "tt0247882", "Forensic Files II": "tt11840612",
@@ -480,6 +482,9 @@ class Handler(BaseHTTPRequestHandler):
             start = int(first or 0)
             end = min(int(last), size - 1) if last else size - 1
         time.sleep(0.2)
+        # A test can make the video slow to answer (a remote server's round
+        # trip), e.g. while a subtitle track is switched.
+        time.sleep(float(CONTROL.get("video_delay", 0)))
         self.send_response(206 if rng else 200)
         self.send_header("Content-Type", ctype)
         self.send_header("Accept-Ranges", "bytes")
@@ -562,6 +567,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"Items": items, "TotalRecordCount": len(items)})
         hls = os.environ.get("OPENIPTV_MOCK_HLS")
         if hls and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
+            time.sleep(float(CONTROL.get("hls_delay", 0)))
             # Server-converted HLS like Emby's: the whole film listed from
             # 0:00 whatever StartTimeTicks asks (the player has to jump).
             with open(os.path.join(hls, "index.m3u8")) as f:

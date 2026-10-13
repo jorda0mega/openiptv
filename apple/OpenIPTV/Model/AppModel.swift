@@ -165,7 +165,13 @@ final class AppModel {
     /// When the app last went to the background.
     @ObservationIgnored private var backgroundedAt: Date?
     /// Away this long, coming back is like a launch for Home.
-    private static let longAway: TimeInterval = 30 * 60
+    private static var longAway: TimeInterval {
+        #if DEBUG
+        // UI tests (OPENREEL_DEBUG_LONG_AWAY=seconds): a shorter time away.
+        if let seconds = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LONG_AWAY"].flatMap(Double.init) { return seconds }
+        #endif
+        return 30 * 60
+    }
 
     /// `full`: rebuild every row. Otherwise, when the newest Home is recent
     /// (six hours), the catalog hasn't changed since and you haven't watched
@@ -1189,9 +1195,9 @@ final class AppModel {
     }
 
     /// The same item converted by the server at `bitrate`, from `start`.
-    func convertedURL(for playback: EmbyPlayback, bitrate: Int, start: Double) -> URL? {
+    func convertedURL(for playback: EmbyPlayback, bitrate: Int, start: Double, copy: Bool = false) -> URL? {
         emby?.hlsURL(playback.itemId, mediaSourceId: playback.mediaSourceId ?? playback.itemId,
-                     playSessionId: playback.playSessionId, start: start, bitrate: bitrate)
+                     playSessionId: playback.playSessionId, start: start, bitrate: bitrate, copy: copy)
     }
 
     /// Download speed (bits/s) last measured from this Emby server, to pick

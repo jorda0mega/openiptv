@@ -289,7 +289,9 @@ struct TVBackdrop: View {
     let title: String
 
     var body: some View {
-        Color.black
+        // Clear under the picture: a hero picture fading in over the last
+        // one shows that one, not black, until it's drawn.
+        Color.clear
             .overlay {
                 if let url {
                     CoverImage(images: [CardImage(url: url, contain: false)], title: title, backdrop: true)

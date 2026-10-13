@@ -252,7 +252,9 @@ final class RemoteFocusTests: XCTestCase {
     }
 
     /// Home's hero turns to the next title without dimming halfway.
-    /// Regression: both pictures faded at once, 10-13% darker mid-change.
+    /// Regression: both pictures faded at once, 10-13% darker mid-change;
+    /// then the first turn after launch still dimmed (the next picture's
+    /// black base showed before the picture was drawn).
     func testHeroTurnsWithoutDimming() {
         app.launch()
         sleep(4)
@@ -269,25 +271,19 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertGreaterThan(samples.count, 20, "too few samples")
         // A dip: a sample darker than the plateaus on both sides by > 6%.
         var dips: [String] = []
-        var firstTurnDips: [String] = []
-        let firstTurn = samples.indices.dropFirst().first { abs(samples[$0] - samples[0]) > 8 } ?? samples.count
         for i in 3..<(max(3, samples.count - 3)) {
             let before = samples[(i - 3)..<i].max() ?? 0, after = samples[(i + 1)...(i + 3)].max() ?? 0
             let floor = min(before, after)
             if samples[i] < floor * 0.94, samples[i] < samples[i - 1], samples[i] <= samples[i + 1] {
-                let dip = "\(i): \(Int(samples[i])) under \(Int(floor))"
-                if i <= firstTurn + 2 { firstTurnDips.append(dip) } else { dips.append(dip) }
+                dips.append("\(i): \(Int(samples[i])) under \(Int(floor))")
                 for j in (i - 1)...(i + 1) {
                     try? pictures[j].pngRepresentation.write(to: shots.appending(path: "hero-dip-\(j).png"))
                 }
             }
         }
+        // The first turn after launch too: each picture's first frame on
+        // screen drew its black base before the picture.
         XCTAssertEqual(dips, [], "the hero dimmed while turning")
-        // Open issue: the first turn after launch still dims (cause not
-        // found yet); every later turn doesn't.
-        XCTExpectFailure("the first hero turn after launch still dims", strict: false) {
-            XCTAssertEqual(firstTurnDips, [], "the first turn dimmed")
-        }
     }
 
     /// Mean brightness (0-255) of an area of a screenshot, in points.

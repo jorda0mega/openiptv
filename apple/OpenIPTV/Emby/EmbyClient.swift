@@ -683,7 +683,10 @@ struct EmbyClient {
     /// Emby's HLS stream, converted on the server: the last resort when the
     /// original file won't open. Starts at `start` because seeking in a
     /// live-converted stream is limited.
-    func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?, bitrate: Int = 20_000_000) -> URL {
+    /// `copy`: the server may copy the video and audio as they are (H.264,
+    /// AAC) instead of converting them, which starts in about a second.
+    func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?, bitrate: Int = 20_000_000,
+                copy: Bool = false) -> URL {
         // Lower bitrates read better at lower resolutions.
         let maxWidth = bitrate >= 8_000_000 ? 1920 : bitrate >= 3_000_000 ? 1280 : 854
         var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/master.m3u8"), resolvingAgainstBaseURL: false)!
@@ -698,6 +701,7 @@ struct EmbyClient {
             .init(name: "MaxWidth", value: String(maxWidth)),
             .init(name: "StartTimeTicks", value: String(Int64((start ?? 0) * 1e7))),
         ] + (playSessionId.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
+            + (copy ? [.init(name: "AllowVideoStreamCopy", value: "true"), .init(name: "AllowAudioStreamCopy", value: "true")] : [])
         return parts.url!
     }
 

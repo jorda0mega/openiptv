@@ -17,6 +17,9 @@ enum PlayerItem: Identifiable {
 struct PlayerScreen: View {
     @Environment(Preferences.self) private var prefs
     let item: PlayerItem
+    /// Takes the player away, with no motion of its own (see RootView).
+    var remove: () -> Void = {}
+    @State private var shown = false
 
     var body: some View {
         Group {
@@ -25,11 +28,92 @@ struct PlayerScreen: View {
             case let .vod(playback): MoviePlayerView(playback: playback)
             }
         }
+        // In and out with the same quick fade, as in the TV app (it slid up
+        // for 0.6 s, and went in one frame).
+        .opacity(shown ? 1 : 0)
+        .onAppear { withAnimation(.easeOut(duration: 0.25)) { shown = true } }
+        .environment(\.closePlayer, ClosePlayer {
+            withAnimation(.easeIn(duration: 0.2)) { shown = false }
+            Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                remove()
+            }
+        })
+        .presentationBackground(.clear)
         #if os(iOS)
         .onAppear { PlayerOrientation.shared.playerAppeared() }
         .onDisappear { PlayerOrientation.shared.playerDisappeared() }
         #endif
     }
+}
+
+#if os(iOS)
+/// The player's "…": the audio and subtitle tracks, ticked where they are.
+/// Its own view, drawn again only when the tracks change: drawn again with
+/// the player (several times a second while the film plays), an open menu
+/// closed at once, so subtitles could only be changed with the film paused.
+struct TrackMenuButton: View, Equatable {
+    let tracks: [MPVPlayer.Track]
+    let pick: (MPVPlayer.Track) -> Void
+    let pickSubtitles: (MPVPlayer.Track?) -> Void
+    let opened: () -> Void
+
+    static func == (a: Self, b: Self) -> Bool { a.tracks == b.tracks }
+
+    var body: some View {
+        let audio = tracks.filter { $0.kind == .audio }
+        let subtitles = tracks.filter { $0.kind == .subtitle }
+        Menu {
+            if audio.count > 1 {
+                Section("Audio") {
+                    ForEach(audio) { track in
+                        Button { pick(track) } label: { item(track) }
+                    }
+                }
+            }
+            Section("Subtitles") {
+                Button { pickSubtitles(nil) } label: {
+                    if subtitles.contains(where: \.selected) { Text("Off") } else { Label("Off", systemImage: "checkmark") }
+                }
+                ForEach(subtitles) { track in
+                    Button { pickSubtitles(track) } label: { item(track) }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+        .buttonStyle(.plain)
+        // Audio, then Subtitles from Off, as written: opened from the
+        // bottom, iOS would turn the list upside down.
+        .menuOrder(.fixed)
+        .accessibilityLabel("Audio and Subtitles")
+        .simultaneousGesture(TapGesture().onEnded { opened() })
+    }
+
+    @ViewBuilder private func item(_ track: MPVPlayer.Track) -> some View {
+        if track.selected {
+            Label(MoviePlayerView.label(track), systemImage: "checkmark")
+        } else {
+            Text(MoviePlayerView.label(track))
+        }
+    }
+}
+#endif
+
+/// Closes the player with its fade (the screens inside call this rather
+/// than dismiss).
+struct ClosePlayer {
+    let run: () -> Void
+    func callAsFunction() { run() }
+}
+
+extension EnvironmentValues {
+    @Entry var closePlayer: ClosePlayer?
 }
 
 struct VideoSurface: UIViewRepresentable {
@@ -67,6 +151,7 @@ struct MoviePlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closePlayer) private var closePlayer
 
     let playback: EmbyPlayback
     @State private var player: MPVPlayer?
@@ -156,6 +241,11 @@ struct MoviePlayerView: View {
     @State private var stats = ""
     /// Debug builds: the tracks playing, for UI tests ("audio=eng subtitles=off").
     @State private var trackReadout = ""
+    /// Debug builds: "original" or "converted 4.0 Mbps", for UI tests.
+    @State private var qualityReadout = "original"
+    /// Debug builds: "72.4 playing" (the player's second, and whether it
+    /// plays), for UI tests.
+    @State private var positionReadout = ""
     #endif
 
     var body: some View {
@@ -188,6 +278,17 @@ struct MoviePlayerView: View {
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
             }
+            #if os(iOS)
+            // Taps on the picture show and hide the controls (a tap on the
+            // Info panel's background closes it first). Under the controls:
+            // a tap on one of them, the "…" menu too, isn't also one on the
+            // picture (that hid the controls, and the menu with them).
+            Color.clear
+                .contentShape(Rectangle())
+                .ignoresSafeArea()
+                .onTapGesture { if showInfo { toggleInfo() } else { toggleControls() } }
+                .accessibilityHidden(true)
+            #endif
             // With the controls up, their play button turns into the spinner.
             if (buffering || !started), error == nil, !controlsVisible {
                 ProgressView().controlSize(.large).tint(.white)
@@ -212,6 +313,16 @@ struct MoviePlayerView: View {
                 .opacity(0.02)
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("debug-tracks")
+            Text(qualityReadout)
+                .font(.caption2)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("debug-quality")
+            Text(positionReadout)
+                .font(.caption2)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("debug-position")
             #endif
             #if os(tvOS)
             // On top and see-through: it takes the remote.
@@ -223,9 +334,6 @@ struct MoviePlayerView: View {
         .onExitCommand { remote(.menu) }
         #endif
         #if os(iOS)
-        .contentShape(Rectangle())
-        // A tap on the picture closes the Info panel first.
-        .onTapGesture { if showInfo { toggleInfo() } else { toggleControls() } }
         .statusBarHidden(!controlsVisible)
         #endif
         .persistentSystemOverlays(.hidden)
@@ -321,15 +429,22 @@ struct MoviePlayerView: View {
     /// The film carries on in the floating window from this second (Emby's
     /// converted stream at 4 Mbps, plenty for a window); this player closes
     /// once it's up, and comes back at the second it reached.
+    /// The film carries on here while the window gets ready (it paused for
+    /// the seconds the server took), and the window takes over at the
+    /// second it has reached then. The window's stream: the film's own
+    /// video copied as it is (starts in about a second; converting it took
+    /// seconds and stalled on a slow server), or the lower quality this
+    /// film already plays at on a slow connection.
     private func startPictureInPicture() {
-        guard let url = model.convertedURL(for: playback, bitrate: 4_000_000, start: position) else { return }
-        let at = position
-        player?.setPaused(true)
-        PictureInPicture.shared.start(playback, url: url, headers: playback.fallbackHeaders, offset: at, total: total, started: {
+        let converted = governor?.current
+        let bitrate = converted ?? (playback.bitrate ?? 18_000_000) + 2_000_000
+        guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, copy: converted == nil) else { return }
+        PictureInPicture.shared.start(playback, url: url, headers: playback.fallbackHeaders, offset: position, total: total,
+                                      now: { position }, started: {
             handedOff = true
+            player?.setPaused(true)
             dismiss()
         }, failed: {
-            player?.setPaused(false)
             note("Picture in Picture isn't available for this video")
         })
     }
@@ -342,47 +457,20 @@ struct MoviePlayerView: View {
 
     /// "…": the audio track and subtitles, ticked where they are.
     private var trackMenu: some View {
-        Menu {
-            if audioTracks.count > 1 {
-                Section("Audio") {
-                    ForEach(audioTracks) { track in
-                        Button { pick(track) } label: {
-                            if track.selected { Label(label(track), systemImage: "checkmark") } else { Text(label(track)) }
-                        }
-                    }
-                }
-            }
-            Section("Subtitles") {
-                Button { pickSubtitles(nil) } label: {
-                    if subtitleTracks.contains(where: \.selected) { Text("Off") } else { Label("Off", systemImage: "checkmark") }
-                }
-                ForEach(subtitleTracks) { track in
-                    Button { pickSubtitles(track) } label: {
-                        if track.selected { Label(label(track), systemImage: "checkmark") } else { Text(label(track)) }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 19, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .contentShape(.circle)
-                .glassEffect(.regular.interactive(), in: .circle)
-        }
-        .buttonStyle(.plain)
-        // Audio, then Subtitles from Off, as written: opened from the
-        // bottom, iOS would turn the list upside down.
-        .menuOrder(.fixed)
-        .accessibilityLabel("Audio and Subtitles")
-        // Open: the controls stay up until something is picked.
-        .simultaneousGesture(TapGesture().onEnded {
+        TrackMenuButton(tracks: tracks, pick: { pick($0) }, pickSubtitles: { pickSubtitles($0) }) {
+            // Open: the controls stay up until something is picked.
             showControls(autoHide: false)
-            Task { if let player { tracks = await player.tracks() } }
-        })
+            Task {
+                guard let player else { return }
+                let fresh = await player.tracks()
+                if fresh != tracks { tracks = fresh }
+            }
+        }
+        .equatable()
     }
 
     private func pick(_ track: MPVPlayer.Track) {
+        trackSwitched()
         player?.selectAudio(track.id)
         markSelected(track.id, kind: .audio)
         TrackChoice.rememberAudio(track.language, role: track.role, for: trackKey)
@@ -390,6 +478,7 @@ struct MoviePlayerView: View {
     }
 
     private func pickSubtitles(_ track: MPVPlayer.Track?) {
+        trackSwitched()
         player?.selectSubtitle(track?.id)
         markSelected(track?.id, kind: .subtitle)
         TrackChoice.rememberSubtitles(track?.language, role: track?.role, for: trackKey)
@@ -400,6 +489,14 @@ struct MoviePlayerView: View {
     }
     #endif
 
+    /// A track switch: the player reads the file again from just before
+    /// where it is (for the new track's data), and on a remote server waits
+    /// a moment. That isn't the connection being slow: no lower quality for
+    /// it (that brought up a note and jumped the picture).
+    private func trackSwitched() {
+        lastSeek = Date().addingTimeInterval(5)
+    }
+
     /// The tracks the plan calls for, with the viewer's newest picks. The
     /// player picks them before the file plays; this corrects one that got
     /// ready before a pick (a playback prepared ahead) with the old plan.
@@ -408,11 +505,13 @@ struct MoviePlayerView: View {
         let choice = TrackChoice.choose(tracks, plan: plan)
         let audioNow = tracks.first { $0.kind == .audio && $0.selected }?.id
         if let audio = choice.audio, audio != audioNow {
+            trackSwitched()
             player.selectAudio(audio)
             markSelected(audio, kind: .audio)
         }
         let subtitlesNow = tracks.first { $0.kind == .subtitle && $0.selected }?.id
         if choice.subtitle != subtitlesNow {
+            trackSwitched()
             player.selectSubtitle(choice.subtitle)
             markSelected(choice.subtitle, kind: .subtitle)
         }
@@ -545,8 +644,10 @@ struct MoviePlayerView: View {
             : String(format: "%d:%02d", s / 60, s % 60)
     }
 
+    private func label(_ track: MPVPlayer.Track) -> String { Self.label(track) }
+
     /// "English", "English (Commentary)", "Spanish 5.1", "French (Forced)".
-    private func label(_ track: MPVPlayer.Track) -> String {
+    static func label(_ track: MPVPlayer.Track) -> String {
         let language = track.language.flatMap { $0 == "und" ? nil : Locale.current.localizedString(forLanguageCode: $0) }
         var text: String
         if let title = track.title, !title.isEmpty {
@@ -790,6 +891,8 @@ struct MoviePlayerView: View {
             #if DEBUG
             NSLog("%@", String(format: "PERF net %.1f Mbps buffer %.1f s at %.1f", bytesPerSecond * 8 / 1e6, buffer, position))
             let quality = governor?.current.map { String(format: "converted %.1f Mbps", Double($0) / 1e6) } ?? "original"
+            if quality != qualityReadout { qualityReadout = quality }
+            positionReadout = String(format: "%.1f %@", position, paused ? "paused" : "playing")
             let file = playback.bitrate.map { String(format: "file %.1f Mbps", Double($0) / 1e6) } ?? "file bitrate ?"
             stats = String(format: "%@ · %@ · speed %.1f Mbps · %.0f s buffered", quality, file,
                            (governor?.speed ?? bytesPerSecond * 8) / 1e6, buffer)
@@ -910,7 +1013,7 @@ struct MoviePlayerView: View {
             quiet.disablesAnimations = true
             withTransaction(quiet) { model.noteStop(playback, seconds: position) }
         }
-        dismiss()
+        if let closePlayer { closePlayer() } else { dismiss() }
     }
 
     private func toggleControls() {
@@ -1160,6 +1263,7 @@ struct MoviePlayerView: View {
         let trackKind: MPVPlayer.Track.Kind = kind == .audio ? .audio : .subtitle
         let list = tracks.filter { $0.kind == trackKind }
         let id: Int?
+        trackSwitched()
         if kind == .audio {
             guard list.indices.contains(row) else { return }
             id = list[row].id

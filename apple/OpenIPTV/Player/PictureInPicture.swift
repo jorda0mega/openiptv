@@ -42,6 +42,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     private var clockIsFilm = false
     /// The film's length: nothing past its end is reported.
     private var total: Double = 0
+    /// Where the app's player is now (it plays on while the window gets
+    /// ready): the window starts there.
+    private var now: () -> Double = { 0 }
     private var restoring = false
     #if DEBUG
     /// When the window was asked for, and whether it grew out of a picture
@@ -60,7 +63,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     /// `total` seconds long. `started`: the window is up (the app's player
     /// can close); `failed`: it couldn't start (the app's player carries on).
     func start(_ playback: EmbyPlayback, url: URL, headers: [String], offset: Double, total: Double,
-               started: @escaping () -> Void, failed: @escaping () -> Void) {
+               now: @escaping () -> Double, started: @escaping () -> Void, failed: @escaping () -> Void) {
         stop()
         guard Self.isSupported, let window = Self.window else { return failed() }
         var fields: [String: String] = [:]
@@ -71,6 +74,8 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": fields])
         let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
         player.allowsExternalPlayback = true
+        // Silent until the window is up: the app's player still plays.
+        player.isMuted = true
         // Over the picture, invisible until the stream is at the right
         // second: PiP grows out of a picture on screen (one behind the app
         // made the start stutter); behind everything once it's up.
@@ -92,6 +97,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         self.playback = playback
         self.offset = offset
         self.total = total
+        self.now = now
         self.started = started
         self.failed = failed
         clockIsFilm = false
@@ -141,14 +147,22 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     private func place(_ item: AVPlayerItem, _ player: AVPlayer) async {
         let length = item.duration.seconds
         let start = player.currentTime().seconds.nanToZero
+        // Where the app's player has got to meanwhile (a moment ahead: the
+        // seek itself takes one).
+        let target = max(offset, now() + 0.3)
         if length.isFinite, total > 0, abs(length - total) < max(30, total * 0.05) {
-            // The whole film from 0:00: jump to where it was.
+            // The whole film from 0:00: jump to where it is.
             clockIsFilm = true
-            await player.seek(to: CMTime(seconds: offset, preferredTimescale: 600),
+            await player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                               toleranceBefore: CMTime(seconds: 1, preferredTimescale: 600), toleranceAfter: .zero)
         } else {
             // The film's own timestamps from the start, or a clock from 0.
             clockIsFilm = offset > 30 && start > offset - 30
+            let ahead = clockIsFilm ? target : target - offset
+            if ahead > 1 {
+                await player.seek(to: CMTime(seconds: ahead, preferredTimescale: 600),
+                                  toleranceBefore: CMTime(seconds: 1, preferredTimescale: 600), toleranceAfter: .zero)
+            }
         }
         #if DEBUG
         NSLog("%@", "PERF pip placed length=\(Int(length.nanToZero)) total=\(Int(total)) offset=\(Int(offset)) clockIsFilm=\(clockIsFilm) at=\(Int(seconds))")
@@ -195,9 +209,10 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         MainActor.assumeIsolated {
             started?()
             started = nil
-            // Behind the app now (the window shows it), and playing: the
-            // handoff could leave it paused.
+            // Behind the app now (the window shows it), heard, and playing:
+            // the handoff could leave it paused.
             if let host { host.superview?.sendSubviewToBack(host) }
+            player?.isMuted = false
             player?.play()
             #if DEBUG
             let startMs = Int(Date().timeIntervalSince(askedAt) * 1000)

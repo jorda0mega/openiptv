@@ -11,6 +11,7 @@ struct LivePlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(Preferences.self) private var prefs
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closePlayer) private var closePlayer
 
     let channels: [LiveChannel]
     @State var index: Int
@@ -56,6 +57,11 @@ struct LivePlayerView: View {
     /// "TLC" rather than "US: TLC HD".
     private var displayName: String { model.title(of: channel) }
 
+    /// Closes the player with its fade.
+    private func close() {
+        if let closePlayer { closePlayer() } else { dismiss() }
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -67,7 +73,7 @@ struct LivePlayerView: View {
                     .accessibilityHint("Shows the player controls")
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { showControls() }
-                    .accessibilityAction(.escape) { dismiss() }
+                    .accessibilityAction(.escape) { close() }
             }
             if !controlsVisible { picture.ignoresSafeArea() }
             // With the controls up, their play button turns into the spinner.
@@ -94,7 +100,7 @@ struct LivePlayerView: View {
             }
         }
         .onPlayPauseCommand { error == nil ? togglePause() : play() }
-        .onExitCommand { dismiss() }
+        .onExitCommand { close() }
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
@@ -122,7 +128,7 @@ struct LivePlayerView: View {
                             note: note, paused: paused, canGoForward: !(recording == nil && atLive),
                             busy: (buffering || !started) && error == nil, ready: started,
                             pills: livePills,
-                            close: { dismiss() }, back: { skip(-10) },
+                            close: { close() }, back: { skip(-10) },
                             playPause: { error == nil ? togglePause() : retry() }, forward: { skip(10) }) {
             #if os(iOS)
             more(info: info)

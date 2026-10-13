@@ -15,6 +15,10 @@ final class PlayerLookTests: XCTestCase {
         if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
             app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
         }
+        // Player options to compare (debug builds).
+        if let options = ProcessInfo.processInfo.environment["MPV_EXTRA"] {
+            app.launchEnvironment["OPENREEL_DEBUG_MPV"] = options
+        }
         XCUIDevice.shared.orientation = .portrait
     }
 
@@ -65,25 +69,34 @@ final class PlayerLookTests: XCTestCase {
         // iPhone simulators have no Picture in Picture (iPads and iPhones do).
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         openFilm()
-        app.tap()
-        usleep(600_000)
+        controlsUp()
         // A minute in, so a wrong clock shows (0:00, or twice the start).
-        for _ in 0..<6 { app.buttons["Forward 10 seconds"].firstMatch.tap(); usleep(400_000) }
+        for _ in 0..<6 {
+            controlsUp()
+            app.buttons["Forward 10 seconds"].firstMatch.tap()
+            usleep(400_000)
+        }
         sleep(2)
+        controlsUp()
         let before = position()
         print("PIP before \(before ?? -1)")
         let pip = app.buttons["Picture in Picture"].firstMatch
         XCTAssertTrue(pip.waitForExistence(timeout: 3), "no Picture in Picture button")
+        // The server takes 6 s to start the window's stream (a conversion).
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["hls_delay": "6"])
+        defer { configure(server, ["reset": "1"]) }
         pip.tap()
         let asked = Date()
         var up: Date?
-        while Date().timeIntervalSince(asked) < 8 {
+        while Date().timeIntervalSince(asked) < 11 {
             if up == nil, pipState() != nil { up = Date() }
             usleep(200_000)
         }
         shot("pip started")
         XCTAssertFalse(app.buttons["Close player"].exists, "the player didn't close for Picture in Picture")
         let first = pipState()
+        let sinceTap = Date().timeIntervalSince(asked)
         sleep(8)
         let later = pipState()
         print("PIP state \(String(describing: first)) then \(String(describing: later))")
@@ -91,15 +104,19 @@ final class PlayerLookTests: XCTestCase {
         // Regression: the window grew out of a picture hidden behind the
         // app, and started late; it stuttered on the way.
         XCTAssertEqual(first.from, "screen", "Picture in Picture didn't grow out of the picture on screen")
-        XCTAssertLessThan(first.startMs, 3000, "Picture in Picture took \(first.startMs) ms to start")
-        XCTAssertLessThan(up.timeIntervalSince(asked), 4, "Picture in Picture took \(up.timeIntervalSince(asked)) s to show")
+        // Regression: the film paused while the window's stream got ready;
+        // it plays on, and the window takes over where it has got to.
+        XCTAssertGreaterThan(first.seconds, before + sinceTap - 2.5,
+                             "the film paused while Picture in Picture got ready: \(first.seconds) s, \(sinceTap) s after \(before) s")
+        XCTAssertLessThan(first.startMs, 9000, "Picture in Picture took \(first.startMs) ms to start")
+        XCTAssertLessThan(up.timeIntervalSince(asked), 10, "Picture in Picture took \(up.timeIntervalSince(asked)) s to show")
         // Regressions: it paused after the handoff; it showed the film from
         // 0:00 while it reported the start plus that clock (episodes got
         // marked watched, "skipped"). The test server's converted stream is
         // the whole film from 0:00, as Emby's, so its clock is the film's.
         XCTAssertTrue(later.playing, "Picture in Picture paused")
         XCTAssertGreaterThanOrEqual(later.seconds - first.seconds, 5, "Picture in Picture isn't moving on")
-        XCTAssertLessThan(abs(first.clock - before), 20, "Picture in Picture shows \(first.clock) s, not near \(before) s")
+        XCTAssertLessThan(abs(first.clock - before), 25, "Picture in Picture shows \(first.clock) s, not near \(before) s")
         XCTAssertLessThan(abs(first.seconds - first.clock), 3, "Picture in Picture reports \(first.seconds) s but shows \(first.clock) s")
 
         // Back to the app: its player from where the window got to, playing.
@@ -121,6 +138,16 @@ final class PlayerLookTests: XCTestCase {
         guard let back, let after else { return XCTFail("the app's player didn't come back") }
         XCTAssertLessThan(abs(back - later.seconds), 20, "came back at \(back) s, not near \(later.seconds) s")
         XCTAssertGreaterThanOrEqual(after - back, 2, "the app's player came back paused")
+    }
+
+    /// The player's controls on screen (a tap on the picture shows them,
+    /// and hides them when they're up).
+    private func controlsUp() {
+        if !app.buttons["Close player"].firstMatch.isHittable {
+            // Above the middle: the middle is the play/pause button.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            usleep(700_000)
+        }
     }
 
     /// The bar's position in seconds ("Playback position" "00:01:12").
@@ -256,6 +283,72 @@ final class PlayerLookTests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SPANISH_FILM"] != nil, "needs a Spanish-made test film")
         openFilm(["-forgetTrackChoices", "YES"])
         XCTAssertEqual(tracksPlaying(), "audio=spa subtitles=off")
+    }
+
+    /// Subtitles switched while the server is slow to answer: the film
+    /// plays on, at full quality. Regressions: the player read the file
+    /// again from the server for the new track and stopped for seconds; and
+    /// that wait counted as a slow connection, which dropped the quality (a
+    /// note, and the picture jumped). Needs the multi-track test server
+    /// (TEST_RUNNER_MULTI_TRACK=1).
+    func testSubtitleSwitchKeepsPlaying() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        openFilm(["-forgetTrackChoices", "YES"])
+        sleep(5)
+        configure(server, ["video_delay": "3"])
+        defer { configure(server, ["reset": "1"]) }
+        if playerState()?.playing == false {
+            controlsUp()
+            app.buttons["Play"].firstMatch.tap()
+            usleep(600_000)
+        }
+        let off = app.buttons["Off"].firstMatch
+        // Regression: while the film played, a tap on "…" also counted as
+        // a tap on the picture, which hid the controls and the menu.
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        XCTAssertTrue(off.waitForExistence(timeout: 3), "the menu didn't open while the film played")
+        shot("menu for the switch")
+        let spanish = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Spanish'")).allElementsBoundByIndex
+            .first { $0.frame.minY > off.frame.minY }
+        XCTAssertNotNil(spanish, "no Spanish subtitles")
+        spanish?.tap()
+        var states: [(Double, Bool)] = []
+        var qualities: [String] = []
+        for _ in 0..<8 {
+            sleep(1)
+            if let state = playerState() { states.append((state.seconds, state.playing)) }
+            qualities.append(app.staticTexts["debug-quality"].firstMatch.label)
+        }
+        print("SWITCH \(states) \(qualities)")
+        guard let first = states.first, let last = states.last else { return XCTFail("no player state") }
+        XCTAssertTrue(states.allSatisfy(\.1), "the film paused")
+        XCTAssertGreaterThanOrEqual(last.0 - first.0, 6.5, "the film stopped after switching subtitles: \(states)")
+        XCTAssertEqual(Set(qualities), ["original"], "the quality dropped after switching subtitles: \(qualities)")
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=spa")
+    }
+
+    /// The app's debug readout of the player: its second, and whether it plays.
+    private func playerState() -> (seconds: Double, playing: Bool)? {
+        let parts = app.staticTexts["debug-position"].firstMatch.label.split(separator: " ")
+        guard parts.count == 2, let seconds = Double(parts[0]) else { return nil }
+        return (seconds, parts[1] == "playing")
+    }
+
+    private func testServer() -> URL? {
+        guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
+              let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let address = json["serverURL"] as? String else { return nil }
+        return URL(string: address)
+    }
+
+    /// Sets how the test server behaves (see CONTROL in mock_server.py).
+    private func configure(_ server: URL, _ settings: [String: String]) {
+        let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
+        let done = expectation(description: "configure")
+        URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
     }
 
     /// The app's debug readout of the tracks playing ("audio=eng subtitles=off").

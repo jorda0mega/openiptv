@@ -487,8 +487,10 @@ struct ProgressBar: View {
 struct CoverImage: View {
     let images: [CardImage]
     let title: String
-    /// Full-bleed art on black (a hero, a page's backdrop): black until the
-    /// picture comes, not grey (it went black, grey, picture).
+    /// Full-bleed art on black (a hero, a page's backdrop): nothing until
+    /// the picture is drawn, so what's under it (black, or the last hero
+    /// picture while the next fades in) shows; not grey (it went black,
+    /// grey, picture).
     var backdrop = false
 
     @State private var image: UIImage?
@@ -508,7 +510,7 @@ struct CoverImage: View {
 
     var body: some View {
         ZStack {
-            if backdrop { Color.black } else { Rectangle().fill(.quaternary) }
+            if !backdrop { Rectangle().fill(.quaternary) }
             if let image {
                 Image(uiImage: image)
                     .resizable()
