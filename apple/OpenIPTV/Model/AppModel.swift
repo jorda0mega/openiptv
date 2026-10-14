@@ -101,6 +101,7 @@ final class AppModel {
         selectedCategory = UserDefaults.standard.string(forKey: "category")
         // Ready before the first film opens.
         DispatchQueue.global(qos: .userInitiated).async { StreamRelay.shared.start() }
+        MPVPlayer.warmUp()
         // v4: Top picks layout; older caches had other rows, and showing
         // one first would flash the old layout before the new.
         for old in ["home.json", "home.v2.json", "home.v3.json"] { AppCache.remove(old) }
@@ -1245,6 +1246,27 @@ final class AppModel {
         warmExpiry?.cancel()
         warm?.player.shutdown()
         warm = nil
+    }
+
+    /// Continue Watching's titles: how to play each, and the start of each
+    /// file (its header, its index, the part where it resumes) fetched into
+    /// the relay's cache, so a tap starts from the device. A resumed title
+    /// waited for the server three times before its first frame. Only on a
+    /// connection known to be unmetered, never while something plays.
+    func prefetchContinueWatching(_ cards: [Card]) {
+        guard NetworkStatus.shared.knownUnmetered, !PlaybackActivity.isPlaying else { return }
+        let items = cards.prefix(4).compactMap { card -> (id: String, kind: String?)? in
+            if let episode = card.episodeId { return (episode, "Episode") }
+            return card.kind == "Series" ? nil : (card.id, card.kind)
+        }
+        prepare(items)
+        for item in items {
+            Task(priority: .utility) {
+                guard let playback = (try? await prepared[item.id]?.task.value).map(withLocalResume),
+                      !PlaybackActivity.isPlaying else { return }
+                StreamRelay.shared.prefetchStart(url: playback.url, headers: playback.headers, at: playback.startSeconds ?? 0)
+            }
+        }
     }
 
     /// Works out how to play these in the background; a later tap uses it.

@@ -548,7 +548,9 @@ class Handler(BaseHTTPRequestHandler):
         movie = lambda i: {"Id": f"m{i}", "Name": f"Movie {i}", "Type": "Movie", "ProductionYear": 2020,
                            "PrimaryImageAspectRatio": 0.6667,
                            "ImageTags": {"Primary": "stale-t15" if i == 15 else f"t{i}"},
-                           "BackdropImageTags": [f"b{i}"]}
+                           "BackdropImageTags": [f"b{i}"]} | (
+            # Where it was last stopped (reported), as on Emby.
+            {"UserData": {"PlaybackPositionTicks": POSITIONS[f"m{i}"]}} if POSITIONS.get(f"m{i}") else {})
         # Each episode has its own still (a frame from it), but every fifth,
         # to check the fall back to the show's art.
         episode = lambda i: {"Id": f"e{i}", "Name": f"Episode {i}", "Type": "Episode", "SeriesId": "s1",

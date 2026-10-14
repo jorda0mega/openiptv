@@ -62,6 +62,11 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     #if DEBUG
     private var askedAt = Date()
     private var startMs = 0
+    /// When iOS said the window was possible, and when the first frame was
+    /// in its layer (ms after the tap).
+    private var possibleMs = -1
+    private var drawnMs = -1
+    private var firstStill = false
     private var grewFromScreen = false
     #endif
 
@@ -107,6 +112,8 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         self.failed = failed
         #if DEBUG
         askedAt = Date()
+        possibleMs = -1
+        drawnMs = -1
         #endif
         let drawn = DrawnFlag()
         player.drawFrames(into: host.frames) { drawn.set() }
@@ -117,6 +124,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
                 try? await Task.sleep(for: .milliseconds(50))
                 guard let self, !Task.isCancelled, self.phase == .starting, let controller = self.controller else { return }
                 #if DEBUG
+                let since = Int(Date().timeIntervalSince(self.askedAt) * 1000)
+                if self.possibleMs < 0, controller.isPictureInPicturePossible { self.possibleMs = since }
+                if self.drawnMs < 0, drawn.isSet { self.drawnMs = since }
                 // UI tests: the picture held in the app's layer a while first.
                 if let hold = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_PIP_HOLD"].flatMap(Double.init),
                    Date().timeIntervalSince(self.askedAt) < hold { continue }
@@ -234,7 +244,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     #if DEBUG
     /// "pip active=true playing=true seconds=84 clock=84 start=420 from=screen"
     private func probe() {
-        PictureInPictureProbe.shared.text = "pip active=\(isActive) playing=\(!paused) seconds=\(Int(position)) clock=\(Int(position)) start=\(startMs) from=\(grewFromScreen ? "screen" : "hidden")"
+        PictureInPictureProbe.shared.text = "pip active=\(isActive) playing=\(!paused) seconds=\(Int(position)) clock=\(Int(position)) start=\(startMs) from=\(grewFromScreen ? "screen" : "hidden") possible=\(possibleMs) drawn=\(drawnMs) first=\(firstStill ? "still" : "live")"
     }
     #endif
 
@@ -253,6 +263,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             if let host { host.superview?.sendSubviewToBack(host) }
             #if DEBUG
             startMs = Int(Date().timeIntervalSince(askedAt) * 1000)
+            firstStill = player?.windowStartedFromStill ?? false
             probe()
             #endif
             let started = started

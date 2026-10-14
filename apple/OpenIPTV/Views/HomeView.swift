@@ -159,6 +159,8 @@ struct HomeView: View {
         let resuming = model.rows.first { $0.title == "Continue Watching" }?.cards ?? []
         let below = model.rows.filter { $0.title != "Continue Watching" }.prefix(1).flatMap { $0.cards.prefix(3) }
         model.prefetchShows((resuming + below).filter { $0.kind == "Series" }.map(\.id))
+        // A tap on any of them starts from the device.
+        model.prefetchContinueWatching(resuming)
         guard let card = (model.rows.first { $0.title == "Continue Watching" } ?? model.rows.first)?.cards.first else { return }
         if let episode = card.episodeId {
             model.warmUp(episode, kind: "Episode", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)

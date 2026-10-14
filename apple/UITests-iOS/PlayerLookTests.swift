@@ -113,7 +113,13 @@ final class PlayerLookTests: XCTestCase {
         let sinceTap = Date().timeIntervalSince(asked)
         sleep(8)
         let later = pipState()
-        print("PIP state \(String(describing: first)) then \(String(describing: later))")
+        let raw = app.staticTexts["debug-pip"].firstMatch.label
+        print("PIP state \(String(describing: first)) then \(String(describing: later)) raw \(raw)")
+        // The window grew out of a still of the picture, put in its layer at
+        // once. Regression: it waited for libmpv to switch to drawing for
+        // the window (decoding again from the last keyframe), a delay after
+        // the tap on a device.
+        XCTAssertTrue(raw.contains("first=still"), "the window waited for libmpv's own first frame: \(raw)")
         guard let first, let later, let before, let up else { return XCTFail("no Picture in Picture state") }
         // Regression: the window grew out of a picture hidden behind the
         // app, and started late; it stuttered on the way.
@@ -221,7 +227,11 @@ final class PlayerLookTests: XCTestCase {
         // video output (the simulator lets an app draw in the background,
         // so only this shows the fix there; a device froze without it).
         XCTAssertEqual(app.staticTexts["debug-away"].firstMatch.label, "1", "the picture didn't go off while away")
-        XCTAssertTrue(pictureMoves(), "the picture is frozen after coming back")
+        // A loaded simulator can take a few seconds to draw again; a frozen
+        // picture never moves.
+        var moving = false
+        for _ in 0..<5 where !moving { moving = pictureMoves() }
+        XCTAssertTrue(moving, "the picture is frozen after coming back")
         XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
     }
 
@@ -509,6 +519,96 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(last.0 - first.0, 6.5, "the film stopped after switching subtitles: \(states)")
         XCTAssertEqual(Set(qualities), ["original"], "the quality dropped after switching subtitles: \(qualities)")
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=spa")
+    }
+
+    /// The first subtitles picked show without stopping the picture, even
+    /// from a slow server. Regression: the picture stopped for a moment the
+    /// first time subtitles were picked (later switches were instant).
+    /// Needs the multi-track test server as for testPickedSubtitlesStay.
+    func testFirstSubtitlesKeepPictureMoving() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        // A real film's end (where its index is) isn't downloaded early;
+        // the test film is small, so the read-ahead is kept short.
+        app.launchEnvironment["OPENREEL_DEBUG_READAHEAD"] = "5"
+        openFilm(["-forgetTrackChoices", "YES"])
+        sleep(5)
+        // A server 3 s away from now on: the index must already be here.
+        configure(server, ["video_delay": "3"])
+        defer { configure(server, ["reset": "1"]) }
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let off = app.buttons["Off"].firstMatch
+        XCTAssertTrue(off.waitForExistence(timeout: 3), "no subtitles menu")
+        let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).allElementsBoundByIndex
+            .first { $0.frame.minY > off.frame.minY }
+        XCTAssertNotNil(english, "no English subtitles")
+        english?.tap()
+        // The longest the picture stood still in the next 3 seconds.
+        let area = CGRect(x: app.frame.width * 0.15, y: app.frame.midY - 50, width: app.frame.width * 0.7, height: 100)
+        var last = samples(in: area), lastChange = Date(), longest = 0.0
+        let end = Date().addingTimeInterval(3)
+        var log: [String] = []
+        let start = Date()
+        while Date() < end {
+            let now = samples(in: area)
+            // The test film's moving parts are thin: a few samples differ.
+            let changed = zip(last, now).filter { abs(Int($0) - Int($1)) > 40 }.count >= 3
+            log.append(String(format: "%.2f%@", Date().timeIntervalSince(start), changed ? "*" : ""))
+            if ProcessInfo.processInfo.environment["SHOTS"] != nil { shot(String(format: "sub %.2f", Date().timeIntervalSince(start))) }
+            if changed { longest = max(longest, Date().timeIntervalSince(lastChange)); lastChange = Date(); last = now }
+        }
+        print("SUBTITLE SAMPLES \(log.joined(separator: " "))")
+        longest = max(longest, Date().timeIntervalSince(lastChange))
+        print("SUBTITLE STILL \(longest)")
+        XCTAssertLessThan(longest, 0.5, "the picture stood still \(longest) s when the first subtitles were picked")
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng")
+    }
+
+    /// A title in Continue Watching other than the first (a player opens
+    /// that one ahead) starts from the device: the start of its file, its
+    /// index and the part where it resumes were fetched ahead, so a slow
+    /// server doesn't hold it up. Regression: a resumed title waited for
+    /// the server three times before its first frame (the user: "the
+    /// video takes a while to load"), where one from the beginning played
+    /// at once.
+    func testContinueWatchingStartsFromDevice() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        stopped(server, item: "m5", seconds: 300)
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Movie 5'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "Movie 5 isn't in Continue Watching")
+        // Fetched ahead meanwhile; then a server 1.5 s from every video request.
+        sleep(8)
+        configure(server, ["video_delay": "1.5"])
+        card.tap()
+        let readout = app.staticTexts["debug-start"].firstMatch
+        var parts: [Substring] = []
+        for _ in 0..<40 where parts.count < 4 {
+            usleep(250_000)
+            parts = readout.exists ? readout.label.split(separator: " ") : []
+        }
+        shot("continue watching started")
+        // "cold 0.6 at 300": how it started, seconds from the tap, where.
+        guard parts.count == 4, let took = Double(parts[1]), let at = Double(parts[3]) else {
+            return XCTFail("no start readout: \(parts)")
+        }
+        XCTAssertEqual(at, 300, accuracy: 8, "it didn't resume where it was stopped")
+        XCTAssertLessThan(took, 1.2, "a resumed title took \(took) s to start from a slow server")
+    }
+
+    /// Tells the test server a title was stopped at `seconds` (its resume point).
+    private func stopped(_ server: URL, item: String, seconds: Double) {
+        var request = URLRequest(url: server.appending(path: "emby/Sessions/Playing/Stopped"))
+        request.httpMethod = "POST"
+        request.setValue("tok", forHTTPHeaderField: "X-Emby-Token")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["ItemId": item, "PositionTicks": Int(seconds * 10_000_000)])
+        let done = expectation(description: "stopped")
+        URLSession.shared.dataTask(with: request) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
     }
 
     /// The app's debug readout of the player: its second, and whether it plays.

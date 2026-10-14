@@ -26,9 +26,12 @@ final class StreamRelay: @unchecked Sendable {
     private var listener: NWListener?
     private var port: UInt16?
     private var routes: [String: (url: URL, headers: [(String, String)])] = [:]
-    /// What's been fetched of the last two files (the one playing, one
-    /// opened ahead), by their real address.
-    private var caches: [(url: URL, cache: ByteCache)] = []
+    /// What's been fetched of the last few files (the one playing, ones
+    /// opened or fetched ahead), by their real address without the
+    /// server's per-request session (asked again later, a title's address
+    /// differs only there).
+    private var caches: [(key: String, cache: ByteCache)] = []
+    private static let keptFiles = 6
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
     func start() {
@@ -127,6 +130,9 @@ final class StreamRelay: @unchecked Sendable {
             if pair.count == 2, pair[0].caseInsensitiveCompare("Range") == .orderedSame { range = pair[1] }
         }
         let cache = method == "GET" ? cache(for: route.url) : nil
+        if let cache, cache.claimIndex() {
+            queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache) }
+        }
         // Already here from the start of what's asked: those bytes at once,
         // then the rest from the server.
         if let cache, let (from, to) = Self.bounds(range, total: cache.total), let total = cache.total {
@@ -164,13 +170,26 @@ final class StreamRelay: @unchecked Sendable {
     /// The cache for this file (made the first time; the oldest of more
     /// than two goes, with its bytes).
     private func cache(for url: URL) -> ByteCache? {
+        let key = Self.cacheKey(url)
         lock.lock()
         defer { lock.unlock() }
-        if let found = caches.first(where: { $0.url == url }) { return found.cache }
+        if let index = caches.firstIndex(where: { $0.key == key }) {
+            // Used again: the newest, the last to go.
+            let found = caches.remove(at: index)
+            caches.append(found)
+            return found.cache
+        }
         guard let made = ByteCache() else { return nil }
-        caches.append((url, made))
-        if caches.count > 2 { caches.removeFirst() }
+        caches.append((key, made))
+        if caches.count > Self.keptFiles { caches.removeFirst() }
         return made
+    }
+
+    /// A file's address without the server's session for one request.
+    private static func cacheKey(_ url: URL) -> String {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.absoluteString }
+        parts.queryItems = parts.queryItems?.filter { $0.name.caseInsensitiveCompare("PlaySessionId") != .orderedSame }
+        return parts.string ?? url.absoluteString
     }
 
     /// Kept bytes to the player, a megabyte at a time, each once the last
@@ -221,6 +240,137 @@ final class StreamRelay: @unchecked Sendable {
                 connection.cancel()
             }
         }
+    }
+
+    // MARK: Ahead of a tap
+
+    /// The start of a film likely to be played next (Continue Watching):
+    /// its header, its index and the part where it resumes, fetched into
+    /// the cache ahead, so opening it reads from the device. A resumed film
+    /// waited for the server three times before its first frame (the
+    /// header, the index at the end of the file, the part where it
+    /// resumes); one from the beginning, once.
+    func prefetchStart(url: URL, headers: [String], at seconds: Double) {
+        start()
+        let route = (url: url, headers: headers.compactMap { header -> (String, String)? in
+            let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            return pair.count == 2 ? (pair[0], pair[1]) : nil
+        })
+        queue.async { [weak self] in
+            guard let self, let cache = self.cache(for: url) else { return }
+            #if DEBUG
+            let started = CFAbsoluteTimeGetCurrent()
+            #endif
+            self.ensure(route, cache, from: 0, count: 1 << 18) { [weak self] head, total in
+                guard let self, let head, let total else { return }
+                cache.noteFile(total: total, contentType: nil)
+                guard let layout = Matroska.layout(in: [UInt8](head)), let cues = layout.cues, cues < total else { return }
+                self.ensure(route, cache, from: cues, count: min(1 << 16, total - cues)) { [weak self] first, _ in
+                    guard let self, let first, let length = Matroska.elementLength([UInt8](first.prefix(16))) else { return }
+                    let size = min(length, min(Int64(32 << 20), total - cues))
+                    self.ensure(route, cache, from: cues, count: size) { [weak self] index, _ in
+                        guard let self, let index,
+                              let cluster = Matroska.clusterPosition(in: [UInt8](index), at: seconds, scale: layout.timecodeScale)
+                        else { return }
+                        let at = layout.segmentStart + cluster
+                        guard at < total else { return }
+                        self.ensure(route, cache, from: at, count: min(Int64(8 << 20), total - at)) { _, _ in
+                            #if DEBUG
+                            NSLog("%@", String(format: "PERF relay start fetched ahead at %.0f s in %.0f ms", seconds,
+                                               (CFAbsoluteTimeGetCurrent() - started) * 1000))
+                            #endif
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// These bytes of the file in the cache (fetched unless already there),
+    /// then `then` with them and the file's size (nil: failed).
+    private func ensure(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, from: Int64, count: Int64,
+                        then: @escaping @Sendable (Data?, Int64?) -> Void) {
+        if count > 0, cache.available(from: from) >= count, let kept = cache.read(from, Int(count)) {
+            return then(kept, cache.total)
+        }
+        var request = URLRequest(url: route.url)
+        request.timeoutInterval = 30
+        for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
+        request.setValue("bytes=\(from)-\(from + count - 1)", forHTTPHeaderField: "Range")
+        HTTP.session.dataTask(with: request) { data, response, _ in
+            let http = response as? HTTPURLResponse
+            let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
+            guard http?.statusCode == 206, let data, !data.isEmpty else { return then(nil, nil) }
+            if let total { cache.noteFile(total: total, contentType: http?.value(forHTTPHeaderField: "Content-Type")) }
+            cache.store(data, at: from, evicting: false)
+            then(data, total ?? cache.total)
+        }.resume()
+    }
+
+    // MARK: The file's index
+
+    /// A Matroska file's index (its Cues), fetched into the cache a moment
+    /// after the file opens. libmpv reads it at its first jump in the file:
+    /// subtitles or audio picked for the first time (it reads from just
+    /// before where it is, for the new track), or a seek. It usually sits at
+    /// the end of the file, which nothing else downloads, so that first
+    /// jump waited for the server, and the picture stopped meanwhile (it
+    /// waits for the new subtitles). `tries`: the file's start isn't here
+    /// yet (a player opened ahead reads little).
+    private func prefetchIndex(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, tries: Int = 5) {
+        guard let total = cache.total else {
+            if tries > 0 { queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache, tries: tries - 1) } }
+            return
+        }
+        let have = Int(min(cache.available(from: 0), 1 << 18))
+        guard have >= 4096, let head = cache.read(0, have) else {
+            if tries > 0 { queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache, tries: tries - 1) } }
+            return
+        }
+        guard let cues = Matroska.cuesOffset(in: [UInt8](head)), cues < total, cache.available(from: cues) == 0 else { return }
+        #if DEBUG
+        let started = CFAbsoluteTimeGetCurrent()
+        #endif
+        // The element's header and, for most films, all of it; then the rest.
+        let first = min(Int64(1 << 16), total - cues)
+        fetchBytes(route, from: cues, count: first) { [weak self] data in
+            guard let self, let data else { return }
+            cache.store(data, at: cues, evicting: false)
+            guard let length = Matroska.elementLength([UInt8](data.prefix(16))) else { return }
+            let end = min(cues + min(length, 32 << 20), total)
+            let next = cues + Int64(data.count)
+            #if DEBUG
+            func done() {
+                NSLog("%@", String(format: "PERF relay index %lld bytes at %lld in %.0f ms", end - cues, cues,
+                                   (CFAbsoluteTimeGetCurrent() - started) * 1000))
+            }
+            #endif
+            guard end > next else {
+                #if DEBUG
+                done()
+                #endif
+                return
+            }
+            self.fetchBytes(route, from: next, count: end - next) { rest in
+                if let rest { cache.store(rest, at: next, evicting: false) }
+                #if DEBUG
+                done()
+                #endif
+            }
+        }
+    }
+
+    /// `count` bytes of the file from `from`, from the server (nil: failed).
+    private func fetchBytes(_ route: (url: URL, headers: [(String, String)]), from: Int64, count: Int64,
+                            then: @escaping @Sendable (Data?) -> Void) {
+        var request = URLRequest(url: route.url)
+        request.timeoutInterval = 30
+        for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
+        request.setValue("bytes=\(from)-\(from + count - 1)", forHTTPHeaderField: "Range")
+        HTTP.session.dataTask(with: request) { data, response, _ in
+            let ok = (response as? HTTPURLResponse)?.statusCode == 206 && data?.count == Int(count)
+            then(ok ? data : nil)
+        }.resume()
     }
 
     private func fail(_ connection: NWConnection, _ status: Int) {
@@ -390,10 +540,21 @@ final class ByteCache: @unchecked Sendable {
         }
     }
 
-    func store(_ data: Data, at offset: Int64) {
+    /// Whether the file's index is still to be fetched (true once).
+    func claimIndex() -> Bool {
+        lock.withLock {
+            defer { indexClaimed = true }
+            return !indexClaimed
+        }
+    }
+    private var indexClaimed = false
+
+    /// `evicting`: may let older bytes go to make room (not for the index,
+    /// far from where the film plays).
+    func store(_ data: Data, at offset: Int64, evicting: Bool = true) {
         let end = offset + Int64(data.count)
         lock.withLock {
-            if stored + Int64(data.count) > Self.limit { letGo(before: offset - (64 << 20)) }
+            if evicting, stored + Int64(data.count) > Self.limit { letGo(before: offset - (64 << 20)) }
             guard stored + Int64(data.count) <= Self.limit else { return }
             do {
                 try handle.seek(toOffset: UInt64(offset))
@@ -432,3 +593,166 @@ final class ByteCache: @unchecked Sendable {
     }
 }
 
+
+/// Just enough of Matroska (EBML) to find a file's index.
+enum Matroska {
+    private static let ebmlID: UInt32 = 0x1A45DFA3
+    private static let segmentID: UInt32 = 0x18538067
+    private static let seekHeadID: UInt32 = 0x114D9B74
+    private static let seekID: UInt32 = 0x4DBB
+    private static let seekTargetID: UInt32 = 0x53AB
+    private static let seekPositionID: UInt32 = 0x53AC
+    private static let clusterID: UInt32 = 0x1F43B675
+    static let cuesID: UInt32 = 0x1C53BB6B
+
+    private static let infoID: UInt32 = 0x1549A966
+    private static let timecodeScaleID: UInt32 = 0x2AD7B1
+    private static let cuePointID: UInt32 = 0xBB
+    private static let cueTimeID: UInt32 = 0xB3
+    private static let cueTrackPositionsID: UInt32 = 0xB7
+    private static let cueClusterPositionID: UInt32 = 0xF1
+
+    /// Where things are in a file, from its start: where the segment's
+    /// contents start, where the Cues are, and its time unit (ns).
+    struct Layout {
+        let segmentStart: Int64
+        let cues: Int64?
+        let timecodeScale: UInt64
+    }
+
+    static func layout(in d: [UInt8]) -> Layout? {
+        guard let (ebml, il) = id(d, 0), ebml == ebmlID, let (headerSize, sl) = self.size(d, il), let header = headerSize else { return nil }
+        var i = il + sl + Int(header)
+        guard let (segment, gl) = id(d, i), segment == segmentID, let (_, zl) = self.size(d, i + gl) else { return nil }
+        let segmentStart = i + gl + zl
+        i = segmentStart
+        var cues: Int64?
+        var scale: UInt64 = 1_000_000
+        while let (element, el) = id(d, i), let (length, ll) = self.size(d, i + el), let length, length < 1 << 31 {
+            let body = i + el + ll
+            if element == clusterID { break }
+            if element == seekHeadID, cues == nil {
+                cues = seeks(d, from: body, to: min(body + Int(length), d.count)).first { $0.0 == cuesID }
+                    .map { Int64(segmentStart) + Int64($0.1) }
+            }
+            if element == infoID {
+                for (child, value) in children(d, from: body, to: min(body + Int(length), d.count)) where child == timecodeScaleID {
+                    if let unit = uint(value), unit > 0 { scale = unit }
+                }
+            }
+            i = body + Int(length)
+        }
+        return Layout(segmentStart: Int64(segmentStart), cues: cues, timecodeScale: scale)
+    }
+
+    /// From the Cues (`d` starts with the element): where the cluster
+    /// holding the keyframe at or before `seconds` starts, from the start
+    /// of the segment's contents.
+    static func clusterPosition(in d: [UInt8], at seconds: Double, scale: UInt64) -> Int64? {
+        guard let (element, el) = id(d, 0), element == cuesID, let (_, sl) = size(d, el) else { return nil }
+        let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(scale))
+        var best: (time: UInt64, position: UInt64)?
+        for (child, point) in children(d, from: el + sl, to: d.count) where child == cuePointID {
+            let fields = children(d, from: point.startIndex, to: point.endIndex)
+            guard let time = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }), time <= target,
+                  let positions = fields.first(where: { $0.0 == cueTrackPositionsID }),
+                  let position = children(d, from: positions.1.startIndex, to: positions.1.endIndex)
+                      .first(where: { $0.0 == cueClusterPositionID }).flatMap({ uint($0.1) })
+            else { continue }
+            if best.map({ time >= $0.time }) ?? true { best = (time, position) }
+        }
+        return best.map { Int64($0.position) }
+    }
+
+    /// The elements inside `from..<to`, each with its contents.
+    private static func children(_ d: [UInt8], from: Int, to end: Int) -> [(UInt32, ArraySlice<UInt8>)] {
+        var found: [(UInt32, ArraySlice<UInt8>)] = []
+        var j = from
+        while j < end, let (element, el) = id(d, j), let (length, ll) = size(d, j + el), let length, length < 1 << 31 {
+            let body = j + el + ll
+            guard body + Int(length) <= d.count else { break }
+            found.append((element, d[body..<body + Int(length)]))
+            j = body + Int(length)
+        }
+        return found
+    }
+
+    private static func uint(_ value: ArraySlice<UInt8>) -> UInt64? {
+        guard !value.isEmpty, value.count <= 8 else { return nil }
+        return value.reduce(0) { $0 << 8 | UInt64($1) }
+    }
+
+    /// Where the Cues start in the file, from the SeekHead at its start.
+    static func cuesOffset(in d: [UInt8]) -> Int64? {
+        guard let (ebml, il) = id(d, 0), ebml == ebmlID, let (headerSize, sl) = self.size(d, il), let header = headerSize else { return nil }
+        var i = il + sl + Int(header)
+        guard let (segment, gl) = id(d, i), segment == segmentID, let (_, zl) = self.size(d, i + gl) else { return nil }
+        let segmentStart = i + gl + zl
+        i = segmentStart
+        while let (element, el) = id(d, i), let (length, ll) = self.size(d, i + el), let length, length < 1 << 31 {
+            let body = i + el + ll
+            if element == clusterID { return nil }
+            if element == seekHeadID {
+                for (target, position) in seeks(d, from: body, to: min(body + Int(length), d.count)) where target == cuesID {
+                    return Int64(segmentStart) + Int64(position)
+                }
+                return nil
+            }
+            i = body + Int(length)
+        }
+        return nil
+    }
+
+    /// The SeekHead's entries: an element's ID and where it is.
+    private static func seeks(_ d: [UInt8], from: Int, to end: Int) -> [(UInt32, UInt64)] {
+        var found: [(UInt32, UInt64)] = []
+        var j = from
+        while j < end, let (element, el) = id(d, j), let (length, ll) = size(d, j + el), let length, length < 1 << 16 {
+            let body = j + el + ll
+            if element == seekID {
+                var target: UInt32?, position: UInt64?
+                var k = body
+                let stop = min(body + Int(length), d.count)
+                while k < stop, let (child, cl) = id(d, k), let (size, sl) = self.size(d, k + cl), let size, size <= 8 {
+                    let value = k + cl + sl
+                    guard value + Int(size) <= d.count else { break }
+                    if child == seekTargetID { target = d[value..<value + Int(size)].reduce(0) { $0 << 8 | UInt32($1) } }
+                    if child == seekPositionID { position = d[value..<value + Int(size)].reduce(0) { $0 << 8 | UInt64($1) } }
+                    k = value + Int(size)
+                }
+                if let target, let position { found.append((target, position)) }
+            }
+            j = body + Int(length)
+        }
+        return found
+    }
+
+    /// The whole length (header and contents) of the element at the start.
+    static func elementLength(_ d: [UInt8]) -> Int64? {
+        guard let (element, el) = id(d, 0), element == cuesID, let (contents, sl) = self.size(d, el), let contents else { return nil }
+        return Int64(el + sl) + Int64(contents)
+    }
+
+    /// An element ID (1-4 bytes, its length marker kept) and its length.
+    private static func id(_ d: [UInt8], _ i: Int) -> (UInt32, Int)? {
+        guard i >= 0, i < d.count, d[i] != 0 else { return nil }
+        let length = d[i].leadingZeroBitCount + 1
+        guard length <= 4, i + length <= d.count else { return nil }
+        return (d[i..<i + length].reduce(0) { $0 << 8 | UInt32($1) }, length)
+    }
+
+    /// A size (1-8 bytes, its marker removed; nil: unknown) and its length.
+    private static func size(_ d: [UInt8], _ i: Int) -> (UInt64?, Int)? {
+        guard i >= 0, i < d.count, d[i] != 0 else { return nil }
+        let length = d[i].leadingZeroBitCount + 1
+        guard i + length <= d.count else { return nil }
+        let marker = UInt8(0x80) >> (length - 1)
+        var value = UInt64(d[i] & (marker &- 1))
+        var unknown = value == UInt64(marker &- 1)
+        for k in 1..<length {
+            value = value << 8 | UInt64(d[i + k])
+            unknown = unknown && d[i + k] == 0xFF
+        }
+        return (unknown ? nil : value, length)
+    }
+}

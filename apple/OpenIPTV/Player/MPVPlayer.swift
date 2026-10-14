@@ -4,6 +4,8 @@ import UIKit
 #if os(iOS)
 import Accelerate
 import AVFoundation
+import CoreText
+import Metal
 #endif
 
 /// CAMetalLayer that ignores MoltenVK's 1×1 drawable resize, which otherwise
@@ -285,6 +287,13 @@ final class MPVPlayer: @unchecked Sendable {
     private func apply(_ readahead: Readahead, _ mpv: OpaquePointer, opening: Bool = true) {
         func set(_ name: String, _ value: String) { mpv_set_property_string(mpv, name, value) }
         func ahead(_ seconds: Int) {
+            var seconds = seconds
+            #if DEBUG
+            // UI tests (OPENREEL_DEBUG_READAHEAD=seconds): a short read-ahead,
+            // so a small test film isn't all downloaded at once (a real
+            // film's end, and its index there, aren't).
+            if let cap = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_READAHEAD"].flatMap(Int.init) { seconds = min(seconds, cap) }
+            #endif
             set("demuxer-readahead-secs", String(seconds))
             set("cache-secs", String(seconds))
         }
@@ -820,6 +829,7 @@ extension MPVPlayer {
     /// kinds of layer, and an app in the background can't use the GPU.
     /// `drawn`: the first frame is in the layer.
     func drawFrames(into layer: AVSampleBufferDisplayLayer, drawn: @escaping @Sendable () -> Void) {
+        let snapshot = Self.snapshot(self.layer)
         queue.async { [self] in
             guard let mpv, frameTap == nil else { return }
             // The picture's shape, at most 1280 wide: plenty for the
@@ -832,6 +842,11 @@ extension MPVPlayer {
             let h = max(2, Int((Double(w) * Double(height) / Double(width)).rounded()) & ~1)
             guard let tap = FrameTap(mpv: mpv, layer: layer, width: w, height: h, drawn: drawn) else { return }
             frameTap = tap
+            // A still of the picture in the window's layer at once: iOS
+            // grows the window out of it while libmpv switches to drawing
+            // for the window (decoding again from the last keyframe, a few
+            // hundred ms for a 4K film, which the window waited for).
+            if let snapshot { tap.showStill(snapshot, videoWidth: Int(width), videoHeight: Int(height)) }
             #if DEBUG
             // What libmpv does while it switches (Picture in Picture froze
             // sound and picture for a moment on the user's iPhone).
@@ -855,6 +870,11 @@ extension MPVPlayer {
         }
     }
 
+    #if DEBUG
+    /// Whether the window's first frame was a still (UI tests).
+    var windowStartedFromStill: Bool { queue.sync { frameTap?.stillShown ?? false } }
+    #endif
+
     /// Back on screen from Picture in Picture (the screen's layer is in a
     /// window again): the GPU draws it, as before.
     func drawOnScreen() {
@@ -876,6 +896,27 @@ extension MPVPlayer {
         }
     }
 }
+
+#if os(iOS)
+extension MPVPlayer {
+    /// What the player's view shows now, from the screen (libmpv's own
+    /// screenshot goes through its GPU output, which crashed simulators).
+    fileprivate static func snapshot(_ layer: CALayer) -> CGImage? {
+        guard let view = layer.superlayer?.delegate as? UIView, view.window != nil,
+              view.bounds.width > 0, view.bounds.height > 0 else { return nil }
+        #if DEBUG
+        let started = CFAbsoluteTimeGetCurrent()
+        defer { NSLog("%@", String(format: "PERF pip still %.0f ms", (CFAbsoluteTimeGetCurrent() - started) * 1000)) }
+        #endif
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = true
+        return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
+        }.cgImage
+    }
+}
+#endif
 
 /// Draws libmpv's picture into frames for an AVSampleBufferDisplayLayer, on
 /// its own thread, each when libmpv says it's due. libmpv draws RGB; the
@@ -973,6 +1014,35 @@ private final class FrameTap: @unchecked Sendable {
             }
         }
         free(pixels)
+        deliver(rendered: rendered)
+    }
+
+    /// A still of the picture (the player's view, from the screen): its
+    /// picture, between any black bars, at the window's size, shown at
+    /// once until libmpv's own frames come.
+    func showStill(_ image: CGImage, videoWidth: Int, videoHeight: Int) {
+        queue.sync {
+            guard lock.withLock({ !closed }), count == 0, videoWidth > 0, videoHeight > 0 else { return }
+            let screen = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+            let picture = AVMakeRect(aspectRatio: CGSize(width: videoWidth, height: videoHeight), insideRect: screen).integral
+            guard let cropped = image.cropping(to: picture), let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: rgb, width: width, height: height, bitsPerComponent: 8, bytesPerRow: rgbStride, space: space,
+                                          bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)
+            else { return }
+            // Memory order B, G, R, (unused), as libmpv draws.
+            context.interpolationQuality = .medium
+            context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
+            stillShown = true
+            deliver(rendered: 0)
+        }
+    }
+
+    /// Whether the first frame in the window was a still (UI tests).
+    private(set) var stillShown = false
+
+    /// The picture in `rgb`, converted and put in the window's layer.
+    private func deliver(rendered: Int32) {
+        guard let pool else { return }
         var made: CVPixelBuffer?
         let pooled = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made)
         #if DEBUG
@@ -1097,5 +1167,26 @@ final class MPVHostView: UIView {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
         }
         lastSize = area.size
+    }
+}
+
+extension MPVPlayer {
+    /// Warms, once at launch and off the main thread, what the first
+    /// subtitles need on a device: CoreText's fonts (libass looks up its
+    /// font the first time it draws text) and the Metal shader compiler
+    /// (libmpv draws subtitles with a shader made the first time they
+    /// show). Both fell on the picture, which stopped for a moment the
+    /// first time subtitles were picked.
+    static func warmUp() {
+        DispatchQueue.global(qos: .utility).async {
+            for family in ["Helvetica", UIFont.systemFont(ofSize: 17).familyName] {
+                let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontFamilyNameAttribute: family] as CFDictionary)
+                _ = CTFontDescriptorCreateMatchingFontDescriptors(descriptor, nil)
+                let font = CTFontCreateWithName(family as CFString, 24, nil)
+                _ = CTFontCreateForString(font, "Aa" as CFString, CFRange(location: 0, length: 2))
+            }
+            let source = "#include <metal_stdlib>\nusing namespace metal;\nfragment half4 warm() { return half4(0.0h); }"
+            _ = try? MTLCreateSystemDefaultDevice()?.makeLibrary(source: source, options: nil)
+        }
     }
 }
