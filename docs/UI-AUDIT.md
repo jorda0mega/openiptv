@@ -152,8 +152,9 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
 
 - Continue Watching's "›" (Apple's opens the whole list): no picture of
   that page anywhere reachable (Mobbin iPhone screens and flows, Mobbin
-  web, Appllama; REA can't press anything in the Mac TV app without
-  accessibility permission; the simulator has no TV app). Not invented
+  web, Appllama; the simulator has no TV app; REA reads the Mac TV app's
+  accessibility tree (14 October), but its sidebar ignores AXPress, and
+  that account has no subscription or watch history). Not invented
   (the user: no design liberties); needs the user's go for a design of
   ours, or a screenshot from their iPhone.
 - The PiP hand-over's last seek (the video output switch): gone only if
