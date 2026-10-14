@@ -515,6 +515,36 @@ final class PlayerLookTests: XCTestCase {
                       "not on the show's page")
     }
 
+    /// Continue Watching in the player, as in the Apple TV app: the other
+    /// titles under a pill; one tapped plays in the same player screen (the
+    /// page behind never shows).
+    func testContinueWatchingInPlayer() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "60"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm()
+        controlsUp()
+        app.buttons["Continue Watching"].firstMatch.tap()
+        sleep(1)
+        shot("continue watching")
+        let episode = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show' AND label CONTAINS 'Case 3'")).firstMatch
+        XCTAssertTrue(episode.exists, "no episode in the player's Continue Watching")
+        episode.tap()
+        // The player's readout is there the whole time: the screen stayed.
+        var gone = 0
+        for _ in 0..<15 {
+            if !app.staticTexts["debug-position"].exists { gone += 1 }
+            usleep(200_000)
+        }
+        XCTAssertEqual(gone, 0, "the player screen went while the title changed")
+        sleep(2)
+        shot("episode playing")
+        let state = playerState()
+        XCTAssertEqual(state?.seconds ?? 0, 63, accuracy: 6, "not the episode from its resume point: \(String(describing: state))")
+        XCTAssertEqual(state?.playing, true, "the episode isn't playing")
+    }
+
     /// Regression: with the film playing, the subtitles menu stayed open
     /// while the controls hid under it, and the player closed with them.
     func testSubtitlesMenuKeepsControls() {

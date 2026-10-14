@@ -31,6 +31,7 @@ flickers or jumps. Each item below has a UI test that fails without it.
 | Menus while playing | The controls stay while a menu is open | The controls hid after 4 s under an open menu, and the player closed with them (the menu's tap hook never fired) | Menus say they are opening through their button style (`MenuPress`) | `testSubtitlesMenuKeepsControls`, `testPlaybackSpeed` |
 | Info panel (portrait) | The panel's text on near-black | Text on the picture dimmed to 30% | The picture dimmed to 18% under the panel | screenshot in `testPlayerLook` |
 | Info for an episode | From Beginning and Go to Show side by side | From Beginning alone | Go to Show: the player closes on the show's page (opened on Home unless that page is under the player) | `testGoToShow` |
+| Continue Watching in the player (iPhone) | A pill beside Info: the other titles as a list (landscape: a row of pictures); one tapped plays in the player | Info alone | The same pill and list, from Home's Continue Watching; the chosen title plays in the same player screen (a fresh player view, no flash of the page behind) | `testContinueWatchingInPlayer` |
 | Speed on Apple TV | A speed button beside subtitles and audio | None | A third round button, its menu like the audio and subtitle menus | `testPlaybackSpeed` (tvOS) |
 | Picture in Picture | The film moves into the window at once | A second stream had to start (5 s on a real server) | The same playback's frames go to the window | `testPictureInPicture` (its picture check runs on devices only: simulators draw this window black for every app) |
 
@@ -58,7 +59,10 @@ their picture's colours.
 
 ## Still open
 
-- The player's pills: the Apple TV app also has InSight and Continue Watching
-  (ours: Info).
-- Live TV has no speed (a live channel can't run ahead of itself).
 - Picture in Picture's picture on a real device (the simulator can't show it).
+
+## Not planned
+
+- InSight (who is on screen, the song playing): Emby has no scene-by-scene
+  cast or music data to show.
+- Speed in Live TV: a live channel can't run ahead of itself.

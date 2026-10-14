@@ -25,7 +25,7 @@ struct PlayerScreen: View {
         Group {
             switch item {
             case let .live(channels, index): LivePlayerView(channels: channels, index: index)
-            case let .vod(playback): MoviePlayerView(playback: playback)
+            case let .vod(playback): VODPlayerHost(playback: playback)
             }
         }
         // In and out with the same quick fade, as in the TV app (it slid up
@@ -44,6 +44,18 @@ struct PlayerScreen: View {
         .onAppear { PlayerOrientation.shared.playerAppeared() }
         .onDisappear { PlayerOrientation.shared.playerDisappeared() }
         #endif
+    }
+}
+
+/// A film or episode, and then any title chosen from Continue Watching in
+/// the player: the player screen stays up while the title changes, with a
+/// fresh player view for each.
+private struct VODPlayerHost: View {
+    @State var playback: EmbyPlayback
+
+    var body: some View {
+        MoviePlayerView(playback: playback, switchTo: { playback = $0 })
+            .id(playback.itemId)
     }
 }
 
@@ -210,6 +222,8 @@ struct MoviePlayerView: View {
     @Environment(\.closePlayer) private var closePlayer
 
     let playback: EmbyPlayback
+    /// Plays another title in this player screen (Continue Watching).
+    var switchTo: ((EmbyPlayback) -> Void)? = nil
     @State private var player: MPVPlayer?
     @State private var position: Double = 0
     @State private var duration: Double?
@@ -237,6 +251,9 @@ struct MoviePlayerView: View {
     /// The Info panel, and the picture filling the screen (cropped) rather
     /// than fitting it.
     @State private var showInfo = false
+    /// The player's Continue Watching open, and the title being started from it.
+    @State private var showContinue = false
+    @State private var switching: String?
     @State private var filled = false
     @State private var muted = false
     /// The film went on in Picture in Picture: closing here isn't stopping.
@@ -348,7 +365,9 @@ struct MoviePlayerView: View {
             Color.clear
                 .contentShape(Rectangle())
                 .ignoresSafeArea()
-                .onTapGesture { if showInfo { toggleInfo() } else { toggleControls() } }
+                .onTapGesture {
+                    if showInfo { toggleInfo() } else if showContinue { toggleContinue() } else { toggleControls() }
+                }
                 .accessibilityHidden(true)
             #endif
             // With the controls up, their play button turns into the spinner.
@@ -433,8 +452,9 @@ struct MoviePlayerView: View {
         // its "S1:E3 · Name" over the show.
         PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
                      paused: paused, busy: (buffering || !started) && error == nil, ready: started,
-                     topActions: pictureActions, pills: [PlayerAction(title: "Info") { toggleInfo() }],
-                     selectedPill: showInfo ? "Info" : nil, panel: showInfo ? infoPanel : nil,
+                     topActions: pictureActions, pills: pills,
+                     selectedPill: showInfo ? "Info" : showContinue ? "Continue Watching" : nil,
+                     panel: showInfo ? infoPanel : showContinue ? continuePanel : nil,
                      muted: muted, toggleMute: {
                          muted.toggle()
                          player?.setMuted(muted)
@@ -476,8 +496,69 @@ struct MoviePlayerView: View {
                                badges: badges, actions: actions)
     }
 
+    /// Info, and Continue Watching when it has other titles, as in the
+    /// Apple TV app.
+    private var pills: [PlayerAction] {
+        var pills = [PlayerAction(title: "Info") { toggleInfo() }]
+        if !otherTitles.isEmpty { pills.append(PlayerAction(title: "Continue Watching") { toggleContinue() }) }
+        return pills
+    }
+
+    /// Home's Continue Watching, but this title.
+    private var otherTitles: [Card] {
+        guard switchTo != nil else { return [] }
+        let row = model.rows.first { $0.title == "Continue Watching" }?.cards ?? []
+        return row.filter { $0.id != playback.itemId && $0.episodeId != playback.itemId && $0.id != playback.seriesId }
+    }
+
+    private var continuePanel: PlayerInfoPanel {
+        PlayerInfoPanel(title: "Continue Watching", meta: "", cards: otherTitles.map { card in
+            PlayerCard(id: card.id, title: card.title, subtitle: card.subtitle, images: card.images,
+                       loading: switching == card.id) { playInstead(card) }
+        })
+    }
+
+    private func toggleContinue() {
+        withAnimation(.snappy(duration: 0.3)) {
+            showInfo = false
+            showContinue.toggle()
+        }
+        // Open: the controls stay until it's closed.
+        showControls(autoHide: !showContinue)
+    }
+
+    /// Another title from Continue Watching, in this player screen: this
+    /// one's stop goes on the pages behind first (as on closing), then a
+    /// fresh player view takes the new one.
+    private func playInstead(_ card: Card) {
+        guard let switchTo, switching == nil else { return }
+        switching = card.id
+        Task {
+            defer { switching = nil }
+            do {
+                let next = if let episode = card.episodeId {
+                    try await model.playback(itemId: episode, kind: "Episode")
+                } else {
+                    try await model.playback(itemId: card.id, kind: card.kind)
+                }
+                if closedAt == nil {
+                    closedAt = position
+                    var quiet = Transaction(animation: nil)
+                    quiet.disablesAnimations = true
+                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
+                }
+                switchTo(next)
+            } catch {
+                note("Couldn't play \(card.title)")
+            }
+        }
+    }
+
     private func toggleInfo() {
-        withAnimation(.snappy(duration: 0.3)) { showInfo.toggle() }
+        withAnimation(.snappy(duration: 0.3)) {
+            showContinue = false
+            showInfo.toggle()
+        }
         // Open: the controls stay until it's closed.
         showControls(autoHide: !showInfo)
     }

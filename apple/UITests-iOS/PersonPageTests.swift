@@ -105,13 +105,14 @@ final class PersonPageTests: XCTestCase {
     func testMainButtonKeepsWidthWhileStarting() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         openForensicFiles()
-        let main = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continue'")).firstMatch
+        // "Continue S2 E3" (not the player's Continue Watching pill).
+        let main = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continue S'")).firstMatch
         XCTAssertTrue(main.waitForExistence(timeout: 5), "no Continue button")
         let before = main.frame.width
         configure(server, ["latency": "3"])
         defer { configure(server, ["reset": "1"]) }
         main.tap()
-        let during = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continue'")).firstMatch
+        let during = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continue S'")).firstMatch
         XCTAssertTrue(during.exists, "the button's label changed while starting")
         XCTAssertEqual(during.frame.width, before, accuracy: 0.5, "the button changed width while starting")
         shot("starting")

@@ -375,6 +375,18 @@ struct PlayerInfoPanel {
     var meta: String
     var badges: [String] = []
     var actions: [PlayerAction] = []
+    /// Continue Watching's titles, in place of the rest.
+    var cards: [PlayerCard] = []
+}
+
+/// A title in the player's Continue Watching.
+struct PlayerCard: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String?
+    let images: [CardImage]
+    var loading = false
+    let action: () -> Void
 }
 
 #if os(iOS)
@@ -386,6 +398,76 @@ struct PlayerInfoPanelView: View {
     var compact = false
 
     var body: some View {
+        if panel.cards.isEmpty { details } else { cards }
+    }
+
+    /// As in the Apple TV app: a list of titles (landscape: a row of
+    /// pictures), each played on a tap.
+    @ViewBuilder private var cards: some View {
+        if compact {
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(panel.cards) { card in
+                        Button(action: card.action) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                thumbnail(card, width: 176)
+                                caption(card)
+                            }
+                            .frame(width: 176, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(label(card))
+                        .accessibilityAddTraits(.isButton)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(panel.cards) { card in
+                    Button(action: card.action) {
+                        HStack(spacing: 12) {
+                            thumbnail(card, width: 96)
+                            caption(card)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 8)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(label(card))
+                    .accessibilityAddTraits(.isButton)
+                    if card.id != panel.cards.last?.id {
+                        Divider().overlay(.white.opacity(0.15)).padding(.leading, 108)
+                    }
+                }
+            }
+        }
+    }
+
+    private func thumbnail(_ card: PlayerCard, width: CGFloat) -> some View {
+        CoverImage(images: card.images, title: card.title)
+            .frame(width: width, height: width * 9 / 16)
+            .overlay { if card.loading { ProgressView().tint(.white) } }
+            .clipShape(.rect(cornerRadius: 8))
+    }
+
+    private func caption(_ card: PlayerCard) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(card.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+            if let subtitle = card.subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+            }
+        }
+    }
+
+    private func label(_ card: PlayerCard) -> String {
+        [card.title, card.subtitle].compactMap(\.self).joined(separator: ", ")
+    }
+
+    private var details: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(panel.title).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(1)
             if let overview = panel.overview, !overview.isEmpty {
