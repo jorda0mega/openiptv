@@ -368,7 +368,9 @@ final class RemoteFocusTests: XCTestCase {
         app.terminate()
         app.launchArguments = []
         app.launch()
-        sleep(6)
+        // Home built (a fresh simulator has nothing saved).
+        XCTAssertTrue(app.staticTexts["My List"].waitForExistence(timeout: 30), "no My List row on Home")
+        sleep(2)
         // Down past the hero and Continue Watching: the next row is My List.
         press(.down, "to Play")
         press(.down, "to Continue Watching")
