@@ -19,6 +19,9 @@ final class AppModel {
     var showRequest: ShowRoute?
     /// The show whose page is on screen, if any.
     var showOnScreen: String?
+    /// The same for a film ("Details" in the player's Continue Watching).
+    var movieRequest: MovieRoute?
+    var movieOnScreen: String?
 
     // MARK: Home (Emby)
 

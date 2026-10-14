@@ -109,6 +109,11 @@ struct HomeView: View {
             model.showRequest = nil
             if model.showOnScreen != request.id { path.append(request) }
         }
+        .onChange(of: model.movieRequest) { _, request in
+            guard let request else { return }
+            model.movieRequest = nil
+            if model.movieOnScreen != request.id { path.append(request) }
+        }
         .task { await model.loadHome(cardWidth: pixelWidth) }
         .task { await model.loadMyList(cardWidth: pixelWidth) }
     }

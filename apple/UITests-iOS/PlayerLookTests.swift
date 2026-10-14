@@ -564,6 +564,9 @@ final class PlayerLookTests: XCTestCase {
         shot("continue watching")
         let episode = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show' AND label CONTAINS 'Case 3'")).firstMatch
         XCTAssertTrue(episode.exists, "no episode in the player's Continue Watching")
+        // As in the Apple TV app: "Continue · S2, E3" and "•••" on the row.
+        XCTAssertTrue(episode.label.contains("Continue · S2, E3"), "not \"Continue · S2, E3\": \(episode.label)")
+        XCTAssertTrue(app.buttons["More"].firstMatch.exists, "no \"•••\" on the rows")
         episode.tap()
         // The player's readout is there the whole time: the screen stayed.
         var gone = 0
@@ -630,6 +633,50 @@ final class PlayerLookTests: XCTestCase {
         sleep(2)
         shot("next episode playing")
         XCTAssertEqual(playerState()?.playing, true, "the next episode isn't playing")
+    }
+
+    /// Sideways, as in the Apple TV app: with Continue Watching open the
+    /// play controls go, and the titles are pictures along the bottom.
+    func testContinueWatchingInLandscape() throws {
+        // iPhone: an iPad keeps its full layout when turned.
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone's sideways layout")
+        openFilm()
+        controlsUp()
+        app.buttons["Rotate to landscape"].firstMatch.tap()
+        sleep(3)
+        controlsUp()
+        app.buttons["Continue Watching"].firstMatch.tap()
+        sleep(1)
+        shot("continue watching landscape")
+        XCTAssertGreaterThan(app.frame.width, app.frame.height, "not sideways")
+        // ("Play" would also find the film page's, under the player.)
+        XCTAssertFalse(app.buttons["Back 10 seconds"].firstMatch.exists, "the play controls stayed with the panel open")
+        let card = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Case 3'")).firstMatch
+        XCTAssertTrue(card.exists, "no titles in Continue Watching")
+        XCTAssertEqual(card.frame.width, 202, accuracy: 1, "not Apple's picture card: \(card.frame)")
+        app.buttons["Rotate to portrait"].firstMatch.tap()
+    }
+
+    /// Sideways with Info open, everything stays on the screen. Regression
+    /// (delegated audit): Close was pushed 66 points above the top.
+    func testInfoInLandscapeKeepsClose() throws {
+        // iPhone: an iPad keeps its full layout when turned.
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone's sideways layout")
+        openFilm()
+        controlsUp()
+        app.buttons["Pause"].firstMatch.tap()
+        app.buttons["Rotate to landscape"].firstMatch.tap()
+        sleep(3)
+        controlsUp()
+        app.buttons["Info"].firstMatch.tap()
+        sleep(1)
+        shot("info landscape")
+        let screen = app.frame
+        let close = app.buttons["Close player"].firstMatch.frame
+        let start = app.buttons["From Beginning"].firstMatch.frame
+        XCTAssertGreaterThanOrEqual(close.minY, 0, "Close is off the top: \(close) on \(screen)")
+        XCTAssertLessThanOrEqual(start.maxY, screen.maxY, "From Beginning is off the bottom: \(start) on \(screen)")
+        app.buttons["Rotate to portrait"].firstMatch.tap()
     }
 
     /// Regression: with the film playing, the subtitles menu stayed open

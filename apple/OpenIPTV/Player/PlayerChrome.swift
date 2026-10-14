@@ -149,17 +149,15 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                 }
             }
             if let panel, landscape {
-                // Landscape (little height): the play controls beside the
-                // pills and the panel, so nothing goes off the screen.
-                HStack(alignment: .center, spacing: 24) {
-                    center.frame(maxWidth: .infinity)
-                    VStack(alignment: .leading, spacing: 0) {
-                        pillsRow
-                        PlayerInfoPanelView(panel: panel, compact: true).padding(.top, 12)
-                    }
-                    .frame(maxWidth: 440)
+                // Landscape, as in the Apple TV app: the play controls go
+                // while a panel is open; the pills and the panel along the
+                // bottom, from the left.
+                VStack(alignment: .leading, spacing: 0) {
+                    Spacer(minLength: 0)
+                    pillsRow
+                    PlayerInfoPanelView(panel: panel, compact: true).padding(.top, 12)
                 }
-                .frame(maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 .transition(.opacity)
             } else {
                 portraitBody
@@ -388,6 +386,10 @@ struct PlayerCard: Identifiable {
     var loading = false
     /// For VoiceOver only (an episode's name).
     var spoken: String? = nil
+    /// Landscape: the line on the picture ("S1, E2 · 26m").
+    var line: String? = nil
+    /// "•••": the title's page.
+    var more: [PlayerAction] = []
     let action: () -> Void
 }
 
@@ -403,24 +405,23 @@ struct PlayerInfoPanelView: View {
         if panel.cards.isEmpty { details } else { cards }
     }
 
-    /// As in the Apple TV app: a list of titles (landscape: a row of
-    /// pictures), each played on a tap.
+    /// As in the Apple TV app (measured at 3x from it): upright, a list
+    /// of 86 × 48 pictures with the title and "Continue · S1, E1", "•••"
+    /// on each row and hairlines between; sideways, a row of 202 × 147
+    /// pictures with "S1, E2 · 26m" and "•••" on them. A tap plays it.
     @ViewBuilder private var cards: some View {
         if compact {
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: 20) {
                     ForEach(panel.cards) { card in
-                        Button(action: card.action) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                thumbnail(card, width: 176)
-                                caption(card)
-                            }
-                            .frame(width: 176, alignment: .leading)
+                        ZStack(alignment: .bottomTrailing) {
+                            Button(action: card.action) { pictureCard(card) }
+                                .buttonStyle(.plain)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(label(card))
+                                .accessibilityAddTraits(.isButton)
+                            more(card)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(label(card))
-                        .accessibilityAddTraits(.isButton)
                     }
                 }
             }
@@ -428,39 +429,81 @@ struct PlayerInfoPanelView: View {
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(panel.cards) { card in
-                    Button(action: card.action) {
-                        HStack(spacing: 12) {
-                            thumbnail(card, width: 96)
-                            caption(card)
-                            Spacer(minLength: 0)
+                    HStack(spacing: 0) {
+                        Button(action: card.action) {
+                            HStack(spacing: 12) {
+                                thumbnail(card)
+                                caption(card)
+                                Spacer(minLength: 8)
+                            }
+                            .padding(.vertical, 10)
+                            .contentShape(.rect)
                         }
-                        .padding(.vertical, 8)
-                        .contentShape(.rect)
+                        .buttonStyle(.plain)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(label(card))
+                        .accessibilityAddTraits(.isButton)
+                        more(card)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(label(card))
-                    .accessibilityAddTraits(.isButton)
                     if card.id != panel.cards.last?.id {
-                        Divider().overlay(.white.opacity(0.15)).padding(.leading, 108)
+                        Rectangle().fill(Color(white: 0.2)).frame(height: 0.5).padding(.leading, 98)
                     }
                 }
             }
         }
     }
 
-    private func thumbnail(_ card: PlayerCard, width: CGFloat) -> some View {
+    private func thumbnail(_ card: PlayerCard) -> some View {
         CoverImage(images: card.images, title: card.title)
-            .frame(width: width, height: width * 9 / 16)
+            .frame(width: 86, height: 48)
             .overlay { if card.loading { ProgressView().tint(.white) } }
-            .clipShape(.rect(cornerRadius: 8))
+            .clipShape(.rect(cornerRadius: 7))
+    }
+
+    private func pictureCard(_ card: PlayerCard) -> some View {
+        CoverImage(images: card.images, title: card.title)
+            .frame(width: 202, height: 147)
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom).frame(height: 48)
+            }
+            .overlay(alignment: .bottomLeading) {
+                HStack(spacing: 5) {
+                    Image(systemName: "play.fill").font(.system(size: 9, weight: .semibold))
+                    Text(card.line ?? "").font(.footnote).lineLimit(1)
+                }
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.leading, 10)
+                .padding(.trailing, 40)
+                .padding(.bottom, 11)
+            }
+            .overlay { if card.loading { ProgressView().tint(.white) } }
+            .clipShape(.rect(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+    }
+
+    /// "•••": the title's page.
+    @ViewBuilder private func more(_ card: PlayerCard) -> some View {
+        if !card.more.isEmpty {
+            Menu {
+                ForEach(card.more) { action in
+                    Button(action.title, systemImage: action.systemImage ?? "info.circle", action: action.action)
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color(white: 0.6))
+                    .frame(width: 40, height: 36)
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel("More")
+        }
     }
 
     private func caption(_ card: PlayerCard) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(card.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+            Text(card.title).font(.body).foregroundStyle(.white).lineLimit(1)
             if let subtitle = card.subtitle {
-                Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                Text(subtitle).font(.subheadline).foregroundStyle(Color(white: 0.56)).lineLimit(1)
             }
         }
     }

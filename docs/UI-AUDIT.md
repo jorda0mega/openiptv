@@ -73,6 +73,9 @@ Measured from a full-size Mobbin screenshot of the Apple TV app's Home
 |---|---|---|---|---|
 | Continue Watching card | 240 × 170, 12-point corners, a hairline light edge; the picture runs to the bottom, about 35% darker there; on it "▶ ━ S1, E1 · 33m" (time left) and "•••"; no title (the picture carries it) | The title and the line on a frosted band with a hard top edge ("glossy border"), 14-point corners | Apple's: the fade, the edge, 12-point corners, "S1, E1 · 33m" (a film: "1h 2m"), "•••" (Go to Show / Details); the episode's name stays for VoiceOver | `testHomeCardSizes` |
 | Subtitles in portrait | On the picture, at the picture's scale | Huge, under the picture, off the screen | Sized by the picture and kept on it | `testSubtitlesOnPictureInPortrait` |
+| The player's Continue Watching, upright ([reference](https://mobbin.com/screens/9bd9cdbe-5b3a-4432-820e-5a0bc60d1442)) | 86 × 48 pictures (7-point corners), the title (17 pt) and "Continue · S1, E1" / "Next · S1, E2" (15 pt, grey), "•••" on each row, hairlines from the text | 96-point pictures, a bold 15-point title, the card's line, no "•••" | Apple's sizes, wording and "•••" (Go to Show / Details) | `testContinueWatchingInPlayer` |
+| The same, sideways ([reference](https://mobbin.com/screens/e6bc47d3-1449-41d7-9645-fb6be489b8e0)) | No play controls while a panel is open; the pills, then 202 × 147 pictures, 20 apart, with "S1, E2 · 26m" and "•••" on them | Play controls beside the pills; small pictures with text under them | Apple's layout | `testContinueWatchingInLandscape` |
+| Picture in Picture hand-over | The picture moves into the window without a stop | Sound and picture froze for a moment (two seeks: the decoder and the output switched) | The decoder stays: one seek left | `testPictureInPicture` (event log: one seek) |
 
 Test fixes found on the way: the test readouts sat over the play button (the
 tests tapped its corner and hid the controls), the Live TV empty-state test
@@ -89,6 +92,38 @@ Apple's card sizes, MORE under long stories, the mute button, landscape and
 pause keeping the picture's size, smaller player buttons, and heroes ending in
 their picture's colours.
 
+## Delegated audit (Astra, code of 12 October 16:38)
+
+Report: `/tmp/openiptv/astra-ui1/REPORT.md` (delivered 14 October). Status
+in today's code:
+
+| Finding | Status |
+|---|---|
+| Resume progress moved the title's buttons up 28 points | Fixed: the bar is drawn under the button without changing the layout |
+| A show opened scrolled down to the next episode | Fixed: only for an episode route, and never after the viewer scrolls |
+| Cold Home: Continue Watching landed, then moved below the hero | Fixed (`22016f2`: a hero-sized placeholder) |
+| Search results moved about 104 points as suggestions changed | Fixed (`02a3dc3`, `testResultsStayPutWhenServerAnswers`) |
+| Search went blank while pending | Fixed ("Searching…") |
+| Apple TV rows moved vertically on a sideways focus move | Not checked again yet |
+| Glass buttons larger than asked; the player unlike the reference | Fixed (`6c6245a`, `testPlayerButtonSizes`) |
+| Apple TV hero hid the next row; dead cast buttons | Fixed |
+| Settings grouped Infuse-style; poster-column search; Live copy | Not done: not the Apple TV app's design (the user: 1:1) |
+
+## Delegated audit, round 2 (Astra, `54f31e5`, 12 October 17:53)
+
+Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
+
+| Finding | Status |
+|---|---|
+| Landscape Info pushed Close 66 points above the top | Layout replaced on 14 October (no play controls with a panel open, as in the Apple TV app); `testInfoInLandscapeKeepsClose` checks it |
+| Remembered English subtitles over English audio came back Off | Fixed later (`testPickedSubtitlesStay`, US film) |
+| Search blank while the server's part is pending | Fixed ("Searching…" over the list) |
+| Continue Watching swapping a show's episode while Home is visible | Fixed: a card's identity includes its episode |
+| An old account's slow Home after sign-out | Fixed (`testSignOutWhileHomeLoads`) |
+| A Home built late waits for the next moment | By design: the user asked for changes only at moments (tab, pull, long away) |
+| One paused rotation kept a portrait-sized picture once | Not reproduced since (`testPlayerLook` turns while paused) |
+| Player times 11 → 13-15 pt; poster-column search; Apple TV shelf captions | Times are Apple's 11 pt (measured); search stays a list (the user); the Apple TV focused-poster caption exists (`d1a424b`) |
+
 ## Kept different on purpose (the user's decisions)
 
 - The show page is one list of every episode with season headers and a filter
@@ -98,11 +133,11 @@ their picture's colours.
 
 ## Still open
 
-- The PiP hand-over still pauses briefly (the user, on device); waiting on
-  whether the sound stops too.
 - Row titles: Apple's have a "›" that opens the whole row; ours open nothing.
-- The player's Continue Watching list: Apple writes "Continue · S1, E1" /
-  "Next · S1, E2" with "…" on each row; ours shows the card's line.
+- The PiP hand-over's last seek (the video output switch): gone only if
+  the picture is always drawn into the window's kind of layer.
+- The Info panel sideways: Apple shows a still beside the text and the
+  buttons at the right; ours has the text and buttons under the pills.
 - Apple's end-of-title post-play page (needs a reference for an episode).
 
 - Skip Intro: Netflix and Max have it; no Apple TV app (iPhone) reference

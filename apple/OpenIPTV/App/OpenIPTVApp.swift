@@ -70,6 +70,9 @@ struct RootView: View {
                 .onChange(of: model.showRequest) { _, request in
                     if let request, model.showOnScreen != request.id { tab = .home }
                 }
+                .onChange(of: model.movieRequest) { _, request in
+                    if let request, model.movieOnScreen != request.id { tab = .home }
+                }
                 #endif
             }
         }

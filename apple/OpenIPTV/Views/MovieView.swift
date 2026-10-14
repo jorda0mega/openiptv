@@ -94,6 +94,8 @@ struct MovieView: View {
         } message: {
             Text(playError ?? "")
         }
+        .onAppear { model.movieOnScreen = route.id }
+        .onDisappear { if model.movieOnScreen == route.id { model.movieOnScreen = nil } }
     }
 
     /// "Movie · Science Fiction · Adventure"

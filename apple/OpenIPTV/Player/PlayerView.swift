@@ -515,10 +515,25 @@ struct MoviePlayerView: View {
         return row.filter { $0.id != playback.itemId && $0.episodeId != playback.itemId && $0.id != playback.seriesId }
     }
 
+    /// As in the Apple TV app: "Continue · S1, E1" for an episode under
+    /// way, "Next · S1, E2" for the next one, "Continue" for a film; "•••"
+    /// for the title's page (the player closes over it).
     private var continuePanel: PlayerInfoPanel {
         PlayerInfoPanel(title: "Continue Watching", meta: "", cards: otherTitles.map { card in
-            PlayerCard(id: card.id, title: card.title, subtitle: card.subtitle, images: card.images,
-                       loading: switching == card.id, spoken: card.episodeName) { playInstead(card) }
+            let code = card.episodeId == nil ? nil : card.subtitle?.components(separatedBy: " · ").first
+            let status = (card.progress ?? 0) > 0 || card.episodeId == nil ? "Continue" : "Next"
+            let page = card.kind == "Series"
+                ? PlayerAction(title: "Go to Show", systemImage: "info.circle") {
+                    model.showRequest = ShowRoute(id: card.id, title: card.title, episodeId: card.episodeId)
+                    close()
+                }
+                : PlayerAction(title: "Details", systemImage: "info.circle") {
+                    model.movieRequest = MovieRoute(id: card.id, title: card.title)
+                    close()
+                }
+            return PlayerCard(id: card.id, title: card.title, subtitle: [status, code].compactMap(\.self).joined(separator: " · "),
+                              images: card.images, loading: switching == card.id, spoken: card.episodeName,
+                              line: card.subtitle, more: [page]) { playInstead(card) }
         })
     }
 
