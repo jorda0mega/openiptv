@@ -27,7 +27,8 @@ final class HomeAfterLandscapeTests: XCTestCase {
             .map(\.frame).first { $0.minX >= 0 && $0.maxX <= app.frame.width }
     }
 
-    func testHeroSizeAfterLandscapePlayback() {
+    func testHeroSizeAfterLandscapePlayback() throws {
+        try XCTSkipIf(onCI, "sideways runs locally only (see onCI in PlayerLookTests)")
         app.launch()
         // Home's first build (a fresh simulator has nothing saved).
         var before = heroPlay()

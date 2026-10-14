@@ -32,6 +32,8 @@ env:
   MEDIA: /tmp/openreel-media
   # The test server's account, passed to the tests (debug builds only).
   TEST_RUNNER_DEBUG_EMBY: '{"serverURL":"http://127.0.0.1:8788","serverName":"Mock","userId":"U1","userName":"tester","accessToken":"tok"}'
+  # The tests know they're on a CI runner (slower; sideways steps skipped).
+  TEST_RUNNER_CI: "1"
 
 jobs:
   ui:
