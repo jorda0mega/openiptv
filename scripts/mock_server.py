@@ -35,7 +35,8 @@ SOCKETS = set()
 # for Continue Watching), "fail=persons" (a person's titles fail),
 # "resume_episode" (the episode a show's Continue Watching card is on),
 # "video_delay" (seconds before each video response), "hls_delay" (seconds
-# before a converted stream's playlist: a server starting a conversion).
+# before a converted stream's playlist: a server starting a conversion),
+# "video_fail" (every video request answered 503: the connection lost).
 CONTROL = {}
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -555,6 +556,12 @@ class Handler(BaseHTTPRequestHandler):
         # A test can make the video slow to answer (a remote server's round
         # trip), e.g. while a subtitle track is switched.
         time.sleep(float(CONTROL.get("video_delay", 0)))
+        if CONTROL.get("video_fail") == "1":
+            print("video failed (test)", flush=True)
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self.send_response(206 if rng else 200)
         self.send_header("Content-Type", ctype)
         self.send_header("Accept-Ranges", "bytes")

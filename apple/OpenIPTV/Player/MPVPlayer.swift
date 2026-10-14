@@ -50,14 +50,21 @@ final class MPVPlayer: @unchecked Sendable {
     let layer = MPVMetalLayer()
     var onEvent: (@MainActor (Event) -> Void)? {
         didSet {
-            // Tracks added while nobody listened (a player opened ahead):
-            // the screen that takes it over hears it now.
-            guard let handler = onEvent, stateLock.withLock({ defer { tracksUnheard = false }; return tracksUnheard }) else { return }
-            Task { @MainActor in handler(.tracksChanged) }
+            // Tracks added, or a failure, while nobody listened (a player
+            // opened ahead): the screen that takes it over hears it now.
+            guard let handler = onEvent else { return }
+            let (tracks, failure) = stateLock.withLock {
+                defer { tracksUnheard = false; failureUnheard = nil }
+                return (tracksUnheard, failureUnheard)
+            }
+            if tracks { Task { @MainActor in handler(.tracksChanged) } }
+            if let failure { Task { @MainActor in handler(.failed(failure)) } }
         }
     }
     /// A `.tracksChanged` went out with no one listening.
     private var tracksUnheard = false
+    /// A `.failed` that went out with no one listening.
+    private var failureUnheard: String?
     /// Players still closing their connection. A live stream waits for them
     /// (up to 2 s) before opening its own: many IPTV accounts allow one
     /// connection, and a second while the first is closing gets refused.
@@ -112,6 +119,9 @@ final class MPVPlayer: @unchecked Sendable {
     private var startedFlag = false
     /// The first frame is ready (a warmed-up player may already be there).
     var hasStarted: Bool { startLock.withLock { startedFlag } }
+    private var failedFlag = false
+    /// The last file failed to play (a player opened ahead can't be used).
+    var hasFailed: Bool { startLock.withLock { failedFlag } }
     private var duration: Double?
     private var buffered: Double = 0
     private var downloadSpeed: Double = 0
@@ -284,7 +294,7 @@ final class MPVPlayer: @unchecked Sendable {
             reportsWindow = !file
             openedAfter = nil
             reportedStart = false
-            startLock.withLock { startedFlag = false }
+            startLock.withLock { startedFlag = false; failedFlag = false }
             duration = nil
             mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
             mpv_set_property_string(mpv, "stream-lavf-o", file
@@ -863,6 +873,7 @@ final class MPVPlayer: @unchecked Sendable {
             guard let data = event.data else { return }
             let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
             if end.reason == MPV_END_FILE_REASON_ERROR {
+                startLock.withLock { failedFlag = true }
                 emit(.failed(String(cString: mpv_error_string(end.error))))
             } else if end.reason == MPV_END_FILE_REASON_EOF {
                 emit(.ended)
@@ -963,7 +974,10 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func emit(_ event: Event) {
         let handler = onEvent
-        if handler == nil, case .tracksChanged = event { stateLock.withLock { tracksUnheard = true } }
+        if handler == nil {
+            if case .tracksChanged = event { stateLock.withLock { tracksUnheard = true } }
+            if case .failed(let reason) = event { stateLock.withLock { failureUnheard = reason } }
+        }
         Task { @MainActor in handler?(event) }
     }
 }

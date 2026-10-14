@@ -599,6 +599,36 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertLessThan(took, 1.2, "a resumed title took \(took) s to start from a slow server")
     }
 
+    /// A player opened ahead that failed before the tap (the connection
+    /// lost meanwhile) isn't the one that plays: the title opens afresh.
+    /// Regression: the failed player was handed over, its error heard by
+    /// no one, and the spinner stayed for good (Apple TV opens one ahead
+    /// for every card the focus rests on).
+    func testFailedWarmPlayerIsNotHandedOver() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["video_fail": "1"])
+        app.launch()
+        // Continue Watching's first card: Home opens a player ahead for it.
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
+        // That player fails meanwhile; then the server answers again.
+        sleep(8)
+        configure(server, ["video_fail": "0"])
+        card.tap()
+        let readout = app.staticTexts["debug-start"].firstMatch
+        var parts: [Substring] = []
+        for _ in 0..<60 where parts.count < 4 {
+            usleep(250_000)
+            parts = readout.exists ? readout.label.split(separator: " ") : []
+        }
+        shot("after a failed warm player")
+        // "cold 0.6 at 1260": it opened afresh.
+        guard parts.count == 4 else { return XCTFail("it never started (no start readout): \(parts)") }
+        XCTAssertEqual(parts[0], "cold", "the failed player was handed over")
+    }
+
     /// Tells the test server a title was stopped at `seconds` (its resume point).
     private func stopped(_ server: URL, item: String, seconds: Double) {
         var request = URLRequest(url: server.appending(path: "emby/Sessions/Playing/Stopped"))

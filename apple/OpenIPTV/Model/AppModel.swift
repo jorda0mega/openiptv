@@ -1201,6 +1201,12 @@ final class AppModel {
     /// again").
     func takeWarm(_ itemId: String, at start: Double?) -> (MPVPlayer, EmbyPlayback)? {
         guard let warm, warm.playback.itemId == itemId else { return nil }
+        // Failed meanwhile (the connection lost, the app away): the title
+        // opens afresh. Handed over, it waited for a start that never came.
+        guard !warm.player.hasFailed else {
+            coolDown()
+            return nil
+        }
         guard abs((warm.playback.startSeconds ?? 0) - (start ?? 0)) < 2 else {
             coolDown()
             return nil
