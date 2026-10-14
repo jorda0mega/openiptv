@@ -235,6 +235,19 @@ struct EmbyPlayback: Hashable, Identifiable {
     var stills: [CardImage] = []
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
+    /// Subtitle files beside the film on the server (English and Spanish),
+    /// added to its own tracks once fetched.
+    var subtitleFiles: [SubtitleFile] = []
+    /// One of the film's own subtitle tracks as text (the server extracts
+    /// it): in time with the film, so the files can be put in time by it.
+    var subtitleReference: URL?
+
+    struct SubtitleFile: Hashable, Sendable {
+        let url: URL
+        let language: String?
+        /// "SDH", "Forced": words the player reads the kind from.
+        let title: String
+    }
 
     /// The same, starting from this second (back from Picture in Picture).
     func resuming(at seconds: Double) -> EmbyPlayback {

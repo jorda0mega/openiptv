@@ -103,8 +103,24 @@ def file_streams():
                 if kind:
                     _STREAMS.append({"Type": kind, "Index": s.get("index"),
                                      "Language": (s.get("tags") or {}).get("language"),
+                                     "Codec": s.get("codec_name"),
+                                     "IsForced": bool((s.get("disposition") or {}).get("forced")),
                                      "IsDefault": bool((s.get("disposition") or {}).get("default"))})
+        # Subtitle files beside the film, as Emby lists them after its own
+        # tracks: "language|title|path;…".
+        for n, spec in enumerate(f for f in os.environ.get("OPENIPTV_MOCK_SUBTITLE_FILES", "").split(";") if f):
+            language, title, _ = spec.split("|", 2)
+            _STREAMS.append({"Type": "Subtitle", "Index": 100 + n, "Language": language, "Title": title or None,
+                             "Codec": "srt", "IsExternal": True, "IsTextSubtitleStream": True,
+                             "IsHearingImpaired": "sdh" in title.lower(), "DeliveryMethod": "External"})
     return _STREAMS
+
+
+def subtitle_file(index):
+    """The path of subtitle file `index` (100, 101, …) beside the film."""
+    files = [f for f in os.environ.get("OPENIPTV_MOCK_SUBTITLE_FILES", "").split(";") if f]
+    n = index - 100
+    return files[n].split("|", 2)[2] if 0 <= n < len(files) else None
 
 
 _STREAMS = None
@@ -629,6 +645,21 @@ class Handler(BaseHTTPRequestHandler):
             if bif and os.path.exists(bif):
                 with open(bif, "rb") as f:
                     return self.send(f.read(), "application/octet-stream")
+            return self.send({"error": "not found"}, status=404)
+        if path.startswith("/Videos/") and "/Subtitles/" in path:
+            # /Videos/{id}/{source}/Subtitles/{index}/Stream.srt
+            index = int(path.split("/Subtitles/", 1)[1].split("/", 1)[0])
+            file = subtitle_file(index)
+            if file and os.path.exists(file):
+                with open(file, "rb") as f:
+                    return self.send(f.read(), "application/x-subrip")
+            # One of the film's own tracks, extracted as SRT (as Emby does).
+            video = os.environ.get("OPENIPTV_MOCK_VIDEO")
+            if index < 100 and video and shutil.which("ffmpeg"):
+                out = subprocess.run(["ffmpeg", "-v", "error", "-i", video, "-map", f"0:{index}", "-f", "srt", "-"],
+                                     capture_output=True).stdout
+                if out:
+                    return self.send(out, "application/x-subrip")
             return self.send({"error": "not found"}, status=404)
         if path.startswith("/Videos/") and "/stream" in path:
             print(f"{time.time():.2f} stream {path.split('/')[2]}", flush=True)

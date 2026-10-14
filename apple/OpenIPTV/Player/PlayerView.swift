@@ -405,6 +405,7 @@ struct MoviePlayerView: View {
                 debugReadout(playback.itemId, "debug-item")
                 #if os(iOS)
                 debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
+                debugReadout(player?.subtitleShift ?? "", "debug-subshift")
                 #endif
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -950,6 +951,7 @@ struct MoviePlayerView: View {
             // original actually stalls.
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
                         readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks)
+            player.addSubtitles(playback.subtitleFiles, reference: playback.subtitleReference)
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
@@ -1218,6 +1220,17 @@ struct MoviePlayerView: View {
             close()
         case let .previewShown(seconds):
             previewShown = seconds
+        case .tracksChanged:
+            // The menu lists them at once (it showed the tracks read at
+            // the start, and a file came a moment later).
+            Task {
+                guard let player else { return }
+                let fresh = await player.tracks()
+                #if DEBUG
+                NSLog("%@", "PERF tracks changed: \(fresh.count) tracks, was \(tracks.count)")
+                #endif
+                if fresh != tracks { tracks = fresh }
+            }
         case .window:
             break
         }

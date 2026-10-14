@@ -655,6 +655,10 @@ struct EmbyClient {
             .map(\.Language)
         playback.tracks = TrackChoice.plan(audio: audio, countries: item.productionLocations ?? [],
                                            key: item.seriesId ?? item.id)
+        if let source = info?.MediaSources?.first {
+            playback.subtitleFiles = subtitleFiles(item.id, source)
+            if !playback.subtitleFiles.isEmpty { playback.subtitleReference = subtitleReference(item.id, source) }
+        }
         #if DEBUG
         if audio.isEmpty { NSLog("%@", "PERF tracks planned without the server's track list") }
         #endif
@@ -664,6 +668,36 @@ struct EmbyClient {
         if playback.method != "remote file" { playback.headers += auth }
         playback.fallbackHeaders = auth
         return playback
+    }
+
+    /// The server's subtitle files beside the film, in English or Spanish
+    /// (text ones; the server serves each as SRT or ASS).
+    private func subtitleFiles(_ itemId: String, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SubtitleFile] {
+        (source.MediaStreams ?? []).compactMap { stream in
+            guard stream.Type == "Subtitle", stream.IsExternal == true, let index = stream.Index,
+                  let language = stream.Language, ["en", "es"].contains(TrackChoice.normalized(language) ?? "") else { return nil }
+            let format = ["ass", "ssa"].contains(stream.Codec?.lowercased() ?? "") ? "ass" : "srt"
+            var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)"),
+                                      resolvingAgainstBaseURL: false)!
+            parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
+            guard let url = parts.url else { return nil }
+            let kind = [stream.IsForced == true ? "Forced" : nil, stream.IsHearingImpaired == true ? "SDH" : nil, stream.Title]
+            return EmbyPlayback.SubtitleFile(url: url, language: language, title: kind.compactMap(\.self).joined(separator: " "))
+        }
+    }
+
+    /// One of the film's own text subtitle tracks (any language, a full
+    /// one before forced lines), as SRT from the server.
+    private func subtitleReference(_ itemId: String, _ source: PlaybackInfo.Source) -> URL? {
+        let text: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
+        let own = (source.MediaStreams ?? []).filter {
+            $0.Type == "Subtitle" && $0.IsExternal != true && text.contains($0.Codec?.lowercased() ?? "")
+        }
+        guard let index = (own.first { $0.IsForced != true } ?? own.first)?.Index else { return nil }
+        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.srt"),
+                                  resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
+        return parts.url
     }
 
     /// When nothing would play: how the server answers each address, in
@@ -766,6 +800,11 @@ struct EmbyClient {
             let Width: Int?
             let Index: Int?
             let Language: String?
+            let Codec: String?
+            let Title: String?
+            let IsExternal: Bool?
+            let IsForced: Bool?
+            let IsHearingImpaired: Bool?
         }
         let MediaSources: [Source]?
         let PlaySessionId: String?
@@ -796,8 +835,12 @@ struct EmbyClient {
                 "BreakOnNonKeyFrames": true,
             ]],
             "ContainerProfiles": [], "CodecProfiles": [],
+            // Text subtitles in files beside the film too (the player adds
+            // them to the film's own tracks).
             "SubtitleProfiles": [["Format": "srt", "Method": "Embed"], ["Format": "ass", "Method": "Embed"],
-                                 ["Format": "subrip", "Method": "Embed"], ["Format": "pgssub", "Method": "Embed"]],
+                                 ["Format": "subrip", "Method": "Embed"], ["Format": "pgssub", "Method": "Embed"],
+                                 ["Format": "srt", "Method": "External"], ["Format": "ass", "Method": "External"],
+                                 ["Format": "vtt", "Method": "External"]],
         ]])
         let info = try JSONDecoder().decode(PlaybackInfo.self, from: try await HTTP.data(request))
         if let code = info.ErrorCode { throw SourceError.unexpected("Emby can't play this (\(code)).") }

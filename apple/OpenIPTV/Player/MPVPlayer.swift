@@ -43,10 +43,21 @@ final class MPVPlayer: @unchecked Sendable {
         /// also lets it jump outside that stretch.
         case window(start: Double, end: Double, seekable: Bool)
         case ended
+        /// Tracks were added (the server's subtitle files, once fetched).
+        case tracksChanged
     }
 
     let layer = MPVMetalLayer()
-    var onEvent: (@MainActor (Event) -> Void)?
+    var onEvent: (@MainActor (Event) -> Void)? {
+        didSet {
+            // Tracks added while nobody listened (a player opened ahead):
+            // the screen that takes it over hears it now.
+            guard let handler = onEvent, stateLock.withLock({ defer { tracksUnheard = false }; return tracksUnheard }) else { return }
+            Task { @MainActor in handler(.tracksChanged) }
+        }
+    }
+    /// A `.tracksChanged` went out with no one listening.
+    private var tracksUnheard = false
     /// Players still closing their connection. A live stream waits for them
     /// (up to 2 s) before opening its own: many IPTV accounts allow one
     /// connection, and a second while the first is closing gets refused.
@@ -63,6 +74,19 @@ final class MPVPlayer: @unchecked Sendable {
     private var loadStarted = CFAbsoluteTimeGetCurrent()
     /// The file's audio and subtitles to pick (the player's queue).
     private var trackPlan: TrackPlan?
+    /// The server's subtitle files added to this film, their tracks, and
+    /// the shift and stretch that put each in time (the player's queue).
+    private var addedFiles: Set<URL> = []
+    private var fileTracks: [URL: Int] = [:]
+    private var fits: [Int: SubtitleSync.Fit] = [:]
+    private var pendingFits: [URL: SubtitleSync.Fit] = [:]
+    /// The subtitle track showing (nil: none).
+    private var shownSubtitle: Int?
+    #if DEBUG
+    /// "delay speed" applied to the subtitles showing (UI tests).
+    private var shift = "0.00 1.0000"
+    var subtitleShift: String { stateLock.withLock { shift } }
+    #endif
     /// When the file was open (headers read), for the start-up breakdown.
     private(set) var openedAfter: Double?
     private var reportedStart = false
@@ -223,6 +247,7 @@ final class MPVPlayer: @unchecked Sendable {
         mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "demuxer-cache-duration", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "cache-speed", MPV_FORMAT_INT64)
+        mpv_observe_property(mpv, 0, "sid", MPV_FORMAT_STRING)
         // A file's tracks are known, none picked yet: see handle(_:).
         mpv_hook_add(mpv, 0, "on_preloaded", 50)
         mpv_set_wakeup_callback(mpv, { context in
@@ -517,7 +542,7 @@ final class MPVPlayer: @unchecked Sendable {
             let words = Set((title ?? "").lowercased().split { !$0.isLetter }.map(String.init))
             if words.contains("commentary") { return "commentary" }
             if hearingImpaired || !words.isDisjoint(with: ["sdh", "cc", "hoh"]) { return "sdh" }
-            if forced { return "forced" }
+            if forced || words.contains("forced") { return "forced" }
             return nil
         }
     }
@@ -561,6 +586,95 @@ final class MPVPlayer: @unchecked Sendable {
         set("subs-with-matching-audio", plan.subtitles == nil ? "no" : "yes")
         // Not the phone's language either (only the plan's).
         set("subs-match-os-language", "no")
+    }
+
+    /// The server's subtitle files for this film, added once fetched (the
+    /// player never waits on the network for them); shown at once when the
+    /// plan asked for subtitles that only a file has. Each is added once.
+    /// Each is then put in time with `reference` (see SubtitleSync): the
+    /// shift (and stretch) that lines its lines up with the film's own
+    /// track is applied whenever it shows.
+    func addSubtitles(_ files: [EmbyPlayback.SubtitleFile], reference: URL? = nil) {
+        guard !files.isEmpty else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            var fetched: [(EmbyPlayback.SubtitleFile, URL)] = []
+            for file in files {
+                guard let local = await Self.fetch(file) else { continue }
+                fetched.append((file, local))
+                self?.queue.async { [weak self] in self?.add(file, at: local) }
+            }
+            guard let reference, !fetched.isEmpty,
+                  let inTime = await Self.fetch(.init(url: reference, language: nil, title: "")),
+                  let referenceText = try? String(contentsOf: inTime, encoding: .utf8) else { return }
+            let referenceCues = SubtitleSync.cues(referenceText)
+            for (file, local) in fetched {
+                guard let text = try? String(contentsOf: local, encoding: .utf8) else { continue }
+                let fit = SubtitleSync.fit(SubtitleSync.cues(text), to: referenceCues)
+                #if DEBUG
+                NSLog("%@", "PERF subsync reference \(referenceCues.count) cues, file \(SubtitleSync.cues(text).count): " +
+                      (fit.map { String(format: "delay %.2f speed %.4f score %.2f", $0.delay, $0.speed, $0.score) } ?? "no fit"))
+                #endif
+                guard let fit else { continue }
+                self?.queue.async { [weak self] in self?.store(fit, for: file.url) }
+            }
+        }
+    }
+
+    private func add(_ file: EmbyPlayback.SubtitleFile, at local: URL) {
+        guard let mpv, addedFiles.insert(file.url).inserted else { return }
+        command(["sub-add", local.path, "auto", file.title.isEmpty ? (file.language ?? "") : file.title, file.language ?? ""])
+        if let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external }).map(\.id).max() {
+            fileTracks[file.url] = id
+            if let fit = pendingFits.removeValue(forKey: file.url) { fits[id] = fit }
+        }
+        emit(.tracksChanged)
+        guard let plan = trackPlan?.refreshed(), plan.subtitles != nil,
+              let now = mpv_get_property_string(mpv, "sid") else { return }
+        let off = String(cString: now) == "no"
+        mpv_free(now)
+        if off, let id = TrackChoice.choose(Self.trackList(mpv), plan: plan).subtitle {
+            mpv_set_property_string(mpv, "sid", String(id))
+        }
+    }
+
+    /// A file's fit: kept for its track, applied now if it's showing.
+    private func store(_ fit: SubtitleSync.Fit, for file: URL) {
+        guard let id = fileTracks[file] else { return pendingFits[file] = fit }
+        fits[id] = fit
+        if shownSubtitle == id { applyFit(for: id) }
+    }
+
+    /// The shift and stretch for the subtitles showing (none for the
+    /// film's own tracks, always in time).
+    private func applyFit(for id: Int?) {
+        guard let mpv else { return }
+        let fit = id.flatMap { fits[$0] }
+        #if DEBUG
+        NSLog("%@", "PERF subsync showing \(id.map(String.init) ?? "none") fit \(fit.map { "\($0.delay) \($0.speed)" } ?? "none") known \(fits.keys.sorted())")
+        #endif
+        // Typed first: in String(format:) a bare `?? 1` is an integer when
+        // there's no fit, which "%f" reads as 0 (a speed of 0 broke the
+        // film's own subtitles after a file's).
+        let delay: Double = fit?.delay ?? 0
+        let speed: Double = fit?.speed ?? 1
+        mpv_set_property_string(mpv, "sub-delay", String(format: "%.3f", delay))
+        mpv_set_property_string(mpv, "sub-speed", String(format: "%.6f", speed))
+        #if DEBUG
+        stateLock.withLock { shift = String(format: "%.2f %.4f", delay, speed) }
+        #endif
+    }
+
+    /// A subtitle file from the server, on the device for this playback
+    /// (fetched each time: a server replaces its files, and the same
+    /// address then holds another).
+    private static func fetch(_ file: EmbyPlayback.SubtitleFile) async -> URL? {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "subtitles")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let local = folder.appending(path: "\(UUID().uuidString).\(file.url.pathExtension.isEmpty ? "srt" : file.url.pathExtension)")
+        guard let (data, response) = try? await HTTP.session.data(from: file.url),
+              (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty,
+              (try? data.write(to: local)) != nil else { return nil }
+        return local
     }
 
     /// Fills the screen with the picture (cropping its edges) or fits it.
@@ -777,6 +891,13 @@ final class MPVPlayer: @unchecked Sendable {
             case "cache-speed" where property.format == MPV_FORMAT_INT64:
                 downloadSpeed = Double(value.assumingMemoryBound(to: Int64.self).pointee)
                 reportNetwork()
+            case "sid" where property.format == MPV_FORMAT_STRING:
+                // Other subtitles showing: their shift (a file's), or none.
+                let id = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.flatMap { Int(String(cString: $0)) }
+                if id != shownSubtitle {
+                    shownSubtitle = id
+                    applyFit(for: id)
+                }
             default:
                 break
             }
@@ -841,6 +962,7 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func emit(_ event: Event) {
         let handler = onEvent
+        if handler == nil, case .tracksChanged = event { stateLock.withLock { tracksUnheard = true } }
         Task { @MainActor in handler?(event) }
     }
 }

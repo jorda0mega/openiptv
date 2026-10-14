@@ -653,6 +653,66 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=spa~spain subtitles=off")
     }
 
+    /// Subtitles kept in a file beside the film on the server show in the
+    /// menu with the film's own and play when picked. Regression: only the
+    /// film's own tracks showed; the server's files (downloaded subtitles,
+    /// say) never did. Needs the multi-track US film with an English SDH
+    /// file beside it (OPENIPTV_MOCK_SUBTITLE_FILES="eng|SDH|…/en-sdh.srt";
+    /// TEST_RUNNER_SUBTITLE_FILES=1).
+    func testServerSubtitleFilesShow() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_FILES"] != nil, "needs a subtitle file beside the film")
+        openFilm(["-forgetTrackChoices", "YES"])
+        sleep(3)
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let sdh = app.buttons["English SDH"].firstMatch
+        XCTAssertTrue(sdh.waitForExistence(timeout: 3), "the server's English SDH file isn't in the menu")
+        shot("menu with the server's file")
+        sdh.tap()
+        sleep(2)
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng+sdh")
+    }
+
+    /// A subtitle file from the server that runs late shows in time by
+    /// itself: its lines are matched against the film's own subtitle track
+    /// and shifted (here 2.5 s earlier), with nothing for the viewer to
+    /// adjust. Needs the sync test film with its late file beside it
+    /// (OPENIPTV_MOCK_VIDEO=sync.mkv, OPENIPTV_MOCK_SUBTITLE_FILES=
+    /// "eng|SDH|…/late.srt"; TEST_RUNNER_SUBTITLE_SYNC=1).
+    func testServerSubtitleFileInTime() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_SYNC"] != nil, "needs the sync test film")
+        openFilm(["-forgetTrackChoices", "YES"])
+        sleep(4)
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let sdh = app.buttons["English SDH"].firstMatch
+        if !sdh.waitForExistence(timeout: 3) {
+            shot("menu without the server's file")
+            print("MENU \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty })")
+        }
+        XCTAssertTrue(sdh.exists, "the server's file isn't in the menu")
+        sdh.tap()
+        let readout = app.staticTexts["debug-subshift"].firstMatch
+        var parts: [Double] = []
+        for _ in 0..<20 where parts.first.map({ abs($0) < 0.01 }) ?? true {
+            sleep(1)
+            parts = readout.label.split(separator: " ").compactMap { Double($0) }
+        }
+        shot("late file in time")
+        XCTAssertEqual(parts.first ?? 0, -2.5, accuracy: 0.1, "the late file wasn't shifted into time: \(readout.label)")
+        XCTAssertEqual(parts.last ?? 0, 1, accuracy: 0.0001, "the file was stretched: \(readout.label)")
+        // The film's own English track is in time already: no shift.
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Off"].firstMatch.waitForExistence(timeout: 3), "the menu didn't open again")
+        let english = app.buttons.matching(NSPredicate(format: "label == 'English'")).allElementsBoundByIndex
+            .max { $0.frame.minY < $1.frame.minY }
+        XCTAssertNotNil(english, "no English in the menu")
+        english?.tap()
+        sleep(2)
+        XCTAssertEqual(readout.label, "0.00 1.0000", "the film's own track was shifted")
+    }
+
     /// The app's debug readout of the player: its second, and whether it plays.
     private func playerState() -> (seconds: Double, playing: Bool)? {
         let parts = app.staticTexts["debug-position"].firstMatch.label.split(separator: " ")
