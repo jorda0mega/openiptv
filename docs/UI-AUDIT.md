@@ -4,6 +4,21 @@ The goal (set 2026-10-12): make the iPhone, iPad and Apple TV apps look and
 behave like the Apple TV app and other premium streaming apps, with no
 flickers or jumps. Each item below has a UI test that fails without it.
 
+## Goal checklist (2026-10-13)
+
+Each item of the goal, where it was done, and the test that checks it. All
+these tests passed on 2026-10-13 against `77cf041` or later.
+
+| Goal item | Commit | Test |
+|---|---|---|
+| Landscape: Home's hero filled the screen after a film played sideways | `219a4b5` | `HomeAfterLandscapeTests.testHeroSizeAfterLandscapePlayback` |
+| The picture changed size when the controls showed (pause) | `82997d9` | `PlayerLookTests.testPlayerLook` (portrait and landscape, playing and paused) |
+| Buttons too big | `6c6245a` (Apple's 44, 63, 92 points; the system style's padding removed), `db81d01` | `testPlayerLook` screenshots, `testHomeCardSizes`, `testMyList` |
+| Change the audio and subtitles; English unless Spanish-made | `79fe646`, `d1a424b`, `02dd23e`, `5a508f4` | `testPickedSubtitlesStay`, `testPickedSDHSubtitlesStay`, `testSubtitleSwitchKeepsPlaying` (US film), `testSpanishFilmStartsInSpanish` (Mexico) |
+| No flickers or jumps (search, Continue Watching, pages) | `22016f2`, `b758bea`, `c896690` | `SearchStabilityTests` (4), `testPageReadyWhenPlayerCloses`, `testEpisodeRowsSameHeight`, `testMainButtonKeepsWidthWhileStarting` |
+| Recommendations change only at moments (launch, pull, tab change, long away) | `22016f2` | `testHomeStaysPutUntilChosenAgainOrPulled`, `testHomeChangesOnlyAfterLongAway` |
+| Audit against the Apple TV app (REA, Mobbin) | this file, rounds 1 to 5 | see the tables below |
+
 ## Method
 
 - **REA** (rea-agents MCP 6.4): `open_binary` on `/System/Applications/TV.app`,
