@@ -592,7 +592,10 @@ final class PlayerLookTests: XCTestCase {
         sleep(2)
         shot("episode playing")
         let state = playerState()
-        XCTAssertEqual(state?.seconds ?? 0, 63, accuracy: 6, "not the episode from its resume point: \(String(describing: state))")
+        // From its resume point (60 s), not the start (a CI runner reads
+        // it a few seconds later).
+        XCTAssertEqual(state?.seconds ?? 0, onCI ? 68 : 63, accuracy: onCI ? 10 : 6,
+                       "not the episode from its resume point: \(String(describing: state))")
         XCTAssertEqual(state?.playing, true, "the episode isn't playing")
     }
 
