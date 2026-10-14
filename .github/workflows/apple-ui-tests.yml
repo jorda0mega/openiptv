@@ -1,0 +1,132 @@
+name: Apple UI tests
+
+# The iPhone, iPad and Apple TV UI tests against the test server
+# (scripts/mock_server.py), four jobs in parallel. GitHub's standard macOS
+# runners are free for public repositories.
+
+on:
+  pull_request:
+    paths:
+      - "apple/**"
+      - "scripts/mock_server.py"
+      - "scripts/make_test_media.sh"
+      - "scripts/make_bif.py"
+      - "scripts/ci_simulator.sh"
+      - ".github/workflows/apple-ui-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apple/**"
+      - "scripts/mock_server.py"
+      - "scripts/make_test_media.sh"
+      - "scripts/make_bif.py"
+      - "scripts/ci_simulator.sh"
+      - ".github/workflows/apple-ui-tests.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: apple-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MEDIA: /tmp/openreel-media
+  # The test server's account, passed to the tests (debug builds only).
+  TEST_RUNNER_DEBUG_EMBY: '{"serverURL":"http://127.0.0.1:8788","serverName":"Mock","userId":"U1","userName":"tester","accessToken":"tok"}'
+
+jobs:
+  ui:
+    name: ${{ matrix.name }}
+    runs-on: macos-26
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: iPhone · Home, pages, search
+            platform: iOS
+            device: iPhone 17 Pro Max
+            scheme: OpenIPTV
+            tests: "OpenIPTV UITests/HomeAfterLandscapeTests;OpenIPTV UITests/PersonPageTests;OpenIPTV UITests/PhoneHomeStabilityTests;OpenIPTV UITests/SearchStabilityTests"
+          - name: iPhone · player
+            platform: iOS
+            device: iPhone 17 Pro Max
+            scheme: OpenIPTV
+            tests: "OpenIPTV UITests/PlayerLookTests"
+          - name: iPad · player
+            platform: iOS
+            device: iPad Pro 11-inch (M5)
+            scheme: OpenIPTV
+            tests: "OpenIPTV UITests/PlayerLookTests"
+          - name: Apple TV
+            platform: tvOS
+            device: Apple TV 4K (3rd generation)
+            scheme: OpenIPTV TV
+            tests: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      - name: MPVKit (cached)
+        uses: actions/cache@v4
+        with:
+          path: apple/Vendor
+          key: mpvkit-${{ hashFiles('apple/mpvkit.lock') }}
+      - name: MPVKit
+        run: apple/scripts/fetch-mpvkit.sh
+
+      - name: ffmpeg
+        run: command -v ffprobe || brew install ffmpeg
+
+      - name: Test media (cached)
+        id: media
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MEDIA }}
+          key: test-media-${{ hashFiles('scripts/make_test_media.sh', 'scripts/make_bif.py') }}
+      - name: Test media
+        if: steps.media.outputs.cache-hit != 'true'
+        run: scripts/make_test_media.sh "$MEDIA"
+
+      - name: Test server
+        run: |
+          OPENIPTV_MOCK_VIDEO="$MEDIA/test.mkv" OPENIPTV_MOCK_HLS="$MEDIA/hls" OPENIPTV_MOCK_BIF="$MEDIA/test.bif" \
+            nohup python3 -u scripts/mock_server.py 8788 > mock-server.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null "http://127.0.0.1:8788/emby/Users/U1/Items/a0?api_key=tok" && exit 0
+            sleep 1
+          done
+          echo "the test server didn't start"; cat mock-server.log; exit 1
+
+      - name: Simulator
+        id: sim
+        run: scripts/ci_simulator.sh "${{ matrix.platform }}" "${{ matrix.device }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          xcodebuild build-for-testing -project apple/OpenIPTV.xcodeproj -scheme "${{ matrix.scheme }}" \
+            -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build/dd -quiet
+
+      - name: Test
+        run: |
+          only=()
+          IFS=';' read -ra tests <<< "${{ matrix.tests }}"
+          for test in "${tests[@]}"; do only+=("-only-testing:$test"); done
+          xcodebuild test-without-building -project apple/OpenIPTV.xcodeproj -scheme "${{ matrix.scheme }}" \
+            -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build/dd \
+            -resultBundlePath build/results.xcresult "${only[@]}"
+
+      - name: Results and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            build/results.xcresult
+            mock-server.log
+            /tmp/openiptv/uitest*
+          retention-days: 7
+          if-no-files-found: ignore
