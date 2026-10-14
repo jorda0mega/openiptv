@@ -305,6 +305,37 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng")
     }
 
+    /// Subtitles on the picture in portrait, at the picture's scale, as in
+    /// the Apple TV app. Regression: sized by the (tall) window, they were
+    /// huge and drawn under the picture, off the bottom of the screen.
+    /// Needs the multi-track test server as for testPickedSubtitlesStay.
+    func testSubtitlesOnPictureInPortrait() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        openFilm(["-forgetTrackChoices", "YES"])
+        app.tap()
+        usleep(600_000)
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let off = app.buttons["Off"].firstMatch
+        XCTAssertTrue(off.waitForExistence(timeout: 3), "no Subtitles in the menu")
+        let english = app.buttons.matching(NSPredicate(format: "label CONTAINS 'English'")).allElementsBoundByIndex
+            .first { $0.frame.minY > off.frame.minY }
+        XCTAssertNotNil(english, "no English subtitles")
+        english?.tap()
+        sleep(1)
+        // Playing, the controls gone: only the picture and its subtitles show.
+        if playerState()?.playing == false {
+            controlsUp()
+            app.buttons["Play"].firstMatch.tap()
+        }
+        sleep(7)
+        shot("subtitles in portrait")
+        XCTAssertFalse(app.buttons["Close player"].exists, "the controls are still up")
+        let screen = app.frame
+        let pictureBottom = screen.midY + screen.width * 9 / 32
+        let below = CGRect(x: 0, y: pictureBottom + 8, width: screen.width, height: screen.maxY - pictureBottom - 8)
+        XCTAssertLessThan(brightestPixel(in: below), 60, "subtitles drawn under the picture")
+    }
+
     /// Of two English subtitle tracks, the one picked (SDH) comes back,
     /// not just its language. Needs the test server with a file holding
     /// English and English SDH subtitles (OPENIPTV_MOCK_VIDEO=multi-sdh.mkv,

@@ -152,6 +152,11 @@ final class MPVPlayer: @unchecked Sendable {
         let cacheDir = FileManager.default.temporaryDirectory.appending(path: "player-cache")
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         set("demuxer-cache-dir", cacheDir.path())
+        // Subtitles sized by the picture and kept on it, as in the Apple TV
+        // app (by the window, a phone held upright drew them huge, under the
+        // picture and off the bottom of the screen).
+        set("sub-scale-with-window", "no")
+        set("sub-use-margins", "no")
         // No log output at all: stream URLs carry credentials.
         set("msg-level", "all=no")
         for (name, value) in options { set(name, value) }
