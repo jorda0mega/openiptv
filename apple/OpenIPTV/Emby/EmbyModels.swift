@@ -158,7 +158,8 @@ extension Card {
     /// The same card with more after its subtitle ("… · with Antonio Banderas").
     func adding(_ note: String) -> Card {
         Card(id: id, kind: kind, title: title, subtitle: [subtitle, note].compactMap(\.self).joined(separator: " · "),
-             images: images, progress: progress, playable: playable, episodeId: episodeId, seriesId: seriesId)
+             images: images, progress: progress, playable: playable, episodeId: episodeId, seriesId: seriesId,
+             episodeName: episodeName)
     }
 }
 
@@ -174,6 +175,9 @@ struct Card: Codable, Hashable, Identifiable {
     var episodeId: String? = nil
     /// For an episode: its show, to open from search.
     var seriesId: String? = nil
+    /// Continue Watching: the episode's name, for VoiceOver (the card shows
+    /// "S1, E1 · 33m", as in the Apple TV app).
+    var episodeName: String? = nil
 }
 
 struct HomeRow: Codable, Hashable, Identifiable {

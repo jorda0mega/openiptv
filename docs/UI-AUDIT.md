@@ -60,9 +60,19 @@ Netflix and Max on Mobbin:
 
 | Area | Premium apps | Ours before | Change | Test |
 |---|---|---|---|---|
-| The next episode | Netflix "Next Ep.", Max and the Apple TV app's Up Next card; the next one plays at the end | The player closed at an episode's end | Up Next card in the last 30 seconds (still, "S2, E4 · Name", Next Episode with the seconds left, Not Now); at the end the next unwatched episode plays in the same player screen | `testUpNext`, `testUpNextNotNow` |
+| The next episode | The Apple TV app's Auto-Play "Play Next Episode" (on by default); its end screen is a post-play page (the next title's preview, logo, "+ Add", "Skip") | The player closed at an episode's end | At the end the next unwatched episode plays in the same player screen. A corner "Up Next" card was tried and removed: it wasn't Apple's design | `testNextEpisodeAtEnd` |
 | Player actions | Netflix: labelled text buttons (Speed, Episodes, Audio & Subtitles, Next Ep.) | Apple TV app style icons | Kept the Apple TV app's style (the goal's first reference) | - |
 | Title page | Netflix and Max: Episodes / More Like This / Extras tabs, a season menu | One list of every episode with season tabs | Kept (the user's decision) | - |
+
+## Round 7 (2026-10-13): Apple TV design 1:1 (the user: no liberties)
+
+Measured from a full-size Mobbin screenshot of the Apple TV app's Home
+([Continue Watching](https://mobbin.com/screens/931b5699-9252-47cc-a9fb-324326addf72)), at 3x:
+
+| Area | Apple TV app | Ours before | Change | Test |
+|---|---|---|---|---|
+| Continue Watching card | 240 × 170, 12-point corners, a hairline light edge; the picture runs to the bottom, about 35% darker there; on it "▶ ━ S1, E1 · 33m" (time left) and "•••"; no title (the picture carries it) | The title and the line on a frosted band with a hard top edge ("glossy border"), 14-point corners | Apple's: the fade, the edge, 12-point corners, "S1, E1 · 33m" (a film: "1h 2m"), "•••" (Go to Show / Details); the episode's name stays for VoiceOver | `testHomeCardSizes` |
+| Subtitles in portrait | On the picture, at the picture's scale | Huge, under the picture, off the screen | Sized by the picture and kept on it | `testSubtitlesOnPictureInPortrait` |
 
 Test fixes found on the way: the test readouts sat over the play button (the
 tests tapped its corner and hid the controls), the Live TV empty-state test
@@ -88,8 +98,16 @@ their picture's colours.
 
 ## Still open
 
-- Skip Intro (Netflix, Max): needs Emby's intro markers (chapter marker
-  types), not read yet.
+- The PiP hand-over still pauses briefly (the user, on device); waiting on
+  whether the sound stops too.
+- Row titles: Apple's have a "›" that opens the whole row; ours open nothing.
+- The player's Continue Watching list: Apple writes "Continue · S1, E1" /
+  "Next · S1, E2" with "…" on each row; ours shows the card's line.
+- Apple's end-of-title post-play page (needs a reference for an episode).
+
+- Skip Intro: Netflix and Max have it; no Apple TV app (iPhone) reference
+  found, so not added. Emby marks intros as chapter markers (IntroStart,
+  IntroEnd, CreditsStart) when its intro detection runs.
 - An Episodes list inside the player (Netflix); ours has Continue Watching
   and Go to Show.
 - Up Next on Apple TV (the episode ends and the player closes there).

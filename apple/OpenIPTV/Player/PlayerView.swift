@@ -288,10 +288,9 @@ struct MoviePlayerView: View {
     @State private var thumbnailTask: Task<Void, Never>?
     /// The next episode got ready (near the end of this one).
     @State private var preparedNext = false
-    /// That episode, offered in the last 30 seconds and played at the end
-    /// (iPhone, as in the Apple TV app and Netflix), unless put off.
+    /// That episode, played at the end (iPhone, as the Apple TV app's "Play
+    /// Next Episode" does).
     @State private var upNext: EmbyItem?
-    @State private var upNextPutOff = false
     /// The film's preview thumbnails, when the server has them, and where
     /// the last preview the player has on screen is (its seconds).
     @State private var thumbnails: PreviewThumbnails?
@@ -379,12 +378,6 @@ struct MoviePlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
-            #if os(iOS)
-            // Up Next, with the controls away (as in the Apple TV app).
-            if let next = upNext, !upNextPutOff, started, total > 0, total - position <= 30, !controlsVisible {
-                upNextCard(next).transition(.opacity)
-            }
-            #endif
             if let qualityNote, !controlsVisible {
                 Text(qualityNote)
                     .font(.footnote.weight(.semibold))
@@ -525,7 +518,7 @@ struct MoviePlayerView: View {
     private var continuePanel: PlayerInfoPanel {
         PlayerInfoPanel(title: "Continue Watching", meta: "", cards: otherTitles.map { card in
             PlayerCard(id: card.id, title: card.title, subtitle: card.subtitle, images: card.images,
-                       loading: switching == card.id) { playInstead(card) }
+                       loading: switching == card.id, spoken: card.episodeName) { playInstead(card) }
         })
     }
 
@@ -538,53 +531,8 @@ struct MoviePlayerView: View {
         showControls(autoHide: !showContinue)
     }
 
-    /// The next episode's card at the bottom right: its still, "S1, E4 ·
-    /// Name", Next Episode with the seconds left, and Not Now.
-    private func upNextCard(_ episode: EmbyItem) -> some View {
-        let left = max(0, Int((total - position).rounded(.up)))
-        return HStack(spacing: 12) {
-            CoverImage(images: model.emby?.card(for: episode, landscape: true, width: 320).images ?? [], title: episode.name)
-                .frame(width: 112, height: 63)
-                .clipShape(.rect(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 6) {
-                Text("UP NEXT").font(.caption2.weight(.bold)).foregroundStyle(.white.opacity(0.6))
-                Text(Self.episodeLine(episode)).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
-                HStack(spacing: 8) {
-                    Button { playNext(episode) } label: {
-                        Label("Next Episode", systemImage: "play.fill")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 12)
-                            .frame(height: 32)
-                            .background(Capsule().fill(.white))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Next Episode")
-                    .accessibilityValue("in \(left) seconds")
-                    // The seconds in a fixed width: the card doesn't move.
-                    Text("\(left)").font(.footnote.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
-                        .frame(width: 22, alignment: .leading)
-                    Button("Not Now") { withAnimation(.easeOut(duration: 0.2)) { upNextPutOff = true } }
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 24)
-    }
-
-    /// "S1, E4 · Name", as the Apple TV app writes episodes.
-    static func episodeLine(_ episode: EmbyItem) -> String {
-        guard let season = episode.parentIndexNumber, let number = episode.indexNumber else { return episode.name }
-        return "S\(season), E\(number) · \(episode.name)"
-    }
-
-    /// The next episode, in this player screen (at the end, or asked for).
+    /// The next episode, in this player screen (at the end, as the Apple TV
+    /// app's "Play Next Episode" does).
     private func playNext(_ episode: EmbyItem) {
         guard let switchTo, switching == nil else { return }
         switching = episode.id
@@ -1249,7 +1197,7 @@ struct MoviePlayerView: View {
         case .ended:
             position = total
             #if os(iOS)
-            if let next = upNext, !upNextPutOff, switchTo != nil { return playNext(next) }
+            if let next = upNext, switchTo != nil { return playNext(next) }
             #endif
             close()
         case let .previewShown(seconds):

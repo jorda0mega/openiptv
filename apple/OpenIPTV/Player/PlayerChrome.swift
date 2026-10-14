@@ -386,6 +386,8 @@ struct PlayerCard: Identifiable {
     let subtitle: String?
     let images: [CardImage]
     var loading = false
+    /// For VoiceOver only (an episode's name).
+    var spoken: String? = nil
     let action: () -> Void
 }
 
@@ -464,7 +466,7 @@ struct PlayerInfoPanelView: View {
     }
 
     private func label(_ card: PlayerCard) -> String {
-        [card.title, card.subtitle].compactMap(\.self).joined(separator: ", ")
+        [card.title, card.subtitle, card.spoken].compactMap(\.self).joined(separator: ", ")
     }
 
     private var details: some View {

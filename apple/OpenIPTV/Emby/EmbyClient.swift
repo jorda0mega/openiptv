@@ -248,15 +248,31 @@ struct EmbyClient {
         }.prefix(20)
         guard !unique.isEmpty else { return nil }
         let shape = Artwork.Shape.landscape
+        // As in the Apple TV app: "S1, E1 · 33m" for an episode, "1h 2m" for
+        // a film (the time left).
         let cards = unique.map { item -> Card in
             let base = card(item, context: .landscape, shape: shape, width: width)
-            guard item.kind == "Episode", let series = item.seriesId else { return base }
+            guard item.kind == "Episode", let series = item.seriesId else {
+                guard let left = Self.timeLeft(item) else { return base }
+                return Card(id: base.id, kind: base.kind, title: base.title, subtitle: left, images: base.images,
+                            progress: base.progress, playable: base.playable, episodeId: base.episodeId, seriesId: base.seriesId)
+            }
             var code = ""
-            if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s), E\(e) · " }
-            return Card(id: series, kind: "Series", title: item.seriesName ?? base.title, subtitle: code + item.name,
-                        images: base.images, progress: base.progress, playable: true, episodeId: item.id)
+            if let s = item.parentIndexNumber, let e = item.indexNumber { code = "S\(s), E\(e)" }
+            let line = [code.isEmpty ? nil : code, Self.timeLeft(item) ?? item.name].compactMap(\.self).joined(separator: " · ")
+            return Card(id: series, kind: "Series", title: item.seriesName ?? base.title, subtitle: line,
+                        images: base.images, progress: base.progress, playable: true, episodeId: item.id,
+                        episodeName: item.name)
         }
         return HomeRow(title: title, shape: shape.rawValue, aspect: shape.aspect, cards: Array(cards))
+    }
+
+    /// "33m", "1h 2m": what's left of it.
+    static func timeLeft(_ item: EmbyItem) -> String? {
+        guard let runtime = item.runTimeTicks, runtime > 0 else { return nil }
+        let left = max(0, Double(runtime - (item.userData?.playbackPositionTicks ?? 0)) / 1e7)
+        let minutes = max(1, Int((left / 60).rounded()))
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
     }
 
     func row(_ title: String, _ items: [EmbyItem], _ context: Artwork.Context, _ width: Int) -> HomeRow? {

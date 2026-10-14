@@ -389,12 +389,25 @@ private struct ContinueRow: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(row.cards) { card in
-                        Button { play(card) } label: { cardView(card) }
-                            .buttonStyle(.plain)
-                            .contextMenu {
+                        ZStack(alignment: .bottomTrailing) {
+                            Button { play(card) } label: { cardView(card) }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
+                                }
+                                .accessibilityIdentifier("continue-\(card.id)")
+                            // "•••", as in the Apple TV app.
+                            Menu {
                                 Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .frame(width: 40, height: 36)
+                                    .contentShape(.rect)
                             }
-                            .accessibilityIdentifier("continue-\(card.id)")
+                            .accessibilityLabel("More")
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -412,39 +425,38 @@ private struct ContinueRow: View {
         }
     }
 
-    /// As in the Apple TV app: the picture fills a 240 × 170 card, and the
-    /// title, how far in and the episode sit inside it on a frosted band
-    /// (they were under a wider, shorter card).
+    /// As in the Apple TV app (measured at 3x from it): the picture fills
+    /// a 240 × 170 card with 12-point corners and a hairline edge, a little
+    /// darker towards the bottom; on it, play, how far in and "S1, E1 ·
+    /// 33m" (no title: the picture carries it), and "•••" beside them.
     private func cardView(_ card: Card) -> some View {
         CoverImage(images: card.images, title: card.title)
             .frame(width: 240, height: 170)
             .overlay(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(card.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill").font(.caption2)
-                        // Always there (an empty track when not started), so
-                        // the text beside it doesn't move when progress comes.
-                        ProgressBar(value: (card.progress ?? 0) / 100).frame(width: 36, height: 4)
-                        Text(card.subtitle ?? "").font(.caption).lineLimit(1)
-                    }
-                    .foregroundStyle(.white.opacity(0.85))
+                LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 56)
+            }
+            .overlay(alignment: .bottomLeading) {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill").font(.system(size: 10, weight: .semibold))
+                    // Always there (an empty track when not started), so
+                    // the text beside it doesn't move when progress comes.
+                    ProgressBar(value: (card.progress ?? 0) / 100).frame(width: 26, height: 4)
+                    Text(card.subtitle ?? "").font(.subheadline).lineLimit(1)
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial)
-                .environment(\.colorScheme, .dark)
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.leading, 12)
+                // Room for "•••" at the right.
+                .padding(.trailing, 44)
+                .padding(.bottom, 12)
             }
             .overlay { if loadingCard == card.id { ProgressView().tint(.white) } }
-            .clipShape(.rect(cornerRadius: 14))
+            .clipShape(.rect(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
             // One element the card's size (combined, it took the size of a
             // picture spilling past the card before it's cut to shape).
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
+            .accessibilityLabel([card.title, card.subtitle, card.episodeName].compactMap(\.self).joined(separator: ", "))
             .accessibilityHint("Plays it")
     }
 }
