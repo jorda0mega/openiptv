@@ -50,6 +50,20 @@ these tests passed on 2026-10-13 against `77cf041` or later.
 | Speed on Apple TV | A speed button beside subtitles and audio | None | A third round button, its menu like the audio and subtitle menus | `testPlaybackSpeed` (tvOS) |
 | Picture in Picture | The film moves into the window at once | A second stream had to start (5 s on a real server) | The same playback's frames go to the window | `testPictureInPicture` (its picture check runs on devices only: simulators draw this window black for every app) |
 
+## Round 6 (2026-10-13): other premium apps
+
+Netflix and Max on Mobbin:
+[Netflix player, landscape](https://mobbin.com/screens/f413f7a3-6534-414e-b62e-f25ba79e4f53),
+[Netflix title page](https://mobbin.com/screens/f7087383-70ec-4e3a-85c7-a4e5428cdc25),
+[Max title page](https://mobbin.com/screens/f48ed50d-049d-41fc-8a25-1c67f3e84910),
+[Max episodes](https://mobbin.com/screens/feca44d6-72ba-45db-a800-c39feb506269).
+
+| Area | Premium apps | Ours before | Change | Test |
+|---|---|---|---|---|
+| The next episode | Netflix "Next Ep.", Max and the Apple TV app's Up Next card; the next one plays at the end | The player closed at an episode's end | Up Next card in the last 30 seconds (still, "S2, E4 · Name", Next Episode with the seconds left, Not Now); at the end the next unwatched episode plays in the same player screen | `testUpNext`, `testUpNextNotNow` |
+| Player actions | Netflix: labelled text buttons (Speed, Episodes, Audio & Subtitles, Next Ep.) | Apple TV app style icons | Kept the Apple TV app's style (the goal's first reference) | - |
+| Title page | Netflix and Max: Episodes / More Like This / Extras tabs, a season menu | One list of every episode with season tabs | Kept (the user's decision) | - |
+
 Test fixes found on the way: the test readouts sat over the play button (the
 tests tapped its corner and hid the controls), the Live TV empty-state test
 now runs only with the server stopped (`LIVE_EMPTY`), and the story test's
@@ -73,6 +87,12 @@ their picture's colours.
 - Specials come after the last season.
 
 ## Still open
+
+- Skip Intro (Netflix, Max): needs Emby's intro markers (chapter marker
+  types), not read yet.
+- An Episodes list inside the player (Netflix); ours has Continue Watching
+  and Go to Show.
+- Up Next on Apple TV (the episode ends and the player closes there).
 
 - Picture in Picture's picture on a real device (the simulator can't show it).
 

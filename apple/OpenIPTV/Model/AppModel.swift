@@ -652,15 +652,20 @@ final class AppModel {
 
     /// Near the end of an episode: the next one's details and how to play it.
     func prepareNext(after playback: EmbyPlayback) {
-        guard let series = playback.seriesId else { return }
         Task {
-            var show = shows[series]
-            if show == nil { show = await loadShow(series) }
-            guard let data = show,
-                  let index = data.episodes.firstIndex(where: { $0.id == playback.itemId }),
-                  let next = data.episodes[(index + 1)...].first(where: { $0.userData?.played != true }) else { return }
+            guard let next = await episode(after: playback) else { return }
             prepare([(id: next.id, kind: "Episode")], duringPlayback: true)
         }
+    }
+
+    /// The first unwatched episode after this one, from the show's data
+    /// (loaded when it isn't yet); nil after the last.
+    func episode(after playback: EmbyPlayback) async -> EmbyItem? {
+        guard let series = playback.seriesId else { return nil }
+        var show = shows[series]
+        if show == nil { show = await loadShow(series) }
+        guard let data = show, let index = data.episodes.firstIndex(where: { $0.id == playback.itemId }) else { return nil }
+        return data.episodes[(index + 1)...].first { $0.userData?.played != true }
     }
 
     /// The channels watched most: what's on now and next, ready for Live TV.

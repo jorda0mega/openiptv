@@ -573,6 +573,69 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(play.midX - back.midX, 117, accuracy: 1, "back 10 and play/pause apart")
     }
 
+    /// Up Next, as in the Apple TV app and Netflix: in an episode's last 30
+    /// seconds a card offers the next one; at the end it plays in the same
+    /// player screen (the player used to close).
+    func testUpNext() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "570"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        let episode = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Case 3'")).firstMatch
+        XCTAssertTrue(episode.waitForExistence(timeout: 20), "no episode in Continue Watching")
+        episode.tap()
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "the episode didn't play")
+        let first = item.label
+        XCTAssertTrue(app.buttons["Next Episode"].firstMatch.waitForExistence(timeout: 20), "no Up Next card")
+        // It stays put (no flicker) until the end.
+        var shown = 0
+        for _ in 0..<8 {
+            if app.buttons["Next Episode"].exists { shown += 1 }
+            usleep(500_000)
+        }
+        XCTAssertEqual(shown, 8, "the Up Next card came and went")
+        shot("up next")
+        var gone = 0
+        var now = first
+        for _ in 0..<80 where now == first {
+            usleep(500_000)
+            if !item.exists { gone += 1 } else { now = item.label }
+        }
+        print("UPNEXT \(first) -> \(now), player gone \(gone)")
+        XCTAssertEqual(gone, 0, "the player closed at the end")
+        XCTAssertNotEqual(now, first, "the next episode didn't play")
+        sleep(2)
+        shot("next episode playing")
+        XCTAssertEqual(playerState()?.playing, true, "the next episode isn't playing")
+    }
+
+    /// Up Next put off with Not Now: the card goes, and at the end the
+    /// player closes as before.
+    func testUpNextNotNow() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "582"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        let episode = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Case 3'")).firstMatch
+        XCTAssertTrue(episode.waitForExistence(timeout: 20), "no episode in Continue Watching")
+        episode.tap()
+        let notNow = app.buttons["Not Now"].firstMatch
+        XCTAssertTrue(notNow.waitForExistence(timeout: 15), "no Up Next card")
+        notNow.tap()
+        usleep(500_000)
+        XCTAssertFalse(app.buttons["Next Episode"].exists, "the card stayed")
+        let item = app.staticTexts["debug-item"].firstMatch
+        var open = true
+        for _ in 0..<40 where open {
+            usleep(500_000)
+            open = item.exists
+        }
+        XCTAssertFalse(open, "the player didn't close at the end")
+    }
+
     /// Regression: with the film playing, the subtitles menu stayed open
     /// while the controls hid under it, and the player closed with them.
     func testSubtitlesMenuKeepsControls() {

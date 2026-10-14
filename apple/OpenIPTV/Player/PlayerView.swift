@@ -288,6 +288,10 @@ struct MoviePlayerView: View {
     @State private var thumbnailTask: Task<Void, Never>?
     /// The next episode got ready (near the end of this one).
     @State private var preparedNext = false
+    /// That episode, offered in the last 30 seconds and played at the end
+    /// (iPhone, as in the Apple TV app and Netflix), unless put off.
+    @State private var upNext: EmbyItem?
+    @State private var upNextPutOff = false
     /// The film's preview thumbnails, when the server has them, and where
     /// the last preview the player has on screen is (its seconds).
     @State private var thumbnails: PreviewThumbnails?
@@ -375,6 +379,12 @@ struct MoviePlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
+            #if os(iOS)
+            // Up Next, with the controls away (as in the Apple TV app).
+            if let next = upNext, !upNextPutOff, started, total > 0, total - position <= 30, !controlsVisible {
+                upNextCard(next).transition(.opacity)
+            }
+            #endif
             if let qualityNote, !controlsVisible {
                 Text(qualityNote)
                     .font(.footnote.weight(.semibold))
@@ -397,6 +407,7 @@ struct MoviePlayerView: View {
                 debugReadout(qualityReadout, "debug-quality")
                 debugReadout(positionReadout, "debug-position")
                 debugReadout(startReadout, "debug-start")
+                debugReadout(playback.itemId, "debug-item")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .ignoresSafeArea()
@@ -525,6 +536,74 @@ struct MoviePlayerView: View {
         }
         // Open: the controls stay until it's closed.
         showControls(autoHide: !showContinue)
+    }
+
+    /// The next episode's card at the bottom right: its still, "S1, E4 ·
+    /// Name", Next Episode with the seconds left, and Not Now.
+    private func upNextCard(_ episode: EmbyItem) -> some View {
+        let left = max(0, Int((total - position).rounded(.up)))
+        return HStack(spacing: 12) {
+            CoverImage(images: model.emby?.card(for: episode, landscape: true, width: 320).images ?? [], title: episode.name)
+                .frame(width: 112, height: 63)
+                .clipShape(.rect(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("UP NEXT").font(.caption2.weight(.bold)).foregroundStyle(.white.opacity(0.6))
+                Text(Self.episodeLine(episode)).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                HStack(spacing: 8) {
+                    Button { playNext(episode) } label: {
+                        Label("Next Episode", systemImage: "play.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 12)
+                            .frame(height: 32)
+                            .background(Capsule().fill(.white))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Next Episode")
+                    .accessibilityValue("in \(left) seconds")
+                    // The seconds in a fixed width: the card doesn't move.
+                    Text("\(left)").font(.footnote.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 22, alignment: .leading)
+                    Button("Not Now") { withAnimation(.easeOut(duration: 0.2)) { upNextPutOff = true } }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(12)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 24)
+    }
+
+    /// "S1, E4 · Name", as the Apple TV app writes episodes.
+    static func episodeLine(_ episode: EmbyItem) -> String {
+        guard let season = episode.parentIndexNumber, let number = episode.indexNumber else { return episode.name }
+        return "S\(season), E\(number) · \(episode.name)"
+    }
+
+    /// The next episode, in this player screen (at the end, or asked for).
+    private func playNext(_ episode: EmbyItem) {
+        guard let switchTo, switching == nil else { return }
+        switching = episode.id
+        Task {
+            defer { switching = nil }
+            do {
+                let next = try await model.playback(itemId: episode.id, kind: "Episode")
+                if closedAt == nil {
+                    closedAt = position
+                    var quiet = Transaction(animation: nil)
+                    quiet.disablesAnimations = true
+                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
+                }
+                switchTo(next)
+            } catch {
+                note("Couldn't play the next episode")
+                close()
+            }
+        }
     }
 
     /// Another title from Continue Watching, in this player screen: this
@@ -1138,6 +1217,9 @@ struct MoviePlayerView: View {
             if !preparedNext, playback.seriesId != nil, total > 0, newPosition >= total * 0.8 {
                 preparedNext = true
                 model.prepareNext(after: playback)
+                #if os(iOS)
+                if switchTo != nil { Task { upNext = await model.episode(after: playback) } }
+                #endif
             }
             // Not while choosing where to jump: the picture's previews
             // aren't where the viewer is.
@@ -1166,6 +1248,9 @@ struct MoviePlayerView: View {
             if isPaused { showControls(autoHide: false) } else { showControls() }
         case .ended:
             position = total
+            #if os(iOS)
+            if let next = upNext, !upNextPutOff, switchTo != nil { return playNext(next) }
+            #endif
             close()
         case let .previewShown(seconds):
             previewShown = seconds
