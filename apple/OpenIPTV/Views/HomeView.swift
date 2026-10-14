@@ -53,7 +53,8 @@ struct HomeView: View {
                             ContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
                             myListRow
                         } else {
-                            PosterRow(title: row.title, cards: row.cards, open: { open($0) }, play: { play($0) })
+                            PosterRow(title: row.title, cards: row.cards, open: { open($0) }, play: { play($0) },
+                                      openRow: { path.append(RowRoute(title: row.title, cards: row.cards)) })
                         }
                     }
                 }
@@ -88,6 +89,7 @@ struct HomeView: View {
             .sheet(isPresented: $showingSettings) { SettingsView(asSheet: true) }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
+            .navigationDestination(for: RowRoute.self) { RowPage(route: $0, open: { open($0) }, play: { play($0) }) }
             // The first thing in Continue Watching opens the moment it's tapped.
             .task(id: model.rows.first?.cards.first?.id) { warmFirst() }
             .onAppear { warmFirst() }
@@ -122,7 +124,8 @@ struct HomeView: View {
     /// "+", newest first.
     @ViewBuilder private var myListRow: some View {
         if !model.myList.isEmpty {
-            PosterRow(title: "My List", cards: model.myList, open: { open($0) }, play: { play($0) })
+            PosterRow(title: "My List", cards: model.myList, open: { open($0) }, play: { play($0) },
+                      openRow: { path.append(RowRoute(title: "My List", cards: model.myList)) })
         }
     }
 
@@ -367,13 +370,100 @@ struct HeroTitle: View {
 }
 
 /// A row heading in Apple's style.
+/// A row's name; with `open`, a grey "›" after it, and a tap opens the
+/// whole row (as in the Apple TV app: the chevron as tall as the capitals,
+/// 67% white).
 private struct RowTitle: View {
     let title: String
+    var open: (() -> Void)? = nil
     var body: some View {
-        Text(title)
-            .font(.title3.weight(.bold))
+        if let open {
+            Button(action: open) {
+                HStack(spacing: 5) {
+                    Text(title)
+                    Image(systemName: "chevron.right").foregroundStyle(Color(white: 0.67))
+                }
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
             .padding(.horizontal, 20)
+            .accessibilityLabel(title)
             .accessibilityAddTraits(.isHeader)
+            .accessibilityHint("Shows the whole row")
+            .accessibilityIdentifier("row-\(title)")
+        } else {
+            Text(title)
+                .font(.title3.weight(.bold))
+                .padding(.horizontal, 20)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+}
+
+/// A row opened from its name.
+struct RowRoute: Hashable {
+    let title: String
+    let cards: [Card]
+}
+
+/// A whole row, as in the Apple TV app (measured at 3x from it): its name,
+/// then three posters across (12 apart, 20 from the edges, 18 between
+/// lines). Tap opens the title; press and hold to play.
+private struct RowPage: View {
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var width
+    #endif
+    let route: RowRoute
+    let open: (Card) -> Void
+    let play: (Card) -> Void
+
+    /// iPhone: three across, as in the Apple TV app; wider screens: as many
+    /// as fit at about that size.
+    private var columns: [GridItem] {
+        #if os(iOS)
+        if width == .compact { return Array(repeating: GridItem(.flexible(), spacing: 12), count: 3) }
+        #endif
+        return [GridItem(.adaptive(minimum: 110, maximum: 160), spacing: 12)]
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(route.title)
+                    .font(.title3.weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
+                LazyVGrid(columns: columns, spacing: 18) {
+                    ForEach(route.cards) { card in
+                        Button { open(card) } label: {
+                            Color.clear
+                                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                                .overlay { CoverImage(images: card.images, title: card.title) }
+                                .clipShape(.rect(cornerRadius: 12))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Play", systemImage: "play.fill") { play(card) }
+                        }
+                        .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
+        }
+        .background(Color.black)
+        .scrollIndicators(.hidden)
+        .navigationTitle(route.title)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(removing: .title)
+        #endif
     }
 }
 
@@ -475,10 +565,11 @@ private struct PosterRow: View {
     let cards: [Card]
     let open: (Card) -> Void
     let play: (Card) -> Void
+    let openRow: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            RowTitle(title: title)
+            RowTitle(title: title, open: openRow)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
                     ForEach(cards) { card in

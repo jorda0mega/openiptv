@@ -202,7 +202,8 @@ final class PersonPageTests: XCTestCase {
         app.launchArguments = []
         app.launch()
         sleep(6)
-        let heading = app.staticTexts["My List"].firstMatch
+        // The row's name opens the whole row: a button.
+        let heading = app.buttons["row-My List"].firstMatch
         for _ in 0..<4 where !heading.isHittable { app.swipeUp(); sleep(1) }
         shot("my-list-row")
         XCTAssertTrue(heading.exists, "no My List row on Home")

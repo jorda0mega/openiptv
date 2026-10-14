@@ -488,6 +488,55 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertGreaterThan(rate, 1.6, "2× played at \(rate)×")
     }
 
+    /// At an episode's end the next one plays in the same player, as the
+    /// Apple TV app's Auto-Play does. Regression: on Apple TV the player
+    /// closed there (the iPhone already played on).
+    func testNextEpisodeAtEnd() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "580"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "forensic"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to the results")
+        for _ in 0..<6 where !focused().contains("label='Forensic Files") { press(.right, "along the results") }
+        press(.select, "open the show")
+        sleep(3)
+        XCTAssertTrue(focused().contains("Continue"), "not on the show's Continue button: \(focused())")
+        press(.select, "play the episode near its end")
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "the episode didn't play")
+        let first = item.label
+        var gone = 0
+        var now = first
+        for _ in 0..<80 where now == first {
+            usleep(500_000)
+            if !item.exists { gone += 1 } else { now = item.label }
+        }
+        XCTAssertEqual(gone, 0, "the player closed at the end")
+        XCTAssertNotEqual(now, first, "the next episode didn't play")
+        sleep(2)
+        press(.down, "next episode playing")
+    }
+
+    /// The test server's address, from the account passed in.
+    private func testServer() -> URL? {
+        guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
+              let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let address = json["serverURL"] as? String else { return nil }
+        return URL(string: address)
+    }
+
+    /// Sets the test server's behaviour (scripts/mock_server.py, /mock/set).
+    private func configure(_ server: URL, _ settings: [String: String]) {
+        let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
+        let done = expectation(description: "configure")
+        URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
+    }
+
     /// The player's second, from its debug readout ("72.4 playing").
     private func playerSecond() -> Double? {
         app.staticTexts["debug-position"].firstMatch.label.split(separator: " ").first.flatMap { Double($0) }

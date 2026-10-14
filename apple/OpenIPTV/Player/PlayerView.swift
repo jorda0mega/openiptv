@@ -247,13 +247,15 @@ struct MoviePlayerView: View {
     /// "HDR") for the Info panel.
     @State private var tracks: [MPVPlayer.Track] = []
     @State private var badges: [String] = []
+    /// The title being started in this player screen (the next episode, or
+    /// one from Continue Watching).
+    @State private var switching: String?
     #if os(iOS)
     /// The Info panel, and the picture filling the screen (cropped) rather
     /// than fitting it.
     @State private var showInfo = false
-    /// The player's Continue Watching open, and the title being started from it.
+    /// The player's Continue Watching open.
     @State private var showContinue = false
-    @State private var switching: String?
     @State private var filled = false
     @State private var muted = false
     /// The film went on in Picture in Picture: closing here isn't stopping.
@@ -288,8 +290,8 @@ struct MoviePlayerView: View {
     @State private var thumbnailTask: Task<Void, Never>?
     /// The next episode got ready (near the end of this one).
     @State private var preparedNext = false
-    /// That episode, played at the end (iPhone, as the Apple TV app's "Play
-    /// Next Episode" does).
+    /// That episode, played at the end (as the Apple TV app's "Play Next
+    /// Episode" does).
     @State private var upNext: EmbyItem?
     /// The film's preview thumbnails, when the server has them, and where
     /// the last preview the player has on screen is (its seconds).
@@ -497,7 +499,7 @@ struct MoviePlayerView: View {
             })
         }
         return PlayerInfoPanel(title: playback.title, overview: playback.overview, meta: meta.joined(separator: " · "),
-                               badges: badges, actions: actions)
+                               badges: badges, actions: actions, images: playback.stills)
     }
 
     /// Info, and Continue Watching when it has other titles, as in the
@@ -544,29 +546,6 @@ struct MoviePlayerView: View {
         }
         // Open: the controls stay until it's closed.
         showControls(autoHide: !showContinue)
-    }
-
-    /// The next episode, in this player screen (at the end, as the Apple TV
-    /// app's "Play Next Episode" does).
-    private func playNext(_ episode: EmbyItem) {
-        guard let switchTo, switching == nil else { return }
-        switching = episode.id
-        Task {
-            defer { switching = nil }
-            do {
-                let next = try await model.playback(itemId: episode.id, kind: "Episode")
-                if closedAt == nil {
-                    closedAt = position
-                    var quiet = Transaction(animation: nil)
-                    quiet.disablesAnimations = true
-                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
-                }
-                switchTo(next)
-            } catch {
-                note("Couldn't play the next episode")
-                close()
-            }
-        }
     }
 
     /// Another title from Continue Watching, in this player screen: this
@@ -1059,6 +1038,29 @@ struct MoviePlayerView: View {
 
     /// A quality change or a short message: a small note at the top for a
     /// few seconds (it brought up every control for four seconds mid-film).
+    /// The next episode, in this player screen (at the end, as the Apple TV
+    /// app's "Play Next Episode" does).
+    private func playNext(_ episode: EmbyItem) {
+        guard let switchTo, switching == nil else { return }
+        switching = episode.id
+        Task {
+            defer { switching = nil }
+            do {
+                let next = try await model.playback(itemId: episode.id, kind: "Episode")
+                if closedAt == nil {
+                    closedAt = position
+                    var quiet = Transaction(animation: nil)
+                    quiet.disablesAnimations = true
+                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
+                }
+                switchTo(next)
+            } catch {
+                note("Couldn't play the next episode")
+                close()
+            }
+        }
+    }
+
     private func note(_ text: String) {
         withAnimation(.easeOut(duration: 0.2)) { qualityNote = text }
         Task {
@@ -1180,9 +1182,7 @@ struct MoviePlayerView: View {
             if !preparedNext, playback.seriesId != nil, total > 0, newPosition >= total * 0.8 {
                 preparedNext = true
                 model.prepareNext(after: playback)
-                #if os(iOS)
                 if switchTo != nil { Task { upNext = await model.episode(after: playback) } }
-                #endif
             }
             // Not while choosing where to jump: the picture's previews
             // aren't where the viewer is.
@@ -1211,9 +1211,7 @@ struct MoviePlayerView: View {
             if isPaused { showControls(autoHide: false) } else { showControls() }
         case .ended:
             position = total
-            #if os(iOS)
             if let next = upNext, switchTo != nil { return playNext(next) }
-            #endif
             close()
         case let .previewShown(seconds):
             previewShown = seconds

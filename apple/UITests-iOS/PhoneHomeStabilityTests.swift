@@ -170,6 +170,40 @@ final class PhoneHomeStabilityTests: XCTestCase {
 
     /// Home's cards as in the Apple TV app: Continue Watching 240 × 170
     /// (the title and progress inside it), posters 100 × 150, 12 apart.
+    /// A row's name with "›" opens the whole row, as in the Apple TV app
+    /// (measured at 3x from it): the name, 12 points under it three posters
+    /// across, 12 apart and 20 from the edges, lines 18 apart. A poster
+    /// opens its title. Regression: row names opened nothing.
+    func testRowNameOpensWholeRow() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone's three across")
+        app.launch()
+        sleep(8)
+        drag(from: 0.75, to: 0.35)
+        sleep(1)
+        let name = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 3), "no row name that opens its row")
+        let title = name.label
+        name.tap()
+        sleep(2)
+        shot("whole row")
+        let screen = app.frame
+        let width = (screen.width - 40 - 24) / 3
+        let posters = app.buttons.allElementsBoundByIndex
+            .filter { abs($0.frame.width - width) < 1 && abs($0.frame.height - width * 1.5) < 1 }
+            .sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
+        XCTAssertGreaterThanOrEqual(posters.count, 4, "not three \(width)-wide posters across: \(posters.map(\.frame))")
+        guard posters.count >= 4 else { return }
+        XCTAssertEqual(posters[0].frame.minX, 20, accuracy: 1, "the first poster isn't 20 from the edge")
+        XCTAssertEqual(posters[1].frame.minX - posters[0].frame.maxX, 12, accuracy: 1, "posters aren't 12 apart")
+        XCTAssertEqual(posters[3].frame.minY - posters[0].frame.maxY, 18, accuracy: 1, "lines aren't 18 apart")
+        let heading = app.staticTexts[title].firstMatch
+        XCTAssertTrue(heading.exists, "no \"\(title)\" over the row")
+        XCTAssertEqual(posters[0].frame.minY - heading.frame.maxY, 12, accuracy: 2, "the posters aren't 12 under the name")
+        posters[0].tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 8), "the poster didn't open its title")
+    }
+
     func testHomeCardSizes() {
         app.launch()
         sleep(8)
@@ -368,7 +402,8 @@ final class PhoneHomeStabilityTests: XCTestCase {
     /// The build numbers after the rows' names ("Trending now ·12").
     private func rowNumbers(_ layout: [String: CGRect]) -> Set<String> {
         Set(layout.keys.compactMap { key -> String? in
-            guard key.hasPrefix("text:"), let dot = key.lastIndex(of: "·") else { return nil }
+            // Row names open the whole row: buttons (rows without: text).
+            guard key.hasPrefix("text:") || key.hasPrefix("button:row-"), let dot = key.lastIndex(of: "·") else { return nil }
             let number = key[key.index(after: dot)...]
             return !number.isEmpty && number.allSatisfy(\.isNumber) ? String(number) : nil
         })

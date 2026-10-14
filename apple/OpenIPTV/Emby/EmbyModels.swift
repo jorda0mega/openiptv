@@ -219,6 +219,9 @@ struct EmbyPlayback: Hashable, Identifiable {
     var seriesId: String?
     /// The story, for the player's Info panel.
     var overview: String?
+    /// A still from it (an episode's own, a film's backdrop), for the
+    /// player's Info panel sideways.
+    var stills: [CardImage] = []
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
 

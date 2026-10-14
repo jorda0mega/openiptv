@@ -640,6 +640,9 @@ struct EmbyClient {
         playback.bitrate = info?.MediaSources?.first?.Bitrate
         playback.seriesId = item.seriesId
         playback.overview = item.overview
+        playback.stills = Artwork.candidates(item, context: item.kind == "Episode" ? .still : .backdrop).prefix(3).map {
+            CardImage(url: imageURL($0, width: 540, shape: .landscape).absoluteString, contain: $0.contain(in: .landscape))
+        }
         // English or Spanish audio as the title calls for, subtitles off
         // (see TrackChoice), from the tracks the server lists.
         // Always a plan: without the server's track list (it didn't answer

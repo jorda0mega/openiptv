@@ -85,6 +85,20 @@ tests tapped its corner and hid the controls), the Live TV empty-state test
 now runs only with the server stopped (`LIVE_EMPTY`), and the story test's
 film has the same story in both of its copies.
 
+## Round 8 (2026-10-14): the open items with an Apple reference
+
+Measured at 3x from Mobbin screenshots of the Apple TV app:
+[Info, sideways](https://mobbin.com/screens/33bd5cb0-b8aa-4bc4-a789-ca1a6cf792da),
+[a whole row](https://mobbin.com/screens/9de56288-8834-43a8-94c7-23c52b5aae0e),
+[Home's row names](https://mobbin.com/screens/5bc9458e-30cc-437e-94b1-85588060b781).
+
+| Area | Apple TV app | Ours before | Change | Test |
+|---|---|---|---|---|
+| Info, sideways | Under the pills: a 180 × 101 still, the text 20 to its right, the buttons stacked at the right (200 × 44, 8 apart), level with the still | No still; one full-width button under the text | Apple's layout (an episode's own still, a film's backdrop) | `testInfoAsInAppleTV` |
+| Info text and buttons | Title 17 pt bold, story 15 pt, genre and time 13 pt semibold (both ways); buttons 44 high, 15-point words | Title 20 pt, story 17 pt, genre 15 pt; buttons 48 high, 17-point words | Apple's sizes | `testInfoAsInAppleTV` |
+| Row names | A grey "›" (67% white, as tall as the capitals) after the name; a tap opens the whole row | Names opened nothing | The "›" and the whole row: the name, then three posters across (12 apart, 20 from the edges, lines 18 apart); iPad: as many as fit at about that size | `testRowNameOpensWholeRow` |
+| The next episode on Apple TV | Auto-Play: the next episode plays at the end | The player closed at an episode's end (the iPhone played on) | The next episode plays in the same player, as on the iPhone | `RemoteFocusTests.testNextEpisodeAtEnd` |
+
 ## Earlier rounds (2026-10-12 and 13)
 
 See the commits from `d1a424b` to `0bbcce9`: tracks chosen by language before
@@ -136,11 +150,11 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
 
 ## Still open
 
-- Row titles: Apple's have a "›" that opens the whole row; ours open nothing.
+- Continue Watching's "›" (Apple's opens the whole list): no reference
+  screenshot of that page found, so not added.
 - The PiP hand-over's last seek (the video output switch): gone only if
-  the picture is always drawn into the window's kind of layer.
-- The Info panel sideways: Apple shows a still beside the text and the
-  buttons at the right; ours has the text and buttons under the pills.
+  the picture is always drawn into the window's kind of layer (waits for
+  the user's "try it" or "keep it as is").
 - Apple's end-of-title post-play page (needs a reference for an episode).
 
 - Skip Intro: Netflix and Max have it; no Apple TV app (iPhone) reference
@@ -148,7 +162,6 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
   IntroEnd, CreditsStart) when its intro detection runs.
 - An Episodes list inside the player (Netflix); ours has Continue Watching
   and Go to Show.
-- Up Next on Apple TV (the episode ends and the player closes there).
 
 - Picture in Picture's picture on a real device (the simulator can't show it).
 

@@ -679,6 +679,48 @@ final class PlayerLookTests: XCTestCase {
         app.buttons["Rotate to portrait"].firstMatch.tap()
     }
 
+    /// The Info panel as in the Apple TV app (measured at 3x from it).
+    /// Upright: the title 17 pt (one line about 22 high), buttons 44 high.
+    /// Sideways: a 180 × 101 still under the pills, the text beside it, and
+    /// From Beginning 200 × 44 at the right, level with the still.
+    /// Regression: sideways had no still and a full-width button under the
+    /// text; the title was 20 pt and the buttons 48 high.
+    func testInfoAsInAppleTV() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone's layouts")
+        openFilm()
+        controlsUp()
+        app.buttons["Pause"].firstMatch.tap()
+        app.buttons["Info"].firstMatch.tap()
+        sleep(1)
+        shot("info upright")
+        let start = app.buttons["From Beginning"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 3), "no From Beginning")
+        XCTAssertEqual(start.frame.height, 44, accuracy: 1, "upright button: \(start.frame)")
+        let title = app.staticTexts.matching(NSPredicate(format: "label == 'Animals'")).firstMatch
+        XCTAssertLessThan(title.frame.height, 24, "the title isn't 17 pt: \(title.frame)")
+
+        app.buttons["Info"].firstMatch.tap()
+        app.buttons["Rotate to landscape"].firstMatch.tap()
+        sleep(3)
+        controlsUp()
+        app.buttons["Info"].firstMatch.tap()
+        sleep(1)
+        shot("info sideways")
+        let still = app.otherElements["player.info.still"].firstMatch
+        XCTAssertTrue(still.waitForExistence(timeout: 3), "no still sideways")
+        let pill = app.buttons["Info"].firstMatch.frame
+        XCTAssertEqual(still.frame.width, 180, accuracy: 1, "still: \(still.frame)")
+        XCTAssertEqual(still.frame.height, 101, accuracy: 1, "still: \(still.frame)")
+        XCTAssertGreaterThan(still.frame.minY, pill.maxY, "the still isn't under the pills")
+        let button = start.frame
+        XCTAssertEqual(button.width, 200, accuracy: 1, "sideways button: \(button)")
+        XCTAssertEqual(button.height, 44, accuracy: 1, "sideways button: \(button)")
+        XCTAssertGreaterThan(button.minX, still.frame.maxX + 150, "the button isn't at the right: \(button)")
+        XCTAssertEqual(button.minY, still.frame.minY, accuracy: 6, "the button isn't level with the still")
+        XCTAssertLessThanOrEqual(button.maxX, app.frame.maxX, "the button is off the screen: \(button)")
+        app.buttons["Rotate to portrait"].firstMatch.tap()
+    }
+
     /// Regression: with the film playing, the subtitles menu stayed open
     /// while the controls hid under it, and the player closed with them.
     func testSubtitlesMenuKeepsControls() {

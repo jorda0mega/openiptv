@@ -373,6 +373,8 @@ struct PlayerInfoPanel {
     var meta: String
     var badges: [String] = []
     var actions: [PlayerAction] = []
+    /// A still, beside the text sideways.
+    var images: [CardImage] = []
     /// Continue Watching's titles, in place of the rest.
     var cards: [PlayerCard] = []
 }
@@ -512,15 +514,63 @@ struct PlayerInfoPanelView: View {
         [card.title, card.subtitle, card.spoken].compactMap(\.self).joined(separator: ", ")
     }
 
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(panel.title).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(1)
+    /// As in the Apple TV app (measured at 3x from it): upright, the text,
+    /// then the buttons side by side; sideways, a 180 × 101 still, the text
+    /// beside it and the buttons stacked at the right (200 × 44, 8 apart).
+    @ViewBuilder private var details: some View {
+        if compact {
+            HStack(alignment: .top, spacing: 0) {
+                if !panel.images.isEmpty {
+                    CoverImage(images: panel.images, title: panel.title)
+                        .frame(width: 180, height: 101)
+                        .clipShape(.rect(cornerRadius: 8))
+                        .accessibilityHidden(true)
+                        #if DEBUG
+                        // UI tests: the still's own frame (the picture's
+                        // counts uncut).
+                        .overlay {
+                            Color.black.opacity(0.001)
+                                .accessibilityElement()
+                                .accessibilityLabel("Still")
+                                .accessibilityIdentifier("player.info.still")
+                        }
+                        #endif
+                        .padding(.leading, 10)
+                        .padding(.trailing, 20)
+                }
+                text.frame(maxWidth: .infinity, alignment: .leading)
+                if !panel.actions.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(panel.actions) { button($0).frame(width: 200) }
+                    }
+                    .padding(.leading, 16)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                text
+                if !panel.actions.isEmpty {
+                    HStack(spacing: 10) {
+                        ForEach(panel.actions) { button($0).frame(maxWidth: .infinity) }
+                    }
+                    .padding(.top, 12)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The title (17 pt bold), the story (15 pt), genre and running time
+    /// (13 pt), as in the Apple TV app.
+    private var text: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(panel.title).font(.headline.weight(.bold)).foregroundStyle(.white).lineLimit(1)
             if let overview = panel.overview, !overview.isEmpty {
-                Text(overview).font(.body).foregroundStyle(.white).lineLimit(compact ? 3 : 5)
+                Text(overview).font(.subheadline).foregroundStyle(.white).lineLimit(compact ? 3 : 5)
             }
             HStack(spacing: 6) {
                 if !panel.meta.isEmpty {
-                    Text(panel.meta).font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.5))
+                    Text(panel.meta).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.5))
                 }
                 ForEach(panel.badges, id: \.self) { badge in
                     Text(badge)
@@ -531,25 +581,21 @@ struct PlayerInfoPanelView: View {
                         .overlay(RoundedRectangle(cornerRadius: 3).stroke(.white.opacity(0.55), lineWidth: 1))
                 }
             }
-            if !panel.actions.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(panel.actions) { action in
-                        Button(action: action.action) {
-                            Label(action.title, systemImage: action.systemImage ?? "circle")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .contentShape(.capsule)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                    }
-                }
-                .padding(.top, 14)
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 44 points tall, 15-point text, as in the Apple TV app.
+    private func button(_ action: PlayerAction) -> some View {
+        Button(action: action.action) {
+            Label(action.title, systemImage: action.systemImage ?? "circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
     }
 }
 #endif
