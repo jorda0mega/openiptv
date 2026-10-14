@@ -262,7 +262,9 @@ final class PlayerLookTests: XCTestCase {
 
     /// Subtitles picked in the player stay for that film, even in the
     /// audio's own language (English over English). Needs the test server
-    /// with the multi-track file (OPENIPTV_MOCK_VIDEO=multi.mkv, a US film).
+    /// with the multi-track file as a US film (OPENIPTV_MOCK_VIDEO=multi.mkv,
+    /// OPENIPTV_MOCK_COUNTRIES="United States of America"; with no country,
+    /// its Spanish first track counts as the original); TEST_RUNNER_MULTI_TRACK=1.
     func testPickedSubtitlesStay() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         openFilm(["-forgetTrackChoices", "YES"])
@@ -305,8 +307,9 @@ final class PlayerLookTests: XCTestCase {
 
     /// Of two English subtitle tracks, the one picked (SDH) comes back,
     /// not just its language. Needs the test server with a file holding
-    /// English and English SDH subtitles (OPENIPTV_MOCK_VIDEO=multi-sdh.mkv;
-    /// run with TEST_RUNNER_SDH_TRACKS=1). Regression: only the language
+    /// English and English SDH subtitles (OPENIPTV_MOCK_VIDEO=multi-sdh.mkv,
+    /// OPENIPTV_MOCK_COUNTRIES="United States of America"; run with
+    /// TEST_RUNNER_SDH_TRACKS=1). Regression: only the language
     /// was kept, so the plain English track came back.
     func testPickedSDHSubtitlesStay() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SDH_TRACKS"] != nil, "needs the SDH test file")
@@ -389,8 +392,8 @@ final class PlayerLookTests: XCTestCase {
     /// plays on, at full quality. Regressions: the player read the file
     /// again from the server for the new track and stopped for seconds; and
     /// that wait counted as a slow connection, which dropped the quality (a
-    /// note, and the picture jumped). Needs the multi-track test server
-    /// (TEST_RUNNER_MULTI_TRACK=1).
+    /// note, and the picture jumped). Needs the multi-track test server as
+    /// for testPickedSubtitlesStay (TEST_RUNNER_MULTI_TRACK=1).
     func testSubtitleSwitchKeepsPlaying() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
