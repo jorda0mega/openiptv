@@ -13,7 +13,7 @@ these tests passed on 2026-10-13 against `77cf041` or later.
 |---|---|---|
 | Landscape: Home's hero filled the screen after a film played sideways | `219a4b5` | `HomeAfterLandscapeTests.testHeroSizeAfterLandscapePlayback` |
 | The picture changed size when the controls showed (pause) | `82997d9` | `PlayerLookTests.testPlayerLook` (portrait and landscape, playing and paused) |
-| Buttons too big | `6c6245a` (Apple's 44, 63, 92 points; the system style's padding removed), `db81d01` | `testPlayerLook` screenshots, `testHomeCardSizes`, `testMyList` |
+| Buttons too big | `6c6245a` (Apple's 44, 63, 92 points; the system style's padding removed), `db81d01` | `testPlayerButtonSizes` (all 7 player buttons, the Info pill, centres 117 apart), `testHomeCardSizes`, `testMyList` |
 | Change the audio and subtitles; English unless Spanish-made | `79fe646`, `d1a424b`, `02dd23e`, `5a508f4` | `testPickedSubtitlesStay`, `testPickedSDHSubtitlesStay`, `testSubtitleSwitchKeepsPlaying` (US film), `testSpanishFilmStartsInSpanish` (Mexico) |
 | No flickers or jumps (search, Continue Watching, pages) | `22016f2`, `b758bea`, `c896690` | `SearchStabilityTests` (4), `testPageReadyWhenPlayerCloses`, `testEpisodeRowsSameHeight`, `testMainButtonKeepsWidthWhileStarting` |
 | Recommendations change only at moments (launch, pull, tab change, long away) | `22016f2` | `testHomeStaysPutUntilChosenAgainOrPulled`, `testHomeChangesOnlyAfterLongAway` |

@@ -548,6 +548,31 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(state?.playing, true, "the episode isn't playing")
     }
 
+    /// The player's buttons at the Apple TV app's sizes (measured from its
+    /// iOS 26 player, 440-point screen). Regression: the system glass style
+    /// added its own padding, and every button came out too big.
+    func testPlayerButtonSizes() {
+        openFilm()
+        controlsUp()
+        app.buttons["Pause"].firstMatch.tap()
+        sleep(1)
+        shot("button sizes")
+        func size(_ label: String) -> CGSize { app.buttons[label].firstMatch.frame.size }
+        let expected: [(String, CGFloat, CGFloat)] = [
+            ("Close player", 44, 44), ("Mute", 44, 44), ("Back 10 seconds", 63, 63), ("Play", 92, 92),
+            ("Forward 10 seconds", 63, 63), ("Audio and Subtitles", 44, 44), ("Playback Speed", 44, 44),
+        ]
+        for (label, width, height) in expected {
+            let found = size(label)
+            XCTAssertEqual(found.width, width, accuracy: 1, "\(label): \(found)")
+            XCTAssertEqual(found.height, height, accuracy: 1, "\(label): \(found)")
+        }
+        XCTAssertEqual(app.buttons["Info"].firstMatch.frame.height, 40, accuracy: 1, "the Info pill")
+        // Centres 117 points apart, as in the Apple TV app.
+        let back = app.buttons["Back 10 seconds"].firstMatch.frame, play = app.buttons["Play"].firstMatch.frame
+        XCTAssertEqual(play.midX - back.midX, 117, accuracy: 1, "back 10 and play/pause apart")
+    }
+
     /// Regression: with the film playing, the subtitles menu stayed open
     /// while the controls hid under it, and the player closed with them.
     func testSubtitlesMenuKeepsControls() {
