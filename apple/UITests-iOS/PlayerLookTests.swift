@@ -713,6 +713,27 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(readout.label, "0.00 1.0000", "the film's own track was shifted")
     }
 
+    /// A film heard in neither English nor Spanish, with no subtitles in
+    /// either, gets English ones by itself: the server's subtitle providers
+    /// are asked, the file downloaded is added and shown. Regression: such
+    /// a film played with no subtitles at all. Needs the French-only test
+    /// film and a provider's subtitles (OPENIPTV_MOCK_VIDEO=foreign.mkv,
+    /// OPENIPTV_MOCK_REMOTE_SUBTITLE=…/inside.srt; TEST_RUNNER_REMOTE_SUBTITLES=1).
+    func testMissingSubtitlesComeFromTheServer() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["REMOTE_SUBTITLES"] != nil, "needs the French-only test film")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm(["-forgetTrackChoices", "YES", "-forgetSubtitleSearches", "YES"])
+        var playing = ""
+        for _ in 0..<15 where !playing.contains("subtitles=eng") {
+            sleep(1)
+            playing = tracksPlaying()
+        }
+        shot("subtitles from the server")
+        XCTAssertTrue(playing.hasSuffix("subtitles=eng"), "no English subtitles came: \(playing)")
+    }
+
     /// The app's debug readout of the player: its second, and whether it plays.
     private func playerState() -> (seconds: Double, playing: Bool)? {
         let parts = app.staticTexts["debug-position"].firstMatch.label.split(separator: " ")

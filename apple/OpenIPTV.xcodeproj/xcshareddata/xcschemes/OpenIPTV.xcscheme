@@ -50,6 +50,17 @@
                ReferencedContainer = "container:OpenIPTV.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "49DFFE4F5C0EF2F0DD456B7A"
+               BuildableName = "OpenIPTV UnitTests.xctest"
+               BlueprintName = "OpenIPTV UnitTests"
+               ReferencedContainer = "container:OpenIPTV.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

@@ -627,7 +627,8 @@ final class MPVPlayer: @unchecked Sendable {
             fileTracks[file.url] = id
             if let fit = pendingFits.removeValue(forKey: file.url) { fits[id] = fit }
         }
-        emit(.tracksChanged)
+        // The menu hears of it once it's chosen or not.
+        defer { emit(.tracksChanged) }
         guard let plan = trackPlan?.refreshed(), plan.subtitles != nil,
               let now = mpv_get_property_string(mpv, "sid") else { return }
         let off = String(cString: now) == "no"

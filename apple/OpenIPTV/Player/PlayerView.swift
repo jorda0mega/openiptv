@@ -264,6 +264,8 @@ struct MoviePlayerView: View {
     #if os(tvOS)
     /// Where the current swipe started from.
     @State private var swipeFrom: Double?
+    /// Buttons moved along by the current swipe (on the round buttons).
+    @State private var buttonSwipeSteps = 0
     /// Rewinding or fast-forwarding while left or right is held, and which
     /// way (+1 forward, −1 back).
     @State private var holdTask: Task<Void, Never>?
@@ -1097,6 +1099,13 @@ struct MoviePlayerView: View {
             startReadout = String(format: "%@ %.1f at %.0f", warmStart ? "warm" : "cold", total, position)
             #endif
             Task { await loadTrackInfo() }
+            // No subtitles a foreign film needs: the server finds some.
+            if playback.mediaSourceId != nil {
+                Task {
+                    let files = await model.fetchMissingSubtitles(for: playback)
+                    if !files.isEmpty { player?.addSubtitles(files, reference: playback.subtitleReference) }
+                }
+            }
             #if DEBUG && os(iOS)
             NSLog("%@", "PERF pip supported=\(PictureInPicture.isSupported)")
             #endif
@@ -1230,6 +1239,9 @@ struct MoviePlayerView: View {
                 NSLog("%@", "PERF tracks changed: \(fresh.count) tracks, was \(tracks.count)")
                 #endif
                 if fresh != tracks { tracks = fresh }
+                #if DEBUG
+                await readTracks()
+                #endif
             }
         case .window:
             break
@@ -1382,8 +1394,9 @@ struct MoviePlayerView: View {
     /// - click left or right: back or forward 10 seconds, straight away;
     /// - hold left or right: rewind or fast-forward, faster the longer it's
     ///   held, jumping there on release;
-    /// - swipe across the touch surface: the picture pauses and follows to
-    ///   where it would jump; click to play from there, Menu to stay;
+    /// - swipe across the touch surface, paused: the picture follows to
+    ///   where it would jump; click to play from there, Menu to stay.
+    ///   Playing, a swipe only shows the controls (see RemoteSwipe);
     /// - click the centre or Play/Pause: pause or play;
     /// - up: the round buttons (subtitles, audio, speed), whose menus open with a
     ///   click; down: the Info panel and "From Beginning";
@@ -1422,6 +1435,11 @@ struct MoviePlayerView: View {
             if let target = scrubbing { commitScrub(target) }
         case let .swipe(began, distance, ended):
             guard started else { return }
+            guard RemoteSwipe.action(at: .bar, paused: paused, scrubbing: scrubbing != nil, distance: distance) == .scrub else {
+                // Playing: a swipe on the way to the buttons isn't a jump.
+                showControls()
+                return
+            }
             compact = true
             if began { swipeFrom = scrubbing ?? position }
             guard let from = swipeFrom else { return }
@@ -1455,18 +1473,30 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// On the round buttons: left and right between them, a click opens
-    /// its menu, down or Menu back to the bar.
+    /// On the round buttons: left and right between them (a click on the
+    /// ring, or a swipe), a click opens its menu, down or Menu back to the
+    /// bar.
     private func onButtons(_ input: TVRemoteSurface.Input) {
-        switch input {
-        case let .click(direction):
+        func move(_ by: Int) {
             let buttons: [TVPlayerFocus] = (subtitleTracks.isEmpty ? [] : [.subtitles]) + [.audio, .speed]
-            guard let at = buttons.firstIndex(of: focus) else { return }
-            let next = buttons[min(max(at + (direction < 0 ? -1 : 1), 0), buttons.count - 1)]
+            guard by != 0, let at = buttons.firstIndex(of: focus) else { return }
+            let next = buttons[min(max(at + by, 0), buttons.count - 1)]
             guard next != focus else { return }
             // Off the button: a menu asked for there no longer opens.
             menuRequest += 1
             focus = next
+        }
+        switch input {
+        case let .click(direction):
+            move(direction < 0 ? -1 : 1)
+        case let .swipe(began, distance, ended):
+            if began { buttonSwipeSteps = 0 }
+            if case let .moveFocus(by) = RemoteSwipe.action(at: .buttons, paused: paused, scrubbing: false,
+                                                            distance: distance, stepsTaken: buttonSwipeSteps), by != 0 {
+                move(by)
+                buttonSwipeSteps += by
+            }
+            if ended { buttonSwipeSteps = 0 }
         case .select:
             openMenu(Self.menu(for: focus))
         case .playPause:

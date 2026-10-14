@@ -88,9 +88,21 @@ CAST = {"z0": [("Antonio Banderas", "Actor"), ("Anthony Hopkins", "Actor"), ("Ca
         "a10": [("Leonardo DiCaprio", "Actor"), ("Christopher Nolan", "Director")]}
 
 
+# Subtitles downloaded through the providers (RemoteSearch), by language.
+DOWNLOADED = []
+
+
 def file_streams():
     """The test video's audio and subtitle tracks as Emby lists them
-    (language, default, index), read once with ffprobe."""
+    (language, default, index), read once with ffprobe, then any files
+    beside it and any downloaded."""
+    _file_streams_cached()
+    # (Files downloaded through the providers are listed fresh each time.)
+    return _STREAMS + [{"Type": "Subtitle", "Index": 200 + n, "Language": lang, "Codec": "srt", "IsExternal": True,
+                        "IsTextSubtitleStream": True, "DeliveryMethod": "External"} for n, lang in enumerate(DOWNLOADED)]
+
+
+def _file_streams_cached():
     global _STREAMS
     if _STREAMS is None:
         _STREAMS = []
@@ -113,11 +125,13 @@ def file_streams():
             _STREAMS.append({"Type": "Subtitle", "Index": 100 + n, "Language": language, "Title": title or None,
                              "Codec": "srt", "IsExternal": True, "IsTextSubtitleStream": True,
                              "IsHearingImpaired": "sdh" in title.lower(), "DeliveryMethod": "External"})
-    return _STREAMS
 
 
 def subtitle_file(index):
-    """The path of subtitle file `index` (100, 101, …) beside the film."""
+    """The path of subtitle file `index` (100, 101, … beside the film; 200,
+    201, … downloaded)."""
+    if index >= 200:
+        return os.environ.get("OPENIPTV_MOCK_REMOTE_SUBTITLE") if index - 200 < len(DOWNLOADED) else None
     files = [f for f in os.environ.get("OPENIPTV_MOCK_SUBTITLE_FILES", "").split(";") if f]
     n = index - 100
     return files[n].split("|", 2)[2] if 0 <= n < len(files) else None
@@ -283,6 +297,12 @@ class Handler(BaseHTTPRequestHandler):
                     and CONTROL.get("ignore_reports") != "1":
                 POSITIONS[body["ItemId"]] = int(float(body.get("PositionTicks") or 0))
             return self.send(b"", status=204)
+        if "/RemoteSearch/Subtitles/" in self.path and self.headers.get("X-Emby-Token") == "tok":
+            # Download one: it's a subtitle file of the item from now on.
+            subtitle = urlparse(self.path).path.rsplit("/", 1)[1]
+            DOWNLOADED.append(subtitle.rsplit("-", 1)[1])
+            print(f"{time.time():.2f} subtitle download {subtitle}", flush=True)
+            return self.send({"NewIndex": 199 + len(DOWNLOADED)})
         if "/Users/U1/FavoriteItems/" in self.path and self.headers.get("X-Emby-Token") == "tok":
             item = urlparse(self.path).path.rsplit("/", 1)[1]
             if item not in FAVORITES:
@@ -309,6 +329,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.websocket()
         if path == "/mock/set":
             if "reset" in q:
+                DOWNLOADED.clear()
                 CONTROL.clear()
                 FAVORITES.clear()
                 POSITIONS.clear()
@@ -646,6 +667,14 @@ class Handler(BaseHTTPRequestHandler):
                 with open(bif, "rb") as f:
                     return self.send(f.read(), "application/octet-stream")
             return self.send({"error": "not found"}, status=404)
+        if "/RemoteSearch/Subtitles/" in path:
+            # The providers' subtitles for an item in a language.
+            language = path.rsplit("/", 1)[1]
+            remote = os.environ.get("OPENIPTV_MOCK_REMOTE_SUBTITLE")
+            print(f"{time.time():.2f} subtitle search {language} ({'offered' if remote else 'none'})", flush=True)
+            return self.send([{"Id": f"os-1-{language}", "Name": f"Release.{language}", "ProviderName": "Open Subtitles",
+                               "Format": "srt", "Language": language, "IsHashMatch": True, "DownloadCount": 100}]
+                             if remote else [])
         if path.startswith("/Videos/") and "/Subtitles/" in path:
             # /Videos/{id}/{source}/Subtitles/{index}/Stream.srt
             index = int(path.split("/Subtitles/", 1)[1].split("/", 1)[0])

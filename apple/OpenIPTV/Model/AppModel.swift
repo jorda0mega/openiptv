@@ -1270,6 +1270,49 @@ final class AppModel {
         }
     }
 
+    /// A film heard in neither English nor Spanish with no subtitles in
+    /// either: the server's subtitle providers are asked for some (English
+    /// first), once a week at most per title, and the subtitle files it
+    /// then has are returned for the player to add (and show). Nothing is
+    /// asked when the film has what's needed.
+    func fetchMissingSubtitles(for playback: EmbyPlayback) async -> [EmbyPlayback.SubtitleFile] {
+        #if DEBUG
+        NSLog("%@", "PERF subtitles needed? wanted=\(playback.tracks?.subtitles ?? []) has=\(playback.subtitleLanguages.sorted()) source=\(playback.mediaSourceId ?? "none")")
+        #endif
+        guard let emby, let wanted = playback.tracks?.subtitles,
+              playback.subtitleLanguages.isDisjoint(with: ["en", "es"]) else { return [] }
+        let key = "subtitleSearch." + playback.itemId
+        var recent = (UserDefaults.standard.object(forKey: key) as? Date).map { Date().timeIntervalSince($0) < 7 * 86_400 } ?? false
+        #if DEBUG
+        // UI tests: `-forgetSubtitleSearches YES` asks again.
+        if UserDefaults.standard.bool(forKey: "forgetSubtitleSearches") { recent = false }
+        #endif
+        if recent { return [] }
+        UserDefaults.standard.set(Date(), forKey: key)
+        let languages = wanted.compactMap { TrackChoice.normalized($0) }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        for language in languages {
+            let code = language == "es" ? "spa" : "eng"
+            let found: [EmbyClient.RemoteSubtitle]
+            do { found = try await emby.searchSubtitles(playback.itemId, mediaSourceId: playback.mediaSourceId, language: code) } catch {
+                #if DEBUG
+                NSLog("%@", "PERF subtitles search failed: \(error)")
+                #endif
+                continue
+            }
+            guard let best = found.first,
+                  (try? await emby.downloadSubtitle(playback.itemId, mediaSourceId: playback.mediaSourceId, id: best.Id)) != nil
+            else { continue }
+            #if DEBUG
+            NSLog("%@", "PERF subtitles fetched from \(best.ProviderName ?? "the server"): \(language)")
+            #endif
+            // The server lists its new file now.
+            if let fresh = try? await emby.playback(versions: [playback.itemId], kind: nil, maxWidth: Self.maxWidth) {
+                return fresh.subtitleFiles
+            }
+        }
+        return []
+    }
+
     /// Works out how to play these in the background; a later tap uses it.
     func prepare(_ items: [(id: String, kind: String?)], duringPlayback: Bool = false) {
         guard let emby, duringPlayback || !PlaybackActivity.isPlaying else { return }

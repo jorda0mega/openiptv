@@ -122,6 +122,42 @@ struct EmbyClient {
         _ = try await HTTP.data(request)
     }
 
+    /// Subtitles the server's providers (OpenSubtitles, …) offer for an
+    /// item in a language ("eng", "spa"), best first: made for this exact
+    /// file, then the most downloaded; forced-only ones left out.
+    func searchSubtitles(_ itemId: String, mediaSourceId: String?, language: String) async throws -> [RemoteSubtitle] {
+        let found: [RemoteSubtitle] = try await get("Items/\(itemId)/RemoteSearch/Subtitles/\(language)",
+                                                    [.init(name: "MediaSourceId", value: mediaSourceId)].filter { $0.value != nil })
+        return found.filter { $0.IsForced != true }.sorted {
+            ($0.IsHashMatch == true ? 1 : 0, $0.DownloadCount ?? 0) > ($1.IsHashMatch == true ? 1 : 0, $1.DownloadCount ?? 0)
+        }
+    }
+
+    /// Has the server download one of them; it's then one of the item's
+    /// subtitle files.
+    func downloadSubtitle(_ itemId: String, mediaSourceId: String?, id: String) async throws {
+        var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(itemId)/RemoteSearch/Subtitles"),
+                                  resolvingAgainstBaseURL: false)!
+        // The provider's id as one path segment, escaped once (escaped by
+        // hand and then by the URL, "-" arrived as "%252D").
+        let segment = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+        parts.percentEncodedPath += "/" + (id.addingPercentEncoding(withAllowedCharacters: segment) ?? id)
+        if let mediaSourceId { parts.queryItems = [.init(name: "MediaSourceId", value: mediaSourceId)] }
+        var request = URLRequest(url: parts.url!)
+        request.httpMethod = "POST"
+        authorize(&request)
+        _ = try await HTTP.data(request)
+    }
+
+    struct RemoteSubtitle: Decodable {
+        let Id: String
+        let Name: String?
+        let ProviderName: String?
+        let DownloadCount: Int?
+        let IsHashMatch: Bool?
+        let IsForced: Bool?
+    }
+
     /// The films and shows on the viewer's My List.
     func favorites() async throws -> [EmbyItem] {
         try await items("Users/\(account.userId)/Items", [
@@ -656,6 +692,8 @@ struct EmbyClient {
         playback.tracks = TrackChoice.plan(audio: audio, countries: item.productionLocations ?? [],
                                            key: item.seriesId ?? item.id)
         if let source = info?.MediaSources?.first {
+            playback.subtitleLanguages = Set((source.MediaStreams ?? []).filter { $0.Type == "Subtitle" }
+                .compactMap { $0.Language.flatMap(TrackChoice.normalized) })
             playback.subtitleFiles = subtitleFiles(item.id, source)
             if !playback.subtitleFiles.isEmpty { playback.subtitleReference = subtitleReference(item.id, source) }
         }
