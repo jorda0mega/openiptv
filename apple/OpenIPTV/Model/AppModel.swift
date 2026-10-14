@@ -14,6 +14,12 @@ final class AppModel {
     let guide = GuideStore()
     let library = LibraryIndex()
 
+    /// "Go to Show" in the player: the show's page to open as the player
+    /// closes (on Home, unless that page is the one under the player).
+    var showRequest: ShowRoute?
+    /// The show whose page is on screen, if any.
+    var showOnScreen: String?
+
     // MARK: Home (Emby)
 
     var rows: [HomeRow] = []

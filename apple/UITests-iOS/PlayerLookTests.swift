@@ -483,6 +483,38 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(app.buttons["Playback Speed"].firstMatch.value as? String, "2×")
     }
 
+    /// An episode's Info, as in the Apple TV app: From Beginning and Go to
+    /// Show side by side; Go to Show closes the player on the show's page.
+    func testGoToShow() throws {
+        // The episode a minute in (its usual resume point is the test
+        // film's end).
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "60"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        let episode = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Case 3'")).firstMatch
+        XCTAssertTrue(episode.waitForExistence(timeout: 20), "no episode in Continue Watching")
+        episode.tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 10), "the episode didn't play")
+        // Playing, the controls gone: brought up for the Info pill.
+        sleep(6)
+        controlsUp()
+        app.buttons["Info"].firstMatch.tap()
+        sleep(1)
+        shot("episode info")
+        let fromStart = app.buttons["From Beginning"].firstMatch
+        let goToShow = app.buttons["Go to Show"].firstMatch
+        XCTAssertTrue(goToShow.exists, "no Go to Show")
+        XCTAssertEqual(fromStart.frame.midY, goToShow.frame.midY, accuracy: 2, "not side by side")
+        goToShow.tap()
+        sleep(2)
+        shot("show page")
+        XCTAssertFalse(app.buttons["Close player"].exists, "the player is still up")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Season'")).firstMatch.waitForExistence(timeout: 5),
+                      "not on the show's page")
+    }
+
     /// Regression: with the film playing, the subtitles menu stayed open
     /// while the controls hid under it, and the player closed with them.
     func testSubtitlesMenuKeepsControls() {

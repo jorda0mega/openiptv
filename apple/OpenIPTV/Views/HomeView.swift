@@ -102,6 +102,13 @@ struct HomeView: View {
         // is: what was built meanwhile goes on before it's drawn, then the
         // next one is built in the background, to wait for the next time.
         .onAppear { model.homeAppeared() }
+        // "Go to Show" in the player: the show's page here (the player
+        // closes over it), unless its page is the one under the player.
+        .onChange(of: model.showRequest) { _, request in
+            guard let request else { return }
+            model.showRequest = nil
+            if model.showOnScreen != request.id { path.append(request) }
+        }
         .task { await model.loadHome(cardWidth: pixelWidth) }
         .task { await model.loadMyList(cardWidth: pixelWidth) }
     }

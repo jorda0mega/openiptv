@@ -206,6 +206,8 @@ struct ShowView: View {
         } message: {
             Text(playError ?? "")
         }
+        .onAppear { model.showOnScreen = route.id }
+        .onDisappear { if model.showOnScreen == route.id { model.showOnScreen = nil } }
     }
 
     @ViewBuilder private var header: some View {

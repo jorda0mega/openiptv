@@ -556,7 +556,9 @@ class Handler(BaseHTTPRequestHandler):
                              "ImageTags": {"Primary": f"still{i}"} if i % 5 != 4 else {},
                              "PrimaryImageAspectRatio": 1.7778,
                              "ParentBackdropItemId": "s1", "ParentBackdropImageTags": ["stale-sb"],
-                             "UserData": {"PlaybackPositionTicks": 6000000000, "PlayedPercentage": 40.0}}
+                             # "episode_resume": seconds in (the test film is 10 min).
+                             "UserData": {"PlaybackPositionTicks": int(float(CONTROL.get("episode_resume", 600)) * 10_000_000),
+                                          "PlayedPercentage": 40.0}}
         if path == "/Users/U1/Views":
             return self.send({"Items": [{"Id": "v1", "Name": "Movies", "Type": "CollectionFolder", "CollectionType": "movies"},
                                         {"Id": "v2", "Name": "TV Shows", "Type": "CollectionFolder", "CollectionType": "tvshows"},

@@ -461,6 +461,38 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertGreaterThanOrEqual((after ?? 0) - (before ?? 0), 8, "the click right didn't skip")
     }
 
+    /// Playback speed, as in the Apple TV app: up to the round buttons,
+    /// right to Playback Speed, its menu on 1×, down to 2×: the film plays
+    /// twice as fast.
+    func testPlaybackSpeed() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(8)
+        press(.up, "to the round buttons")
+        press(.right, "to speed")
+        press(.select, "speed menu")
+        for _ in 0..<3 { press(.down, "down the speeds") }
+        press(.select, "pick 2x")
+        press(.down, "back to the bar")
+        guard let first = playerSecond() else { return XCTFail("no position readout") }
+        let from = Date()
+        sleep(4)
+        guard let later = playerSecond() else { return XCTFail("no position readout") }
+        let rate = (later - first) / Date().timeIntervalSince(from)
+        XCTAssertGreaterThan(rate, 1.6, "2× played at \(rate)×")
+    }
+
+    /// The player's second, from its debug readout ("72.4 playing").
+    private func playerSecond() -> Double? {
+        app.staticTexts["debug-position"].firstMatch.label.split(separator: " ").first.flatMap { Double($0) }
+    }
+
     /// The transport bar's time, in seconds ("02:12, -07:48" → 132).
     private func barSeconds() -> Double? {
         let bar = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Playing' OR label == 'Paused'")).firstMatch

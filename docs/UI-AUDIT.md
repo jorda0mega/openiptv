@@ -30,6 +30,8 @@ flickers or jumps. Each item below has a UI test that fails without it.
 | Playback speed | 0.5× to 2× from the gauge button | None | Menu "Playback Speed": 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2× (pitch kept), for that playback | `testPlaybackSpeed` |
 | Menus while playing | The controls stay while a menu is open | The controls hid after 4 s under an open menu, and the player closed with them (the menu's tap hook never fired) | Menus say they are opening through their button style (`MenuPress`) | `testSubtitlesMenuKeepsControls`, `testPlaybackSpeed` |
 | Info panel (portrait) | The panel's text on near-black | Text on the picture dimmed to 30% | The picture dimmed to 18% under the panel | screenshot in `testPlayerLook` |
+| Info for an episode | From Beginning and Go to Show side by side | From Beginning alone | Go to Show: the player closes on the show's page (opened on Home unless that page is under the player) | `testGoToShow` |
+| Speed on Apple TV | A speed button beside subtitles and audio | None | A third round button, its menu like the audio and subtitle menus | `testPlaybackSpeed` (tvOS) |
 | Picture in Picture | The film moves into the window at once | A second stream had to start (5 s on a real server) | The same playback's frames go to the window | `testPictureInPicture` (its picture check runs on devices only: simulators draw this window black for every app) |
 
 Test fixes found on the way: the test readouts sat over the play button (the
@@ -58,6 +60,5 @@ their picture's colours.
 
 - The player's pills: the Apple TV app also has InSight and Continue Watching
   (ours: Info).
-- Info for an episode: Apple shows From Beginning and Go to Show side by side.
-- Playback speed on Apple TV (tvOS) and in Live TV.
+- Live TV has no speed (a live channel can't run ahead of itself).
 - Picture in Picture's picture on a real device (the simulator can't show it).

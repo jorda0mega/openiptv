@@ -47,6 +47,16 @@ struct PlayerScreen: View {
     }
 }
 
+/// Playback speeds, as in the Apple TV app: half to double.
+enum PlaybackSpeed {
+    static let all: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+    /// "1×", "1.25×", "0.5×".
+    static func name(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...2))) + "×"
+    }
+}
+
 #if os(iOS)
 /// The player's subtitles button: the audio and subtitle tracks, ticked
 /// where they are. Its own view, drawn again only when the tracks change: drawn again with
@@ -117,10 +127,9 @@ struct MenuPress: ButtonStyle {
     }
 }
 
-/// The playback speed, as in the Apple TV app: half to double, ticked
-/// where it is. Its own view for the same reason as the subtitles button.
+/// The playback speed, ticked where it is. Its own view for the same
+/// reason as the subtitles button.
 struct SpeedMenuButton: View, Equatable {
-    static let speeds: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
     let speed: Double
     let pick: (Double) -> Void
     let opened: () -> Void
@@ -130,9 +139,10 @@ struct SpeedMenuButton: View, Equatable {
     var body: some View {
         Menu {
             Section("Playback Speed") {
-                ForEach(Self.speeds, id: \.self) { value in
+                ForEach(PlaybackSpeed.all, id: \.self) { value in
                     Button { pick(value) } label: {
-                        if value == speed { Label(Self.name(value), systemImage: "checkmark") } else { Text(Self.name(value)) }
+                        let name = PlaybackSpeed.name(value)
+                        if value == speed { Label(name, systemImage: "checkmark") } else { Text(name) }
                     }
                 }
             }
@@ -146,12 +156,7 @@ struct SpeedMenuButton: View, Equatable {
         .buttonStyle(MenuPress(pressed: opened))
         .menuOrder(.fixed)
         .accessibilityLabel("Playback Speed")
-        .accessibilityValue(Self.name(speed))
-    }
-
-    /// "1×", "1.25×", "0.5×".
-    static func name(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0...2))) + "×"
+        .accessibilityValue(PlaybackSpeed.name(speed))
     }
 }
 #endif
@@ -456,12 +461,19 @@ struct MoviePlayerView: View {
     private var infoPanel: PlayerInfoPanel {
         let genre = playback.seriesId == nil ? playback.subtitle?.components(separatedBy: " · ").last : playback.subtitle
         let meta = [genre, runtime].compactMap(\.self).filter { !$0.isEmpty }
+        var actions = [PlayerAction(title: "From Beginning", systemImage: "play.fill") {
+            restart()
+            toggleInfo()
+        }]
+        // An episode: its show's page, as in the Apple TV app.
+        if let show = playback.seriesId {
+            actions.append(PlayerAction(title: "Go to Show", systemImage: "info.circle") {
+                model.showRequest = ShowRoute(id: show, title: playback.title, episodeId: playback.itemId)
+                close()
+            })
+        }
         return PlayerInfoPanel(title: playback.title, overview: playback.overview, meta: meta.joined(separator: " · "),
-                               badges: badges,
-                               actions: [PlayerAction(title: "From Beginning", systemImage: "play.fill") {
-                                   restart()
-                                   toggleInfo()
-                               }])
+                               badges: badges, actions: actions)
     }
 
     private func toggleInfo() {
@@ -661,6 +673,8 @@ struct MoviePlayerView: View {
         case .subtitles:
             TVTrackMenu(heading: "Subtitles", rows: [.init(label: "Off", checked: !subtitleTracks.contains(where: \.selected))]
                 + subtitleTracks.map { .init(label: label($0), checked: $0.selected) })
+        case .speed:
+            TVTrackMenu(heading: "Playback Speed", rows: PlaybackSpeed.all.map { .init(label: PlaybackSpeed.name($0), checked: $0 == speed) })
         default:
             nil
         }
@@ -1228,13 +1242,13 @@ struct MoviePlayerView: View {
     /// - swipe across the touch surface: the picture pauses and follows to
     ///   where it would jump; click to play from there, Menu to stay;
     /// - click the centre or Play/Pause: pause or play;
-    /// - up: the round buttons (subtitles, audio), whose menus open with a
+    /// - up: the round buttons (subtitles, audio, speed), whose menus open with a
     ///   click; down: the Info panel and "From Beginning";
     /// - Menu: close a menu or the panel, stop choosing, hide the controls,
     ///   then leave.
     private func remote(_ input: TVRemoteSurface.Input) {
         if let panel { return inPanel(panel, input) }
-        if focus == .audio || focus == .subtitles { return onButtons(input) }
+        if focus == .audio || focus == .subtitles || focus == .speed { return onButtons(input) }
         switch input {
         case let .click(direction):
             guard started else { return }
@@ -1303,12 +1317,15 @@ struct MoviePlayerView: View {
     private func onButtons(_ input: TVRemoteSurface.Input) {
         switch input {
         case let .click(direction):
-            guard !subtitleTracks.isEmpty else { return }
+            let buttons: [TVPlayerFocus] = (subtitleTracks.isEmpty ? [] : [.subtitles]) + [.audio, .speed]
+            guard let at = buttons.firstIndex(of: focus) else { return }
+            let next = buttons[min(max(at + (direction < 0 ? -1 : 1), 0), buttons.count - 1)]
+            guard next != focus else { return }
             // Off the button: a menu asked for there no longer opens.
             menuRequest += 1
-            focus = direction < 0 ? .subtitles : .audio
+            focus = next
         case .select:
-            openMenu(focus == .subtitles ? .subtitles : .audio)
+            openMenu(Self.menu(for: focus))
         case .playPause:
             togglePlay()
         case .down, .menu:
@@ -1322,7 +1339,7 @@ struct MoviePlayerView: View {
     /// picks, Menu (or up, from the Info panel) closes it.
     private func inPanel(_ open: TVPlayerPanel, _ input: TVRemoteSurface.Input) {
         let rows = menu?.rows.count ?? 0
-        let button: TVPlayerFocus = open == .subtitles ? .subtitles : .audio
+        let button = Self.button(for: open)
         switch (open, input) {
         case (.info, .select):
             restart()
@@ -1358,30 +1375,56 @@ struct MoviePlayerView: View {
         showControls(autoHide: !paused)
     }
 
-    /// A track menu, on the track in use.
+    /// The menu a round button opens, and the button a menu closes back to.
+    private static func menu(for button: TVPlayerFocus) -> TVPlayerPanel {
+        switch button {
+        case .subtitles: .subtitles
+        case .speed: .speed
+        default: .audio
+        }
+    }
+
+    private static func button(for menu: TVPlayerPanel) -> TVPlayerFocus {
+        switch menu {
+        case .subtitles: .subtitles
+        case .speed: .speed
+        default: .audio
+        }
+    }
+
+    /// A menu, on the track (or speed) in use.
     private func openMenu(_ kind: TVPlayerPanel) {
         menuRequest += 1
         let request = menuRequest
-        let button: TVPlayerFocus = kind == .subtitles ? .subtitles : .audio
+        let button = Self.button(for: kind)
         Task {
-            let fresh = await player?.tracks()
+            var fresh: [MPVPlayer.Track]?
+            if kind != .speed { fresh = await player?.tracks() }
             // Still asked for: the latest request, the remote still on its
             // button, nothing else opened meanwhile.
             guard request == menuRequest, focus == button, panel == nil else { return }
             if let fresh { tracks = fresh }
-            let chosen = kind == .audio
-                ? audioTracks.firstIndex(where: \.selected) ?? 0
-                : subtitleTracks.firstIndex(where: \.selected).map { $0 + 1 } ?? 0
+            let chosen = switch kind {
+            case .audio: audioTracks.firstIndex(where: \.selected) ?? 0
+            case .speed: PlaybackSpeed.all.firstIndex(of: speed) ?? 2
+            default: subtitleTracks.firstIndex(where: \.selected).map { $0 + 1 } ?? 0
+            }
             panel = kind
             focus = .row(chosen)
             showControls(autoHide: false)
         }
     }
 
-    /// Plays the audio track in this row, or shows these subtitles (row 0:
-    /// none); the tick moves at once.
+    /// Plays the audio track in this row, shows these subtitles (row 0:
+    /// none), or plays at this speed; the tick moves at once.
     private func choose(_ row: Int, in kind: TVPlayerPanel) {
         guard let player else { return }
+        if kind == .speed {
+            guard PlaybackSpeed.all.indices.contains(row) else { return }
+            speed = PlaybackSpeed.all[row]
+            player.setSpeed(speed)
+            return
+        }
         let trackKind: MPVPlayer.Track.Kind = kind == .audio ? .audio : .subtitle
         let list = tracks.filter { $0.kind == trackKind }
         let id: Int?

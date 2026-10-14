@@ -24,6 +24,8 @@ struct OpenIPTVApp: App {
     }
 }
 
+enum RootTab: Hashable { case home, live, search }
+
 struct RootView: View {
     /// A change made with no animation at all (the player's cover).
     static func quietly(_ change: () -> Void) {
@@ -38,6 +40,9 @@ struct RootView: View {
     /// The player on screen: `playing`, put up and taken away with no
     /// slide (the player fades itself in and out).
     @State private var shown: PlayerItem?
+    #if os(iOS)
+    @State private var tab = RootTab.home
+    #endif
 
     var body: some View {
         Group {
@@ -48,18 +53,23 @@ struct RootView: View {
                 // Laid out like Apple's TV app: a sidebar over full-screen pages.
                 TVRootView(playing: $playing)
                 #else
-                TabView {
-                    Tab("Home", systemImage: "house.fill") {
+                TabView(selection: $tab) {
+                    Tab("Home", systemImage: "house.fill", value: RootTab.home) {
                         HomeView(playing: $playing)
                     }
-                    Tab("Live TV", systemImage: "dot.radiowaves.left.and.right") {
+                    Tab("Live TV", systemImage: "dot.radiowaves.left.and.right", value: RootTab.live) {
                         LiveView(playing: $playing)
                     }
-                    Tab(role: .search) {
+                    Tab(value: RootTab.search, role: .search) {
                         SearchView(playing: $playing)
                     }
                 }
                 .tabBarMinimizeBehavior(.onScrollDown)
+                // "Go to Show" in the player: Home opens the show's page,
+                // unless that page is already under the player.
+                .onChange(of: model.showRequest) { _, request in
+                    if let request, model.showOnScreen != request.id { tab = .home }
+                }
                 #endif
             }
         }

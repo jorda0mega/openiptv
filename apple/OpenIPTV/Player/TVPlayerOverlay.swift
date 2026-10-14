@@ -5,7 +5,7 @@ import SwiftUI
 // screenshots of it at 1080p: margins of 80 points; paused, the caption
 // and title over a thin glass bar, the time under the playhead with a small
 // sign for what it's doing, the time left at the end, an Info tab under
-// them and round buttons (subtitles, audio) to the right of the title;
+// them and round buttons (subtitles, audio, speed) to the right of the title;
 // playing, the bar alone. The bar sits at the same height in every state.
 
 /// What the player shows over the picture.
@@ -14,6 +14,7 @@ enum TVPlayerPanel: Hashable {
     case info
     case audio
     case subtitles
+    case speed
 }
 
 /// What the remote moves between (the player has no SwiftUI focus: its
@@ -22,7 +23,8 @@ enum TVPlayerFocus: Hashable {
     case bar
     case subtitles
     case audio
-    /// A row of the open audio or subtitle menu.
+    case speed
+    /// A row of the open audio, subtitle or speed menu.
     case row(Int)
     case fromBeginning
 }
@@ -274,6 +276,8 @@ struct TVMovieOverlay: View {
                             TVPlayerRoundButton(systemName: "captions.bubble", label: "Subtitles", focused: focus == .subtitles)
                         }
                         TVPlayerRoundButton(systemName: "waveform", label: "Audio", focused: focus == .audio)
+                        TVPlayerRoundButton(systemName: "gauge.with.dots.needle.67percent", label: "Playback Speed",
+                                            focused: focus == .speed)
                     }
                 } bar: {
                     bar
