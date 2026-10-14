@@ -27,22 +27,23 @@ final class HomeAfterLandscapeTests: XCTestCase {
             .map(\.frame).first { $0.minX >= 0 && $0.maxX <= app.frame.width }
     }
 
-    func testHeroSizeAfterLandscapePlayback() {
+    func testHeroSizeAfterLandscapePlayback() throws {
+        try XCTSkipIf(onCI, "sideways runs locally only (see onCI in PlayerLookTests)")
         app.launch()
-        sleep(6)
-        let before = heroPlay()
+        // Home's first build (a fresh simulator has nothing saved).
+        var before = heroPlay()
+        for _ in 0..<40 where before == nil {
+            usleep(500_000)
+            before = heroPlay()
+        }
         shot("before")
         XCTAssertNotNil(before, "no hero Play button")
         app.buttons.matching(NSPredicate(format: "label == 'Play'")).firstMatch.tap()
         sleep(6)
-        app.tap()
-        usleep(600_000)
-        app.buttons["Rotate to landscape"].firstMatch.tap()
+        app.tapControl("Rotate to landscape") { self.app.buttons["Rotate to portrait"].exists }
         sleep(3)
         shot("player-landscape")
-        app.tap()
-        usleep(600_000)
-        app.buttons["Close player"].firstMatch.tap()
+        app.tapControl("Close player") { !self.app.buttons["Rotate to portrait"].exists }
         sleep(4)
         shot("after")
         let after = heroPlay()

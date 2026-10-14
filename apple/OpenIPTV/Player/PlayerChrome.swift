@@ -126,6 +126,8 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                     // about half a second).
                     PlayerGlassButton(systemName: paused ? "play.fill" : "pause.fill", label: paused ? "Play" : "Pause",
                                       size: 92, glyph: 42, action: playPause)
+                        // UI tests ("Play" alone also finds a page's Play).
+                        .accessibilityIdentifier("player.playPause")
                 }
             }
             PlayerGlassButton(systemName: "goforward.10", label: "Forward 10 seconds", size: 63, glyph: 30, action: forward)

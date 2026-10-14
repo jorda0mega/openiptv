@@ -366,9 +366,15 @@ final class RemoteFocusTests: XCTestCase {
         press(.select, "add to My List")
         XCTAssertTrue(app.buttons["Remove from My List"].exists, "+ didn't turn into a tick")
         app.terminate()
-        app.launchArguments = []
+        // On Home (the app opens on the tab it was last on: an earlier
+        // test may have left it on Settings).
+        app.launchArguments = ["-tvTab", "home"]
         app.launch()
-        sleep(6)
+        // Home built (a fresh simulator has nothing saved): Continue
+        // Watching shows under the hero (My List, further down, only once
+        // it's scrolled to).
+        XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 30), "Home didn't load")
+        sleep(2)
         // Down past the hero and Continue Watching: the next row is My List.
         press(.down, "to Play")
         press(.down, "to Continue Watching")
