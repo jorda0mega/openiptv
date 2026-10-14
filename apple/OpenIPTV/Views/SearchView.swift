@@ -369,18 +369,19 @@ struct SearchView: View {
                 // No animation for the results: they change at once; only
                 // the pill slides (below).
                 Button { scope = option } label: {
-                    // As in the Apple TV app: the chosen one in a blue pill,
-                    // the others plain.
+                    // The chosen one in a white pill with black words, as
+                    // everywhere in the app (the player's pills); the others
+                    // plain.
                     Text(option.rawValue)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(selected ? .black : .white)
                         // Dimmed when it has nothing for what's typed.
                         .opacity(query.trimmingCharacters(in: .whitespaces).isEmpty || hasResults(option) || selected ? 1 : 0.4)
                         .padding(.horizontal, 14)
                         .frame(height: 32)
                         .background {
                             if selected {
-                                Capsule().fill(Color.blue).matchedGeometryEffect(id: "scope", in: scopeUnderline)
+                                Capsule().fill(.white).matchedGeometryEffect(id: "scope", in: scopeUnderline)
                             }
                         }
                         .contentShape(Capsule())
@@ -432,6 +433,7 @@ struct SearchView: View {
                     }
                     .buttonStyle(QuickPress())
                     .accessibilityLabel(tile.name)
+                    .accessibilityValue(tile.card.title)
                     .accessibilityIdentifier("genre-\(tile.name)")
                 }
             }

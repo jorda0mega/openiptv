@@ -258,6 +258,61 @@ final class PersonPageTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Antonio Banderas"].exists, "no person page")
     }
 
+    /// Two copies of a film on the server's My List (HD and 4K: the same
+    /// IMDb id) are one title on Home's My List row, as everywhere else in
+    /// the app; taking it off takes both off. Regression: the row showed
+    /// the film twice, once per copy.
+    func testMyListOneCardPerTitle() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        for id in ["a8", "k8"] { favorite(server, id) }
+        app.launchArguments = []
+        app.launch()
+        sleep(6)
+        let heading = app.buttons["row-My List"].firstMatch
+        for _ in 0..<4 where !heading.isHittable { app.swipeUp(); sleep(1) }
+        shot("my-list-copies")
+        XCTAssertTrue(heading.exists, "no My List row on Home")
+        let top = heading.frame.maxY + 12
+        let cards = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dune: Part Two'")).allElementsBoundByIndex
+            .filter { abs($0.frame.minY - top) < 4 }
+        XCTAssertEqual(cards.count, 1, "My List shows the film once per copy: \(cards.map(\.frame))")
+        guard let card = cards.first else { return }
+        card.tap()
+        let remove = app.buttons["Remove from My List"].firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 6), "the film's page doesn't show it on My List")
+        remove.tap()
+        sleep(2)
+        XCTAssertEqual(favorites(server), [], "a copy stayed on the server's My List")
+    }
+
+    /// Puts a title on the test user's My List on the server.
+    private func favorite(_ server: URL, _ id: String) {
+        var request = URLRequest(url: server.appending(path: "emby/Users/U1/FavoriteItems/\(id)"))
+        request.httpMethod = "POST"
+        request.setValue("tok", forHTTPHeaderField: "X-Emby-Token")
+        let done = expectation(description: "favorite \(id)")
+        URLSession.shared.dataTask(with: request) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
+    }
+
+    /// The ids on the test user's My List on the server.
+    private func favorites(_ server: URL) -> [String] {
+        var request = URLRequest(url: server.appending(path: "emby/Users/U1/Items")
+            .appending(queryItems: [URLQueryItem(name: "Filters", value: "IsFavorite")]))
+        request.setValue("tok", forHTTPHeaderField: "X-Emby-Token")
+        var ids: [String] = []
+        let done = expectation(description: "favorites")
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            ids = (json?["Items"] as? [[String: Any]])?.compactMap { $0["Id"] as? String } ?? ["(no answer)"]
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return ids
+    }
+
     private func testServer() -> URL? {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
               let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],

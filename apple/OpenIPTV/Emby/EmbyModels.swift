@@ -80,6 +80,17 @@ struct EmbyItem: Codable, Hashable {
         return LibraryEntry.titleKey(kind: kind, name: name, year: productionYear, imdb: imdb, tmdb: tmdb)
     }
 
+    /// Every key this title is known by: its IMDb and its TMDb id, so two
+    /// copies match when each has only one of them; its name and year only
+    /// when it has neither (two films can share a name and year).
+    var titleKeys: Set<String> {
+        guard kind == "Movie" || kind == "Series" else { return ["id:" + id] }
+        var keys: Set<String> = []
+        if let imdb { keys.insert(LibraryEntry.titleKey(kind: kind, name: name, year: productionYear, imdb: imdb, tmdb: nil)) }
+        if let tmdb { keys.insert(LibraryEntry.titleKey(kind: kind, name: name, year: productionYear, imdb: nil, tmdb: tmdb)) }
+        return keys.isEmpty ? [titleKey] : keys
+    }
+
     static func imdb(in providers: [String: String]?) -> String? {
         providers?.first { $0.key.caseInsensitiveCompare("Imdb") == .orderedSame && $0.value.hasPrefix("tt") }?.value
     }

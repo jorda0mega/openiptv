@@ -403,6 +403,9 @@ struct MoviePlayerView: View {
                 debugReadout(positionReadout, "debug-position")
                 debugReadout(startReadout, "debug-start")
                 debugReadout(playback.itemId, "debug-item")
+                #if os(iOS)
+                debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
+                #endif
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .ignoresSafeArea()

@@ -35,6 +35,10 @@ final class AppModel {
     /// titles are on it (nil: not loaded yet).
     private(set) var myList: [Card] = []
     private(set) var myListIDs: Set<String>?
+    /// My List's copies of each title (an HD and a 4K film are one title,
+    /// one card): the ids on the server's list, by each key the title is
+    /// known by.
+    @ObservationIgnored private var myListCopies: [String: Set<String>] = [:]
 
     // MARK: Live TV
 
@@ -2187,22 +2191,45 @@ extension AppModel {
         set { UserDefaults.standard.set(newValue, forKey: Self.myListOrderKey) }
     }
 
-    /// My List from the server, newest additions first.
+    /// My List from the server, newest additions first, one card per
+    /// title however many copies (HD, 4K) are on it.
     func loadMyList(cardWidth: Int) async {
         guard let emby, let found = try? await emby.favorites() else { return }
         let added = myListAdded
         let order = Dictionary(found.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         let items = found.sorted { (added[$0.id] ?? 0, -(order[$0.id] ?? 0)) > (added[$1.id] ?? 0, -(order[$1.id] ?? 0)) }
-        let cards = items.map { emby.card($0, context: .poster, shape: .portrait, width: cardWidth) }
+        // One group per title: the first copy (its card) and every key and
+        // id of its copies.
+        var groups: [(first: EmbyItem, keys: Set<String>, ids: Set<String>)] = []
+        for item in items {
+            let keys = item.titleKeys
+            if let i = groups.firstIndex(where: { !$0.keys.isDisjoint(with: keys) }) {
+                groups[i].keys.formUnion(keys)
+                groups[i].ids.insert(item.id)
+            } else {
+                groups.append((item, keys, [item.id]))
+            }
+        }
+        myListCopies = Dictionary(groups.flatMap { group in group.keys.map { ($0, group.ids) } }, uniquingKeysWith: { $0.union($1) })
+        let cards = groups.map { emby.card($0.first, context: .poster, shape: .portrait, width: cardWidth) }
         if cards != myList { myList = cards }
         let ids = Set(found.map(\.id))
         if ids != myListIDs { myListIDs = ids }
     }
 
-    /// Whether a title is on My List (what the server said of the title
-    /// itself until the list is loaded).
+    /// Whether a title is on My List, in any copy (what the server said of
+    /// the title itself until the list is loaded).
     func isOnMyList(_ id: String, item: EmbyItem?) -> Bool {
-        myListIDs?.contains(id) ?? (item?.userData?.isFavorite == true)
+        guard let myListIDs else { return item?.userData?.isFavorite == true }
+        if myListIDs.contains(id) { return true }
+        return !copiesOnMyList(item).isEmpty
+    }
+
+    /// The ids of this title's copies on My List.
+    private func copiesOnMyList(_ item: EmbyItem?) -> Set<String> {
+        guard let item else { return [] }
+        return item.titleKeys.compactMap { myListCopies[$0] }.reduce(into: Set<String>()) { $0.formUnion($1) }
+            .union((myListIDs ?? []).contains(item.id) ? [item.id] : [])
     }
 
     /// Puts a title on My List or takes it off: on screen at once (the row
@@ -2210,23 +2237,32 @@ extension AppModel {
     func toggleMyList(_ item: EmbyItem, cardWidth: Int = 360) {
         guard let emby else { return }
         let on = !isOnMyList(item.id, item: item)
-        let before = (myList, myListIDs)
+        let before = (myList, myListIDs, myListCopies)
         var ids = myListIDs ?? []
+        // Off: every copy of the title comes off (the other one would
+        // bring it back).
+        let copies = on ? [item.id] : copiesOnMyList(item).union([item.id])
         if on {
             ids.insert(item.id)
             myList.removeAll { $0.id == item.id }
             myList.insert(emby.card(item, context: .poster, shape: .portrait, width: cardWidth), at: 0)
             myListAdded[item.id] = Date().timeIntervalSince1970
+            for key in item.titleKeys { myListCopies[key, default: []].insert(item.id) }
         } else {
-            ids.remove(item.id)
-            myList.removeAll { $0.id == item.id }
-            myListAdded[item.id] = nil
+            ids.subtract(copies)
+            myList.removeAll { copies.contains($0.id) }
+            for id in copies { myListAdded[id] = nil }
+            for key in item.titleKeys { myListCopies[key] = nil }
+            myListCopies = myListCopies.filter { $0.value.isDisjoint(with: copies) }
         }
         myListIDs = ids
         Task {
-            do { try await emby.setFavorite(item.id, on) } catch {
+            do {
+                for id in copies { try await emby.setFavorite(id, on) }
+            } catch {
                 myList = before.0
                 myListIDs = before.1
+                myListCopies = before.2
             }
         }
     }

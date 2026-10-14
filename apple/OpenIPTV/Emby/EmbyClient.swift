@@ -127,7 +127,8 @@ struct EmbyClient {
         try await items("Users/\(account.userId)/Items", [
             .init(name: "Filters", value: "IsFavorite"), .init(name: "Recursive", value: "true"),
             .init(name: "IncludeItemTypes", value: "Movie,Series"), .init(name: "Limit", value: "100"),
-            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,Genres"),
+            // The IMDb and TMDb ids: an HD and a 4K copy are one title.
+            .init(name: "Fields", value: "PrimaryImageAspectRatio,ProductionYear,Genres,ProviderIds"),
             .init(name: "EnableImageTypes", value: "Primary,Thumb,Backdrop"),
         ])
     }

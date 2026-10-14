@@ -101,6 +101,15 @@ final class MPVPlayer: @unchecked Sendable {
     /// Until when libmpv's events go to the log (a Picture in Picture switch).
     private var logEventsUntil: CFAbsoluteTime = 0
     #endif
+    /// Away from the app (another app, the Home Screen) with the picture
+    /// on screen: its track, off meanwhile. iOS stops an app's GPU work in
+    /// the background; the picture kept being drawn there, failed, and
+    /// stayed frozen after coming back. The sound plays on.
+    private var awayTrack: String?
+    private var appObservers: [NSObjectProtocol] = []
+    /// Times the picture went off while away and came back (UI tests).
+    private var awayReturns = 0
+    var pictureReturnsFromAway: Int { stateLock.withLock { awayReturns } }
     #endif
 
     /// How far ahead to download, always in memory for files: libmpv's
@@ -129,7 +138,45 @@ final class MPVPlayer: @unchecked Sendable {
         layer.backgroundColor = UIColor.black.cgColor
         let wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         queue.async { [self] in setUp(wid: wid, options: options, hardwareDecoding: hardwareDecoding) }
+        #if os(iOS)
+        let center = NotificationCenter.default
+        appObservers = [
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
+                self?.leftApp()
+            },
+            center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
+                self?.cameBack()
+            },
+        ]
+        #endif
     }
+
+    #if os(iOS)
+    /// Away from the app: the picture off (unless Picture in Picture draws
+    /// it, on the CPU), the sound on.
+    private func leftApp() {
+        queue.async { [self] in
+            guard let mpv, frameTap == nil, awayTrack == nil,
+                  let track = mpv_get_property_string(mpv, "vid") else { return }
+            let current = String(cString: track)
+            mpv_free(track)
+            guard current != "no" else { return }
+            awayTrack = current
+            mpv_set_property_string(mpv, "vid", "no")
+        }
+    }
+
+    /// Back in the app: the picture on again, through a fresh video output
+    /// (even one that failed while away is replaced).
+    private func cameBack() {
+        queue.async { [self] in
+            guard let mpv, let track = awayTrack else { return }
+            awayTrack = nil
+            mpv_set_property_string(mpv, "vid", track)
+            stateLock.withLock { awayReturns += 1 }
+        }
+    }
+    #endif
 
     private func setUp(wid: Int64, options: [(String, String)], hardwareDecoding: Bool) {
         guard let mpv = mpv_create() else { return }
@@ -570,6 +617,10 @@ final class MPVPlayer: @unchecked Sendable {
     /// moment, and the screen mustn't wait for it.
     func shutdown() {
         onEvent = nil
+        #if os(iOS)
+        appObservers.forEach(NotificationCenter.default.removeObserver)
+        appObservers = []
+        #endif
         let live = stateLock.withLock { () -> Bool in
             closed = true
             return playedLive

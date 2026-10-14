@@ -678,27 +678,35 @@ final class LibraryIndex {
 
     private var genresMade: (key: String, list: [(name: String, entry: LibraryEntry)])?
 
-    /// The genres with the most titles, most first, each with its best-known
-    /// title that has a poster (Search's tiles before anything is typed).
-    /// Worked out once per version of the index.
+    /// The genres with the most titles, most first, each with its
+    /// best-known title that has a poster and isn't on an earlier tile
+    /// (Search's tiles before anything is typed: no poster twice). A genre
+    /// whose every title is already on a tile is left out. Worked out once
+    /// per version of the index.
     func topGenres(limit: Int) -> [(name: String, entry: LibraryEntry)] {
         let key = "\(count)|\(changedAt?.timeIntervalSince1970 ?? 0)|\(ratings != nil)|\(limit)"
         if let made = genresMade, made.key == key { return made.list }
         var counts: [String: Int] = [:]
-        var best: [String: (entry: LibraryEntry, votes: Int)] = [:]
+        var candidates: [String: [(entry: LibraryEntry, votes: Int)]] = [:]
         for entry in corpus.items {
             guard let genres = entry.genres, !genres.isEmpty else { continue }
             let votes = rating(entry)?.votes ?? 0
             for genre in genres {
                 counts[genre, default: 0] += 1
-                if entry.imageTag != nil, votes >= (best[genre]?.votes ?? -1) { best[genre] = (entry, votes) }
+                if entry.imageTag != nil { candidates[genre, default: []].append((entry, votes)) }
             }
         }
-        let list = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-            .compactMap { genre in best[genre.key].map { (name: genre.key, entry: $0.entry) } }
-            .prefix(limit)
-        genresMade = (key, Array(list))
-        return Array(list)
+        var used: Set<String> = []
+        var list: [(name: String, entry: LibraryEntry)] = []
+        for genre in counts.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }) where list.count < limit {
+            let ranked = (candidates[genre.key] ?? [])
+                .sorted { $0.votes != $1.votes ? $0.votes > $1.votes : $0.entry.name < $1.entry.name }
+            guard let pick = ranked.first(where: { !used.contains($0.entry.titleKey) }) else { continue }
+            used.insert(pick.entry.titleKey)
+            list.append((genre.key, pick.entry))
+        }
+        genresMade = (key, list)
+        return list
     }
 
     /// The whole catalog, resuming from whatever pages are already here. A

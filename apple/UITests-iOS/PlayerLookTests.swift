@@ -205,6 +205,54 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertLessThan(abs(at - closed), 3, "it started at \(at) s, not where it stopped (\(closed) s)")
     }
 
+    /// Leaving the app while a film plays (another app, the Home Screen) and
+    /// coming back: the film plays on with its picture moving. Regression:
+    /// the picture stayed frozen after coming back.
+    func testPictureMovesAfterLeavingApp() {
+        openFilm()
+        sleep(5)
+        XCTAssertTrue(pictureMoves(), "the picture doesn't move before leaving")
+        XCUIDevice.shared.press(.home)
+        sleep(6)
+        app.activate()
+        sleep(3)
+        shot("back in the app")
+        // The picture went off while away and came back through a fresh
+        // video output (the simulator lets an app draw in the background,
+        // so only this shows the fix there; a device froze without it).
+        XCTAssertEqual(app.staticTexts["debug-away"].firstMatch.label, "1", "the picture didn't go off while away")
+        XCTAssertTrue(pictureMoves(), "the picture is frozen after coming back")
+        XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
+    }
+
+    /// Whether the picture in the middle of the screen changes within a
+    /// second (the test film always moves).
+    private func pictureMoves() -> Bool {
+        let area = CGRect(x: app.frame.width * 0.15, y: app.frame.midY - 50, width: app.frame.width * 0.7, height: 100)
+        let before = samples(in: area)
+        usleep(1_200_000)
+        let after = samples(in: area)
+        let changed = zip(before, after).filter { abs(Int($0) - Int($1)) > 24 }.count
+        return !before.isEmpty && changed > before.count / 50
+    }
+
+    /// Colour channels sampled every 6 pixels inside `area` of the screen.
+    private func samples(in area: CGRect) -> [UInt8] {
+        let shot = XCUIScreen.main.screenshot().image
+        guard let image = shot.cgImage, let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return [] }
+        let scale = CGFloat(image.width) / shot.size.width
+        let perPixel = image.bitsPerPixel / 8
+        var out: [UInt8] = []
+        for y in stride(from: Int(area.minY * scale), to: Int(area.maxY * scale), by: 6) {
+            for x in stride(from: Int(area.minX * scale), to: Int(area.maxX * scale), by: 6)
+            where x >= 0 && y >= 0 && x < image.width && y < image.height {
+                let i = y * image.bytesPerRow + x * perPixel
+                out += [bytes[i], bytes[i + 1], bytes[i + 2]]
+            }
+        }
+        return out
+    }
+
     /// The brightest colour channel inside `area` of the screen (0-255).
     private func brightestPixel(in area: CGRect) -> UInt8 {
         guard let image = XCUIScreen.main.screenshot().image.cgImage,

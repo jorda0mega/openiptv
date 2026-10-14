@@ -67,6 +67,10 @@ final class SearchStabilityTests: XCTestCase {
             .sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
         shot("genre tiles")
         XCTAssertGreaterThanOrEqual(tiles.count, 6, "no genre tiles")
+        // A different title on each tile. Regression: a title in two
+        // genres (Drama and Crime, say) was on both tiles.
+        let posters = tiles.compactMap { $0.value as? String }
+        XCTAssertEqual(Set(posters).count, posters.count, "a title is on two tiles: \(zip(tiles.map(\.label), posters).map { "\($0)=\($1)" })")
         guard tiles.count >= 3 else { return }
         XCTAssertEqual(tiles[0].frame.minY, tiles[2].frame.minY, accuracy: 1, "not three across")
         XCTAssertEqual(tiles[0].frame.height / tiles[0].frame.width, 1.5, accuracy: 0.05, "not poster-shaped")
@@ -78,6 +82,26 @@ final class SearchStabilityTests: XCTestCase {
         // The test library's most common genre is Adventure (the Zorro films).
         let titles = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Zorro'"))
         XCTAssertGreaterThanOrEqual(titles.count, 2, "the \(name) page doesn't list its titles")
+    }
+
+    /// The chosen scope (All, Movies, …) in a white pill with black words,
+    /// as everywhere else in the app. Regression: a blue pill.
+    func testScopePillIsWhite() {
+        openSearch("zorro")
+        sleep(3)
+        let all = app.buttons["scope-All"].firstMatch
+        XCTAssertTrue(all.exists, "no scope bar")
+        shot("scope pill")
+        // Inside the pill, left of its word.
+        let point = CGPoint(x: all.frame.minX + 6, y: all.frame.midY)
+        let shot = XCUIScreen.main.screenshot().image
+        guard let image = shot.cgImage, let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else {
+            return XCTFail("no screenshot")
+        }
+        let scale = CGFloat(image.width) / shot.size.width
+        let i = Int(point.y * scale) * image.bytesPerRow + Int(point.x * scale) * (image.bitsPerPixel / 8)
+        let (a, b, c) = (Int(bytes[i]), Int(bytes[i + 1]), Int(bytes[i + 2]))
+        XCTAssertGreaterThan(min(a, b, c), 200, "the chosen scope's pill isn't white: \(a), \(b), \(c)")
     }
 
     /// One bar at the bottom while searching, as in the Apple TV app: the
