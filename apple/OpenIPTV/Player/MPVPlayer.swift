@@ -91,15 +91,16 @@ final class MPVPlayer: @unchecked Sendable {
     private var downloadSpeed: Double = 0
     private var lastNetworkReport: CFAbsoluteTime = 0
     private var reportsWindow = false
-    /// How it decodes on screen (the hardware's output goes straight to the
-    /// GPU), to go back to after Picture in Picture.
-    private let hardwareDecoding: Bool
     #if os(iOS)
     /// Picture in Picture: the picture drawn into the window's layer.
     private var frameTap: FrameTap?
     /// The picture drawn on screen again: shown once it is (the screen's
     /// surface still holds a frame from before the window).
     private var revealPending = false
+    #if DEBUG
+    /// Until when libmpv's events go to the log (a Picture in Picture switch).
+    private var logEventsUntil: CFAbsoluteTime = 0
+    #endif
     #endif
 
     /// How far ahead to download, always in memory for files: libmpv's
@@ -124,7 +125,6 @@ final class MPVPlayer: @unchecked Sendable {
     /// initialisation takes a while, and used to hold up the screen that
     /// opened the player); everything asked of the player queues behind it.
     init(options: [(String, String)], hardwareDecoding: Bool) {
-        self.hardwareDecoding = hardwareDecoding
         layer.framebufferOnly = true
         layer.backgroundColor = UIColor.black.cgColor
         let wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
@@ -613,6 +613,11 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     private func handle(_ event: mpv_event) {
+        #if DEBUG && os(iOS)
+        if logEventsUntil > CFAbsoluteTimeGetCurrent(), event.event_id != MPV_EVENT_PROPERTY_CHANGE {
+            NSLog("%@", "PERF pip event \(String(cString: mpv_event_name(event.event_id)))")
+        }
+        #endif
         #if os(iOS)
         // Back on screen after Picture in Picture: shown once libmpv has
         // drawn the picture where it is now.
@@ -776,11 +781,24 @@ extension MPVPlayer {
             let h = max(2, Int((Double(w) * Double(height) / Double(width)).rounded()) & ~1)
             guard let tap = FrameTap(mpv: mpv, layer: layer, width: w, height: h, drawn: drawn) else { return }
             frameTap = tap
+            #if DEBUG
+            // What libmpv does while it switches (Picture in Picture froze
+            // sound and picture for a moment on the user's iPhone).
+            logEventsUntil = CFAbsoluteTimeGetCurrent() + 5
+            var at = CFAbsoluteTimeGetCurrent()
+            func took(_ what: String) {
+                let now = CFAbsoluteTimeGetCurrent()
+                NSLog("%@", String(format: "PERF pip switch %@ %.0f ms", what, (now - at) * 1000))
+                at = now
+            }
+            #endif
             mpv_set_property_string(mpv, "sw-fast", "yes")
-            // Decoded frames copied back from the decoder for the CPU.
-            mpv_set_property_string(mpv, "hwdec", hardwareDecoding ? "videotoolbox-copy" : "no")
+            // The decoder stays as it is (libmpv copies the frames it needs
+            // for the window): switching it to copy-back restarted the
+            // decoder, a seek that froze sound and picture for a moment.
             let switched = mpv_set_property_string(mpv, "vo", "libmpv")
             #if DEBUG
+            took("vo")
             NSLog("%@", "PERF pip frames \(w)x\(h) vo=\(switched)")
             #endif
         }
@@ -799,7 +817,6 @@ extension MPVPlayer {
             frameTap = nil
             revealPending = true
             mpv_set_property_string(mpv, "vo", "gpu-next")
-            mpv_set_property_string(mpv, "hwdec", hardwareDecoding ? "videotoolbox" : "no")
             tap.close()
             // Shown in any case after a moment (a paused picture may not
             // say it's drawn).
@@ -947,7 +964,17 @@ private final class FrameTap: @unchecked Sendable {
         if count == 1 { drawn() }
         #if DEBUG
         if count % 60 == 1 {
-            NSLog("%@", "PERF pip frame \(count) render=\(rendered) status=\(renderer.status.rawValue) error=\(renderer.error?.localizedDescription ?? "none")")
+            // The brightest of a grid of the picture's pixels: the window
+            // gets a picture, not black (simulators can't show the window).
+            var brightest: UInt8 = 0
+            let bytes = rgb.assumingMemoryBound(to: UInt8.self)
+            for y in Swift.stride(from: 0, to: height, by: 16) {
+                for x in Swift.stride(from: 0, to: width, by: 16) {
+                    let pixel = y * rgbStride + x * 4
+                    brightest = max(brightest, bytes[pixel], bytes[pixel + 1], bytes[pixel + 2])
+                }
+            }
+            NSLog("%@", "PERF pip frame \(count) render=\(rendered) status=\(renderer.status.rawValue) brightest=\(brightest) error=\(renderer.error?.localizedDescription ?? "none")")
         }
         #endif
     }
