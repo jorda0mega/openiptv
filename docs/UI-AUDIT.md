@@ -155,10 +155,6 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
 - The PiP hand-over's last seek (the video output switch): gone only if
   the picture is always drawn into the window's kind of layer (waits for
   the user's "try it" or "keep it as is").
-- Apple's end-of-film page ([reference](https://mobbin.com/screens/76f840ca-f975-4e35-9efb-cb0f471db36f):
-  another film's preview playing, its logo, genre, time and rating, "+ Add"
-  and "Skip"): needs a playable preview, and Emby servers seldom have
-  trailers to play. Episodes go on to the next one (done, both apps).
 
 - Skip Intro: Netflix and Max have it; no Apple TV app (iPhone) reference
   found, so not added. Emby marks intros as chapter markers (IntroStart,
@@ -169,6 +165,14 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
 - Picture in Picture's picture on a real device (the simulator can't show it).
 
 ## Not planned
+
+- The Apple TV app's screen with another title's preview, "+ Add" and
+  "Skip" ([reference](https://mobbin.com/screens/76f840ca-f975-4e35-9efb-cb0f471db36f))
+  isn't an end page: Apple's [episode flow](https://mobbin.com/flows/c3ab6524-d7be-4246-a516-1ecbd420c684)
+  shows it before the episode (the Apple TV logo, this promo for an Apple TV+
+  title, an age-rating card, then the episode). Apple's own advertising; it
+  would delay playback. At an episode's end the next one plays (done, both
+  apps).
 
 - InSight (who is on screen, the song playing): Emby has no scene-by-scene
   cast or music data to show.
