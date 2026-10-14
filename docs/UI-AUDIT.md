@@ -155,7 +155,10 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
 - The PiP hand-over's last seek (the video output switch): gone only if
   the picture is always drawn into the window's kind of layer (waits for
   the user's "try it" or "keep it as is").
-- Apple's end-of-title post-play page (needs a reference for an episode).
+- Apple's end-of-film page ([reference](https://mobbin.com/screens/76f840ca-f975-4e35-9efb-cb0f471db36f):
+  another film's preview playing, its logo, genre, time and rating, "+ Add"
+  and "Skip"): needs a playable preview, and Emby servers seldom have
+  trailers to play. Episodes go on to the next one (done, both apps).
 
 - Skip Intro: Netflix and Max have it; no Apple TV app (iPhone) reference
   found, so not added. Emby marks intros as chapter markers (IntroStart,

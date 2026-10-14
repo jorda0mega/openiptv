@@ -718,6 +718,12 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertGreaterThan(button.minX, still.frame.maxX + 150, "the button isn't at the right: \(button)")
         XCTAssertEqual(button.minY, still.frame.minY, accuracy: 6, "the button isn't level with the still")
         XCTAssertLessThanOrEqual(button.maxX, app.frame.maxX, "the button is off the screen: \(button)")
+        // Info closes the panel. Regression: the still's uncut picture lay
+        // over the pill and took the tap: the film played on, Info stayed.
+        app.buttons["Info"].firstMatch.tap()
+        sleep(1)
+        XCTAssertFalse(start.exists, "Info didn't close the panel")
+        XCTAssertEqual(playerState()?.playing, false, "the tap on Info played the film")
         app.buttons["Rotate to portrait"].firstMatch.tap()
     }
 
@@ -789,6 +795,7 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(fromStart.exists && screen.contains(fromStart.frame), "From Beginning went off the screen")
         app.buttons["Info"].firstMatch.tap()
         sleep(1)
+        shot("landscape info closed")
         app.buttons["Play"].firstMatch.tap()
         sleep(1)
         shot("landscape resumed")

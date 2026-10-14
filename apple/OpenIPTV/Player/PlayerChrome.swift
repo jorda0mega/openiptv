@@ -524,6 +524,7 @@ struct PlayerInfoPanelView: View {
                     CoverImage(images: panel.images, title: panel.title)
                         .frame(width: 180, height: 101)
                         .clipShape(.rect(cornerRadius: 8))
+                        .allowsHitTesting(false)
                         .accessibilityHidden(true)
                         #if DEBUG
                         // UI tests: the still's own frame (the picture's

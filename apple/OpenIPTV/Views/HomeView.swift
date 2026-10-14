@@ -672,6 +672,10 @@ struct CoverImage: View {
             }
         }
         .clipped()
+        // Taps only inside its frame: the picture, cut to it, is laid out
+        // whole, and took taps meant for what's beside it (the player's
+        // Info pill above its still).
+        .contentShape(.rect)
         .task(id: images.first?.url) {
             for candidate in images {
                 guard let url = URL(string: candidate.url) else { continue }
