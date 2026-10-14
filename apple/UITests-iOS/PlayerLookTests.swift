@@ -986,6 +986,40 @@ final class PlayerLookTests: XCTestCase {
     /// From Beginning 200 × 44 at the right, level with the still.
     /// Regression: sideways had no still and a full-width button under the
     /// text; the title was 20 pt and the buttons 48 high.
+    /// Info opening upright: the pills travel up from the bottom, and the
+    /// panel's text shows once they're there. Regression: the text was
+    /// drawn first, and the pills crossed it on their way ("Info" over the
+    /// title for about 170 ms; found filming testGoToShow). A UI test only
+    /// sees the end of an animation, so this one opens Info stretched 15
+    /// times (4.5 s) under scripts/frame-audit/record.sh, and writes where
+    /// things end up for scripts/frame-audit/info_open.py, which checks the
+    /// film frame by frame (it fails on the old opening).
+    func testInfoTextWaitsForThePills() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone's layout")
+        app.launchEnvironment["OPENREEL_DEBUG_ANIMATION_SCALE"] = "15"
+        openFilm()
+        controlsUp()
+        app.buttons["Pause"].firstMatch.tap()
+        app.buttons["Info"].firstMatch.tap()
+        let start = app.buttons["From Beginning"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 8), "no From Beginning")
+        sleep(2)
+        shot("info opened")
+        let pills = app.buttons.allElementsBoundByIndex.filter { ["Info", "Continue Watching"].contains($0.label) }.map(\.frame)
+        let info = app.buttons["Info"].firstMatch.frame
+        let title = app.staticTexts.matching(NSPredicate(format: "label == 'Animals'")).firstMatch.frame
+        XCTAssertGreaterThan(title.minY, info.maxY, "the title isn't under the pills: \(title), \(info)")
+        let geometry: [String: Any] = [
+            "width": app.frame.width, "height": app.frame.height,
+            "info": [info.minX, info.minY, info.width, info.height],
+            "pillsEnd": pills.map(\.maxX).max() ?? info.maxX,
+            "title": [title.minX, title.minY, title.width, title.height],
+            "start": [start.frame.minX, start.frame.minY, start.frame.width, start.frame.height],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: geometry)
+        try data.write(to: shots.appending(path: "info-geometry.json"))
+    }
+
     func testInfoAsInAppleTV() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone's layouts")
         openFilm()

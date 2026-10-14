@@ -2,7 +2,8 @@
 # record.sh Class/test ...: films each iOS UI test on the simulator PHONE
 # (env, a simulator id) with simctl recordVideo, into OUT (default
 # /tmp/openiptv/frames). Start scripts/mock_server.py on 8788 first; set
-# TEST_RUNNER_DEBUG_EMBY as for the UI tests. Then: python3 scan.py OUT/x.mp4.
+# TEST_RUNNER_DEBUG_EMBY as for the UI tests. Then: python3 scan.py OUT/x.mp4
+# (flashes and jumps), or info_open.py for testInfoTextWaitsForThePills.
 ZAP=${0:A:h:h:h}
 OUT=${OUT:-/tmp/openiptv/frames}; DD=${DD:-/tmp/openiptv/dd-imdb}
 : ${PHONE:?set PHONE to a simulator id}

@@ -3,6 +3,16 @@ import SwiftUI
 import AVKit
 #endif
 
+/// How long the player's animations take (UI tests stretch them to see
+/// their middle: OPENREEL_DEBUG_ANIMATION_SCALE).
+enum PlayerMotion {
+    #if DEBUG
+    static let scale = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_ANIMATION_SCALE"].flatMap(Double.init) ?? 1
+    #else
+    static let scale = 1.0
+    #endif
+}
+
 /// A button in the player's top capsule or its row of pills.
 struct PlayerAction: Identifiable {
     var id: String { title }
@@ -195,9 +205,14 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
             pillsRow.padding(.top, 6)
         }
         if let panel {
+            // Once the pills have come up past it: they travel from the
+            // bottom, and crossed its text on the way. Gone at once on
+            // closing, before they travel back down.
             PlayerInfoPanelView(panel: panel)
                 .padding(.top, 23)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .transition(.asymmetric(
+                    insertion: .opacity.animation(.easeOut(duration: 0.15 * PlayerMotion.scale).delay(0.2 * PlayerMotion.scale)),
+                    removal: .opacity.animation(.easeIn(duration: 0.1 * PlayerMotion.scale))))
             Spacer(minLength: 0)
         }
     }

@@ -546,7 +546,7 @@ struct MoviePlayerView: View {
     }
 
     private func toggleContinue() {
-        withAnimation(.snappy(duration: 0.3)) {
+        withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) {
             showInfo = false
             showContinue.toggle()
         }
@@ -582,7 +582,7 @@ struct MoviePlayerView: View {
     }
 
     private func toggleInfo() {
-        withAnimation(.snappy(duration: 0.3)) {
+        withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) {
             showContinue = false
             showInfo.toggle()
         }

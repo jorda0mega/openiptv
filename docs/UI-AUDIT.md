@@ -21,7 +21,7 @@ multi-track film, 1 with SDH subtitles, 1 with a Mexican film).
 | No flickers or jumps (search, Continue Watching, pages) | `22016f2`, `b758bea`, `c896690` | `SearchStabilityTests` (4), `testPageReadyWhenPlayerCloses`, `testEpisodeRowsSameHeight`, `testMainButtonKeepsWidthWhileStarting` |
 | Recommendations change only at moments (launch, pull, tab change, long away) | `22016f2` | `testHomeStaysPutUntilChosenAgainOrPulled`, `testHomeChangesOnlyAfterLongAway` |
 | Audit against the Apple TV app (REA, Mobbin) | this file, rounds 1 to 8 | see the tables below |
-| Search and Continue Watching filmed, every frame checked for flashes and jumps | round 9 (`72f1a27`) | `scripts/frame-audit` (8 tests filmed: 0 flashes, 0 blanks, 0 moves without a gesture) |
+| Search, Continue Watching and the other pages filmed, every frame checked for flashes and jumps | rounds 9 and 10 | `scripts/frame-audit` (22 tests filmed: 0 flashes; one jump found and fixed, the Info opening: `testInfoTextWaitsForThePills`) |
 
 ## Method
 
@@ -147,6 +147,38 @@ page held down while Home is built again, then settling 2 to 4 pixels).
   frame between them.
 - **Two blanks** (the player, then the simulator's Home Screen) were the
   tests' ends, with the app quitting. The scanner now skips the last rest.
+
+## Round 10 (2026-10-14): the other pages, frame by frame
+
+The same method as round 9, on 14 more tests: the person, show and film
+pages, My List, a whole row, Home after a long time away, Go to Show and a
+title opened again (`63e35f6`).
+
+| Recorded | Length | Screen changes | Moves (in ≤ 2 frames) | Flashes | Blanks |
+|---|---|---|---|---|---|
+| 14 tests | 9 min 4 s (16,340 frames) | 194 | 34 (12) | 0 | 1 |
+
+- **Moves:** each was looked at. 33 are the tests' own gestures:
+  `app.swipeUp()` is a fast swipe whose first frame moves the page 20 to
+  80 points at once, and pages settle after a scroll. **One was a defect.**
+- **The blank** is the system's own app-launch animation (the dark launch
+  screen growing from the icon).
+- **Defect found and fixed: the Info panel's opening, upright.** The pills
+  travel from the bottom up to the top while the panel's text was already
+  drawn under their path. For about 170 ms the white "Info" pill lay over
+  the episode's title, then the panel settled 16 points higher. Now the
+  text fades in once the pills have come up past it (0.2 s), and on
+  closing it goes at once, before they travel back down.
+  - Test: a UI test only sees the end of an animation, so
+    `testInfoTextWaitsForThePills` opens Info stretched 15 times
+    (`OPENREEL_DEBUG_ANIMATION_SCALE`) and writes the final positions;
+    `scripts/frame-audit/info_open.py` checks its film frame by frame.
+    Before: 32 frames with text drawn while the pill was not yet past it
+    (exit 1). After: 0 of 39 (exit 0).
+- **Checked, not changed:** Live TV may show all channels for a frame
+  before Favorites on its first open (the category is chosen in a task
+  after the first frame). The choice is saved, so this happens at most once
+  per install.
 
 ## Earlier rounds (2026-10-12 and 13)
 
