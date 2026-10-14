@@ -7,7 +7,10 @@ flickers or jumps. Each item below has a UI test that fails without it.
 ## Goal checklist (2026-10-13)
 
 Each item of the goal, where it was done, and the test that checks it. All
-these tests passed on 2026-10-13 against `77cf041` or later.
+these tests passed on 2026-10-13 against `77cf041` or later, and again on
+2026-10-14 against `cf644b0`: 21 of 21 on the iPhone 17 Pro Max simulator
+(`/tmp/openiptv/run-goal.sh`: 16 with the plain test film, 3 with a US
+multi-track film, 1 with SDH subtitles, 1 with a Mexican film).
 
 | Goal item | Commit | Test |
 |---|---|---|
