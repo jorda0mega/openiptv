@@ -20,7 +20,8 @@ multi-track film, 1 with SDH subtitles, 1 with a Mexican film).
 | Change the audio and subtitles; English unless Spanish-made | `79fe646`, `d1a424b`, `02dd23e`, `5a508f4` | `testPickedSubtitlesStay`, `testPickedSDHSubtitlesStay`, `testSubtitleSwitchKeepsPlaying` (US film), `testSpanishFilmStartsInSpanish` (Mexico) |
 | No flickers or jumps (search, Continue Watching, pages) | `22016f2`, `b758bea`, `c896690` | `SearchStabilityTests` (4), `testPageReadyWhenPlayerCloses`, `testEpisodeRowsSameHeight`, `testMainButtonKeepsWidthWhileStarting` |
 | Recommendations change only at moments (launch, pull, tab change, long away) | `22016f2` | `testHomeStaysPutUntilChosenAgainOrPulled`, `testHomeChangesOnlyAfterLongAway` |
-| Audit against the Apple TV app (REA, Mobbin) | this file, rounds 1 to 5 | see the tables below |
+| Audit against the Apple TV app (REA, Mobbin) | this file, rounds 1 to 8 | see the tables below |
+| Search and Continue Watching filmed, every frame checked for flashes and jumps | round 9 (`72f1a27`) | `scripts/frame-audit` (8 tests filmed: 0 flashes, 0 blanks, 0 moves without a gesture) |
 
 ## Method
 
@@ -98,6 +99,54 @@ Measured at 3x from Mobbin screenshots of the Apple TV app:
 | Info text and buttons | Title 17 pt bold, story 15 pt, genre and time 13 pt semibold (both ways); buttons 44 high, 15-point words | Title 20 pt, story 17 pt, genre 15 pt; buttons 48 high, 17-point words | Apple's sizes | `testInfoAsInAppleTV` |
 | Row names | A grey "›" (67% white, as tall as the capitals) after the name; a tap opens the whole row | Names opened nothing | The "›" and the whole row: the name, then three posters across (12 apart, 20 from the edges, lines 18 apart); iPad: as many as fit at about that size | `testRowNameOpensWholeRow` |
 | The next episode on Apple TV | Auto-Play: the next episode plays at the end | The player closed at an episode's end (the iPhone played on) | The next episode plays in the same player, as on the iPhone | `RemoteFocusTests.testNextEpisodeAtEnd` |
+
+## Round 9 (2026-10-14): Search and Continue Watching, frame by frame
+
+The UI tests read the page at chosen moments, so a flash between two reads
+is invisible to them. This round films the tests and checks every frame.
+
+- **How:** `scripts/frame-audit/record.sh` films each test on the iPhone 17
+  Pro Max simulator (`simctl recordVideo`) against `72f1a27`.
+  `scan.py` reads each film at 30 frames a second and finds the rest states
+  (the screen still for 100 ms or more). It compares two rest states in a
+  row: a part of the screen that comes back moved is a **move**. A screen
+  that changes and comes back as it was is a **flash**. A short rest with
+  much less on screen than the rests around it is a **blank**.
+- **Control:** `control.py` plants a 40-point jump, a one-frame white flash
+  and a 5-frame empty list in a still Search page. The scanner finds all
+  three.
+- **Limit:** over a playing picture the screen is never still, so the scan
+  sees the player only before and after. `testPlayerLook` measures the
+  player's sizes.
+
+| Test (recorded) | Length | Screen changes | Moves (in ≤ 2 frames) | Flashes | Blanks |
+|---|---|---|---|---|---|
+| `testResultsStayPutWhenServerAnswers` (search, server late) | 38 s | 10 | 0 | 0 | 0 |
+| `testHeaderStaysFixed` (search, scrolled and pulled) | 44 s | 29 | 14 (3) | 0 | 0 |
+| `testGenreTiles` | 30 s | 13 | 0 | 0 | 0 |
+| `testSlowFirstBuildStillShows` (cold Home, Continue Watching) | 52 s | 12 | 0 | 0 | 0 |
+| `testHomeStaysPutUntilChosenAgainOrPulled` | 114 s | 61 | 18 (11) | 0 | 0 |
+| `testPageReadyWhenPlayerCloses` | 48 s | 11 | 0 | 0 | 0 |
+| `testContinueWatchingInPlayer` | 51 s | 15 | 0 | 0 | 0 |
+| `testContinueWatchingStartsFromDevice` | 28 s | 7 | 0 | 0 | 0 |
+| **All 8** | **6 min 45 s (12,149 frames)** | **158** | **32 (14)** | **0** | **0** |
+
+Each of the 32 moves was looked at, frame by frame. Every one is the test's
+own gesture: the search list scrolled and pulled (its header stays put), the
+keyboard rising, Home dragged back to the top and pulled to refresh (the
+page held down while Home is built again, then settling 2 to 4 pixels).
+**No part of a page moved without a gesture.**
+
+- **Home during the server's changes:** for the 18 s while the server
+  changed the library and a watched episode, the only changes on screen are
+  the hero turning to its next title every 8 s (Apple's carousel). The rows
+  and Continue Watching stay as they are.
+- **Continue Watching tap:** the player fades in over Home, and the
+  resumed picture is on screen 3 frames (100 ms) after Home's last frame
+  (frames 806 to 811 of the film; the spinner shows for 2 frames). No black
+  frame between them.
+- **Two blanks** (the player, then the simulator's Home Screen) were the
+  tests' ends, with the app quitting. The scanner now skips the last rest.
 
 ## Earlier rounds (2026-10-12 and 13)
 
