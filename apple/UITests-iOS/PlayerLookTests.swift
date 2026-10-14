@@ -95,8 +95,9 @@ final class PlayerLookTests: XCTestCase {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["hls_delay": "6"])
         defer { configure(server, ["reset": "1"]) }
-        app.tapControl("Picture in Picture")
         let asked = Date()
+        // Tapped again if the tap missed (the controls hid on the way).
+        app.tapControl("Picture in Picture") { self.pipState() != nil }
         usleep(1_000_000)
         shot("pip starting")
         var up: Date?
@@ -791,20 +792,29 @@ extension XCUIApplication {
     @discardableResult
     func tapControl(_ control: XCUIElement, until done: (() -> Bool)? = nil,
                     file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        // A control read or tapped as it hides is a miss, tried again, not
+        // a failure.
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        func hittable() -> Bool {
+            var yes = false
+            XCTExpectFailure("the controls hid while it was checked", options: options) { yes = control.isHittable }
+            return yes
+        }
         for _ in 0..<3 {
-            if !control.isHittable {
+            if !hittable() {
                 coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
                 _ = control.waitForExistence(timeout: 3)
-                guard control.isHittable else { continue }
+                guard hittable() else { continue }
             }
             // The control itself (a point worked out from its frame missed
-            // sideways); gone before the tap landed, that's tried again.
-            let options = XCTExpectedFailure.Options()
-            options.isStrict = false
+            // sideways).
             XCTExpectFailure("the controls hid before the tap", options: options) { control.tap() }
             guard let done else { return true }
             for _ in 0..<10 {
-                if done() { return true }
+                var ok = false
+                XCTExpectFailure("the controls hid while it was checked", options: options) { ok = done() }
+                if ok { return true }
                 usleep(300_000)
             }
         }
