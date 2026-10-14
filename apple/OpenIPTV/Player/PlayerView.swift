@@ -629,7 +629,7 @@ struct MoviePlayerView: View {
     /// bar's end, as in the Apple TV app.
     private var trackMenu: some View {
         HStack(spacing: 0) {
-            TrackMenuButton(tracks: tracks, pick: { pick($0) }, pickSubtitles: { pickSubtitles($0) }) {
+            TrackMenuButton(tracks: menuTracks, pick: { pick($0) }, pickSubtitles: { pickSubtitles($0) }) {
                 // Open: the controls stay up until something is picked.
                 showControls(autoHide: false)
                 Task {
@@ -714,9 +714,14 @@ struct MoviePlayerView: View {
         try? await Task.sleep(for: .milliseconds(500))
         guard let player else { return }
         let playing = await player.tracks()
-        let audio = playing.first { $0.kind == .audio && $0.selected }?.language ?? "none"
-        let shown = playing.first { $0.kind == .subtitle && $0.selected }
-        let subtitles = shown.map { ($0.language ?? "und") + ($0.role.map { "+" + $0 } ?? "") } ?? "off"
+        func describe(_ track: MPVPlayer.Track, role: Bool) -> String {
+            let language: String = track.language ?? "und"
+            let variant: String = track.variant.map { "~" + $0.rawValue } ?? ""
+            let kind: String = role ? (track.role.map { "+" + $0 } ?? "") : ""
+            return language + variant + kind
+        }
+        let audio = playing.first { $0.kind == .audio && $0.selected }.map { describe($0, role: false) } ?? "none"
+        let subtitles = playing.first { $0.kind == .subtitle && $0.selected }.map { describe($0, role: true) } ?? "off"
         trackReadout = "audio=\(audio) subtitles=\(subtitles)"
     }
     #endif
@@ -820,8 +825,13 @@ struct MoviePlayerView: View {
         return minutes % 60 == 0 ? "\(minutes / 60) hr" : "\(minutes / 60) hr \(minutes % 60) min"
     }
 
-    private var audioTracks: [MPVPlayer.Track] { tracks.filter { $0.kind == .audio } }
-    private var subtitleTracks: [MPVPlayer.Track] { tracks.filter { $0.kind == .subtitle } }
+    /// The tracks the viewer chooses from (see TrackChoice.menu): no
+    /// duplicates, English and Spanish.
+    private var menuTracks: [MPVPlayer.Track] {
+        TrackChoice.menu(tracks, spanish: TrackChoice.spanish(for: playback.tracks?.basis?.countries ?? []))
+    }
+    private var audioTracks: [MPVPlayer.Track] { menuTracks.filter { $0.kind == .audio } }
+    private var subtitleTracks: [MPVPlayer.Track] { menuTracks.filter { $0.kind == .subtitle } }
 
     /// iPhone, as the Apple TV app writes it: "0:00:03" when the film runs
     /// an hour or more, "4:05" otherwise.
@@ -834,30 +844,20 @@ struct MoviePlayerView: View {
 
     private func label(_ track: MPVPlayer.Track) -> String { Self.label(track) }
 
-    /// "English", "English (Commentary)", "Spanish 5.1", "French (Forced)".
+    /// The language and kind, as in the Apple TV app: "English",
+    /// "English SDH", "Spanish", "English (Commentary)" (one of each shows:
+    /// a file's own names, "Castellano" or "English [Full]", only repeated
+    /// it).
     static func label(_ track: MPVPlayer.Track) -> String {
-        let language = track.language.flatMap { $0 == "und" ? nil : Locale.current.localizedString(forLanguageCode: $0) }
-        var text: String
-        if let title = track.title, !title.isEmpty {
-            if let language, !title.localizedCaseInsensitiveContains(language) {
-                text = "\(language) (\(title))"
-            } else {
-                text = title
-            }
-        } else {
-            text = language ?? "Unknown language"
-            if track.kind == .audio, let channels = track.channels {
-                switch channels {
-                case 6: text += " 5.1"
-                case 8: text += " 7.1"
-                default: break
-                }
-            }
+        let code = track.language.flatMap { TrackChoice.normalized($0) }
+        let language = code.flatMap { Locale.current.localizedString(forLanguageCode: $0) }
+            ?? track.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown language"
+        switch track.role {
+        case "commentary": return "\(language) (Commentary)"
+        case "sdh": return "\(language) SDH"
+        case "forced": return "\(language) (Forced)"
+        default: return language
         }
-        if track.forced { text += " (Forced)" }
-        // Two tracks in one language told apart (the file's flag, no title).
-        if track.hearingImpaired, !text.localizedCaseInsensitiveContains("SDH") { text += " SDH" }
-        return text
     }
 
     /// The tracks, and the picture's size and range, once it's playing.

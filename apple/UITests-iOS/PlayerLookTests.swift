@@ -611,6 +611,48 @@ final class PlayerLookTests: XCTestCase {
         wait(for: [done], timeout: 10)
     }
 
+    /// The audio and subtitles menu lists each language and kind once, in
+    /// English and Spanish (and the film's own language), the best track of
+    /// each; Spanish is the variant for where the film was made (a US film:
+    /// Latin American). Regression: every track of the file showed, the
+    /// same language several times ("English", "English", "French",
+    /// "Spanish (Castellano)", "Spanish (Latino)"). Needs the test server
+    /// with the duplicate-track film as a US film (OPENIPTV_MOCK_VIDEO=
+    /// dupes.mkv, OPENIPTV_MOCK_COUNTRIES="United States of America";
+    /// TEST_RUNNER_DUPES=1).
+    func testTrackMenuHasNoDuplicates() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DUPES"] != nil, "needs the duplicate-track test film")
+        openFilm(["-forgetTrackChoices", "YES"])
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Off"].firstMatch.waitForExistence(timeout: 3), "no subtitles menu")
+        shot("track menu")
+        let words = ["English", "Spanish", "French", "Off", "Unknown", "Director", "Castellano", "Latino"]
+        let items = app.buttons.allElementsBoundByIndex
+            .filter { button in words.contains { button.label.hasPrefix($0) } && button.frame.height < 80 }
+            .sorted { $0.frame.minY < $1.frame.minY }
+            .map(\.label)
+        XCTAssertEqual(items, ["English", "Spanish", "English (Commentary)", "Off", "English", "English SDH", "Spanish"])
+        // English audio with its forced subtitles (signs, foreign lines),
+        // which show by themselves and aren't in the menu.
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng+forced")
+        let spanish = app.buttons.matching(NSPredicate(format: "label == 'Spanish'")).allElementsBoundByIndex
+            .max { $0.frame.minY < $1.frame.minY }
+        spanish?.tap()
+        sleep(2)
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=spa~latinAmerica")
+    }
+
+    /// A film made in Spain starts in Spain's Spanish when the file also
+    /// has Latin American Spanish (the user's rule: by where it was made).
+    /// Needs the duplicate-track film as a Spanish film (OPENIPTV_MOCK_
+    /// COUNTRIES=Spain; TEST_RUNNER_DUPES_SPAIN=1).
+    func testSpainFilmStartsInSpainsSpanish() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DUPES_SPAIN"] != nil, "needs the duplicate-track film made in Spain")
+        openFilm(["-forgetTrackChoices", "YES"])
+        XCTAssertEqual(tracksPlaying(), "audio=spa~spain subtitles=off")
+    }
+
     /// The app's debug readout of the player: its second, and whether it plays.
     private func playerState() -> (seconds: Double, playing: Bool)? {
         let parts = app.staticTexts["debug-position"].firstMatch.label.split(separator: " ")

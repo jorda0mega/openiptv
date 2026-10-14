@@ -486,6 +486,29 @@ final class MPVPlayer: @unchecked Sendable {
         var selected: Bool
         /// Subtitles for the deaf and hard of hearing (the file says so).
         var hearingImpaired = false
+        /// "subrip", "ass", "hdmv_pgs_subtitle", "truehd", "eac3", …
+        var codec: String? = nil
+        /// Subtitles drawn as pictures (PGS, VobSub), not text.
+        var image = false
+        /// From a file beside the film (the server's), not inside it.
+        var external = false
+        /// The file marks it as its default.
+        var isDefault = false
+
+        /// Spain's or Latin American Spanish, from the track's language tag
+        /// or name ("es-ES", "Castellano"; "es-419", "Latino"); nil: not said.
+        var variant: TrackChoice.Variant? {
+            let tag = (language ?? "").lowercased()
+            if tag == "es-es" { return .spain }
+            if ["es-419", "es-mx", "es-us", "es-ar", "es-co", "es-cl", "spa-419"].contains(tag) { return .latinAmerica }
+            let name = (title ?? "").folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            let words = Set(name.split { !$0.isLetter && !$0.isNumber }.map(String.init))
+            if !words.isDisjoint(with: ["castellano", "castilian", "espana", "spain", "european", "europe"]) { return .spain }
+            if !words.isDisjoint(with: ["latino", "latin", "latam", "latinoamerica", "latinoamericano", "mexico", "mexican", "419"]) {
+                return .latinAmerica
+            }
+            return nil
+        }
 
         /// What the track is for besides its language: "commentary", "sdh",
         /// "forced", or nil (the main one). Two English subtitle tracks,
@@ -617,7 +640,8 @@ final class MPVPlayer: @unchecked Sendable {
             guard let id = number("id") else { return nil }
             return Track(id: id, kind: kind, title: text("title"), language: text("lang"),
                          channels: number("demux-channel-count"), forced: flag("forced"), selected: flag("selected"),
-                         hearingImpaired: flag("hearing-impaired"))
+                         hearingImpaired: flag("hearing-impaired"), codec: text("codec"), image: flag("image"),
+                         external: flag("external"), isDefault: flag("default"))
         }
     }
 

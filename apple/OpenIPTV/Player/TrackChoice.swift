@@ -13,6 +13,9 @@ struct TrackPlan: Hashable, Sendable {
     /// ("sdh", "commentary"; nil: the main one).
     var audioRole: String? = nil
     var subtitleRole: String? = nil
+    /// Which Spanish, when a file has both: Spain's for titles made in
+    /// Spain, Latin American otherwise (the user's rule).
+    var spanish: TrackChoice.Variant = .latinAmerica
     /// What it was made from, to make it again with the viewer's newest
     /// picks (a playback got ready before a pick still has the old plan).
     var basis: Basis?
@@ -34,6 +37,15 @@ struct TrackPlan: Hashable, Sendable {
 /// everything else; no subtitles unless the audio is in neither language;
 /// what the viewer picks for a show or film is kept for it.
 enum TrackChoice {
+    /// Spain's Spanish or Latin American Spanish.
+    enum Variant: String, Hashable, Sendable { case spain, latinAmerica }
+
+    /// The Spanish for a title made in these countries (the first is the
+    /// main one): Spain's for Spain, Latin American for anywhere else.
+    static func spanish(for countries: [String]) -> Variant {
+        countries.first == "Spain" ? .spain : .latinAmerica
+    }
+
     /// Countries whose own films and shows are in Spanish.
     private static let spanishCountries: Set<String> = [
         "Spain", "Mexico", "Argentina", "Colombia", "Chile", "Peru", "Venezuela", "Cuba", "Uruguay", "Ecuador",
@@ -64,6 +76,7 @@ enum TrackChoice {
         return TrackPlan(audio: codes(wanted), subtitles: subtitles,
                          audioRole: kept?.audio == wanted ? kept?.audioRole : nil,
                          subtitleRole: subtitles == nil ? nil : kept?.subtitleRole,
+                         spanish: spanish(for: countries),
                          basis: TrackPlan.Basis(audio: audio, countries: countries, key: key))
     }
 
@@ -77,7 +90,13 @@ enum TrackChoice {
             return track.language.flatMap(normalized).map(wanted.contains) ?? false
         }
         func best(_ list: [MPVPlayer.Track], _ codes: [String], role: String?) -> MPVPlayer.Track? {
-            let found = list.filter { matches($0, codes) }
+            var found = list.filter { matches($0, codes) }
+            // Two Spanish: the one for where the title was made.
+            let variant = found.filter { $0.variant == plan.spanish }
+            if !variant.isEmpty, found.contains(where: { $0.variant != nil && $0.variant != plan.spanish }) {
+                found = variant + found.filter { $0.variant == nil }
+            }
+            found = ranked(found)
             return found.first { $0.role == role } ?? found.first { $0.role == nil } ?? found.first
         }
         let audio = tracks.filter { $0.kind == .audio }
@@ -90,6 +109,72 @@ enum TrackChoice {
         let spoken = (chosen ?? audio.first)?.language
         let forced = subtitles.first { track in track.forced && (spoken.map { matches(track, [$0]) } ?? false) }
         return (chosen?.id, forced?.id)
+    }
+
+    /// Best first: more channels and a better sound (TrueHD, DTS, E-AC-3,
+    /// AC-3, then the rest) for audio; for subtitles text before pictures
+    /// (sharper, any size), inside the film before a file beside it (always
+    /// in time with it); then the file's own order.
+    static func ranked(_ tracks: [MPVPlayer.Track]) -> [MPVPlayer.Track] {
+        func sound(_ codec: String?) -> Int {
+            switch codec ?? "" {
+            case "truehd", "mlp": 4
+            case "dts", "dts-hd", "dtshd": 3
+            case "eac3": 2
+            case "ac3": 1
+            default: 0
+            }
+        }
+        return tracks.sorted { a, b in
+            if a.kind == .audio {
+                if (a.channels ?? 0) != (b.channels ?? 0) { return (a.channels ?? 0) > (b.channels ?? 0) }
+                if sound(a.codec) != sound(b.codec) { return sound(a.codec) > sound(b.codec) }
+            } else {
+                if a.image != b.image { return !a.image }
+                if a.external != b.external { return !a.external }
+            }
+            return a.id < b.id
+        }
+    }
+
+    /// The tracks the viewer chooses from: one per language and kind, the
+    /// best of each (see `ranked`), the one playing always among them.
+    /// Audio: English, Spanish and the film's own language when it's
+    /// neither, then commentaries; subtitles: English and Spanish, full
+    /// and SDH (forced ones show by themselves where they're needed).
+    /// Spanish: the variant for where the title was made. Other languages
+    /// are left out; with nothing left, everything shows.
+    static func menu(_ tracks: [MPVPlayer.Track], spanish: Variant) -> [MPVPlayer.Track] {
+        let audio = tracks.filter { $0.kind == .audio }
+        let subtitles = tracks.filter { $0.kind == .subtitle }
+        let original = audio.first?.language.flatMap(normalized)
+        func language(_ track: MPVPlayer.Track) -> String? { track.language.flatMap(normalized) }
+        func pick(_ list: [MPVPlayer.Track], languages: [String], roles: [String?]) -> [MPVPlayer.Track] {
+            var chosen: [MPVPlayer.Track] = []
+            for role in roles {
+                for code in languages {
+                    var group = list.filter { language($0) == code && $0.role == role }
+                    if code == "es", group.contains(where: { $0.variant == spanish }) {
+                        group = group.filter { $0.variant == spanish || $0.variant == nil }
+                    }
+                    if let playing = group.first(where: \.selected) { chosen.append(playing) }
+                    else if let best = ranked(group).first { chosen.append(best) }
+                }
+            }
+            return chosen
+        }
+        var languages = ["en", "es"]
+        if let original, !languages.contains(original) { languages.insert(original, at: 0) }
+        var shownAudio = pick(audio, languages: languages, roles: [nil, "commentary"])
+        if shownAudio.isEmpty { shownAudio = audio }
+        if let playing = audio.first(where: \.selected), !shownAudio.contains(playing) { shownAudio.insert(playing, at: 0) }
+        var shownSubtitles = pick(subtitles, languages: ["en", "es"], roles: [nil, "sdh"])
+        if let playing = subtitles.first(where: { $0.selected && !$0.forced }), !shownSubtitles.contains(playing) {
+            shownSubtitles.insert(playing, at: 0)
+        }
+        // English, then Spanish, the SDH beside its language.
+        shownSubtitles.sort { (languages.firstIndex(of: language($0) ?? "") ?? 9, $0.role ?? "") < (languages.firstIndex(of: language($1) ?? "") ?? 9, $1.role ?? "") }
+        return shownAudio + shownSubtitles
     }
 
     /// "eng", "en", "en-US" → "en"; "spa", "es-419", "esl" → "es".
