@@ -150,14 +150,18 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
 
 ## Still open
 
-- Continue Watching's "›" (Apple's opens the whole list): no reference
-  screenshot of that page found, so not added.
+- Continue Watching's "›" (Apple's opens the whole list): no picture of
+  that page anywhere reachable (Mobbin iPhone screens and flows, Mobbin
+  web, Appllama; REA can't press anything in the Mac TV app without
+  accessibility permission; the simulator has no TV app). Not invented
+  (the user: no design liberties); needs the user's go for a design of
+  ours, or a screenshot from their iPhone.
 - The PiP hand-over's last seek (the video output switch): gone only if
   the picture is always drawn into the window's kind of layer (waits for
   the user's "try it" or "keep it as is").
 
 - Skip Intro: Netflix and Max have it; no Apple TV app (iPhone) reference
-  found, so not added. Emby marks intros as chapter markers (IntroStart,
+  found, so not added (the user asked for the Apple TV app 1:1). Emby marks intros as chapter markers (IntroStart,
   IntroEnd, CreditsStart) when its intro detection runs.
 - An Episodes list inside the player (Netflix); ours has Continue Watching
   and Go to Show.
