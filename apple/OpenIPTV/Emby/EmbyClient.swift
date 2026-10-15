@@ -594,9 +594,23 @@ struct EmbyClient {
         }
         guard !copies.isEmpty else { return try await playback(itemId: ids[0], kind: kind) }
         func width(_ info: PlaybackInfo?) -> Int { info?.MediaSources?.first?.videoWidth ?? 0 }
-        let fitting = copies.filter { maxWidth == nil || width($0.info) <= maxWidth! }
+        func sound(_ info: PlaybackInfo?) -> [String] {
+            (info?.MediaSources?.first?.MediaStreams ?? []).filter { $0.Type == "Audio" }
+                .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }.compactMap { $0.Language.flatMap(TrackChoice.normalized) }
+        }
+        // The copies with the sound the title calls for (English, or
+        // Spanish for a Spanish-made one, or the viewer's choice), before a
+        // sharper one without it: a French-only copy left no English or
+        // Spanish to pick while another copy had it. None has it (or none
+        // says): all of them.
+        let first = copies[0]
+        let wanted = TrackChoice.wantedAudio(countries: first.item.productionLocations ?? [],
+                                             original: sound(first.info).first, key: first.item.seriesId ?? first.item.id)
+        let speaking = copies.filter { sound($0.info).contains(wanted) }
+        let pool = speaking.isEmpty ? copies : speaking
+        let fitting = pool.filter { maxWidth == nil || width($0.info) <= maxWidth! }
         let chosen = fitting.max { width($0.info) < width($1.info) }
-            ?? copies.min { width($0.info) < width($1.info) }!
+            ?? pool.min { width($0.info) < width($1.info) }!
         // Resume where any copy was left off most recently.
         let resume = copies
             .filter { Self.resumePoint($0.item) != nil }

@@ -56,13 +56,21 @@ enum TrackChoice {
     /// `audio`: the file's audio languages in its own order (the first is
     /// usually the original); `countries`: where the title was made, first
     /// the main one; `key`: the show (for an episode) or the film.
+    /// The sound a title calls for, before looking at any file of it: the
+    /// viewer's choice for it, else Spanish for a Spanish-made title (or,
+    /// where it was made isn't known, one whose sound is Spanish), else
+    /// English.
+    static func wantedAudio(countries: [String], original: String?, key: String) -> String {
+        if let audio = remembered(key)?.audio { return audio }
+        let made = countries.first.map { spanishCountries.contains($0) }
+        return (made ?? (original.flatMap(normalized) == "es")) ? "es" : "en"
+    }
+
     static func plan(audio: [String?], countries: [String], key: String) -> TrackPlan {
         let languages = audio.map { $0.flatMap(normalized) }
         let original = languages.first ?? nil
-        let made = countries.first.map { spanishCountries.contains($0) }
-        var wanted = (made ?? (original == "es")) ? "es" : "en"
+        var wanted = wantedAudio(countries: countries, original: original, key: key)
         let kept = remembered(key)
-        if let audio = kept?.audio { wanted = audio }
         // Not in the file: the original language.
         if !languages.contains(wanted), let original { wanted = original }
         let subtitles: [String]?

@@ -37,7 +37,8 @@ SOCKETS = set()
 # "video_delay" (seconds before each video response), "hls_delay" (seconds
 # before a converted stream's playlist: a server starting a conversion),
 # "video_fail" (every video request answered 503: the connection lost),
-# "intro" ("5,45": an episode's intro marks, in seconds).
+# "intro" ("5,45": an episode's intro marks, in seconds), "copy_audio"
+# ("a8:fre": one copy of a film with only that language's sound).
 CONTROL = {}
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -315,9 +316,17 @@ class Handler(BaseHTTPRequestHandler):
         if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == "tok":
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
             width = 3840 if item.startswith("k") else 1920
+            streams = file_streams()
+            # "copy_audio": "a8:fre": that copy's sound in that language only
+            # (another copy of the same film keeps the file's).
+            for spec in filter(None, CONTROL.get("copy_audio", "").split(",")):
+                copy, language = spec.split(":")
+                if copy == item:
+                    streams = [s for s in streams if s["Type"] != "Audio"] + \
+                              [{"Type": "Audio", "Index": 1, "Language": language, "Codec": "aac"}]
             return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": 8000000,
                                                 "SupportsDirectPlay": True, "SupportsDirectStream": True,
-                                                "MediaStreams": [{"Type": "Video", "Width": width}] + file_streams()}],
+                                                "MediaStreams": [{"Type": "Video", "Width": width}] + streams}],
                               "PlaySessionId": "ps1"})
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})

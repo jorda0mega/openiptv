@@ -1291,6 +1291,11 @@ struct MoviePlayerView: View {
             }
             let newPosition = rawPosition + offset
             position = newPosition
+            #if DEBUG
+            // With the position itself: the network reports (about once a
+            // second, none once the buffer is full) left it a second behind.
+            positionReadout = String(format: "%.1f %@", newPosition, paused ? "paused" : "playing")
+            #endif
             // Into the last fifth of an episode: the next one, ready.
             if !preparedNext, playback.seriesId != nil, total > 0, newPosition >= total * 0.8 {
                 preparedNext = true

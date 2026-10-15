@@ -518,9 +518,7 @@ final class PlayerLookTests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         openFilm(["-forgetTrackChoices", "YES"])
-        sleep(5)
-        configure(server, ["video_delay": "3"])
-        defer { configure(server, ["reset": "1"]) }
+        sleep(4)
         if playerState()?.playing == false {
             controlsUp()
             app.buttons["Play"].firstMatch.tap()
@@ -529,7 +527,11 @@ final class PlayerLookTests: XCTestCase {
         let off = app.buttons["Off"].firstMatch
         // Regression: while the film played, a tap on "…" also counted as
         // a tap on the picture, which hid the controls and the menu.
+        // Up before the server slows down (every second under a 3 s server
+        // runs the buffer down).
         controlsUp()
+        configure(server, ["video_delay": "3"])
+        defer { configure(server, ["reset": "1"]) }
         app.buttons["Audio and Subtitles"].firstMatch.tap()
         XCTAssertTrue(off.waitForExistence(timeout: 3), "the menu didn't open while the film played")
         shot("menu for the switch")
@@ -582,6 +584,36 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng")
         let after = Int(readout.label) ?? -1
         XCTAssertEqual(after, before, "picking subtitles went back into the film to read it again")
+    }
+
+    /// A film in two copies, one French-only and one in English: the
+    /// English one plays, sharper or not (an iPhone otherwise takes the
+    /// 1080p copy). Regression: the copy was chosen by picture alone, and a
+    /// French-only copy left no English or Spanish to pick (the user:
+    /// Asterix only played in French). Needs the multi-track test film.
+    func testCopyInTheLanguagePlays() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["copy_audio": "a8:fre"])
+        app.launchArguments = ["-debugSearch", "dune", "-forgetTrackChoices", "YES"]
+        app.launch()
+        sleep(4)
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
+        sleep(3)
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dune: Part Two'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 8), "no Dune: Part Two")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 8), "no Play")
+        play.tap()
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player")
+        sleep(3)
+        XCTAssertEqual(item.label, "k8", "the French-only copy played")
+        XCTAssertTrue(tracksPlaying().hasPrefix("audio=eng"), "not in English: \(tracksPlaying())")
     }
 
     func testFirstSubtitlesKeepPictureMoving() throws {
