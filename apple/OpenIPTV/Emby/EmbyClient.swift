@@ -716,7 +716,10 @@ struct EmbyClient {
                 .compactMap { $0.Language.flatMap(TrackChoice.normalized) })
             playback.subtitleFiles = subtitleFiles(item.id, source)
             playback.subtitleCopies = subtitleCopies(item.id, source)
-            if !playback.subtitleFiles.isEmpty { playback.subtitleReference = subtitleReference(item.id, source) }
+            // For the files, and for any the server finds later (only
+            // addresses: nothing is asked for until a file needs it).
+            playback.subtitleReference = subtitleReference(item.id, source)
+            playback.speechStretches = speechStretches(item, source)
         }
         #if DEBUG
         if audio.isEmpty { NSLog("%@", "PERF tracks planned without the server's track list") }
@@ -773,6 +776,28 @@ struct EmbyClient {
                                   resolvingAgainstBaseURL: false)!
         parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
         return parts.url
+    }
+
+    /// Eight one-minute stretches across the film (past the opening and
+    /// before the credits) as audio alone, mono MP3 at 64 kb/s (about 0.5 MB
+    /// each). Each its own play session: under one, the server kept sending
+    /// the first stretch's sound for every later one.
+    private func speechStretches(_ item: EmbyItem, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SpeechStretch] {
+        guard let ticks = item.runTimeTicks, ticks > 0 else { return [] }
+        let length = Double(ticks) / 10_000_000
+        guard length > 2 * SpeechHeard.seconds else { return [] }
+        return (0..<8).compactMap { i in
+            let start = (length * (0.06 + 0.11 * Double(i))).rounded()
+            guard start + SpeechHeard.seconds <= length else { return nil }
+            var parts = URLComponents(url: Self.api(account.serverURL, "Audio/\(item.id)/stream.mp3"), resolvingAgainstBaseURL: false)!
+            parts.queryItems = [.init(name: "MediaSourceId", value: source.Id),
+                                .init(name: "StartTimeTicks", value: String(Int64(start * 10_000_000))),
+                                .init(name: "AudioCodec", value: "mp3"), .init(name: "AudioBitRate", value: "64000"),
+                                .init(name: "AudioChannels", value: "1"),
+                                .init(name: "PlaySessionId", value: UUID().uuidString.replacingOccurrences(of: "-", with: "")),
+                                .init(name: "api_key", value: account.accessToken)]
+            return parts.url.map { .init(start: start, url: $0) }
+        }
     }
 
     /// When nothing would play: how the server answers each address, in

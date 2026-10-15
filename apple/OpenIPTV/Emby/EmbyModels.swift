@@ -265,6 +265,16 @@ struct EmbyPlayback: Hashable, Identifiable {
     /// One of the film's own subtitle tracks as text (the server extracts
     /// it): in time with the film, so the files can be put in time by it.
     var subtitleReference: URL?
+    /// Stretches of the film's sound (the server converts each to audio
+    /// alone), for putting the files in time by the speech heard in them
+    /// when there's no reference track to (see SpeechHeard).
+    var speechStretches: [SpeechStretch] = []
+
+    struct SpeechStretch: Hashable, Sendable {
+        /// Where it starts in the film (seconds).
+        let start: Double
+        let url: URL
+    }
     /// The languages of every subtitle track the server knows for it (the
     /// film's own and files), normalized ("en", "es").
     var subtitleLanguages: Set<String> = []

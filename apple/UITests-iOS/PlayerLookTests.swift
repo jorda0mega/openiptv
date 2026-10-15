@@ -926,6 +926,67 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(parts.first ?? 0, -2.5, accuracy: 0.1, "the late file wasn't shifted into time: \(readout.label)")
     }
 
+    /// A subtitle file for a film with no subtitle track of its own shows
+    /// in time by itself: the speech heard in stretches of the film's sound
+    /// (the server converts each to audio alone; Apple's sound classifier
+    /// hears it) tells how far off it is. Here every line is 6.5 s early,
+    /// like Asterix and Cleopatra's English file. Regression: such a file
+    /// played as it came. Needs the speech test film
+    /// (scripts/make_speech_film.sh; OPENIPTV_MOCK_VIDEO=…/speech.mkv,
+    /// OPENIPTV_MOCK_RUNTIME=480, OPENIPTV_MOCK_SUBTITLE_FILES="eng||…/early.srt";
+    /// TEST_RUNNER_SUBTITLE_SPEECH=1).
+    func testSubtitleFileInTimeBySpeech() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_SPEECH"] != nil, "needs the speech test film")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        openFilm(["-forgetTrackChoices", "YES"])
+        sleep(4)
+        // Watched without subtitles, nothing of its sound is asked for
+        // (eight conversions on the server). Regression: asked for every
+        // film played or got ready, subtitles or not.
+        sleep(10)
+        XCTAssertEqual(audioRequests(server), 0, "the film's sound was asked for with no subtitles showing")
+        controlsUp()
+        // The file is in the menu once fetched (the menu lists what's known
+        // as it opens): opened again until it is.
+        let file = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'"))
+        for _ in 0..<4 {
+            app.buttons["Audio and Subtitles"].firstMatch.tap()
+            XCTAssertTrue(app.buttons["Off"].firstMatch.waitForExistence(timeout: 5), "the menu didn't open")
+            if file.firstMatch.waitForExistence(timeout: 2) { break }
+            app.buttons["Off"].firstMatch.tap()
+            sleep(3)
+            controlsUp()
+        }
+        let english = file.allElementsBoundByIndex.max { $0.frame.minY < $1.frame.minY }
+        guard let english else {
+            return XCTFail("the server's file isn't in the menu: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty })")
+        }
+        english.tap()
+        let readout = app.staticTexts["debug-subshift"].firstMatch
+        var parts: [Double] = []
+        for _ in 0..<150 where parts.first.map({ abs($0) < 0.01 }) ?? true {
+            sleep(1)
+            parts = readout.label.split(separator: " ").compactMap { Double($0) }
+        }
+        shot("early file in time by speech")
+        XCTAssertEqual(parts.first ?? 0, 6.5, accuracy: 0.2, "the early file wasn't shifted into time: \(readout.label)")
+        XCTAssertEqual(parts.last ?? 0, 1, accuracy: 0.0001, "the file was stretched: \(readout.label)")
+        XCTAssertEqual(audioRequests(server), 8, "not eight stretches of its sound, once")
+    }
+
+    /// How many stretches of a film's sound the test server was asked for.
+    private func audioRequests(_ server: URL) -> Int {
+        var count = -1
+        let done = expectation(description: "audio requests")
+        URLSession.shared.dataTask(with: server.appending(path: "mock/audio_requests")) { data, _, _ in
+            count = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Int] })?["count"] ?? -1
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return count
+    }
+
     /// A film heard in neither English nor Spanish, with no subtitles in
     /// either, gets English ones by itself: the server's subtitle providers
     /// are asked, the file downloaded is added and shown. Regression: such

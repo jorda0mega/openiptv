@@ -44,6 +44,11 @@ SOCKETS = set()
 # "reference_delay" (seconds before one of the film's own subtitle tracks
 # answers: a real server reads the whole film to take it out).
 CONTROL = {}
+# A film's length (seconds; OPENIPTV_MOCK_RUNTIME): two hours unless the
+# test film is shorter and its length matters (stretches of its sound).
+# Requests for a stretch of a film's sound (GET /mock/audio_requests).
+AUDIO_REQUESTS = [0]
+MOVIE_TICKS = int(float(os.environ.get("OPENIPTV_MOCK_RUNTIME", "7200")) * 10_000_000)
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
                         "who destroyed his family. Facing a choice between the love of his life and the fate of the known "
@@ -153,7 +158,7 @@ def known_item(entry, played=False):
     return {"Id": id_, "Name": name, "Type": kind, "ProductionYear": year, "ProviderIds": providers,
             "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{len(id_) * 7 + int(id_[1:])}"},
             "BackdropImageTags": [f"b{id_}"], "Overview": LONG_OVERVIEWS.get(id_, f"{name} ({year}), a title from the test library."),
-            "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": 72000000000,
+            "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": MOVIE_TICKS,
             "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None,
                          "IsFavorite": id_ in FAVORITES} | (
                 {"PlaybackPositionTicks": POSITIONS[id_]} if POSITIONS.get(id_) else {}),
@@ -342,8 +347,11 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/embywebsocket" and q.get("api_key") == "tok":
             return self.websocket()
+        if path == "/mock/audio_requests":
+            return self.send({"count": AUDIO_REQUESTS[0]})
         if path == "/mock/set":
             if "reset" in q:
+                AUDIO_REQUESTS[0] = 0
                 DOWNLOADED.clear()
                 CONTROL.clear()
                 FAVORITES.clear()
@@ -650,7 +658,7 @@ class Handler(BaseHTTPRequestHandler):
                                         {"StartPositionTicks": int(start * 1e7), "Name": "Intro", "MarkerType": "IntroStart"},
                                         {"StartPositionTicks": int(end * 1e7), "Name": "Intro End", "MarkerType": "IntroEnd"}]
                 return self.send(item)
-            return self.send(movie(int(item_id[1:])) | {"RunTimeTicks": 72000000000})
+            return self.send(movie(int(item_id[1:])) | {"RunTimeTicks": MOVIE_TICKS})
         if path.startswith("/Shows/") and path.endswith("/Seasons"):
             return self.send({"Items": [{"Id": f"season{n}", "Name": f"Season {n}", "Type": "Season", "IndexNumber": n,
                                          "UserData": {"Played": n == 1}} for n in (1, 2)]})
@@ -704,6 +712,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send([{"Id": f"os-1-{language}", "Name": f"Release.{language}", "ProviderName": "Open Subtitles",
                                "Format": "srt", "Language": language, "IsHashMatch": True, "DownloadCount": 100}]
                              if remote else [])
+        if path.startswith("/Audio/") and "/stream" in path:
+            # A stretch of the film's sound alone, from StartTimeTicks, as
+            # MP3 (Emby converts it; read for as long as it's wanted).
+            start = int(q.get("StartTimeTicks", "0")) / 10_000_000
+            AUDIO_REQUESTS[0] += 1
+            print(f"{time.time():.2f} audio {path.split('/')[2]} from {start:.0f} s, session {q.get('PlaySessionId', '-')}", flush=True)
+            video = os.environ.get("OPENIPTV_MOCK_VIDEO")
+            if not video or not shutil.which("ffmpeg"):
+                return self.send({"error": "not found"}, status=404)
+            out = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(start), "-i", video, "-t", "70", "-vn", "-ac", "1",
+                                  "-b:a", "64k", "-f", "mp3", "-"], capture_output=True).stdout
+            return self.send(out, "audio/mpeg")
         if path.startswith("/Videos/") and "/Subtitles/" in path:
             # /Videos/{id}/{source}/Subtitles/{index}/Stream.srt
             index = int(path.split("/Subtitles/", 1)[1].split("/", 1)[0])
