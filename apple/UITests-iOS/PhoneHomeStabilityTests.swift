@@ -50,6 +50,22 @@ final class PhoneHomeStabilityTests: XCTestCase {
         let moved = differences(before, after)
         XCTAssertEqual(moved, [], "Home changed while on screen:\n" + moved.joined(separator: "\n"))
 
+        // Scrolling isn't a moment either (the user: "scrolling shouldn't
+        // change the recommendation list"): down the page and back, the
+        // same Home.
+        drag(from: 0.8, to: 0.3)
+        sleep(2)
+        let further = rowNumbers(rows())
+        XCTAssertFalse(further.isEmpty, "no numbered rows further down")
+        XCTAssertEqual(further, numbers, "scrolling down put the Home built meanwhile on the page")
+        drag(from: 0.3, to: 0.8)
+        sleep(1)
+        drag(from: 0.75, to: 0.35)
+        sleep(2)
+        let back = rowNumbers(rows())
+        XCTAssertFalse(back.isEmpty, "no numbered rows after scrolling back")
+        XCTAssertEqual(back, numbers, "scrolling back put the Home built meanwhile on the page")
+
         // Home chosen again in the tab bar (back at the top, where it's
         // full size): the Home built meanwhile goes on.
         for _ in 0..<3 { drag(from: 0.3, to: 0.8) }
