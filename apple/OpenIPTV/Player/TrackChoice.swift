@@ -34,8 +34,9 @@ struct TrackPlan: Hashable, Sendable {
 }
 
 /// The rules (the user's): Spanish for titles made in Spanish, English for
-/// everything else; no subtitles unless the audio is in neither language;
-/// what the viewer picks for a show or film is kept for it.
+/// everything else; no subtitles unless the audio is in neither language
+/// (sound with no language on it counts as the language of where the title
+/// was made); what the viewer picks for a show or film is kept for it.
 enum TrackChoice {
     /// Spain's Spanish or Latin American Spanish.
     enum Variant: String, Hashable, Sendable { case spain, latinAmerica }
@@ -51,6 +52,11 @@ enum TrackChoice {
         "Spain", "Mexico", "Argentina", "Colombia", "Chile", "Peru", "Venezuela", "Cuba", "Uruguay", "Ecuador",
         "Bolivia", "Paraguay", "Guatemala", "Costa Rica", "Dominican Republic", "Puerto Rico", "Panama",
         "Honduras", "El Salvador", "Nicaragua",
+    ]
+
+    /// Countries whose own films and shows are in English.
+    private static let englishCountries: Set<String> = [
+        "United States of America", "United Kingdom", "Canada", "Australia", "Ireland", "New Zealand",
     ]
 
     /// `audio`: the file's audio languages in its own order (the first is
@@ -73,9 +79,16 @@ enum TrackChoice {
         let kept = remembered(key)
         // Not in the file: the original language.
         if !languages.contains(wanted), let original { wanted = original }
+        // No language on any of its sound (a fifth of one server's titles),
+        // made where neither is spoken: heard in that country's language
+        // (War 2, India: Hindi), so subtitles. Regression: none showed.
+        let unlabelledForeign = !languages.isEmpty && languages.allSatisfy { $0 == nil }
+            && countries.first.map { !englishCountries.contains($0) && !spanishCountries.contains($0) } == true
         let subtitles: [String]?
         if let chosen = kept?.subtitles {
             subtitles = chosen == "off" ? nil : codes(chosen)
+        } else if unlabelledForeign {
+            subtitles = codes("en") + codes("es")
         } else if wanted == "en" || wanted == "es" {
             subtitles = nil
         } else {
@@ -112,7 +125,17 @@ enum TrackChoice {
         let chosen = best(audio, plan.audio, role: plan.audioRole)
         if let wanted = plan.subtitles {
             let shown = subtitles.filter { !$0.forced || plan.subtitleRole == "forced" }
-            return (chosen?.id, best(shown, wanted, role: plan.subtitleRole)?.id)
+            // English before Spanish (the plan's order), whatever their kind:
+            // a Spanish file beside the film came before English drawn
+            // subtitles inside it (Either Way).
+            var languages: [String] = []
+            for code in wanted { if let language = normalized(code), !languages.contains(language) { languages.append(language) } }
+            for language in languages {
+                if let track = best(shown, wanted.filter { normalized($0) == language }, role: plan.subtitleRole) {
+                    return (chosen?.id, track.id)
+                }
+            }
+            return (chosen?.id, nil)
         }
         let spoken = (chosen ?? audio.first)?.language
         let forced = subtitles.first { track in track.forced && (spoken.map { matches(track, [$0]) } ?? false) }
@@ -185,9 +208,16 @@ enum TrackChoice {
         return shownAudio + shownSubtitles
     }
 
-    /// "eng", "en", "en-US" → "en"; "spa", "es-419", "esl" → "es".
+    /// "eng", "en", "en-US" → "en"; "spa", "es-419", "esl" → "es"; a
+    /// language's name as some files have it ("English", "Español",
+    /// "Castellano") → its code.
     static func normalized(_ language: String) -> String? {
         let code = language.lowercased().split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init) ?? ""
+        if code.count > 3 {
+            let name = language.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                .split { !$0.isLetter }.first.map(String.init) ?? ""
+            if let named = names[name] { return named }
+        }
         switch code {
         case "", "und", "unk", "mis", "mul", "zxx": return nil
         case "en", "eng": return "en"
@@ -204,6 +234,22 @@ enum TrackChoice {
         "slo": "sk", "alb": "sq", "arm": "hy", "baq": "eu", "bur": "my", "geo": "ka", "ice": "is", "mac": "mk",
         "mao": "mi", "may": "ms", "tib": "bo", "wel": "cy",
     ]
+
+    /// Languages by their names in English and Spanish, folded ("english",
+    /// "ingles", "espanol"), and the names files use for Spanish's kinds.
+    private static let names: [String: String] = {
+        var all: [String: String] = ["castellano": "es", "castilian": "es", "latino": "es"]
+        for code in Locale.LanguageCode.isoLanguageCodes where code.identifier.count == 2 {
+            for locale in [Locale(identifier: "en"), Locale(identifier: "es")] {
+                guard let name = locale.localizedString(forLanguageCode: code.identifier) else { continue }
+                let folded = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                if let word = folded.split(whereSeparator: { !$0.isLetter }).first.map(String.init), all[word] == nil {
+                    all[word] = code.identifier
+                }
+            }
+        }
+        return all
+    }()
 
     /// The forms files use for a language ("en": "eng", "en").
     private static func codes(_ language: String) -> [String] {

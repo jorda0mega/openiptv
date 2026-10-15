@@ -987,6 +987,49 @@ final class PlayerLookTests: XCTestCase {
         return count
     }
 
+    /// The language rules on titles of the user's server (a survey of 550
+    /// found each case): `env` names the test film each needs.
+    private func startingTracks(_ env: String) throws -> String {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment[env] != nil, "needs its test film (\(env))")
+        openFilm(["-forgetTrackChoices", "YES"])
+        sleep(6)
+        var playing = tracksPlaying()
+        for _ in 0..<10 where playing.hasSuffix("subtitles=off") {
+            sleep(1)
+            playing = tracksPlaying()
+        }
+        shot("tracks \(env)")
+        return playing
+    }
+
+    /// Sound with no language on it, in a film made in France: heard as
+    /// French, so English subtitles. Regression: none showed (War 2, The
+    /// Crime of Monsieur Lange: a fifth of the server's titles have
+    /// unlabelled sound). Speech test film, OPENIPTV_MOCK_COUNTRIES=France,
+    /// OPENIPTV_MOCK_SUBTITLE_FILES="eng||…/in-time.srt"; TEST_RUNNER_RULE_UNLABELLED=1.
+    func testUnlabelledSoundFromAbroadShowsSubtitles() throws {
+        XCTAssertTrue(try startingTracks("RULE_UNLABELLED").hasSuffix("subtitles=eng"), "no English subtitles: \(tracksPlaying())")
+    }
+
+    /// French sound with a Spanish file listed before an English one:
+    /// English. Regression: the first file listed won (Yakuza Graveyard,
+    /// The Jade Tiger), and Spanish text beat English drawn subtitles
+    /// (Either Way). foreign.mkv, OPENIPTV_MOCK_COUNTRIES=France,
+    /// OPENIPTV_MOCK_SUBTITLE_FILES="spa||…;eng||…"; TEST_RUNNER_RULE_ORDER=1.
+    func testEnglishSubtitlesBeforeSpanish() throws {
+        XCTAssertTrue(try startingTracks("RULE_ORDER").hasSuffix("subtitles=eng"), "not English subtitles: \(tracksPlaying())")
+    }
+
+    /// Sound marked "English" (the word, not "eng") in an American film:
+    /// English, no subtitles. Regression: the word wasn't read as English,
+    /// so the film counted as foreign and showed subtitles. Speech film
+    /// tagged "English", OPENIPTV_MOCK_COUNTRIES="United States of America",
+    /// OPENIPTV_MOCK_SUBTITLE_FILES="eng||…/in-time.srt"; TEST_RUNNER_RULE_NAME=1.
+    func testLanguageWrittenAsAWord() throws {
+        let playing = try startingTracks("RULE_NAME")
+        XCTAssertTrue(playing.hasSuffix("subtitles=off"), "subtitles over English sound: \(playing)")
+    }
+
     /// A film heard in neither English nor Spanish, with no subtitles in
     /// either, gets English ones by itself: the server's subtitle providers
     /// are asked, the file downloaded is added and shown. Regression: such
