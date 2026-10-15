@@ -214,6 +214,26 @@ final class PlayerLookTests: XCTestCase {
     /// Leaving the app while a film plays (another app, the Home Screen) and
     /// coming back: the film plays on with its picture moving. Regression:
     /// the picture stayed frozen after coming back.
+    /// The screen stays on while a film plays, and may sleep again when
+    /// it's paused, as with Apple's player (which tells the system by
+    /// itself; libmpv doesn't). Regression: the phone locked, and the
+    /// Apple TV slept, in the middle of a film.
+    func testScreenStaysOnWhilePlaying() {
+        openFilm()
+        sleep(3)
+        let awake = app.staticTexts["debug-awake"].firstMatch
+        XCTAssertTrue(awake.waitForExistence(timeout: 5), "no awake readout")
+        XCTAssertEqual(awake.label, "awake", "the screen may sleep while the film plays")
+        controlsUp()
+        app.buttons["Pause"].firstMatch.tap()
+        sleep(1)
+        XCTAssertEqual(awake.label, "idle", "the screen is kept on while paused")
+        controlsUp()
+        app.buttons["Play"].firstMatch.tap()
+        sleep(1)
+        XCTAssertEqual(awake.label, "awake", "the screen may sleep after playing again")
+    }
+
     func testPictureMovesAfterLeavingApp() {
         openFilm()
         sleep(5)

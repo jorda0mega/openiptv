@@ -296,6 +296,54 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertEqual(item.label, "e205", "the chosen episode didn't play")
     }
 
+    /// The Apple TV stays awake while a film plays (no screensaver, no
+    /// sleep), and may sleep when it's paused. Regression: it slept in the
+    /// middle of a film (Apple's player tells the system; libmpv doesn't).
+    func testStaysAwakeWhilePlaying() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(6)
+        let awake = app.staticTexts["debug-awake"].firstMatch
+        XCTAssertTrue(awake.waitForExistence(timeout: 5), "no awake readout")
+        XCTAssertEqual(awake.label, "awake", "the Apple TV may sleep while the film plays")
+        remote.press(.playPause)
+        sleep(1)
+        XCTAssertEqual(awake.label, "idle", "kept awake while paused")
+    }
+
+    /// Back from the Home Screen (or the Apple TV waking from sleep), the
+    /// picture moves again: it went off while away (no drawing in the
+    /// background) and came back through a fresh video output. Regression:
+    /// after the Apple TV slept mid-film, the picture stayed frozen on a
+    /// frame until another episode was picked.
+    func testPictureBackAfterLeaving() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(6)
+        XCUIRemote.shared.press(.home)
+        sleep(6)
+        app.activate()
+        sleep(4)
+        shot("back from home")
+        XCTAssertEqual(app.staticTexts["debug-away"].firstMatch.label, "1", "the picture didn't go off while away")
+        let first = playerSecond() ?? 0
+        sleep(3)
+        let later = playerSecond() ?? 0
+        XCTAssertGreaterThan(later - first, 2, "not playing after coming back (\(first) → \(later))")
+    }
+
     /// A film's Info panel is headed by its name, and no bare year shows.
     /// Regression: the heading (and the line over the title) was "2026".
     func testFilmInfoHeading() {

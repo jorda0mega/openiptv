@@ -250,6 +250,8 @@ struct MoviePlayerView: View {
     /// The title being started in this player screen (the next episode, or
     /// one from Continue Watching).
     @State private var switching: String?
+    /// This player, to ScreenAwake.
+    @State private var awakeID = UUID()
     /// An episode: its season's episodes, for the player's Episodes list
     /// (as on the show's page).
     @State private var seasonEpisodes: [EmbyItem] = []
@@ -438,8 +440,9 @@ struct MoviePlayerView: View {
                 debugReadout(startReadout, "debug-start")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
-                #if os(iOS)
                 debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
+                debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
+                #if os(iOS)
                 debugReadout(player?.subtitleShift ?? "", "debug-subshift")
                 #endif
             }
@@ -470,6 +473,7 @@ struct MoviePlayerView: View {
         }
         .onDisappear {
             PlaybackActivity.ended()
+            ScreenAwake.set(awakeID, playing: false)
             #if DEBUG
             model.debugPlayerUp = false
             #endif
@@ -1172,6 +1176,7 @@ struct MoviePlayerView: View {
     private func handle(_ event: MPVPlayer.Event) {
         switch event {
         case let .started(playerSeconds):
+            ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false
             guard !startedOnce else { return }
@@ -1300,6 +1305,7 @@ struct MoviePlayerView: View {
             }
         case let .paused(isPaused):
             paused = isPaused
+            if started { ScreenAwake.set(awakeID, playing: !isPaused) }
             #if DEBUG
             // At once: the network reports that also refresh it stop once
             // the buffer is full, and it said "playing" after a pause.

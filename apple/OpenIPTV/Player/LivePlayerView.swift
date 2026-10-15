@@ -19,6 +19,8 @@ struct LivePlayerView: View {
     @State private var player: MPVPlayer?
     @State private var timing = "Starting…"
     @State private var started = false
+    /// This player, to ScreenAwake.
+    @State private var awakeID = UUID()
     @State private var buffering = false
     @State private var paused = false
     @State private var error: String?
@@ -107,6 +109,7 @@ struct LivePlayerView: View {
         .onAppear { PlaybackActivity.began() }
         .onDisappear {
             PlaybackActivity.ended()
+            ScreenAwake.set(awakeID, playing: false)
             hideTask?.cancel()
             loadTask?.cancel()
             player?.shutdown()
@@ -430,6 +433,7 @@ struct LivePlayerView: View {
         case let .started(seconds):
             started = true
             buffering = false
+            ScreenAwake.set(awakeID, playing: !paused)
             #if DEBUG
             NSLog("%@", String(format: "PERF live start %.3f", seconds))
             #endif
@@ -443,6 +447,7 @@ struct LivePlayerView: View {
             buffering = isBuffering
         case let .paused(isPaused):
             paused = isPaused
+            if started { ScreenAwake.set(awakeID, playing: !isPaused) }
         case let .time(now, _):
             guard abs(now - (position ?? -10)) >= 0.25 else { return }
             position = now
