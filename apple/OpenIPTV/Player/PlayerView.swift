@@ -250,15 +250,16 @@ struct MoviePlayerView: View {
     /// The title being started in this player screen (the next episode, or
     /// one from Continue Watching).
     @State private var switching: String?
+    /// An episode: its season's episodes, for the player's Episodes list
+    /// (as on the show's page).
+    @State private var seasonEpisodes: [EmbyItem] = []
     #if os(iOS)
     /// The Info panel, and the picture filling the screen (cropped) rather
     /// than fitting it.
     @State private var showInfo = false
     /// The player's Continue Watching open.
     @State private var showContinue = false
-    /// An episode: its season's episodes, for the player's Episodes list
-    /// (as on the show's page), and that list open.
-    @State private var seasonEpisodes: [EmbyItem] = []
+    /// The Episodes list open.
     @State private var showEpisodes = false
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSize
@@ -457,9 +458,7 @@ struct MoviePlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
-        #if os(iOS)
         .task(id: playback.itemId) { await loadSeason() }
-        #endif
         .onAppear {
             PlaybackActivity.began()
             #if DEBUG
@@ -490,7 +489,11 @@ struct MoviePlayerView: View {
                        info: TVPlayerInfo(heading: film ? playback.title : playback.subtitle, overview: playback.overview,
                                           runtime: film ? [playback.subtitle, runtime].compactMap(\.self).joined(separator: " · ") : runtime,
                                           badges: badges),
-                       menu: menu)
+                       menu: menu,
+                       episodes: seasonEpisodes.count > 1 ? seasonEpisodes.map { episode in
+                           TVPlayerEpisode(id: episode.id, title: episodeTitle(episode), line: episodeStatus(episode),
+                                           images: model.emby?.card(for: episode, landscape: true, width: 320).images ?? [])
+                       } : [])
         #else
         // A film shows its title alone, as in the Apple TV app; an episode
         // its "S1:E3 · Name" over the show.
@@ -634,40 +637,17 @@ struct MoviePlayerView: View {
         showControls(autoHide: !showEpisodes)
     }
 
-    /// The season of the episode playing, as on its show's page (the
-    /// show as saved, else fetched).
-    private func loadSeason() async {
-        guard let series = playback.seriesId else { return }
-        let data: AppModel.ShowData?
-        if let saved = model.cachedShow(series), saved.episodes.contains(where: { $0.id == playback.itemId }) {
-            data = saved
-        } else {
-            data = await model.loadShow(series)
-        }
-        guard let data, let current = data.episodes.first(where: { $0.id == playback.itemId }) else { return }
-        seasonEpisodes = data.episodes
-            .filter { $0.parentIndexNumber == current.parentIndexNumber }
-            .sorted { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }
-    }
-
     /// The season's episodes: "3. Case 3", "Playing" for this one, how far
     /// one under way is, else its length. A tap plays it in this player.
     private var episodesPanel: PlayerInfoPanel {
         PlayerInfoPanel(title: "Episodes", meta: "", cards: seasonEpisodes.map { episode in
             let playing = episode.id == playback.itemId
-            let number = episode.indexNumber.map { "\($0). " } ?? ""
-            let length = episode.runTimeTicks.map { ticks -> String in
-                let minutes = max(1, Int((Double(ticks) / 6e8).rounded()))
-                return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
-            }
-            let left = episode.resumeFraction == nil ? nil : EmbyClient.timeLeft(episode).map { "\($0) left" }
-            let status = playing ? "Playing" : left ?? length
             let code = [episode.parentIndexNumber.map { "S\($0)" }, episode.indexNumber.map { "E\($0)" }]
                 .compactMap(\.self).joined(separator: ", ")
-            return PlayerCard(id: episode.id, title: number + episode.name, subtitle: status,
+            return PlayerCard(id: episode.id, title: episodeTitle(episode), subtitle: episodeStatus(episode),
                               images: model.emby?.card(for: episode, landscape: true, width: 180).images ?? [],
                               loading: switching == episode.id,
-                              line: [code, length].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · ")) {
+                              line: [code, episodeLength(episode)].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · ")) {
                 if playing { toggleEpisodes() } else { playEpisode(episode) }
             }
         }, focus: playback.itemId)
@@ -1624,27 +1604,10 @@ struct MoviePlayerView: View {
     /// The Info panel or a menu open: up and down through a menu, a click
     /// picks, Menu (or up, from the Info panel) closes it.
     private func inPanel(_ open: TVPlayerPanel, _ input: TVRemoteSurface.Input) {
+        if open == .info || open == .episodes { return inInfo(input) }
         let rows = menu?.rows.count ?? 0
         let button = Self.button(for: open)
         switch (open, input) {
-        case (.info, .select):
-            // On the tab, a click does nothing.
-            guard focus == .fromBeginning else { return }
-            restart()
-            panel = nil
-            backToBar()
-        case (.info, .down):
-            focus = .fromBeginning
-        case (.info, .up):
-            if focus == .fromBeginning {
-                focus = .infoTab
-            } else {
-                panel = nil
-                backToBar()
-            }
-        case (.info, .menu):
-            panel = nil
-            backToBar()
         case (_, .playPause):
             togglePlay()
         case (_, .up):
@@ -1658,6 +1621,75 @@ struct MoviePlayerView: View {
         case (_, .menu):
             panel = nil
             focus = button
+        default:
+            break
+        }
+    }
+
+    /// The Info and Episodes tabs, as in Apple's player: left and right
+    /// between the tabs (each shows its page), down into the page ("From
+    /// Beginning", or the row of episodes, on the one playing), left and
+    /// right along the row; a click carries it out (on a tab, nothing);
+    /// up back to the tab, then away; Menu away.
+    private func inInfo(_ input: TVRemoteSurface.Input) {
+        let tabs: [TVPlayerFocus] = seasonEpisodes.count > 1 ? [.infoTab, .episodesTab] : [.infoTab]
+        func moveTab(_ by: Int) {
+            guard let at = tabs.firstIndex(of: focus) else { return }
+            let tab = tabs[min(max(at + by, 0), tabs.count - 1)]
+            focus = tab
+            panel = tab == .episodesTab ? .episodes : .info
+        }
+        func moveEpisode(_ by: Int) {
+            guard case let .episode(i) = focus else { return }
+            focus = .episode(min(max(i + by, 0), seasonEpisodes.count - 1))
+        }
+        func move(_ by: Int) {
+            if case .episode = focus { moveEpisode(by) } else { moveTab(by) }
+        }
+        switch input {
+        case let .click(direction):
+            move(direction < 0 ? -1 : 1)
+        case let .swipe(began, distance, ended):
+            if began { buttonSwipeSteps = 0 }
+            if case let .moveFocus(by) = RemoteSwipe.action(at: .buttons, paused: paused, scrubbing: false,
+                                                            distance: distance, stepsTaken: buttonSwipeSteps), by != 0 {
+                move(by)
+                buttonSwipeSteps += by
+            }
+            if ended { buttonSwipeSteps = 0 }
+        case .down:
+            if focus == .infoTab {
+                focus = .fromBeginning
+            } else if focus == .episodesTab {
+                focus = .episode(seasonEpisodes.firstIndex { $0.id == playback.itemId } ?? 0)
+            }
+        case .up:
+            switch focus {
+            case .fromBeginning: focus = .infoTab
+            case .episode: focus = .episodesTab
+            default:
+                panel = nil
+                backToBar()
+            }
+        case .select:
+            if focus == .fromBeginning {
+                restart()
+                panel = nil
+                backToBar()
+            } else if case let .episode(i) = focus, seasonEpisodes.indices.contains(i) {
+                let episode = seasonEpisodes[i]
+                if episode.id == playback.itemId {
+                    panel = nil
+                    backToBar()
+                } else {
+                    playNext(episode)
+                }
+            }
+        case .playPause:
+            togglePlay()
+        case .menu:
+            panel = nil
+            backToBar()
         default:
             break
         }
@@ -1779,6 +1811,42 @@ struct MoviePlayerView: View {
     }
 
     #endif
+
+    /// The season of the episode playing, as on its show's page (the
+    /// show as saved, else fetched).
+    private func loadSeason() async {
+        guard let series = playback.seriesId else { return }
+        let data: AppModel.ShowData?
+        if let saved = model.cachedShow(series), saved.episodes.contains(where: { $0.id == playback.itemId }) {
+            data = saved
+        } else {
+            data = await model.loadShow(series)
+        }
+        guard let data, let current = data.episodes.first(where: { $0.id == playback.itemId }) else { return }
+        seasonEpisodes = data.episodes
+            .filter { $0.parentIndexNumber == current.parentIndexNumber }
+            .sorted { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }
+    }
+
+    /// "3. Case 3".
+    private func episodeTitle(_ episode: EmbyItem) -> String {
+        (episode.indexNumber.map { "\($0). " } ?? "") + episode.name
+    }
+
+    /// "22m", "1h 2m".
+    private func episodeLength(_ episode: EmbyItem) -> String? {
+        episode.runTimeTicks.map { ticks in
+            let minutes = max(1, Int((Double(ticks) / 6e8).rounded()))
+            return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+        }
+    }
+
+    /// "Playing" for this one, "12m left" for one under way, else its length.
+    private func episodeStatus(_ episode: EmbyItem) -> String? {
+        if episode.id == playback.itemId { return "Playing" }
+        if episode.resumeFraction != nil, let left = EmbyClient.timeLeft(episode) { return "\(left) left" }
+        return episodeLength(episode)
+    }
 
     /// During the intro the server has marked: "Skip Intro", until a
     /// second before its end; not with a panel open, or while choosing a

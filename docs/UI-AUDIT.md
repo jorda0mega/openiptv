@@ -284,8 +284,9 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
   neither). "Skip Intro" shows during an intro Emby has marked (chapters
   "IntroStart" and "IntroEnd"), on iPhone, iPad and Apple TV (a click skips
   it there); "Episodes" beside Info lists the season, the one playing
-  marked (iPhone and iPad). Tests: `testSkipIntro` (both),
-  `testEpisodesInPlayer`. Not yet: Episodes on Apple TV.
+  marked: a list on iPhone and iPad, a tab beside Info with a row of
+  stills on Apple TV. Tests: `testSkipIntro` (both),
+  `testEpisodesInPlayer`, `testEpisodesTab`.
 
 - Picture in Picture's picture on a real device (the simulator can't show it).
 

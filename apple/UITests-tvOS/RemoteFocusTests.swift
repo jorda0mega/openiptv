@@ -258,6 +258,44 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertLessThan(playerSecond() ?? 99, 5, "From Beginning didn't start the film over")
     }
 
+    /// An episode: down, then right, the Episodes tab beside Info, its
+    /// season in a row; down onto the one playing, right along the row, and
+    /// a click plays that one in the same player. The user asked for it
+    /// (14 October).
+    func testEpisodesTab() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        // From its start (the test film is 10 min: resumed at 10:00 it ends).
+        configure(server, ["episode_resume": "0"])
+        app.launch()
+        sleep(6)
+        // Continue Watching's first card: the show, at its episode.
+        for _ in 0..<5 where !focused().contains("id='continue-") { press(.down, "down to Continue Watching") }
+        press(.select, "play")
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player")
+        XCTAssertEqual(item.label, "e203", "not the show's episode")
+        sleep(6)
+        remote.press(.down)
+        usleep(800_000)
+        remote.press(.right)
+        usleep(800_000)
+        XCTAssertTrue(app.descendants(matching: .any)["player.episodes.tab"].firstMatch.isSelected, "no Episodes tab beside Info")
+        remote.press(.down)
+        usleep(800_000)
+        shot("episodes row")
+        XCTAssertTrue(app.descendants(matching: .any)["player.episode.e203"].firstMatch.isSelected, "the row didn't open on the one playing")
+        remote.press(.right)
+        usleep(500_000)
+        remote.press(.right)
+        usleep(800_000)
+        XCTAssertTrue(app.descendants(matching: .any)["player.episode.e205"].firstMatch.isSelected, "right didn't move along the row")
+        remote.press(.select)
+        for _ in 0..<40 where item.label != "e205" { usleep(250_000) }
+        XCTAssertEqual(item.label, "e205", "the chosen episode didn't play")
+    }
+
     /// A film's Info panel is headed by its name, and no bare year shows.
     /// Regression: the heading (and the line over the title) was "2026".
     func testFilmInfoHeading() {

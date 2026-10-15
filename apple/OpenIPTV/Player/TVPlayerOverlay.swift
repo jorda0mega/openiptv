@@ -12,6 +12,8 @@ import SwiftUI
 enum TVPlayerPanel: Hashable {
     /// Down from the bar: the title's details and "From Beginning".
     case info
+    /// An episode's season, the tab beside Info.
+    case episodes
     case audio
     case subtitles
     case speed
@@ -30,6 +32,19 @@ enum TVPlayerFocus: Hashable {
     /// a click there does nothing, so it can't start the film over).
     case infoTab
     case fromBeginning
+    /// The Episodes tab, and an episode in its row.
+    case episodesTab
+    case episode(Int)
+}
+
+/// An episode in the player's Episodes row (Apple TV).
+struct TVPlayerEpisode: Identifiable {
+    let id: String
+    /// "3. Case 3".
+    let title: String
+    /// "Playing", "12m left", "22m".
+    let line: String?
+    let images: [CardImage]
 }
 
 /// The Info panel's contents.
@@ -236,12 +251,13 @@ struct TVPlayerRoundButton: View {
 /// The Info tab: under the bar while paused, over the Info panel (lit)
 /// when it's open.
 struct TVPlayerInfoTab: View {
+    var title = "Info"
     var selected = false
     /// The remote is on it: white, black words, raised.
     var focused = false
 
     var body: some View {
-        Text("Info")
+        Text(title)
             .font(.system(size: 29))
             .foregroundStyle(focused ? .black : .white)
             .padding(.horizontal, 31)
@@ -250,7 +266,7 @@ struct TVPlayerInfoTab: View {
             .glassEffect(focused ? .identity : selected ? .regular.tint(.white.opacity(0.3)) : .regular, in: .capsule)
             .scaleEffect(focused ? 1.05 : 1)
             .shadow(color: .black.opacity(focused ? 0.3 : 0), radius: 12, y: 6)
-            .accessibilityIdentifier("player.info.tab")
+            .accessibilityIdentifier(title == "Info" ? "player.info.tab" : "player.episodes.tab")
             .accessibilityAddTraits(focused ? [.isButton, .isSelected] : .isButton)
     }
 }
@@ -269,12 +285,22 @@ struct TVMovieOverlay: View {
     let hasSubtitles: Bool
     let info: TVPlayerInfo
     let menu: TVTrackMenu?
+    /// An episode's season (the Episodes tab), when it has more than one.
+    var episodes: [TVPlayerEpisode] = []
 
     var body: some View {
         ZStack {
             TVPlayerShade(full: !compact || panel != nil || note != nil)
             if busy { ProgressView().controlSize(.large) }
-            if panel == .info {
+            if panel == .episodes {
+                // The row has no glass box: a fade from the middle down keeps
+                // its words clear of a bright picture.
+                LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+            if panel == .info || panel == .episodes {
                 infoPage.transition(.opacity.combined(with: .offset(y: 40)))
             } else {
                 TVPlayerLayout(showsTitles: !compact || panel != nil || note != nil, showsBelow: !compact || panel != nil) {
@@ -315,7 +341,62 @@ struct TVMovieOverlay: View {
     /// running time and picture badges, and "From Beginning".
     private var infoPage: some View {
         VStack(alignment: .leading, spacing: 45) {
-            TVPlayerInfoTab(selected: true, focused: focus == .infoTab)
+            HStack(spacing: 20) {
+                TVPlayerInfoTab(selected: panel == .info, focused: focus == .infoTab)
+                if !episodes.isEmpty {
+                    TVPlayerInfoTab(title: "Episodes", selected: panel == .episodes, focused: focus == .episodesTab)
+                }
+            }
+            if panel == .episodes { episodesRow } else { infoBox }
+        }
+        .padding(.horizontal, 80)
+        .padding(.bottom, 38)
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea()
+    }
+
+    /// The season, as a row of stills: the remote's in front, raised.
+    private var episodesRow: some View {
+        let focused: Int? = if case let .episode(i) = focus { i } else { nil }
+        return ScrollViewReader { reader in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 40) {
+                    ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
+                        let on = focused == index
+                        VStack(alignment: .leading, spacing: 10) {
+                            CoverImage(images: episode.images, title: episode.title)
+                                .frame(width: 320, height: 180)
+                                .clipShape(.rect(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(on ? 0.9 : 0.15), lineWidth: on ? 3 : 1))
+                            Text(episode.title).font(.system(size: 25, weight: .semibold)).lineLimit(1)
+                            if let line = episode.line {
+                                Text(line).font(.system(size: 22)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                            }
+                        }
+                        .foregroundStyle(.white)
+                        .frame(width: 320, alignment: .leading)
+                        .scaleEffect(on ? 1.08 : 1, anchor: .bottom)
+                        .shadow(color: .black.opacity(on ? 0.4 : 0), radius: 16, y: 10)
+                        .id(episode.id)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("player.episode.\(episode.id)")
+                        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+                    }
+                }
+                .padding(.vertical, 24)
+                .padding(.horizontal, 12)
+            }
+            .scrollIndicators(.hidden)
+            .scrollClipDisabled()
+            .onChange(of: focused) { _, index in
+                guard let index, episodes.indices.contains(index) else { return }
+                withAnimation(.snappy(duration: 0.25)) { reader.scrollTo(episodes[index].id, anchor: .center) }
+            }
+        }
+        .frame(height: 300)
+    }
+
+    private var infoBox: some View {
             HStack(alignment: .top, spacing: 40) {
                 VStack(alignment: .leading, spacing: 8) {
                     if let heading = info.heading ?? caption {
@@ -346,11 +427,6 @@ struct TVMovieOverlay: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 227)
             .glassEffect(.regular, in: .rect(cornerRadius: 40))
-        }
-        .padding(.horizontal, 80)
-        .padding(.bottom, 38)
-        .frame(maxHeight: .infinity, alignment: .bottom)
-        .ignoresSafeArea()
     }
 
     private var fromBeginning: some View {
