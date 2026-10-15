@@ -54,16 +54,21 @@ struct RootView: View {
                 TVRootView(playing: $playing)
                 #else
                 TabView(selection: $tab) {
+                    // The pages keep the usual tint (see below).
                     Tab("Home", systemImage: "house.fill", value: RootTab.home) {
-                        HomeView(playing: $playing)
+                        HomeView(playing: $playing).tint(nil)
                     }
                     Tab("Live TV", systemImage: "dot.radiowaves.left.and.right", value: RootTab.live) {
-                        LiveView(playing: $playing)
+                        LiveView(playing: $playing).tint(nil)
                     }
                     Tab(value: RootTab.search, role: .search) {
-                        SearchView(playing: $playing)
+                        SearchView(playing: $playing).tint(nil)
                     }
                 }
+                // The chosen tab white (the bar at the bottom on iPhone, at
+                // the top on iPad), as every other highlight in the app; the
+                // system's blue looked out of place.
+                .tint(.white)
                 .tabBarMinimizeBehavior(.onScrollDown)
                 // "Go to Show" in the player: Home opens the show's page,
                 // unless that page is already under the player.

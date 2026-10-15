@@ -220,6 +220,43 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertTrue(play.waitForExistence(timeout: 8), "the poster didn't open its title")
     }
 
+    /// The chosen tab (iPhone: in the bar at the bottom; iPad: at the top)
+    /// is white, as every other highlight in the app, not the system's
+    /// blue (the user: "a weird blue tint when a nav is selected"). On Live
+    /// TV, whose page is dark behind the bar, the tab's bright pixels are
+    /// grey to white, not blue.
+    func testChosenTabIsWhite() {
+        app.launch()
+        sleep(5)
+        let bar = app.tabBars.buttons["Live TV"].firstMatch
+        let live = bar.exists ? bar : app.buttons["Live TV"].firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 5), "no Live TV tab")
+        live.tap()
+        sleep(2)
+        shot("live tv tab chosen")
+        let frame = live.frame
+        let shot = XCUIScreen.main.screenshot().image
+        guard let image = shot.cgImage, let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else {
+            return XCTFail("no screenshot")
+        }
+        let scale = CGFloat(image.width) / shot.size.width
+        let perPixel = image.bitsPerPixel / 8
+        var bright = 0, coloured = 0
+        for y in stride(from: Int(frame.minY * scale), to: Int(frame.maxY * scale), by: 2) {
+            for x in stride(from: Int(frame.minX * scale), to: Int(frame.maxX * scale), by: 2)
+            where x >= 0 && y >= 0 && x < image.width && y < image.height {
+                let i = y * image.bytesPerRow + x * perPixel
+                let channels = [Int(bytes[i]), Int(bytes[i + 1]), Int(bytes[i + 2])]
+                guard channels.max()! > 180 else { continue }
+                bright += 1
+                // The system's blue: one channel high, another near nothing.
+                if channels.max()! - channels.min()! > 90 { coloured += 1 }
+            }
+        }
+        XCTAssertGreaterThan(bright, 20, "nothing bright in the chosen tab (\(frame))")
+        XCTAssertLessThan(Double(coloured), Double(bright) * 0.1, "the chosen tab is coloured, not white: \(coloured) of \(bright) bright pixels")
+    }
+
     func testHomeCardSizes() {
         app.launch()
         sleep(8)
