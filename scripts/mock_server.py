@@ -39,7 +39,8 @@ SOCKETS = set()
 # "video_fail" (every video request answered 503: the connection lost),
 # "intro" ("5,45": an episode's intro marks, in seconds), "copy_audio"
 # ("a8:fre": one copy of a film with only that language's sound),
-# "watched_elsewhere" ("m7": a film just played on another device).
+# "watched_elsewhere" ("m7": a film just played on another device),
+# "favorites_delay" (seconds before My List answers: a slow refresh).
 CONTROL = {}
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -724,6 +725,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
         # My List (before the library listing, which would answer it).
         if path == "/Users/U1/Items" and q.get("Filters") == "IsFavorite":
+            time.sleep(float(CONTROL.get("favorites_delay", 0)))
             return self.send({"Items": [known_item(KNOWN_BY_ID[i]) for i in reversed(FAVORITES) if i in KNOWN_BY_ID]})
         if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q \
                 and "PersonIds" not in q:

@@ -294,6 +294,53 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertTrue(app.buttons["row-My List"].firstMatch.waitForExistence(timeout: 8), "what was put on My List elsewhere isn't there")
     }
 
+    /// Pulled down, Home shows a spinner under the status bar, over the
+    /// hero, until the new Home is in. Regression: nothing showed that a
+    /// pull did anything (the hero covered the system's spinner).
+    func testPullShowsItsSpinner() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        sleep(8)
+        // A refresh that takes a while (My List answers after 3 s).
+        configure(server, ["favorites_delay": "3"])
+        drag(from: 0.3, to: 0.9, hold: 1)
+        // UI tests look only once the screen is still, so the spinner's
+        // place while it spun comes from the app's DEBUG readout.
+        let readout = app.staticTexts["debug-pulled"].firstMatch
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "no pull readout")
+        let deadline = Date().addingTimeInterval(20)
+        while readout.label.contains("refreshing true") || readout.label.contains("refreshes 0"), Date() < deadline { usleep(250_000) }
+        let state = readout.label
+        shot("after pull")
+        let words = state.split(separator: " ")
+        guard let at = words.firstIndex(of: "spinner"), words[at + 1] == "y",
+              let top = Double(words[at + 2]), let bottom = Double(words[at + 3]) else {
+            return XCTFail("no spinner while it refreshed (\(state))")
+        }
+        let screen = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(top, 54, "the spinner sat under the status bar (\(state))")
+        XCTAssertLessThan(bottom, screen.height / 3, "the spinner wasn't at the top (\(state))")
+        XCTAssertFalse(app.activityIndicators["home.pullSpinner"].exists, "the spinner stayed after the refresh (\(state))")
+    }
+
+    /// Put on My List on another device while Home was open: a pull
+    /// brings it. Regression: pulling rebuilt the rows but not My List.
+    func testMyListFromElsewhereShowsOnPull() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        sleep(8)
+        XCTAssertFalse(app.buttons["row-My List"].exists, "My List wasn't empty at the start")
+        favorite(server, "a4")
+        drag(from: 0.3, to: 0.9, hold: 1)
+        let pulled = app.staticTexts["debug-pulled"].firstMatch
+        XCTAssertTrue(app.buttons["row-My List"].firstMatch.waitForExistence(timeout: 10),
+                      "a pull didn't bring what was put on My List elsewhere (\(pulled.exists ? pulled.label : "no pull readout"))")
+    }
+
     /// Puts a title on the test user's My List on the server (as another
     /// device would).
     private func favorite(_ server: URL, _ id: String) {

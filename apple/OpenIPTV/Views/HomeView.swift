@@ -21,6 +21,17 @@ struct HomeView: View {
     /// Shows and films opened from Home, and from their pages (More Like
     /// This links by route: a film's page opened here needs a film route).
     @State private var path = NavigationPath()
+    /// How far Home is pulled down past its top (points), and whether the
+    /// pull's refresh is running: the spinner over the hero (the system's
+    /// never showed over the full-bleed hero).
+    @State private var pulled: CGFloat = 0
+    @State private var refreshing = false
+    #if DEBUG
+    @State private var mostPulled: CGFloat = 0
+    @State private var refreshes = 0
+    /// Where the spinner was while a refresh ran.
+    @State private var spinnerFrame: CGRect?
+    #endif
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -64,6 +75,12 @@ struct HomeView: View {
             .ignoresSafeArea(edges: .top)
             // Browsing: a Home built from now on waits for the next moment.
             .onScrollPhaseChange { _, phase in if phase == .interacting { model.homeBrowsed() } }
+            .onScrollGeometryChange(for: CGFloat.self) { -($0.contentOffset.y + $0.contentInsets.top) } action: { _, new in
+                pulled = max(0, new)
+                #if DEBUG
+                mostPulled = max(mostPulled, pulled)
+                #endif
+            }
             .background(Color.black)
             .scrollIndicators(.hidden)
             // The name pages opened from here go back to.
@@ -84,7 +101,40 @@ struct HomeView: View {
             #endif
             // Pulling down is one of the moments Home changes (like
             // Netflix's): everything built afresh, shown when it's ready.
-            .refreshableOnPhone { await model.refreshHome(cardWidth: pixelWidth) }
+            // My List too: put on it on another device while Home was open.
+            .refreshableOnPhone {
+                refreshing = true
+                #if DEBUG
+                refreshes += 1
+                #endif
+                // Not cancelled with the pull's own task (which a change on
+                // the page can end): My List's fetch was cut off.
+                let width = pixelWidth
+                await Task {
+                    async let home: Void = model.refreshHome(cardWidth: width)
+                    async let list: Void = model.refreshMyList()
+                    _ = await (home, list)
+                }.value
+                refreshing = false
+            }
+            #if os(iOS)
+            .overlay(alignment: .top) {
+                #if DEBUG
+                PullSpinner(pulled: pulled, refreshing: refreshing) { spinnerFrame = $0 }
+                #else
+                PullSpinner(pulled: pulled, refreshing: refreshing)
+                #endif
+            }
+            #endif
+            #if DEBUG
+            .background {
+                let spinner = spinnerFrame.map { "spinner y \(Int($0.minY)) \(Int($0.maxY))" } ?? "spinner none"
+                let state = "pulled \(Int(pulled)) most \(Int(mostPulled)) refreshing \(refreshing) refreshes \(refreshes) \(spinner)"
+                Text(state)
+                    .frame(width: 1, height: 1).opacity(0.02)
+                    .accessibilityLabel(state).accessibilityIdentifier("debug-pulled")
+            }
+            #endif
             .sheet(isPresented: $addingEmby) { AddEmbyView() }
             .sheet(isPresented: $showingSettings) { SettingsView(asSheet: true) }
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
@@ -194,6 +244,47 @@ struct HomeView: View {
                 playError = error.localizedDescription
             }
         }
+    }
+}
+
+/// Pull to refresh's spinner, under the status bar over the hero: it
+/// fades in as Home is pulled, and spins until the new Home is in.
+private struct PullSpinner: View {
+    let pulled: CGFloat
+    let refreshing: Bool
+    #if DEBUG
+    var noteShown: (CGRect) -> Void = { _ in }
+    @State private var frame: CGRect = .zero
+    #endif
+
+    /// The pull at which it's fully there (the system's refreshes at about
+    /// this).
+    static let full: CGFloat = 80
+
+    var body: some View {
+        let shown = refreshing ? 1 : min(1, pulled / Self.full)
+        ZStack {
+            if shown > 0 {
+                ProgressView()
+                    .controlSize(.regular)
+                    .tint(.white)
+                    .shadow(color: .black.opacity(0.4), radius: 4)
+                    .opacity(shown)
+                    .transition(.opacity)
+                    .accessibilityLabel("Refreshing")
+                    .accessibilityIdentifier("home.pullSpinner")
+                    #if DEBUG
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { new in
+                        frame = new
+                        if refreshing { noteShown(new) }
+                    }
+                    .onChange(of: refreshing, initial: true) { if refreshing, frame != .zero { noteShown(frame) } }
+                    #endif
+            }
+        }
+        .padding(.top, 8)
+        .animation(.easeOut(duration: 0.2), value: refreshing)
+        .allowsHitTesting(false)
     }
 }
 
