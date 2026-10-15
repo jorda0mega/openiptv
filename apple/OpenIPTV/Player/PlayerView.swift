@@ -256,6 +256,15 @@ struct MoviePlayerView: View {
     @State private var showInfo = false
     /// The player's Continue Watching open.
     @State private var showContinue = false
+    /// An episode: its season's episodes, for the player's Episodes list
+    /// (as on the show's page), and that list open.
+    @State private var seasonEpisodes: [EmbyItem] = []
+    @State private var showEpisodes = false
+    #if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSize
+    /// Sideways on iPhone.
+    private var compactHeight: Bool { verticalSize == .compact }
+    #endif
     @State private var filled = false
     @State private var muted = false
     /// The film went on in Picture in Picture: closing here isn't stopping.
@@ -373,7 +382,7 @@ struct MoviePlayerView: View {
                 .contentShape(Rectangle())
                 .ignoresSafeArea()
                 .onTapGesture {
-                    if showInfo { toggleInfo() } else if showContinue { toggleContinue() } else { toggleControls() }
+                    if showInfo { toggleInfo() } else if showContinue { toggleContinue() } else if showEpisodes { toggleEpisodes() } else { toggleControls() }
                 }
                 .accessibilityHidden(true)
             #endif
@@ -382,6 +391,26 @@ struct MoviePlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
+            #if os(iOS)
+            if showsSkipIntro { skipIntroButton.transition(.opacity) }
+            #else
+            if showsSkipIntro {
+                // Apple TV: the one thing a click does meanwhile, so it
+                // looks focused, as Apple's does.
+                Text("Skip Intro")
+                    .font(.system(size: 29, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 36)
+                    .frame(height: 66)
+                    .background(.white, in: .capsule)
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 90)
+                    .padding(.bottom, controlsVisible ? 200 : 70)
+                    .transition(.opacity)
+                    .accessibilityIdentifier("Skip Intro")
+            }
+            #endif
             if let qualityNote, !controlsVisible {
                 Text(qualityNote)
                     .font(.footnote.weight(.semibold))
@@ -428,6 +457,9 @@ struct MoviePlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
+        #if os(iOS)
+        .task(id: playback.itemId) { await loadSeason() }
+        #endif
         .onAppear {
             PlaybackActivity.began()
             #if DEBUG
@@ -465,8 +497,8 @@ struct MoviePlayerView: View {
         PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
                      paused: paused, busy: (buffering || !started) && error == nil, ready: started,
                      topActions: pictureActions, pills: pills,
-                     selectedPill: showInfo ? "Info" : showContinue ? "Continue Watching" : nil,
-                     panel: showInfo ? infoPanel : showContinue ? continuePanel : nil,
+                     selectedPill: showInfo ? "Info" : showEpisodes ? "Episodes" : showContinue ? "Continue Watching" : nil,
+                     panel: showInfo ? infoPanel : showEpisodes ? episodesPanel : showContinue ? continuePanel : nil,
                      muted: muted, toggleMute: {
                          muted.toggle()
                          player?.setMuted(muted)
@@ -512,6 +544,7 @@ struct MoviePlayerView: View {
     /// Apple TV app.
     private var pills: [PlayerAction] {
         var pills = [PlayerAction(title: "Info") { toggleInfo() }]
+        if seasonEpisodes.count > 1 { pills.append(PlayerAction(title: "Episodes") { toggleEpisodes() }) }
         if !otherTitles.isEmpty { pills.append(PlayerAction(title: "Continue Watching") { toggleContinue() }) }
         return pills
     }
@@ -548,6 +581,7 @@ struct MoviePlayerView: View {
     private func toggleContinue() {
         withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) {
             showInfo = false
+            showEpisodes = false
             showContinue.toggle()
         }
         // Open: the controls stay until it's closed.
@@ -584,11 +618,86 @@ struct MoviePlayerView: View {
     private func toggleInfo() {
         withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) {
             showContinue = false
+            showEpisodes = false
             showInfo.toggle()
         }
         // Open: the controls stay until it's closed.
         showControls(autoHide: !showInfo)
     }
+
+    private func toggleEpisodes() {
+        withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) {
+            showInfo = false
+            showContinue = false
+            showEpisodes.toggle()
+        }
+        showControls(autoHide: !showEpisodes)
+    }
+
+    /// The season of the episode playing, as on its show's page (the
+    /// show as saved, else fetched).
+    private func loadSeason() async {
+        guard let series = playback.seriesId else { return }
+        let data: AppModel.ShowData?
+        if let saved = model.cachedShow(series), saved.episodes.contains(where: { $0.id == playback.itemId }) {
+            data = saved
+        } else {
+            data = await model.loadShow(series)
+        }
+        guard let data, let current = data.episodes.first(where: { $0.id == playback.itemId }) else { return }
+        seasonEpisodes = data.episodes
+            .filter { $0.parentIndexNumber == current.parentIndexNumber }
+            .sorted { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }
+    }
+
+    /// The season's episodes: "3. Case 3", "Playing" for this one, how far
+    /// one under way is, else its length. A tap plays it in this player.
+    private var episodesPanel: PlayerInfoPanel {
+        PlayerInfoPanel(title: "Episodes", meta: "", cards: seasonEpisodes.map { episode in
+            let playing = episode.id == playback.itemId
+            let number = episode.indexNumber.map { "\($0). " } ?? ""
+            let length = episode.runTimeTicks.map { ticks -> String in
+                let minutes = max(1, Int((Double(ticks) / 6e8).rounded()))
+                return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+            }
+            let left = episode.resumeFraction == nil ? nil : EmbyClient.timeLeft(episode).map { "\($0) left" }
+            let status = playing ? "Playing" : left ?? length
+            let code = [episode.parentIndexNumber.map { "S\($0)" }, episode.indexNumber.map { "E\($0)" }]
+                .compactMap(\.self).joined(separator: ", ")
+            return PlayerCard(id: episode.id, title: number + episode.name, subtitle: status,
+                              images: model.emby?.card(for: episode, landscape: true, width: 180).images ?? [],
+                              loading: switching == episode.id,
+                              line: [code, length].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · ")) {
+                if playing { toggleEpisodes() } else { playEpisode(episode) }
+            }
+        }, focus: playback.itemId)
+    }
+
+    /// Another episode of the season, in this player screen (as a title
+    /// from Continue Watching).
+    private func playEpisode(_ episode: EmbyItem) {
+        var card = Card(id: episode.id, kind: "Episode", title: episode.name, subtitle: nil, images: [], progress: nil, playable: true)
+        card.seriesId = playback.seriesId
+        playInstead(card)
+    }
+
+    /// At the bottom right, above the title and bar when they're up.
+    private var skipIntroButton: some View {
+        Button { skipIntro() } label: {
+            Text("Skip Intro")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .frame(height: 44)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.trailing, 20)
+        .padding(.bottom, controlsVisible ? (compactHeight ? 112 : 150) : (compactHeight ? 24 : 48))
+    }
+
 
     /// Fill the screen (the picture cropped at its edges) or fit it, like
     /// pinching in the Apple TV app.
@@ -1452,11 +1561,16 @@ struct MoviePlayerView: View {
         case .down:
             guard started, scrubbing == nil else { return }
             panel = .info
-            focus = .fromBeginning
+            // On its tab, as in Apple's player: "From Beginning" is one
+            // more press down, so a click meant for the film can't start it
+            // over.
+            focus = .infoTab
             showControls(autoHide: false)
         case .select, .playPause:
             if let target = scrubbing {
                 commitScrub(target, byClick: true)
+            } else if case .select = input, showsSkipIntro {
+                skipIntro()
             } else {
                 togglePlay()
             }
@@ -1514,10 +1628,21 @@ struct MoviePlayerView: View {
         let button = Self.button(for: open)
         switch (open, input) {
         case (.info, .select):
+            // On the tab, a click does nothing.
+            guard focus == .fromBeginning else { return }
             restart()
             panel = nil
             backToBar()
-        case (.info, .up), (.info, .menu):
+        case (.info, .down):
+            focus = .fromBeginning
+        case (.info, .up):
+            if focus == .fromBeginning {
+                focus = .infoTab
+            } else {
+                panel = nil
+                backToBar()
+            }
+        case (.info, .menu):
             panel = nil
             backToBar()
         case (_, .playPause):
@@ -1654,6 +1779,28 @@ struct MoviePlayerView: View {
     }
 
     #endif
+
+    /// During the intro the server has marked: "Skip Intro", until a
+    /// second before its end; not with a panel open, or while choosing a
+    /// point on the bar. Apple TV: while it plays (a click then skips).
+    private var showsSkipIntro: Bool {
+        guard let intro = playback.intro, started, scrubbing == nil else { return false }
+        #if os(iOS)
+        guard !showInfo, !showContinue, !showEpisodes else { return false }
+        #else
+        guard panel == nil, !paused else { return false }
+        #endif
+        return position >= intro.lowerBound && position < intro.upperBound - 1
+    }
+
+    /// To the intro's end, straight away.
+    private func skipIntro() {
+        guard let end = playback.intro?.upperBound else { return }
+        player?.seek(to: max(0, end - offset), exact: false)
+        lastSeek = Date()
+        position = end
+        jumpUntil = Date().addingTimeInterval(1.5)
+    }
 
     /// Back or forward 10 s, straight away: the bar moves at once, and the
     /// picture follows from the nearest keyframe past the ten seconds.

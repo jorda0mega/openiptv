@@ -39,4 +39,18 @@ final class RemoteSwipeTests: XCTestCase {
         XCTAssertTrue(RemoteSwipe.playsAfterChoosing(byClick: false, wasPlaying: true))
         XCTAssertFalse(RemoteSwipe.playsAfterChoosing(byClick: false, wasPlaying: false))
     }
+
+    /// Apple TV: up or down needs a swipe, not the finger rolling as it
+    /// clicks. Regression: 24 points down during a click opened the Info
+    /// panel (with "From Beginning" ready for the next click).
+    func testAClickIsNotASwipeDown() {
+        XCTAssertNil(RemoteSwipe.vertical(travel: 40, clicked: true))
+        XCTAssertNil(RemoteSwipe.vertical(travel: 200, clicked: true))
+        XCTAssertNil(RemoteSwipe.vertical(travel: 40, clicked: false))
+    }
+
+    func testASwipeUpOrDownIsAPressThatWay() {
+        XCTAssertEqual(RemoteSwipe.vertical(travel: 200, clicked: false), .down)
+        XCTAssertEqual(RemoteSwipe.vertical(travel: -200, clicked: false), .up)
+    }
 }

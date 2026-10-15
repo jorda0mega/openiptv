@@ -227,6 +227,37 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(focused().contains("Case 3"), "Down didn't land on the episode you're up to: \(focused())")
     }
 
+    /// Down opens the Info panel on its tab, as in Apple's player: a click
+    /// there does nothing, so a click meant for the film can't start it
+    /// over; "From Beginning" is one more press down. Regression: the panel
+    /// opened on "From Beginning", so a stray swipe down (the finger
+    /// rolling in a click) and the next click restarted the film.
+    func testInfoOpensOnItsTab() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(10)
+        remote.press(.down)
+        usleep(800_000)
+        shot("info opened")
+        XCTAssertTrue(app.descendants(matching: .any)["player.info.tab"].firstMatch.isSelected, "the Info panel didn't open on its tab")
+        remote.press(.select)
+        sleep(2)
+        let after = playerSecond() ?? 0
+        XCTAssertGreaterThan(after, 6, "a click on the Info panel's tab started the film over (at \(after) s)")
+        remote.press(.down)
+        usleep(800_000)
+        XCTAssertTrue(app.descendants(matching: .any)["player.info.fromBeginning"].firstMatch.isSelected, "down didn't reach From Beginning")
+        remote.press(.select)
+        sleep(2)
+        XCTAssertLessThan(playerSecond() ?? 99, 5, "From Beginning didn't start the film over")
+    }
+
     /// A film's Info panel is headed by its name, and no bare year shows.
     /// Regression: the heading (and the line over the title) was "2026".
     func testFilmInfoHeading() {
@@ -401,6 +432,29 @@ final class RemoteFocusTests: XCTestCase {
     /// when Home shows, and stays so. Regression: the cards swapped places
     /// about 200 ms after Home came back (the stop reached Home only after
     /// the player had closed).
+    /// An episode whose intro the server has marked (Emby's intro
+    /// detection): "Skip Intro" shows while it plays, and a click skips to
+    /// the intro's end, as in the Apple TV app; then it's gone. The user
+    /// asked for it (14 October).
+    func testSkipIntro() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["intro": "4,90", "episode_resume": "0"])
+        app.launch()
+        sleep(6)
+        // Continue Watching's first card: the show, at its episode.
+        for _ in 0..<5 where !focused().contains("id='continue-") { press(.down, "down to Continue Watching") }
+        press(.select, "play")
+        let skip = app.staticTexts["Skip Intro"].firstMatch
+        XCTAssertTrue(skip.waitForExistence(timeout: 20), "no Skip Intro during the intro")
+        XCTAssertLessThan(playerSecond() ?? 999, 90, "Skip Intro came after the intro")
+        press(.select, "skip intro")
+        sleep(2)
+        XCTAssertGreaterThanOrEqual(playerSecond() ?? 0, 89, "the click didn't skip to the intro's end")
+        XCTAssertFalse(skip.exists, "Skip Intro stayed after the intro")
+    }
+
     func testContinueWatchingStillAfterClose() {
         app.launch()
         sleep(6)

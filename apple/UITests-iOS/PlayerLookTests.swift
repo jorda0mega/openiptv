@@ -599,6 +599,68 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertLessThan(took, 1.2, "a resumed title took \(took) s to start from a slow server")
     }
 
+    /// An episode whose intro the server has marked (Emby's intro detection:
+    /// chapters marked "IntroStart" and "IntroEnd"): "Skip Intro" shows
+    /// during it, with the controls hidden too, and jumps to its end; then
+    /// it's gone. The user asked for it (14 October).
+    func testSkipIntro() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["intro": "4,90", "episode_resume": "0"])
+        app.launch()
+        // Continue Watching's first card: the show, at its episode.
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
+        card.tap()
+        let skip = app.buttons["Skip Intro"].firstMatch
+        XCTAssertTrue(skip.waitForExistence(timeout: 20), "no Skip Intro during the intro")
+        shot("skip intro")
+        XCTAssertLessThan(position() ?? 999, 90, "Skip Intro came after the intro")
+        skip.tap()
+        sleep(2)
+        XCTAssertGreaterThanOrEqual(position() ?? 0, 89, "Skip Intro didn't jump to the intro's end")
+        XCTAssertFalse(skip.exists, "Skip Intro stayed after the intro")
+    }
+
+    /// An episode: "Episodes" beside Info lists its season (as on the
+    /// show's page), the one playing marked; a tap on another plays it in
+    /// the same player. The user asked for it (14 October).
+    func testEpisodesInPlayer() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        // From its start (the test film is 10 min: resumed at 10:00 it ends,
+        // and the next episode plays).
+        configure(server, ["episode_resume": "0"])
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
+        card.tap()
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player")
+        XCTAssertEqual(item.label, "e203", "not the show's episode")
+        sleep(3)
+        controlsUp()
+        let pill = app.buttons["Episodes"].firstMatch
+        XCTAssertTrue(pill.waitForExistence(timeout: 5), "no Episodes beside Info")
+        pill.tap()
+        sleep(1)
+        shot("episodes")
+        // Season 2's eight, in order, the one playing marked.
+        let rows = app.buttons.matching(NSPredicate(format: "label MATCHES '^[0-9]+\\. Case [0-9]+.*'")).allElementsBoundByIndex
+            .sorted { $0.frame.minY < $1.frame.minY }
+        XCTAssertEqual(rows.map { String($0.label.prefix(while: { $0 != "," })) },
+                       (1...8).map { "\($0). Case \($0)" }, "not season 2's episodes in order")
+        XCTAssertTrue(rows.first { $0.label.hasPrefix("3. Case 3") }?.label.contains("Playing") ?? false,
+                      "the episode playing isn't marked: \(rows.map(\.label))")
+        let fifth = try XCTUnwrap(rows.first { $0.label.hasPrefix("5. Case 5") })
+        fifth.tap()
+        for _ in 0..<40 where item.label != "e205" { usleep(250_000) }
+        XCTAssertEqual(item.label, "e205", "the chosen episode didn't play")
+        shot("episode 5 playing")
+    }
+
     /// A player opened ahead that failed before the tap (the connection
     /// lost meanwhile) isn't the one that plays: the title opens afresh.
     /// Regression: the failed player was handed over, its error heard by

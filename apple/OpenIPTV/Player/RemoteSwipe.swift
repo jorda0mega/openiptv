@@ -48,3 +48,21 @@ extension RemoteSwipe {
         byClick || wasPlaying
     }
 }
+
+extension RemoteSwipe {
+    enum Vertical: Equatable {
+        case up
+        case down
+    }
+
+    /// The least travel, up or down the touch surface, that's a swipe.
+    static let verticalTravel: CGFloat = 80
+
+    /// When the finger lifts from a swipe up or down the touch surface:
+    /// a press of the ring that way, or nothing. `travel`: how far (+ is
+    /// down); `clicked`: the touch also clicked.
+    static func vertical(travel: CGFloat, clicked: Bool) -> Vertical? {
+        guard !clicked, abs(travel) >= verticalTravel else { return nil }
+        return travel > 0 ? .down : .up
+    }
+}

@@ -279,11 +279,13 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
   the picture is always drawn into the window's kind of layer (waits for
   the user's "try it" or "keep it as is").
 
-- Skip Intro: Netflix and Max have it; no Apple TV app (iPhone) reference
-  found, so not added (the user asked for the Apple TV app 1:1). Emby marks intros as chapter markers (IntroStart,
-  IntroEnd, CreditsStart) when its intro detection runs.
-- An Episodes list inside the player (Netflix); ours has Continue Watching
-  and Go to Show.
+- Skip Intro and an Episodes list in the player: added on 14 October at
+  the user's request (Netflix and Max have both; Apple's iPhone app
+  neither). "Skip Intro" shows during an intro Emby has marked (chapters
+  "IntroStart" and "IntroEnd"), on iPhone, iPad and Apple TV (a click skips
+  it there); "Episodes" beside Info lists the season, the one playing
+  marked (iPhone and iPad). Tests: `testSkipIntro` (both),
+  `testEpisodesInPlayer`. Not yet: Episodes on Apple TV.
 
 - Picture in Picture's picture on a real device (the simulator can't show it).
 

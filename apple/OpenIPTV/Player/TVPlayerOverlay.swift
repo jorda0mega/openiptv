@@ -26,6 +26,9 @@ enum TVPlayerFocus: Hashable {
     case speed
     /// A row of the open audio, subtitle or speed menu.
     case row(Int)
+    /// The Info panel's tab, where the panel opens (as in Apple's player:
+    /// a click there does nothing, so it can't start the film over).
+    case infoTab
     case fromBeginning
 }
 
@@ -234,15 +237,21 @@ struct TVPlayerRoundButton: View {
 /// when it's open.
 struct TVPlayerInfoTab: View {
     var selected = false
+    /// The remote is on it: white, black words, raised.
+    var focused = false
 
     var body: some View {
         Text("Info")
             .font(.system(size: 29))
-            .foregroundStyle(.white)
+            .foregroundStyle(focused ? .black : .white)
             .padding(.horizontal, 31)
             .frame(height: 62)
-            .glassEffect(selected ? .regular.tint(.white.opacity(0.3)) : .regular, in: .capsule)
-            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .background { if focused { Capsule().fill(.white.opacity(0.92)) } }
+            .glassEffect(focused ? .identity : selected ? .regular.tint(.white.opacity(0.3)) : .regular, in: .capsule)
+            .scaleEffect(focused ? 1.05 : 1)
+            .shadow(color: .black.opacity(focused ? 0.3 : 0), radius: 12, y: 6)
+            .accessibilityIdentifier("player.info.tab")
+            .accessibilityAddTraits(focused ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -306,7 +315,7 @@ struct TVMovieOverlay: View {
     /// running time and picture badges, and "From Beginning".
     private var infoPage: some View {
         VStack(alignment: .leading, spacing: 45) {
-            TVPlayerInfoTab(selected: true)
+            TVPlayerInfoTab(selected: true, focused: focus == .infoTab)
             HStack(alignment: .top, spacing: 40) {
                 VStack(alignment: .leading, spacing: 8) {
                     if let heading = info.heading ?? caption {
@@ -355,7 +364,8 @@ struct TVMovieOverlay: View {
             .glassEffect(focused ? .identity : .regular, in: .capsule)
             .scaleEffect(focused ? 1.05 : 1)
             .shadow(color: .black.opacity(focused ? 0.3 : 0), radius: 14, y: 8)
-            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("player.info.fromBeginning")
+            .accessibilityAddTraits(focused ? [.isButton, .isSelected] : .isButton)
     }
 }
 

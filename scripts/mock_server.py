@@ -36,7 +36,8 @@ SOCKETS = set()
 # "resume_episode" (the episode a show's Continue Watching card is on),
 # "video_delay" (seconds before each video response), "hls_delay" (seconds
 # before a converted stream's playlist: a server starting a conversion),
-# "video_fail" (every video request answered 503: the connection lost).
+# "video_fail" (every video request answered 503: the connection lost),
+# "intro" ("5,45": an episode's intro marks, in seconds).
 CONTROL = {}
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -627,7 +628,15 @@ class Handler(BaseHTTPRequestHandler):
                                   "Overview": "Real cases solved with forensic science.",
                                   "ImageTags": {"Primary": "p"}, "BackdropImageTags": ["b"]})
             if item_id.startswith("e"):
-                return self.send(episode(int(item_id[1:])) | {"RunTimeTicks": 18000000000})
+                item = episode(int(item_id[1:])) | {"RunTimeTicks": 18000000000}
+                # "intro": "start,end" seconds, marked as Emby's intro
+                # detection marks them (chapters with a MarkerType).
+                if CONTROL.get("intro"):
+                    start, end = (float(x) for x in CONTROL["intro"].split(","))
+                    item["Chapters"] = [{"StartPositionTicks": 0, "Name": "Chapter 1", "MarkerType": "Chapter"},
+                                        {"StartPositionTicks": int(start * 1e7), "Name": "Intro", "MarkerType": "IntroStart"},
+                                        {"StartPositionTicks": int(end * 1e7), "Name": "Intro End", "MarkerType": "IntroEnd"}]
+                return self.send(item)
             return self.send(movie(int(item_id[1:])) | {"RunTimeTicks": 72000000000})
         if path.startswith("/Shows/") and path.endswith("/Seasons"):
             return self.send({"Items": [{"Id": f"season{n}", "Name": f"Season {n}", "Type": "Season", "IndexNumber": n,

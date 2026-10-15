@@ -392,6 +392,8 @@ struct PlayerInfoPanel {
     var images: [CardImage] = []
     /// Continue Watching's titles, in place of the rest.
     var cards: [PlayerCard] = []
+    /// The card the list opens at (the episode playing).
+    var focus: String? = nil
 }
 
 /// A title in the player's Continue Watching.
@@ -427,46 +429,57 @@ struct PlayerInfoPanelView: View {
     /// on each row and hairlines between; sideways, a row of 202 × 147
     /// pictures with "S1, E2 · 26m" and "•••" on them. A tap plays it.
     @ViewBuilder private var cards: some View {
-        if compact {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 20) {
-                    ForEach(panel.cards) { card in
-                        ZStack(alignment: .bottomTrailing) {
-                            Button(action: card.action) { pictureCard(card) }
-                                .buttonStyle(.plain)
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel(label(card))
-                                .accessibilityAddTraits(.isButton)
-                            more(card)
-                        }
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-        } else {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(panel.cards) { card in
-                    HStack(spacing: 0) {
-                        Button(action: card.action) {
-                            HStack(spacing: 12) {
-                                thumbnail(card)
-                                caption(card)
-                                Spacer(minLength: 8)
+        ScrollViewReader { reader in
+            Group {
+                if compact {
+                    ScrollView(.horizontal) {
+                        HStack(alignment: .top, spacing: 20) {
+                            ForEach(panel.cards) { card in
+                                ZStack(alignment: .bottomTrailing) {
+                                    // One element: the button, read as its label (a
+                                    // second wrapper made VoiceOver read each twice).
+                                    Button(action: card.action) { pictureCard(card) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel(label(card))
+                                    more(card)
+                                }
+                                .id(card.id)
                             }
-                            .padding(.vertical, 10)
-                            .contentShape(.rect)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(label(card))
-                        .accessibilityAddTraits(.isButton)
-                        more(card)
                     }
-                    if card.id != panel.cards.last?.id {
-                        Rectangle().fill(Color(white: 0.2)).frame(height: 0.5).padding(.leading, 98)
+                    .scrollIndicators(.hidden)
+                } else {
+                    // A whole season scrolls; a few titles just sit there.
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(panel.cards) { card in
+                                HStack(spacing: 0) {
+                                    Button(action: card.action) {
+                                        HStack(spacing: 12) {
+                                            thumbnail(card)
+                                            caption(card)
+                                            Spacer(minLength: 8)
+                                        }
+                                        .padding(.vertical, 10)
+                                        .contentShape(.rect)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(label(card))
+                                    more(card)
+                                }
+                                .id(card.id)
+                                if card.id != panel.cards.last?.id {
+                                    Rectangle().fill(Color(white: 0.2)).frame(height: 0.5).padding(.leading, 98)
+                                }
+                            }
+                        }
                     }
+                    .scrollIndicators(.hidden)
+                    .scrollBounceBehavior(.basedOnSize)
                 }
             }
+            // Open at the one playing (an episode far into the season).
+            .onAppear { if let focus = panel.focus { reader.scrollTo(focus, anchor: compact ? .leading : .center) } }
         }
     }
 

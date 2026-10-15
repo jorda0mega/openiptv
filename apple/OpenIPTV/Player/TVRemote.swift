@@ -44,6 +44,10 @@ struct TVRemoteSurface: UIViewRepresentable {
         /// Which way the current swipe goes, once it's clear: across moves
         /// through the film, up or down is one press of the ring.
         private var vertical: Bool?
+        /// When this touch began, and the last click: a click during a
+        /// touch makes it a click, not a swipe.
+        private var touchBegan = Date.distantPast
+        private var lastClick = Date.distantPast
 
         override var canBecomeFocused: Bool { true }
 
@@ -67,6 +71,7 @@ struct TVRemoteSurface: UIViewRepresentable {
             switch pan.state {
             case .began:
                 vertical = nil
+                touchBegan = Date()
             case .changed:
                 if vertical == nil, max(abs(moved.x), abs(moved.y)) > 24 {
                     vertical = abs(moved.y) > abs(moved.x)
@@ -77,7 +82,14 @@ struct TVRemoteSurface: UIViewRepresentable {
                 if vertical == false {
                     handle(.swipe(began: false, distance: moved.x, ended: true))
                 } else if vertical == true, pan.state == .ended {
-                    handle(moved.y > 0 ? .down : .up)
+                    // The pan begins once the finger has moved a little, so
+                    // a click just before counts as in this touch too.
+                    let clicked = lastClick > touchBegan.addingTimeInterval(-0.5)
+                    switch RemoteSwipe.vertical(travel: moved.y, clicked: clicked) {
+                    case .down: handle(.down)
+                    case .up: handle(.up)
+                    case nil: break
+                    }
                 }
                 vertical = nil
             default: break
@@ -93,6 +105,7 @@ struct TVRemoteSurface: UIViewRepresentable {
         }
 
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            lastClick = Date()
             var rest = Set<UIPress>()
             for press in presses {
                 if let direction = Self.direction(press.type) {

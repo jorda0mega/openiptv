@@ -618,7 +618,12 @@ struct EmbyClient {
             guard let episode = try await episodeToPlay(series: itemId, season: nil) else {
                 throw SourceError.unexpected("There's nothing to play in this show yet.")
             }
-            item = episode
+            // Its full record (a list's has no chapters: the intro's marks),
+            // fetched with how to play it.
+            async let full: EmbyItem? = try? get("Users/\(account.userId)/Items/\(episode.id)", [])
+            async let info = try? playbackInfo(episode.id, startSeconds: nil)
+            item = await full ?? episode
+            prefetchedInfo = await info
         } else if kind == "Movie" || kind == "Episode" || kind == "Video" {
             async let fetched: EmbyItem = get("Users/\(account.userId)/Items/\(itemId)", [])
             async let info = try? playbackInfo(itemId, startSeconds: nil)
@@ -677,6 +682,7 @@ struct EmbyClient {
         playback.bitrate = info?.MediaSources?.first?.Bitrate
         playback.seriesId = item.seriesId
         playback.overview = item.overview
+        playback.intro = item.intro
         playback.stills = Artwork.candidates(item, context: item.kind == "Episode" ? .still : .backdrop).prefix(3).map {
             CardImage(url: imageURL($0, width: 540, shape: .landscape).absoluteString, contain: $0.contain(in: .landscape))
         }

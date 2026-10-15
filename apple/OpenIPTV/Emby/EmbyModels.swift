@@ -56,6 +56,26 @@ struct EmbyItem: Codable, Hashable {
     /// Where it was made, the main country first (a single item's full
     /// record has it): which language it starts in.
     var productionLocations: [String]?
+    /// Its chapters (a single item's full record has them), with the
+    /// intro's marks when the server has found them (Emby's intro
+    /// detection: "IntroStart", "IntroEnd").
+    var chapters: [Chapter]?
+
+    struct Chapter: Codable, Hashable {
+        var startPositionTicks: Int64
+        var markerType: String?
+        enum CodingKeys: String, CodingKey {
+            case startPositionTicks = "StartPositionTicks", markerType = "MarkerType"
+        }
+    }
+
+    /// The intro, in seconds, when both its marks are there.
+    var intro: ClosedRange<Double>? {
+        guard let start = chapters?.first(where: { $0.markerType == "IntroStart" })?.startPositionTicks,
+              let end = chapters?.first(where: { $0.markerType == "IntroEnd" })?.startPositionTicks,
+              end > start else { return nil }
+        return Double(start) / 1e7...Double(end) / 1e7
+    }
 
     struct Person: Codable, Hashable {
         var name: String
@@ -120,6 +140,7 @@ struct EmbyItem: Codable, Hashable {
         case people = "People"
         case genres = "Genres"
         case productionLocations = "ProductionLocations"
+        case chapters = "Chapters"
     }
 
     init(from decoder: Decoder) throws {
@@ -157,6 +178,7 @@ struct EmbyItem: Codable, Hashable {
         people = (try? c.decodeIfPresent([Lenient<Person>].self, forKey: .people))?.compactMap(\.value)
         genres = try? c.decodeIfPresent([String].self, forKey: .genres)
         productionLocations = try? c.decodeIfPresent([String].self, forKey: .productionLocations)
+        chapters = (try? c.decodeIfPresent([Lenient<Chapter>].self, forKey: .chapters))?.compactMap(\.value)
     }
 }
 
@@ -233,6 +255,8 @@ struct EmbyPlayback: Hashable, Identifiable {
     /// A still from it (an episode's own, a film's backdrop), for the
     /// player's Info panel sideways.
     var stills: [CardImage] = []
+    /// The intro, in seconds, when the server has marked it: "Skip Intro".
+    var intro: ClosedRange<Double>?
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
     /// Subtitle files beside the film on the server (English and Spanish),
