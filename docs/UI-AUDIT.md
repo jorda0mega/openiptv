@@ -4,6 +4,11 @@ The goal (set 2026-10-12): make the iPhone, iPad and Apple TV apps look and
 behave like the Apple TV app and other premium streaming apps, with no
 flickers or jumps. Each item below has a UI test that fails without it.
 
+**Status (2026-10-14, late):** the user called the audit "done for now".
+Still open: the user's own check on Apple TV of build `202610142332`
+(a click on a chosen point plays, no stray Info panel, Skip Intro,
+Episodes), Apple's review of the public TestFlight link, and the logo.
+
 ## Goal checklist (2026-10-13)
 
 Each item of the goal, where it was done, and the test that checks it. All
@@ -268,13 +273,11 @@ Report: `/tmp/openiptv/astra-ui2/REPORT.md`. Status in today's code:
 
 ## Still open
 
-- Continue Watching's "›" (Apple's opens the whole list): no picture of
-  that page anywhere reachable (Mobbin iPhone screens and flows, Mobbin
-  web, Appllama; the simulator has no TV app; REA reads the Mac TV app's
-  accessibility tree (14 October), but its sidebar ignores AXPress, and
-  that account has no subscription or watch history). Not invented
-  (the user: no design liberties); needs the user's go for a design of
-  ours, or a screenshot from their iPhone.
+- Continue Watching's "›": closed on 14 October. The user chose "however
+  Netflix works": Netflix's "Continue watching for …" heading has no "›"
+  and opens nothing ([Home](https://mobbin.com/screens/3ffab88b-c374-498e-bb71-82af9b4bbd1d),
+  [My Netflix](https://mobbin.com/screens/599382a7-1baa-4c8c-aaf6-88a02601cb8e)),
+  which is how ours already is. No change.
 - The PiP hand-over's last seek (the video output switch): gone only if
   the picture is always drawn into the window's kind of layer (waits for
   the user's "try it" or "keep it as is").
