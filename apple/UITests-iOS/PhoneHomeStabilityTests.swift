@@ -5,8 +5,8 @@ import XCTest
 /// cards in another order and its number after each row's name, so a build
 /// put on the page under your eyes would move things. The test server then
 /// says the library changed and something was watched: the rows must stay
-/// exactly as they were until Home is chosen again in the tab bar, or
-/// pulled down to refresh. Run with `xcodebuild test -scheme OpenIPTV` on
+/// exactly as they were until Home is chosen again in the tab bar (there
+/// is no pull to refresh, as in the Apple TV app and Netflix). Run with `xcodebuild test -scheme OpenIPTV` on
 /// an iPhone simulator signed in to the test server (scripts/mock_server.py)
 /// through TEST_RUNNER_DEBUG_EMBY; screenshots go to /tmp/openiptv/uitest-agent.
 final class PhoneHomeStabilityTests: XCTestCase {
@@ -24,7 +24,7 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    func testHomeStaysPutUntilChosenAgainOrPulled() throws {
+    func testHomeStaysPutUntilChosenAgain() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         app.launch()
         // Past the first seconds after a launch, when a build may still go
@@ -86,14 +86,20 @@ final class PhoneHomeStabilityTests: XCTestCase {
         let nextEpisode = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Case 4'")).firstMatch
         XCTAssertTrue(nextEpisode.exists, "the show's next episode didn't go on when Home was chosen again: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { $0.contains("Case") })")
 
-        // Back to the top, then pulled down: built afresh and shown.
+        // Back to the top, then pulled down: nothing changes (no pull to
+        // refresh, as in the Apple TV app and Netflix). Regression: a pull,
+        // by mistake too, put a new Home with other rows on the page.
+        drag(from: 0.75, to: 0.35)
+        sleep(2)
+        let shown = rowNumbers(rows())
+        XCTAssertFalse(shown.isEmpty, "no numbered rows after Home was chosen again")
         for _ in 0..<4 { drag(from: 0.3, to: 0.8) }
         drag(from: 0.3, to: 0.9, hold: 1)
         sleep(8)
         drag(from: 0.75, to: 0.35)
         sleep(2)
         shot("home after pull")
-        XCTAssertNotEqual(rowNumbers(rows()), again, "pulling down didn't refresh Home")
+        XCTAssertEqual(rowNumbers(rows()), shown, "pulling down changed Home")
     }
 
     /// A launch is a moment Home may change: the first Home built goes on
@@ -294,40 +300,10 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertTrue(app.buttons["row-My List"].firstMatch.waitForExistence(timeout: 8), "what was put on My List elsewhere isn't there")
     }
 
-    /// Pulled down, Home shows a spinner under the status bar, over the
-    /// hero, until the new Home is in. Regression: nothing showed that a
-    /// pull did anything (the hero covered the system's spinner).
-    func testPullShowsItsSpinner() throws {
-        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
-        configure(server, ["reset": "1"])
-        defer { configure(server, ["reset": "1"]) }
-        app.launch()
-        sleep(8)
-        // A refresh that takes a while (My List answers after 3 s).
-        configure(server, ["favorites_delay": "3"])
-        drag(from: 0.3, to: 0.9, hold: 1)
-        // UI tests look only once the screen is still, so the spinner's
-        // place while it spun comes from the app's DEBUG readout.
-        let readout = app.staticTexts["debug-pulled"].firstMatch
-        XCTAssertTrue(readout.waitForExistence(timeout: 5), "no pull readout")
-        let deadline = Date().addingTimeInterval(20)
-        while readout.label.contains("refreshing true") || readout.label.contains("refreshes 0"), Date() < deadline { usleep(250_000) }
-        let state = readout.label
-        shot("after pull")
-        let words = state.split(separator: " ")
-        guard let at = words.firstIndex(of: "spinner"), words[at + 1] == "y",
-              let top = Double(words[at + 2]), let bottom = Double(words[at + 3]) else {
-            return XCTFail("no spinner while it refreshed (\(state))")
-        }
-        let screen = app.windows.firstMatch.frame
-        XCTAssertGreaterThan(top, 54, "the spinner sat under the status bar (\(state))")
-        XCTAssertLessThan(bottom, screen.height / 3, "the spinner wasn't at the top (\(state))")
-        XCTAssertFalse(app.activityIndicators["home.pullSpinner"].exists, "the spinner stayed after the refresh (\(state))")
-    }
-
-    /// Put on My List on another device while Home was open: a pull
-    /// brings it. Regression: pulling rebuilt the rows but not My List.
-    func testMyListFromElsewhereShowsOnPull() throws {
+    /// Put on My List on another device while Home was open: there when
+    /// Home is chosen again in the tab bar (the moment that replaced pull to
+    /// refresh).
+    func testMyListFromElsewhereShowsWhenHomeIsChosenAgain() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
@@ -335,10 +311,10 @@ final class PhoneHomeStabilityTests: XCTestCase {
         sleep(8)
         XCTAssertFalse(app.buttons["row-My List"].exists, "My List wasn't empty at the start")
         favorite(server, "a4")
-        drag(from: 0.3, to: 0.9, hold: 1)
-        let pulled = app.staticTexts["debug-pulled"].firstMatch
-        XCTAssertTrue(app.buttons["row-My List"].firstMatch.waitForExistence(timeout: 10),
-                      "a pull didn't bring what was put on My List elsewhere (\(pulled.exists ? pulled.label : "no pull readout"))")
+        app.tabBars.buttons["Live TV"].firstMatch.tap()
+        sleep(2)
+        app.tabBars.buttons["Home"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["row-My List"].firstMatch.waitForExistence(timeout: 10), "what was put on My List elsewhere isn't there")
     }
 
     /// Put on My List on another device: first on the row here, as on

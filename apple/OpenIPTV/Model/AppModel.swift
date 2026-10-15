@@ -221,7 +221,7 @@ final class AppModel {
         showStagedHome()
     }
 
-    /// Pull to refresh: every row built afresh, and shown.
+    /// Try Again after Home failed: every row built afresh, and shown.
     func refreshHome(cardWidth: Int) async {
         await loadHome(cardWidth: cardWidth, full: true, show: true)
     }

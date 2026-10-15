@@ -24,7 +24,7 @@ multi-track film, 1 with SDH subtitles, 1 with a Mexican film).
 | Buttons too big | `6c6245a` (Apple's 44, 63, 92 points; the system style's padding removed), `db81d01` | `testPlayerButtonSizes` (all 7 player buttons, the Info pill, centres 117 apart), `testHomeCardSizes`, `testMyList` |
 | Change the audio and subtitles; English unless Spanish-made | `79fe646`, `d1a424b`, `02dd23e`, `5a508f4` | `testPickedSubtitlesStay`, `testPickedSDHSubtitlesStay`, `testSubtitleSwitchKeepsPlaying` (US film), `testSpanishFilmStartsInSpanish` (Mexico) |
 | No flickers or jumps (search, Continue Watching, pages) | `22016f2`, `b758bea`, `c896690` | `SearchStabilityTests` (4), `testPageReadyWhenPlayerCloses`, `testEpisodeRowsSameHeight`, `testMainButtonKeepsWidthWhileStarting` |
-| Recommendations change only at moments (launch, pull, tab change, long away) | `22016f2` | `testHomeStaysPutUntilChosenAgainOrPulled`, `testHomeChangesOnlyAfterLongAway` |
+| Recommendations change only at moments (launch, tab change, long away); no pull to refresh, as in the Apple TV app and Netflix (removed 2026-10-15) | `22016f2` | `testHomeStaysPutUntilChosenAgain`, `testHomeChangesOnlyAfterLongAway` |
 | Audit against the Apple TV app (REA, Mobbin) | this file, rounds 1 to 8 | see the tables below |
 | Search, Continue Watching and the other pages filmed, every frame checked for flashes and jumps | rounds 9 to 12 (iPhone, Apple TV, iPad) | `scripts/frame-audit` (43 films: 0 flashes; one jump found and fixed, the Info opening: `testInfoTextWaitsForThePills`) |
 

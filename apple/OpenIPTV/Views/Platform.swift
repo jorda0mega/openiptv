@@ -28,15 +28,6 @@ enum Layout {
 }
 
 extension View {
-    /// Pull to refresh where the platform has it.
-    @ViewBuilder func refreshableOnPhone(_ action: @escaping @MainActor () async -> Void) -> some View {
-        #if os(iOS)
-        refreshable { await action() }
-        #else
-        self
-        #endif
-    }
-
     @ViewBuilder func inlineTitle() -> some View {
         #if os(iOS)
         navigationBarTitleDisplayMode(.inline)
