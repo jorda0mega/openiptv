@@ -899,6 +899,33 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(readout.label, "0.00 1.0000", "the film's own track was shifted")
     }
 
+    /// The same late file, when the server takes 30 s to give the film's
+    /// own track (a real one reads the whole film to take it out; Asterix
+    /// the Gaul took over a minute): still put in time once it comes.
+    /// Regression: the app gave up on the track after 20 s, and the file
+    /// stayed 32 s late. Same needs as testServerSubtitleFileInTime.
+    func testServerSubtitleFileInTimeWhenTheTrackIsSlow() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_SYNC"] != nil, "needs the sync test film")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reference_delay": "30"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm(["-forgetTrackChoices", "YES"])
+        sleep(4)
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let sdh = app.buttons["English SDH"].firstMatch
+        XCTAssertTrue(sdh.waitForExistence(timeout: 5), "the server's file isn't in the menu")
+        sdh.tap()
+        let readout = app.staticTexts["debug-subshift"].firstMatch
+        var parts: [Double] = []
+        for _ in 0..<60 where parts.first.map({ abs($0) < 0.01 }) ?? true {
+            sleep(1)
+            parts = readout.label.split(separator: " ").compactMap { Double($0) }
+        }
+        shot("late file in time after a slow track")
+        XCTAssertEqual(parts.first ?? 0, -2.5, accuracy: 0.1, "the late file wasn't shifted into time: \(readout.label)")
+    }
+
     /// A film heard in neither English nor Spanish, with no subtitles in
     /// either, gets English ones by itself: the server's subtitle providers
     /// are asked, the file downloaded is added and shown. Regression: such

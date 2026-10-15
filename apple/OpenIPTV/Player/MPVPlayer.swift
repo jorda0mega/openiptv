@@ -92,6 +92,9 @@ final class MPVPlayer: @unchecked Sendable {
     private var fileTracks: [URL: Int] = [:]
     private var fits: [Int: SubtitleSync.Fit] = [:]
     private var pendingFits: [URL: SubtitleSync.Fit] = [:]
+    /// The film's own track the files are put in time with: asked for once
+    /// a film (the server reads the whole film for it), dropped on close.
+    private var reference: (url: URL, task: Task<URL?, Never>)?
     /// The subtitle track showing (nil: none).
     private var shownSubtitle: Int?
     #if DEBUG
@@ -614,6 +617,16 @@ final class MPVPlayer: @unchecked Sendable {
     /// track is applied whenever it shows.
     func addSubtitles(_ files: [EmbyPlayback.SubtitleFile], reference: URL? = nil) {
         guard !files.isEmpty else { return }
+        // Asked for at once, beside the files: the server may take
+        // minutes to give it.
+        let inTime = reference.map { url in
+            stateLock.withLock { () -> Task<URL?, Never> in
+                if let asked = self.reference, asked.url == url { return asked.task }
+                let task = Task.detached(priority: .utility) { await Self.fetchReference(url) }
+                self.reference = (url, task)
+                return task
+            }
+        }
         Task.detached(priority: .utility) { [weak self] in
             var fetched: [(EmbyPlayback.SubtitleFile, URL)] = []
             for file in files {
@@ -621,8 +634,7 @@ final class MPVPlayer: @unchecked Sendable {
                 fetched.append((file, local))
                 self?.queue.async { [weak self] in self?.add(file, at: local) }
             }
-            guard let reference, !fetched.isEmpty,
-                  let inTime = await Self.fetch(.init(url: reference, language: nil, title: "")),
+            guard !fetched.isEmpty, let inTime = await inTime?.value,
                   let referenceText = try? String(contentsOf: inTime, encoding: .utf8) else { return }
             let referenceCues = SubtitleSync.cues(referenceText)
             for (file, local) in fetched {
@@ -686,11 +698,17 @@ final class MPVPlayer: @unchecked Sendable {
     /// A subtitle file from the server, on the device for this playback
     /// (fetched each time: a server replaces its files, and the same
     /// address then holds another).
-    private static func fetch(_ file: EmbyPlayback.SubtitleFile) async -> URL? {
+    /// The film's own track the files are put in time with, however long
+    /// the server takes to start answering.
+    private static func fetchReference(_ url: URL) async -> URL? {
+        await fetch(.init(url: url, language: nil, title: ""), patient: true)
+    }
+
+    private static func fetch(_ file: EmbyPlayback.SubtitleFile, patient: Bool = false) async -> URL? {
         let folder = FileManager.default.temporaryDirectory.appending(path: "subtitles")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let local = folder.appending(path: "\(UUID().uuidString).\(file.url.pathExtension.isEmpty ? "srt" : file.url.pathExtension)")
-        guard let (data, response) = try? await HTTP.session.data(from: file.url),
+        guard let (data, response) = try? await (patient ? HTTP.patient : HTTP.session).data(from: file.url),
               (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty,
               (try? data.write(to: local)) != nil else { return nil }
         return local
@@ -836,6 +854,7 @@ final class MPVPlayer: @unchecked Sendable {
         appObservers = []
         let live = stateLock.withLock { () -> Bool in
             closed = true
+            reference?.task.cancel()
             return playedLive
         }
         if live { Self.closing.enter() }

@@ -101,10 +101,14 @@ enum SourceError: LocalizedError {
 enum HTTP {
     static let session = make(connections: 8)
     static let ahead = make(connections: 4)
+    /// For answers a server takes minutes to start: a film's own subtitle
+    /// track, which Emby reads the whole film to take out (over a minute
+    /// for Asterix the Gaul).
+    static let patient = make(connections: 2, wait: 300)
 
-    private static func make(connections: Int) -> URLSession {
+    private static func make(connections: Int, wait: TimeInterval = 20) -> URLSession {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForRequest = wait
         config.httpShouldSetCookies = false
         config.httpCookieAcceptPolicy = .never
         config.urlCache = nil

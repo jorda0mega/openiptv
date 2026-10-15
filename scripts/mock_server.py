@@ -40,7 +40,9 @@ SOCKETS = set()
 # "intro" ("5,45": an episode's intro marks, in seconds), "copy_audio"
 # ("a8:fre": one copy of a film with only that language's sound),
 # "watched_elsewhere" ("m7": a film just played on another device),
-# "favorites_delay" (seconds before My List answers: a slow refresh).
+# "favorites_delay" (seconds before My List answers: a slow refresh),
+# "reference_delay" (seconds before one of the film's own subtitle tracks
+# answers: a real server reads the whole film to take it out).
 CONTROL = {}
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -712,6 +714,7 @@ class Handler(BaseHTTPRequestHandler):
             # One of the film's own tracks, extracted as SRT (as Emby does).
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")
             if index < 100 and video and shutil.which("ffmpeg"):
+                time.sleep(float(CONTROL.get("reference_delay", 0)))
                 out = subprocess.run(["ffmpeg", "-v", "error", "-i", video, "-map", f"0:{index}", "-f", "srt", "-"],
                                      capture_output=True).stdout
                 if out:
