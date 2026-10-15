@@ -21,7 +21,7 @@ multi-track film, 1 with SDH subtitles, 1 with a Mexican film).
 | No flickers or jumps (search, Continue Watching, pages) | `22016f2`, `b758bea`, `c896690` | `SearchStabilityTests` (4), `testPageReadyWhenPlayerCloses`, `testEpisodeRowsSameHeight`, `testMainButtonKeepsWidthWhileStarting` |
 | Recommendations change only at moments (launch, pull, tab change, long away) | `22016f2` | `testHomeStaysPutUntilChosenAgainOrPulled`, `testHomeChangesOnlyAfterLongAway` |
 | Audit against the Apple TV app (REA, Mobbin) | this file, rounds 1 to 8 | see the tables below |
-| Search, Continue Watching and the other pages filmed, every frame checked for flashes and jumps | rounds 9 and 10 | `scripts/frame-audit` (22 tests filmed: 0 flashes; one jump found and fixed, the Info opening: `testInfoTextWaitsForThePills`) |
+| Search, Continue Watching and the other pages filmed, every frame checked for flashes and jumps | rounds 9 to 11 (iPhone and Apple TV) | `scripts/frame-audit` (32 tests filmed: 0 flashes; one jump found and fixed, the Info opening: `testInfoTextWaitsForThePills`) |
 
 ## Method
 
@@ -180,6 +180,27 @@ title opened again (`63e35f6`).
   after the first frame). The choice is saved, so this happens at most once
   per install.
 
+## Round 11 (2026-10-14): Apple TV, frame by frame
+
+The same method on 10 Apple TV tests (`record.sh` with `SCHEME="OpenIPTV TV"`):
+Home cold and after changes on the server, a row walked to the right, every
+row reached, a show page, Search, Continue Watching after a film closes, a
+page opening, the hero turning, and the Live TV list (`1713c39`).
+
+| Recorded | Length | Screen changes | Moves | Flashes | Blanks |
+|---|---|---|---|---|---|
+| 10 tests | 5 min 37 s (10,110 frames) | 161 | 32 | 0 | 0 |
+
+- **Moves:** each comes with a press of the remote (the page scrolls to the
+  focused row), or is the test film's own picture while it plays. The
+  simulator draws Apple TV animations in few frames, so "in 2 frames or
+  fewer" means nothing here.
+- **Rows on a sideways move:** during the four presses to the right in
+  `testMovingAlongARowKeepsThePageStill`, nothing on the page moves up or
+  down. The open item from the first delegated audit is closed.
+- **Home while the server changes** (`testHomeStaysPutUntilChosenAgain`):
+  9 screen changes in 56 s, no moves.
+
 ## Earlier rounds (2026-10-12 and 13)
 
 See the commits from `d1a424b` to `0bbcce9`: tracks chosen by language before
@@ -202,7 +223,7 @@ in today's code:
 | Cold Home: Continue Watching landed, then moved below the hero | Fixed (`22016f2`: a hero-sized placeholder) |
 | Search results moved about 104 points as suggestions changed | Fixed (`02a3dc3`, `testResultsStayPutWhenServerAnswers`) |
 | Search went blank while pending | Fixed ("Searching…") |
-| Apple TV rows moved vertically on a sideways focus move | Not checked again yet |
+| Apple TV rows moved vertically on a sideways focus move | Fixed (`22016f2`, `testMovingAlongARowKeepsThePageStill`); filmed in round 11: no move up or down during four presses to the right |
 | Glass buttons larger than asked; the player unlike the reference | Fixed (`6c6245a`, `testPlayerButtonSizes`) |
 | Apple TV hero hid the next row; dead cast buttons | Fixed |
 | Settings grouped Infuse-style; poster-column search; Live copy | Not done: not the Apple TV app's design (the user: 1:1) |
