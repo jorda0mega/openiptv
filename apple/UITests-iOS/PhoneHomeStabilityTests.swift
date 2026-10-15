@@ -367,6 +367,19 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertEqual(cards.first?.label.hasPrefix("Weapons"), true, "not first: \(cards.map(\.label))")
     }
 
+    /// Settings shows the build beside the version, as TestFlight lists
+    /// it ("0.2.0 (202610151425)"). Regression: every upload read "0.2.0",
+    /// and the user couldn't tell which was the latest.
+    func testSettingsShowsTheBuild() {
+        app.launch()
+        sleep(3)
+        app.buttons["Settings"].firstMatch.tap()
+        let about = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'About'")).firstMatch
+        XCTAssertTrue(about.waitForExistence(timeout: 3), "no About in Settings")
+        shot("settings about")
+        XCTAssertNotNil(about.label.range(of: #"\d+\.\d+\.\d+ \(\d+\)"#, options: .regularExpression), "no build beside the version: \(about.label)")
+    }
+
     /// Puts a title on the test user's My List on the server (as another
     /// device would).
     private func favorite(_ server: URL, _ id: String) {

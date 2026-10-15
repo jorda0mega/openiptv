@@ -122,6 +122,25 @@ enum HTTP {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
+    /// The build: when it was made, to the minute ("202610151425"), set by
+    /// the TestFlight upload. One version has many builds.
+    static var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+    }
+
+    /// "0.2.0 (202610151425)", as TestFlight lists a build.
+    static var appVersionAndBuild: String { "\(appVersion) (\(appBuild))" }
+
+    /// When the build was made, in words ("Oct 15, 2026 at 2:25 PM");
+    /// nil for a build number that isn't a time (a local build's "1").
+    static var appBuildDate: String? {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyyMMddHHmm"
+        guard appBuild.count == 12, let date = parser.date(from: appBuild) else { return nil }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
     static func data(_ request: URLRequest) async throws -> Data {
         do {
             // Only reads go ahead (and may be asked twice): a POST (playback

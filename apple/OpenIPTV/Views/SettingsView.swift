@@ -40,7 +40,7 @@ struct SettingsView: View {
                         SettingsRow(title: "Advanced", symbol: "gearshape.2.fill", tint: .gray)
                     }
                     NavigationLink { page("About") { aboutSection } } label: {
-                        SettingsRow(title: "About", symbol: "info.circle.fill", tint: .gray, value: HTTP.appVersion)
+                        SettingsRow(title: "About", symbol: "info.circle.fill", tint: .gray, value: HTTP.appVersionAndBuild)
                     }
                 }
             }
@@ -224,7 +224,10 @@ struct SettingsView: View {
 
     @ViewBuilder private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: HTTP.appVersion)
+            // The build beside the version, as in TestFlight: every upload
+            // is 0.2.0, the build tells them apart (the user's request).
+            LabeledContent("Version", value: HTTP.appVersionAndBuild)
+            if let built = HTTP.appBuildDate { LabeledContent("Built", value: built) }
             #if os(iOS)
             Link("Source code on GitHub", destination: URL(string: "https://github.com/jorda0mega/openiptv")!)
             #else
