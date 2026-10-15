@@ -37,3 +37,14 @@ enum RemoteSwipe {
         }
     }
 }
+
+extension RemoteSwipe {
+    /// A point chosen on the bar is kept: does the film play from it?
+    /// `byClick`: kept with a click (the centre, or Play/Pause), not by
+    /// letting go of a held button or the finger.
+    /// As in Apple's player: a click plays from there, paused before or
+    /// not; letting go carries on as it was.
+    static func playsAfterChoosing(byClick: Bool, wasPlaying: Bool) -> Bool {
+        byClick || wasPlaying
+    }
+}

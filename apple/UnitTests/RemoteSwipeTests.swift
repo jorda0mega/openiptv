@@ -24,4 +24,19 @@ final class RemoteSwipeTests: XCTestCase {
         // Never through the film from the buttons, paused or not.
         XCTAssertNotEqual(RemoteSwipe.action(at: .buttons, paused: true, scrubbing: false, distance: 900), .scrub)
     }
+
+    /// Apple TV: paused, a swipe chooses a point; a click plays from it, as
+    /// in Apple's player. Regression: the click kept the point but left the
+    /// film paused there, and it took a second click to play.
+    func testClickOnAChosenPointPlaysFromIt() {
+        XCTAssertTrue(RemoteSwipe.playsAfterChoosing(byClick: true, wasPlaying: false))
+        XCTAssertTrue(RemoteSwipe.playsAfterChoosing(byClick: true, wasPlaying: true))
+    }
+
+    /// Letting go (of a held button, or the finger on iPhone) carries on as
+    /// it was: playing if it played, paused if it was paused.
+    func testLettingGoKeepsHowItWas() {
+        XCTAssertTrue(RemoteSwipe.playsAfterChoosing(byClick: false, wasPlaying: true))
+        XCTAssertFalse(RemoteSwipe.playsAfterChoosing(byClick: false, wasPlaying: false))
+    }
 }

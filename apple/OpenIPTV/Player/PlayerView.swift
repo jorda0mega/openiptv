@@ -759,7 +759,7 @@ struct MoviePlayerView: View {
         TimeBar(leading: phoneClock(scrubbing ?? position),
                 trailing: scrubSpeed ?? "−" + phoneClock(max(0, total - (scrubbing ?? position)))) {
             Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
-                     onChanged: { liveScrub($0) }, onCommit: commitScrub)
+                     onChanged: { liveScrub($0) }, onCommit: { commitScrub($0) })
         }
         #else
         transportBar
@@ -1371,7 +1371,7 @@ struct MoviePlayerView: View {
     /// the picture is a moment behind, jump: to the keyframe before the
     /// target, which plays without decoding up to the second (exact when
     /// scrubbing slowly on iPhone).
-    private func commitScrub(_ target: Double) {
+    private func commitScrub(_ target: Double, byClick: Bool = false) {
         settleSeek?.cancel()
         // Carries on from the picture on screen when it's already there (no
         // second jump); otherwise one jump, replacing any preview still on
@@ -1382,10 +1382,9 @@ struct MoviePlayerView: View {
         jumpUntil = Date().addingTimeInterval(0.5)
         scrubbing = nil
         scrubOrigin = nil
-        if resumeAfterScrub {
-            resumeAfterScrub = false
-            player?.setPaused(false)
-        }
+        let play = RemoteSwipe.playsAfterChoosing(byClick: byClick, wasPlaying: resumeAfterScrub)
+        resumeAfterScrub = false
+        if play { player?.setPaused(false) }
         showControls()
     }
 
@@ -1457,7 +1456,7 @@ struct MoviePlayerView: View {
             showControls(autoHide: false)
         case .select, .playPause:
             if let target = scrubbing {
-                commitScrub(target)
+                commitScrub(target, byClick: true)
             } else {
                 togglePlay()
             }
