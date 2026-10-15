@@ -1151,6 +1151,7 @@ final class AppModel {
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
                         tracks: playback.tracks)
             player.addSubtitles(playback.subtitleFiles, reference: playback.subtitleReference)
+            player.addCopies(playback.subtitleCopies)
             warm = (itemId, player, playback, false)
             // Its preview stills too, so scrubbing has its pictures from
             // the first second of playing.

@@ -701,6 +701,7 @@ struct EmbyClient {
             playback.subtitleLanguages = Set((source.MediaStreams ?? []).filter { $0.Type == "Subtitle" }
                 .compactMap { $0.Language.flatMap(TrackChoice.normalized) })
             playback.subtitleFiles = subtitleFiles(item.id, source)
+            playback.subtitleCopies = subtitleCopies(item.id, source)
             if !playback.subtitleFiles.isEmpty { playback.subtitleReference = subtitleReference(item.id, source) }
         }
         #if DEBUG
@@ -727,6 +728,22 @@ struct EmbyClient {
             guard let url = parts.url else { return nil }
             let kind = [stream.IsForced == true ? "Forced" : nil, stream.IsHearingImpaired == true ? "SDH" : nil, stream.Title]
             return EmbyPlayback.SubtitleFile(url: url, language: language, title: kind.compactMap(\.self).joined(separator: " "))
+        }
+    }
+
+    /// The film's own text subtitles in English or Spanish (not forced
+    /// ones, which show by themselves), as files from the server.
+    private func subtitleCopies(_ itemId: String, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SubtitleCopy] {
+        let text: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
+        return (source.MediaStreams ?? []).compactMap { stream in
+            guard stream.Type == "Subtitle", stream.IsExternal != true, stream.IsForced != true, let index = stream.Index,
+                  let codec = stream.Codec?.lowercased(), text.contains(codec),
+                  ["en", "es"].contains(stream.Language.flatMap(TrackChoice.normalized) ?? "") else { return nil }
+            let format = ["ass", "ssa"].contains(codec) ? "ass" : "srt"
+            var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)"),
+                                      resolvingAgainstBaseURL: false)!
+            parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
+            return parts.url.map { EmbyPlayback.SubtitleCopy(streamIndex: index, url: $0) }
         }
     }
 

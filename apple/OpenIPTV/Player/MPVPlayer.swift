@@ -84,6 +84,11 @@ final class MPVPlayer: @unchecked Sendable {
     /// The server's subtitle files added to this film, their tracks, and
     /// the shift and stretch that put each in time (the player's queue).
     private var addedFiles: Set<URL> = []
+    /// The film's own subtitle tracks and their copies from the server (by
+    /// track id, both ways): a pick of the track shows the copy, which the
+    /// menu never lists.
+    private var copies: [Int: Int] = [:]
+    private var copied: [Int: Int] = [:]
     private var fileTracks: [URL: Int] = [:]
     private var fits: [Int: SubtitleSync.Fit] = [:]
     private var pendingFits: [URL: SubtitleSync.Fit] = [:]
@@ -529,6 +534,9 @@ final class MPVPlayer: @unchecked Sendable {
         var external = false
         /// The file marks it as its default.
         var isDefault = false
+        /// Its place in the file (FFmpeg's stream index; the server's
+        /// "Index" for the same track).
+        var ffIndex: Int? = nil
 
         /// Spain's or Latin American Spanish, from the track's language tag
         /// or name ("es-ES", "Castellano"; "es-419", "Latino"); nil: not said.
@@ -562,7 +570,7 @@ final class MPVPlayer: @unchecked Sendable {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 guard let mpv else { return continuation.resume(returning: []) }
-                continuation.resume(returning: Self.trackList(mpv))
+                continuation.resume(returning: shown(Self.trackList(mpv)))
             }
         }
     }
@@ -643,8 +651,8 @@ final class MPVPlayer: @unchecked Sendable {
               let now = mpv_get_property_string(mpv, "sid") else { return }
         let off = String(cString: now) == "no"
         mpv_free(now)
-        if off, let id = TrackChoice.choose(Self.trackList(mpv), plan: plan).subtitle {
-            mpv_set_property_string(mpv, "sid", String(id))
+        if off, let id = TrackChoice.choose(shown(Self.trackList(mpv)), plan: plan).subtitle {
+            mpv_set_property_string(mpv, "sid", String(copies[id] ?? id))
         }
     }
 
@@ -704,12 +712,61 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    /// Shows this subtitle track (nil: none).
+    /// Shows this subtitle track (nil: none): from its copy when the
+    /// server's is here.
     func selectSubtitle(_ id: Int?) {
         queue.async { [self] in
             guard let mpv else { return }
-            mpv_set_property_string(mpv, "sid", id.map(String.init) ?? "no")
+            let shown = id.map { copies[$0] ?? $0 }
+            mpv_set_property_string(mpv, "sid", shown.map(String.init) ?? "no")
         }
+    }
+
+    /// The tracks as the menu lists them: the copies left out, a track
+    /// marked chosen while its copy shows.
+    private func shown(_ list: [Track]) -> [Track] {
+        // Subtitles only: audio tracks are numbered apart (audio 2 and
+        // subtitles 2 are different tracks).
+        let subtitles = list.filter { $0.kind == .subtitle }
+        let showingCopy = Set(subtitles.filter { $0.selected }.compactMap { copied[$0.id] })
+        return list.compactMap { track in
+            guard track.kind == .subtitle else { return track }
+            if copied[track.id] != nil { return nil }
+            var track = track
+            if showingCopy.contains(track.id) { track.selected = true }
+            return track
+        }
+    }
+
+    /// Fetches the server's copies of the film's own subtitle tracks and
+    /// adds them, unshown (see `subtitleCopies`). Each once.
+    func addCopies(_ wanted: [EmbyPlayback.SubtitleCopy]) {
+        guard !wanted.isEmpty else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            for copy in wanted {
+                guard let local = await Self.fetch(.init(url: copy.url, language: nil, title: "")) else { continue }
+                self?.queue.async { [weak self] in self?.addCopy(copy, at: local, tries: 10) }
+            }
+        }
+    }
+
+    private func addCopy(_ copy: EmbyPlayback.SubtitleCopy, at local: URL, tries: Int) {
+        guard let mpv, !addedFiles.contains(copy.url) else { return }
+        let list = Self.trackList(mpv)
+        guard let original = list.first(where: { $0.kind == .subtitle && !$0.external && $0.ffIndex == copy.streamIndex }) else {
+            // The file isn't open yet (a player opened ahead): again shortly.
+            if tries > 0 { queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.addCopy(copy, at: local, tries: tries - 1) } }
+            return
+        }
+        addedFiles.insert(copy.url)
+        command(["sub-add", local.path, "auto", original.title ?? "", original.language ?? ""])
+        let known = Set(list.map(\.id))
+        guard let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external && !known.contains($0.id) }).map(\.id).max() else { return }
+        copies[original.id] = id
+        copied[id] = original.id
+        #if DEBUG
+        NSLog("%@", "PERF subtitles copy of track \(original.id) (\(original.language ?? "?")) is track \(id)")
+        #endif
     }
 
     /// The picture's height and transfer ("pq", "hlg" for HDR), once it's
@@ -766,7 +823,7 @@ final class MPVPlayer: @unchecked Sendable {
             return Track(id: id, kind: kind, title: text("title"), language: text("lang"),
                          channels: number("demux-channel-count"), forced: flag("forced"), selected: flag("selected"),
                          hearingImpaired: flag("hearing-impaired"), codec: text("codec"), image: flag("image"),
-                         external: flag("external"), isDefault: flag("default"))
+                         external: flag("external"), isDefault: flag("default"), ffIndex: number("ff-index"))
         }
     }
 

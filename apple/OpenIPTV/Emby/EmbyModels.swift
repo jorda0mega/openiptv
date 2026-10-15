@@ -276,6 +276,17 @@ struct EmbyPlayback: Hashable, Identifiable {
         let title: String
     }
 
+    /// The film's own English and Spanish text subtitles, as files from the
+    /// server (`streamIndex`: the track's place in the file). Shown from the
+    /// file, a first pick doesn't make the player read back into the film
+    /// for the line already on screen (a pause of a second on a big film).
+    var subtitleCopies: [SubtitleCopy] = []
+
+    struct SubtitleCopy: Hashable, Sendable {
+        let streamIndex: Int
+        let url: URL
+    }
+
     /// The same, starting from this second (back from Picture in Picture).
     func resuming(at seconds: Double) -> EmbyPlayback {
         var copy = self

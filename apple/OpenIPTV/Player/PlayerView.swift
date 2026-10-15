@@ -339,6 +339,8 @@ struct MoviePlayerView: View {
     /// Debug builds: "72.4 playing" (the player's second, and whether it
     /// plays), for UI tests.
     @State private var positionReadout = ""
+    /// Reads back into the film so far (see StreamRelay.readsBack).
+    @State private var relayReadout = ""
     /// Debug builds: how it started ("warm 0.3": a player kept or opened
     /// ahead; "cold 2.1": opened on the tap), and where.
     @State private var startReadout = ""
@@ -434,6 +436,7 @@ struct MoviePlayerView: View {
                 debugReadout(qualityReadout, "debug-quality")
                 debugReadout(positionReadout, "debug-position")
                 debugReadout(startReadout, "debug-start")
+                debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
                 #if os(iOS)
                 debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
@@ -1043,6 +1046,7 @@ struct MoviePlayerView: View {
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
                         readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks)
             player.addSubtitles(playback.subtitleFiles, reference: playback.subtitleReference)
+            player.addCopies(playback.subtitleCopies)
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
@@ -1233,6 +1237,7 @@ struct MoviePlayerView: View {
             let quality = governor?.current.map { String(format: "converted %.1f Mbps", Double($0) / 1e6) } ?? "original"
             if quality != qualityReadout { qualityReadout = quality }
             positionReadout = String(format: "%.1f %@", position, paused ? "paused" : "playing")
+            relayReadout = String(StreamRelay.shared.readsBack)
             let file = playback.bitrate.map { String(format: "file %.1f Mbps", Double($0) / 1e6) } ?? "file bitrate ?"
             stats = String(format: "%@ · %@ · speed %.1f Mbps · %.0f s buffered", quality, file,
                            (governor?.speed ?? bytesPerSecond * 8) / 1e6, buffer)
@@ -1295,6 +1300,11 @@ struct MoviePlayerView: View {
             }
         case let .paused(isPaused):
             paused = isPaused
+            #if DEBUG
+            // At once: the network reports that also refresh it stop once
+            // the buffer is full, and it said "playing" after a pause.
+            positionReadout = String(format: "%.1f %@", position, isPaused ? "paused" : "playing")
+            #endif
             // Paused: choosing where to go is likely next.
             if isPaused { thumbnails?.warm(around: position) }
             #if os(tvOS)

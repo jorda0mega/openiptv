@@ -130,6 +130,9 @@ final class StreamRelay: @unchecked Sendable {
             if pair.count == 2, pair[0].caseInsensitiveCompare("Range") == .orderedSame { range = pair[1] }
         }
         let cache = method == "GET" ? cache(for: route.url) : nil
+        #if DEBUG
+        noteRead(token, range)
+        #endif
         if let cache, cache.claimIndex() {
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache) }
         }
@@ -156,6 +159,23 @@ final class StreamRelay: @unchecked Sendable {
         }
         fetch(route, method: method, range: range, connection: connection, cache: cache, head: true)
     }
+
+    #if DEBUG
+    /// UI tests: how many times the player went back in a file to read it
+    /// again (a jump back, or subtitles picked the first time).
+    private(set) var readsBack = 0
+    private var lastRead: [String: Int64] = [:]
+
+    private func noteRead(_ token: String, _ range: String?) {
+        guard let range, range.hasPrefix("bytes="),
+              let from = Int64(range.dropFirst(6).split(separator: "-").first ?? "") else { return }
+        lock.lock()
+        // More than a megabyte back from where the last read began.
+        if let last = lastRead[token], from < last - (1 << 20) { readsBack += 1 }
+        lastRead[token] = from
+        lock.unlock()
+    }
+    #endif
 
     /// The bytes asked for, from where to where (both included), when it's
     /// one plain range and the file's size is known.

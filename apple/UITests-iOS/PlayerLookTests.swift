@@ -285,10 +285,21 @@ final class PlayerLookTests: XCTestCase {
     /// The player's controls on screen (a tap on the picture shows them,
     /// and hides them when they're up).
     private func controlsUp() {
-        if !app.buttons["Close player"].firstMatch.isHittable {
-            // Above the middle: the middle is the play/pause button.
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-            usleep(700_000)
+        let close = app.buttons["Close player"].firstMatch
+        // Above the middle: the middle is the play/pause button.
+        let picture = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        if close.isHittable {
+            // Up, but maybe about to hide (3 s after showing, while it
+            // plays): hidden first, so they come up afresh. Regression:
+            // they went as the test reached for a button on them. (If they
+            // hid by themselves just before, this tap brings them back,
+            // fresh: then that's that.)
+            picture.tap()
+            usleep(400_000)
+        }
+        if !close.isHittable {
+            picture.tap()
+            for _ in 0..<10 where !close.isHittable { usleep(200_000) }
         }
     }
 
@@ -525,6 +536,34 @@ final class PlayerLookTests: XCTestCase {
     /// from a slow server. Regression: the picture stopped for a moment the
     /// first time subtitles were picked (later switches were instant).
     /// Needs the multi-track test server as for testPickedSubtitlesStay.
+    /// The first subtitles picked show from the server's copy of the film's
+    /// own track, already on the device: the player doesn't go back into
+    /// the film to read the line on screen. Regression: it did (mpv's
+    /// "refresh seek", ten seconds back), and on a real film, tens of
+    /// megabytes in those ten seconds, the picture stopped on the first
+    /// pick. The test film is too small for the pause to show, so the
+    /// relay counts the reads back.
+    func testFirstSubtitlesReadNothingBack() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        openFilm(["-forgetTrackChoices", "YES"])
+        // The copies come meanwhile.
+        sleep(8)
+        let readout = app.staticTexts["debug-reads-back"].firstMatch
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "no reads-back readout")
+        let before = Int(readout.label) ?? -1
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let off = app.buttons["Off"].firstMatch
+        XCTAssertTrue(off.waitForExistence(timeout: 3), "no subtitles menu")
+        let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).allElementsBoundByIndex
+            .first { $0.frame.minY > off.frame.minY }
+        try XCTUnwrap(english, "no English subtitles").tap()
+        sleep(3)
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng")
+        let after = Int(readout.label) ?? -1
+        XCTAssertEqual(after, before, "picking subtitles went back into the film to read it again")
+    }
+
     func testFirstSubtitlesKeepPictureMoving() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
@@ -532,11 +571,14 @@ final class PlayerLookTests: XCTestCase {
         // the test film is small, so the read-ahead is kept short.
         app.launchEnvironment["OPENREEL_DEBUG_READAHEAD"] = "5"
         openFilm(["-forgetTrackChoices", "YES"])
-        sleep(5)
+        sleep(4)
+        // Up before the server slows down: with 5 s read ahead, every second
+        // under a 3 s server runs the buffer down (and the player turns to
+        // the server's converted stream).
+        controlsUp()
         // A server 3 s away from now on: the index must already be here.
         configure(server, ["video_delay": "3"])
         defer { configure(server, ["reset": "1"]) }
-        controlsUp()
         app.buttons["Audio and Subtitles"].firstMatch.tap()
         let off = app.buttons["Off"].firstMatch
         XCTAssertTrue(off.waitForExistence(timeout: 3), "no subtitles menu")
