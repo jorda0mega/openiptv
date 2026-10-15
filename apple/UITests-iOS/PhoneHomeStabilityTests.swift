@@ -341,6 +341,32 @@ final class PhoneHomeStabilityTests: XCTestCase {
                       "a pull didn't bring what was put on My List elsewhere (\(pulled.exists ? pulled.label : "no pull readout"))")
     }
 
+    /// Put on My List on another device: first on the row here, as on
+    /// Netflix, though the server lists My List by name. Regression: Dragon
+    /// Ball Z, put on it on the Apple TV, sat eleventh, out of sight.
+    func testMyListFromElsewhereComesFirst() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        favorite(server, "a2")
+        app.launchArguments += ["-forgetMyListOrder", "YES"]
+        app.launch()
+        sleep(8)
+        XCUIDevice.shared.press(.home)
+        favorite(server, "a11")
+        sleep(3)
+        app.activate()
+        let heading = app.buttons["row-My List"].firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 8), "no My List row")
+        sleep(3)
+        for _ in 0..<4 where !heading.isHittable { app.swipeUp(); sleep(1) }
+        let cards = app.buttons.allElementsBoundByIndex
+            .filter { $0.frame.minY > heading.frame.maxY && $0.frame.minY < heading.frame.maxY + 40 && !$0.identifier.hasPrefix("row-") }
+            .sorted { $0.frame.minX < $1.frame.minX }
+        shot("my list after another device")
+        XCTAssertEqual(cards.first?.label.hasPrefix("Weapons"), true, "not first: \(cards.map(\.label))")
+    }
+
     /// Puts a title on the test user's My List on the server (as another
     /// device would).
     private func favorite(_ server: URL, _ id: String) {

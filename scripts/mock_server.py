@@ -749,7 +749,8 @@ class Handler(BaseHTTPRequestHandler):
         # My List (before the library listing, which would answer it).
         if path == "/Users/U1/Items" and q.get("Filters") == "IsFavorite":
             time.sleep(float(CONTROL.get("favorites_delay", 0)))
-            return self.send({"Items": [known_item(KNOWN_BY_ID[i]) for i in reversed(FAVORITES) if i in KNOWN_BY_ID]})
+            # By name, as Emby lists them.
+            return self.send({"Items": sorted((known_item(KNOWN_BY_ID[i]) for i in FAVORITES if i in KNOWN_BY_ID), key=lambda x: x["Name"])})
         if path == "/Users/U1/Items" and q.get("IncludeItemTypes") == "Movie,Series" and "SearchTerm" not in q \
                 and "PersonIds" not in q:
             # The library index: movies plus a few real-looking show names.

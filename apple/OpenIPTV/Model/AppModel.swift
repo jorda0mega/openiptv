@@ -2261,7 +2261,7 @@ final class TitleState<Value> {
 // MARK: - My List
 
 extension AppModel {
-    private static let myListOrderKey = "myListAdded"
+    fileprivate static let myListOrderKey = "myListAdded"
 
     /// When each title was put on My List here (newest first on the row).
     private var myListAdded: [String: Double] {
@@ -2269,12 +2269,37 @@ extension AppModel {
         set { UserDefaults.standard.set(newValue, forKey: Self.myListOrderKey) }
     }
 
+    /// Every copy on My List the last time this device read it.
+    private static let myListSeenKey = "myListSeen"
+
+    #if DEBUG
+    /// UI tests: `-forgetMyListOrder YES` at launch starts with no order
+    /// kept (when each title was added, the titles seen).
+    static func forgetMyListOrderForTesting() {
+        guard UserDefaults.standard.bool(forKey: "forgetMyListOrder") else { return }
+        UserDefaults.standard.removeObject(forKey: myListOrderKey)
+        UserDefaults.standard.removeObject(forKey: myListSeenKey)
+    }
+    #endif
+
     /// My List from the server, newest additions first, one card per
-    /// title however many copies (HD, 4K) are on it.
+    /// title however many copies (HD, 4K) are on it. One this device
+    /// hasn't seen was put on it on another device meanwhile: added now,
+    /// so first, as on Netflix. Regression: the server lists My List by
+    /// name, and Dragon Ball Z, put on it on the Apple TV, sat eleventh on
+    /// the iPhone's row, out of sight. (The first read on a device stamps
+    /// nothing: the server's order.)
     func loadMyList(cardWidth: Int) async {
         myListWidth = cardWidth
         guard let emby, let found = try? await emby.favorites() else { return }
-        let added = myListAdded
+        var added = myListAdded
+        let defaults = UserDefaults.standard
+        if let seen = defaults.stringArray(forKey: Self.myListSeenKey).map(Set.init) {
+            let now = Date().timeIntervalSince1970
+            for item in found where !seen.contains(item.id) && added[item.id] == nil { added[item.id] = now }
+            if added != myListAdded { myListAdded = added }
+        }
+        defaults.set(found.map(\.id), forKey: Self.myListSeenKey)
         let order = Dictionary(found.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         let items = found.sorted { (added[$0.id] ?? 0, -(order[$0.id] ?? 0)) > (added[$1.id] ?? 0, -(order[$1.id] ?? 0)) }
         // One group per title: the first copy (its card) and every key and
