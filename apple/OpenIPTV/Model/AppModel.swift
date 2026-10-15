@@ -2282,24 +2282,37 @@ extension AppModel {
     }
     #endif
 
-    /// My List from the server, newest additions first, one card per
-    /// title however many copies (HD, 4K) are on it. One this device
-    /// hasn't seen was put on it on another device meanwhile: added now,
-    /// so first, as on Netflix. Regression: the server lists My List by
-    /// name, and Dragon Ball Z, put on it on the Apple TV, sat eleventh on
-    /// the iPhone's row, out of sight. (The first read on a device stamps
-    /// nothing: the server's order.)
+    /// My List from the server, newest additions first, as on Netflix, one
+    /// card per title however many copies (HD, 4K) are on it. When each was
+    /// added comes from the app's record on the server, which every device
+    /// writes to (Emby keeps no such date), else from this device; one
+    /// neither knows was put on the list elsewhere meanwhile (another app):
+    /// added now. Regression: the server lists My List by name, and Dragon
+    /// Ball Z, put on it on the Apple TV, sat eleventh on the iPhone's row,
+    /// out of sight. (The first read on a device stamps nothing: the
+    /// server's order for titles no device dated.)
     func loadMyList(cardWidth: Int) async {
         myListWidth = cardWidth
-        guard let emby, let found = try? await emby.favorites() else { return }
+        guard let emby else { return }
+        async let shared = emby.myListDates()
+        guard let found = try? await emby.favorites() else { return }
+        let record = await shared
         var added = myListAdded
+        for (id, date) in record ?? [:] where (added[id] ?? 0) < date { added[id] = date }
         let defaults = UserDefaults.standard
         if let seen = defaults.stringArray(forKey: Self.myListSeenKey).map(Set.init) {
             let now = Date().timeIntervalSince1970
             for item in found where !seen.contains(item.id) && added[item.id] == nil { added[item.id] = now }
-            if added != myListAdded { myListAdded = added }
         }
+        if added != myListAdded { myListAdded = added }
         defaults.set(found.map(\.id), forKey: Self.myListSeenKey)
+        // The record kept to what's on the list, with what this device knows.
+        if let record {
+            let onList = Set(found.map(\.id))
+            // Whole seconds, as the record keeps them.
+            let kept = added.filter { onList.contains($0.key) }.mapValues { $0.rounded(.down) }
+            if kept != record.mapValues({ $0.rounded(.down) }) { Task { await emby.saveMyListDates(kept) } }
+        }
         let order = Dictionary(found.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         let items = found.sorted { (added[$0.id] ?? 0, -(order[$0.id] ?? 0)) > (added[$1.id] ?? 0, -(order[$1.id] ?? 0)) }
         // One group per title: the first copy (its card) and every key and
@@ -2367,9 +2380,16 @@ extension AppModel {
             myListCopies = myListCopies.filter { $0.value.isDisjoint(with: copies) }
         }
         myListIDs = ids
+        let stamp = myListAdded[item.id]
         Task {
             do {
                 for id in copies { try await emby.setFavorite(id, on) }
+                // The app's record on the server: the other devices put it
+                // first too (or forget it).
+                if var record = await emby.myListDates() {
+                    if on, let stamp { record[item.id] = stamp } else { for id in copies { record[id] = nil } }
+                    await emby.saveMyListDates(record)
+                }
             } catch {
                 myList = before.0
                 myListIDs = before.1

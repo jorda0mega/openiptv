@@ -46,6 +46,9 @@ SOCKETS = set()
 CONTROL = {}
 # A film's length (seconds; OPENIPTV_MOCK_RUNTIME): two hours unless the
 # test film is shorter and its length matters (stretches of its sound).
+# Apps' own records in the user's display preferences, by (id, client):
+# the app keeps when each title was put on My List there.
+PREFERENCES = {}
 # Requests for a stretch of a film's sound (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0]
 MOVIE_TICKS = int(float(os.environ.get("OPENIPTV_MOCK_RUNTIME", "7200")) * 10_000_000)
@@ -315,6 +318,11 @@ class Handler(BaseHTTPRequestHandler):
             DOWNLOADED.append(subtitle.rsplit("-", 1)[1])
             print(f"{time.time():.2f} subtitle download {subtitle}", flush=True)
             return self.send({"NewIndex": 199 + len(DOWNLOADED)})
+        if "/DisplayPreferences/" in self.path and self.headers.get("X-Emby-Token") == "tok":
+            key = (urlparse(self.path).path.rsplit("/", 1)[1], (parse_qs(urlparse(self.path).query).get("client") or [""])[0])
+            PREFERENCES[key] = dict(body.get("CustomPrefs") or {})
+            print(f"{time.time():.2f} preferences {key[0]} saved: {len(PREFERENCES[key])} entries", flush=True)
+            return self.send(b"", status=204)
         if "/Users/U1/FavoriteItems/" in self.path and self.headers.get("X-Emby-Token") == "tok":
             item = urlparse(self.path).path.rsplit("/", 1)[1]
             if item not in FAVORITES:
@@ -352,6 +360,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/mock/set":
             if "reset" in q:
                 AUDIO_REQUESTS[0] = 0
+                PREFERENCES.clear()
                 DOWNLOADED.clear()
                 CONTROL.clear()
                 FAVORITES.clear()
@@ -712,6 +721,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send([{"Id": f"os-1-{language}", "Name": f"Release.{language}", "ProviderName": "Open Subtitles",
                                "Format": "srt", "Language": language, "IsHashMatch": True, "DownloadCount": 100}]
                              if remote else [])
+        if path.startswith("/DisplayPreferences/"):
+            key = (path.rsplit("/", 1)[1], q.get("client", ""))
+            return self.send({"Id": key[0], "Client": key[1], "SortBy": "SortName", "CustomPrefs": PREFERENCES.get(key, {})})
         if path.startswith("/Audio/") and "/stream" in path:
             # A stretch of the film's sound alone, from StartTimeTicks, as
             # MP3 (Emby converts it; read for as long as it's wanted).

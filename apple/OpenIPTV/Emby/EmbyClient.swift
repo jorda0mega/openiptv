@@ -122,6 +122,39 @@ struct EmbyClient {
         _ = try await HTTP.data(request)
     }
 
+    /// When each title was put on My List, by any of the viewer's devices:
+    /// the app's own record on the server (Emby keeps no such date), in the
+    /// viewer's display preferences under the app's own name. Nil when the
+    /// server didn't answer.
+    func myListDates() async -> [String: Double]? {
+        struct Preferences: Decodable { let CustomPrefs: [String: String]? }
+        guard let found: Preferences = try? await get("DisplayPreferences/\(Self.myListRecord)", [
+            .init(name: "userId", value: account.userId), .init(name: "client", value: Self.recordClient),
+        ]) else { return nil }
+        return (found.CustomPrefs ?? [:]).compactMapValues(Double.init)
+    }
+
+    /// Writes that record (item id → seconds since 1970), replacing it.
+    func saveMyListDates(_ dates: [String: Double]) async {
+        var parts = URLComponents(url: Self.api(account.serverURL, "DisplayPreferences/\(Self.myListRecord)"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "userId", value: account.userId), .init(name: "client", value: Self.recordClient)]
+        var request = URLRequest(url: parts.url!)
+        request.httpMethod = "POST"
+        authorize(&request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The fields Emby's display preferences always carry, then the dates.
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "Id": Self.myListRecord, "Client": Self.recordClient, "SortBy": "SortName", "SortOrder": "Ascending",
+            "RememberIndexing": false, "RememberSorting": false, "ShowBackdrop": false, "ShowSidebar": false,
+            "PrimaryImageHeight": 0, "PrimaryImageWidth": 0, "ScrollDirection": "Horizontal",
+            "CustomPrefs": dates.mapValues { String(Int($0)) },
+        ])
+        _ = try? await HTTP.data(request)
+    }
+
+    private static let myListRecord = "zapline-mylist"
+    private static let recordClient = "zapline"
+
     /// Subtitles the server's providers (OpenSubtitles, …) offer for an
     /// item in a language ("eng", "spa"), best first: made for this exact
     /// file, then the most downloaded; forced-only ones left out.

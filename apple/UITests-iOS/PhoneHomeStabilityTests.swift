@@ -332,15 +332,72 @@ final class PhoneHomeStabilityTests: XCTestCase {
         favorite(server, "a11")
         sleep(3)
         app.activate()
+        let cards = myListCards()
+        shot("my list after another device")
+        XCTAssertEqual(cards.first?.hasPrefix("Weapons"), true, "not first: \(cards)")
+        // Dated in the app's record on the server, for the other devices.
+        XCTAssertNotNil(myListRecord(server)["a11"], "not in the record on the server: \(myListRecord(server))")
+    }
+
+    /// When each title was put on My List travels with it: every device
+    /// keeps the dates in the app's own record on the server, so titles
+    /// added on the Apple TV come first on the iPhone, newest first, even on
+    /// an iPhone that never saw the list before. Regression: each device
+    /// knew only its own dates, and the server lists My List by name.
+    func testMyListOrderSharedAcrossDevices() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        for id in ["a2", "a5", "a11"] { favorite(server, id) }
+        // Another device's record: Weapons newest, then American Animals,
+        // Animal House first.
+        saveMyListRecord(server, ["a11": "1792090000", "a5": "1792080000", "a2": "1792070000"])
+        app.launchArguments += ["-forgetMyListOrder", "YES"]
+        app.launch()
+        sleep(8)
+        let cards = myListCards()
+        shot("my list in the other device's order")
+        XCTAssertEqual(cards.prefix(3).map { $0.components(separatedBy: ",")[0] }, ["Weapons", "American Animals", "Animal House"], "\(cards)")
+    }
+
+    /// My List's cards, left to right (labels).
+    private func myListCards() -> [String] {
         let heading = app.buttons["row-My List"].firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 8), "no My List row")
         sleep(3)
         for _ in 0..<4 where !heading.isHittable { app.swipeUp(); sleep(1) }
-        let cards = app.buttons.allElementsBoundByIndex
+        return app.buttons.allElementsBoundByIndex
             .filter { $0.frame.minY > heading.frame.maxY && $0.frame.minY < heading.frame.maxY + 40 && !$0.identifier.hasPrefix("row-") }
             .sorted { $0.frame.minX < $1.frame.minX }
-        shot("my list after another device")
-        XCTAssertEqual(cards.first?.label.hasPrefix("Weapons"), true, "not first: \(cards.map(\.label))")
+            .map(\.label)
+    }
+
+    /// The app's record on the test server: when each title was put on My List.
+    private func myListRecord(_ server: URL) -> [String: String] {
+        var record: [String: String] = [:]
+        let url = server.appending(path: "emby/DisplayPreferences/zapline-mylist").appending(queryItems: [.init(name: "client", value: "zapline")])
+        var request = URLRequest(url: url)
+        request.setValue("tok", forHTTPHeaderField: "X-Emby-Token")
+        let done = expectation(description: "record")
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            record = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })?["CustomPrefs"] as? [String: String] ?? [:]
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return record
+    }
+
+    /// Writes that record as another device would.
+    private func saveMyListRecord(_ server: URL, _ record: [String: String]) {
+        let url = server.appending(path: "emby/DisplayPreferences/zapline-mylist").appending(queryItems: [.init(name: "client", value: "zapline")])
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("tok", forHTTPHeaderField: "X-Emby-Token")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["Id": "zapline-mylist", "CustomPrefs": record])
+        let done = expectation(description: "save record")
+        URLSession.shared.dataTask(with: request) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
     }
 
     /// Settings shows the build beside the version, as TestFlight lists
