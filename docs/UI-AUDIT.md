@@ -21,7 +21,7 @@ multi-track film, 1 with SDH subtitles, 1 with a Mexican film).
 | No flickers or jumps (search, Continue Watching, pages) | `22016f2`, `b758bea`, `c896690` | `SearchStabilityTests` (4), `testPageReadyWhenPlayerCloses`, `testEpisodeRowsSameHeight`, `testMainButtonKeepsWidthWhileStarting` |
 | Recommendations change only at moments (launch, pull, tab change, long away) | `22016f2` | `testHomeStaysPutUntilChosenAgainOrPulled`, `testHomeChangesOnlyAfterLongAway` |
 | Audit against the Apple TV app (REA, Mobbin) | this file, rounds 1 to 8 | see the tables below |
-| Search, Continue Watching and the other pages filmed, every frame checked for flashes and jumps | rounds 9 to 11 (iPhone and Apple TV) | `scripts/frame-audit` (32 tests filmed: 0 flashes; one jump found and fixed, the Info opening: `testInfoTextWaitsForThePills`) |
+| Search, Continue Watching and the other pages filmed, every frame checked for flashes and jumps | rounds 9 to 12 (iPhone, Apple TV, iPad) | `scripts/frame-audit` (43 films: 0 flashes; one jump found and fixed, the Info opening: `testInfoTextWaitsForThePills`) |
 
 ## Method
 
@@ -202,6 +202,20 @@ page opening, the hero turning, and the Live TV list (`1713c39`).
   9 screen changes in 56 s, no moves. The test itself was stopped by tvOS
   (0x8BADF00D: its `sleep(10)` left the runner's screen unanswered for
   10 s); it now waits with the run loop going, and passes twice in a row.
+
+## Round 12 (2026-10-14): iPad, frame by frame
+
+11 iPhone UI tests filmed on the iPad simulator (`19a0500`): 7 min 56 s
+(14,304 frames), 146 screen changes, 25 moves, **0 flashes, 0 blanks**.
+
+- **Moves:** the tests' swipes and scrolls, the hero turning to its next
+  title (a cross-fade), and the test film's own picture. None without a
+  cause.
+- **Not covered on iPad:** three iPhone-only tests stop at their first step
+  (they look for the iPhone's tab bar: `testResultsStayPutWhenServerAnswers`,
+  `testGenreTiles`, `testHomeStaysPutUntilChosenAgainOrPulled`), and
+  `testRowNameOpensWholeRow` skips itself there. Their films show the iPad
+  only up to that step.
 
 ## Earlier rounds (2026-10-12 and 13)
 
