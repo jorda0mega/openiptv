@@ -1228,13 +1228,13 @@ struct MoviePlayerView: View {
             // which used to drop a film to the server-converted version after
             // a few skips, and every skip after that waited for the server.
             if isBuffering, started, scrubbing == nil, Date().timeIntervalSince(lastSeek) > 3,
-               let decision = governor?.observe(buffer: 0, bytesPerSecond: 0, stalled: true) {
+               let decision = governor?.observe(buffer: 0, bytesPerSecond: 0, stalled: true, left: secondsLeft) {
                 apply(decision)
             }
         case let .network(buffer, bytesPerSecond):
             // Just after a jump the buffer is refilling: not a slow connection.
             if started, !paused, scrubbing == nil, Date().timeIntervalSince(lastSeek) > 3,
-               let decision = governor?.observe(buffer: buffer, bytesPerSecond: bytesPerSecond, stalled: false) {
+               let decision = governor?.observe(buffer: buffer, bytesPerSecond: bytesPerSecond, stalled: false, left: secondsLeft) {
                 apply(decision)
             }
             #if DEBUG
@@ -1876,6 +1876,9 @@ struct MoviePlayerView: View {
         #endif
         return position >= intro.lowerBound && position < intro.upperBound - 1
     }
+
+    /// Seconds from here to the end of the file, when its length is known.
+    private var secondsLeft: Double? { total > 0 ? max(0, total - position) : nil }
 
     /// To the intro's end, straight away.
     private func skipIntro() {

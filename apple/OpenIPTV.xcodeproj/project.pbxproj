@@ -52,6 +52,7 @@
 		256361B5F9FE060AAED11A31 /* Sources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320EE0FE4DDEEB903360A4AF /* Sources.swift */; };
 		28B8F7BBE18EBEB9722388B6 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DE7D9201148434BE2E8348A /* CoreVideo.framework */; };
 		296D7A13458E6C452ABC7FC1 /* SearchStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050F50A01718229F1DF48EE0 /* SearchStabilityTests.swift */; };
+		2979896C40B2FB3C7AA811C0 /* QualityGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */; };
 		2A7555058A5B7D6CB775FE4F /* TVRemote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3704F35E9F8381B01A16311E /* TVRemote.swift */; };
 		2FBF68B8E252F5B346F377DA /* SubtitleSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19E63A90D228DEEB8FCA703 /* SubtitleSync.swift */; };
 		30946DBB482F4C1006EC80F5 /* StreamRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857825645808317F48AB50AA /* StreamRelay.swift */; };
@@ -217,6 +218,7 @@
 		EAA9E81F338896A834778400 /* libxml2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 12D689360F95FEEBC85A1443 /* libxml2.tbd */; };
 		EAC30F65A7C729D3E2CC42C0 /* TVLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B020D0F87B72E286D9A48D /* TVLiveView.swift */; };
 		ECFE41EC6137470B9E7408E7 /* lcms2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */; };
+		EDEA774CC2788DF4A6444F57 /* QualityGovernorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F945F999C40400846D4CCB /* QualityGovernorTests.swift */; };
 		EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DF96B743FAE66F816DD9294 /* Platform.swift */; };
 		EF729A91220E6C66170831E6 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5EDE0462D2DCE22124164E8 /* Metal.framework */; };
 		F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9236570FD5D04A7FE5B59AB8 /* Artwork.swift */; };
@@ -312,6 +314,7 @@
 		6C786F389C51A2833D4205BE /* TitleHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleHero.swift; sourceTree = "<group>"; };
 		6C97593A755F65E9694219D4 /* IMDbCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMDbCatalog.swift; sourceTree = "<group>"; };
 		72303AAC600EF3DE6075EF7A /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
+		73F945F999C40400846D4CCB /* QualityGovernorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QualityGovernorTests.swift; sourceTree = "<group>"; };
 		766249862D814DF2C6786AF4 /* LiveShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveShelfViews.swift; sourceTree = "<group>"; };
 		7A1F2D0451F66503C9B600AF /* libbz2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libbz2.tbd; path = usr/lib/libbz2.tbd; sourceTree = SDKROOT; };
 		857825645808317F48AB50AA /* StreamRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamRelay.swift; sourceTree = "<group>"; };
@@ -625,6 +628,7 @@
 		5852E5DF3A8D60F1744A733F /* UnitTests */ = {
 			isa = PBXGroup;
 			children = (
+				73F945F999C40400846D4CCB /* QualityGovernorTests.swift */,
 				12232F30722138C0CC3DF129 /* RemoteSwipeTests.swift */,
 				3B495F216423F68AE40EEC2D /* SubtitleSyncTests.swift */,
 			);
@@ -981,6 +985,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2979896C40B2FB3C7AA811C0 /* QualityGovernor.swift in Sources */,
+				EDEA774CC2788DF4A6444F57 /* QualityGovernorTests.swift in Sources */,
 				16434D81F4E19A43C2ADD7C5 /* RemoteSwipe.swift in Sources */,
 				76DF5AB929E63EC63FD2D25C /* RemoteSwipeTests.swift in Sources */,
 				D3236519CA0E4D1DFD1DD06A /* SubtitleSync.swift in Sources */,

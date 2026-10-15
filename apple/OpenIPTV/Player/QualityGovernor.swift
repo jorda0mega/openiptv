@@ -45,7 +45,9 @@ struct QualityGovernor {
 
     private var currentBitrate: Double { Double(current ?? original ?? Self.ladder[0]) }
 
-    mutating func observe(buffer: Double, bytesPerSecond: Double, stalled: Bool, now: Date = Date()) -> Decision? {
+    /// `left`: seconds from here to the end of the file, when known.
+    mutating func observe(buffer: Double, bytesPerSecond: Double, stalled: Bool, left: Double? = nil,
+                          now: Date = Date()) -> Decision? {
         // With plenty buffered the player only tops up as fast as it plays,
         // so slow samples then say nothing about the connection: let the
         // estimate rise but not fall. With little buffered it downloads flat
@@ -56,16 +58,21 @@ struct QualityGovernor {
             speed = buffer >= 30 ? max(speed, blended) : blended
         }
         let sinceSwitch = now.timeIntervalSince(lastSwitch)
+        // Buffered to the file's end: nothing more to download, so a short
+        // buffer then says nothing about the connection (it dropped an
+        // episode's last seconds to a converted stream, and the next episode
+        // never came).
+        let toTheEnd = left.map { buffer >= $0 - 1 } ?? false
 
         // Down: a stall, or the buffer staying low while the connection
         // can't keep up with this bitrate.
-        if buffer < 5, speed > 0, speed < currentBitrate * 1.1 {
+        if !toTheEnd, buffer < 5, speed > 0, speed < currentBitrate * 1.1 {
             lowSince = lowSince ?? now
         } else {
             lowSince = nil
         }
         let starving = lowSince.map { now.timeIntervalSince($0) >= 2 } ?? false
-        if (stalled || starving), sinceSwitch >= 10 {
+        if (stalled && !toTheEnd) || starving, sinceSwitch >= 10 {
             let budget = speed > 0 ? speed * 0.7 : currentBitrate / 2
             guard let lower = Self.ladder.first(where: { Double($0) <= budget && Double($0) < currentBitrate })
                 ?? (currentBitrate > Double(Self.ladder.last!) ? Self.ladder.last : nil)
