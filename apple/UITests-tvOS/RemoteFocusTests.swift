@@ -410,7 +410,7 @@ final class RemoteFocusTests: XCTestCase {
         let id = card.identifier
         XCTAssertTrue(id.hasPrefix("continue-"), "not on a Continue Watching card: \(focused())")
         press(.select, "play")
-        sleep(10)
+        wait(seconds: 10)
         press(.right, "skip")
         press(.right, "skip")
         // Menu until the player has gone (the first may only hide its bar).

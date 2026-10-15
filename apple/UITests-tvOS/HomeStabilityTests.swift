@@ -30,7 +30,7 @@ final class HomeStabilityTests: XCTestCase {
         app.launch()
         // Past the first seconds after a launch, when a build may still go
         // straight on the page.
-        sleep(10)
+        wait(seconds: 10)
         // Resting on the hero's Play, as after a launch (it doesn't turn
         // to another title meanwhile).
         for _ in 0..<2 where focusedIsTab() { remote.press(.down); sleep(1) }
@@ -44,7 +44,7 @@ final class HomeStabilityTests: XCTestCase {
         // again (another order, another number) while it's on screen.
         push(server, "library")
         push(server, "watched")
-        sleep(18)
+        wait(seconds: 18)
         let after = layout()
         shot("home after changes")
         let moved = differences(before, after)
@@ -183,5 +183,15 @@ final class HomeStabilityTests: XCTestCase {
         let name = String(format: "tv-%02d-%@.png", step, note.replacingOccurrences(of: " ", with: "-"))
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: shots.appending(path: name))
         print("SHOT \(note) → \(name)")
+    }
+}
+
+extension XCTestCase {
+    /// Waits while the test runner goes on answering the system. tvOS
+    /// stops an app that leaves its screen unanswered for 10 s (0x8BADF00D,
+    /// "scene-update watchdog"), and a sleep() of 10 s or more did that to
+    /// the runner whenever the system asked it something meanwhile.
+    func wait(seconds: TimeInterval) {
+        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 }

@@ -199,7 +199,9 @@ page opening, the hero turning, and the Live TV list (`1713c39`).
   `testMovingAlongARowKeepsThePageStill`, nothing on the page moves up or
   down. The open item from the first delegated audit is closed.
 - **Home while the server changes** (`testHomeStaysPutUntilChosenAgain`):
-  9 screen changes in 56 s, no moves.
+  9 screen changes in 56 s, no moves. The test itself was stopped by tvOS
+  (0x8BADF00D: its `sleep(10)` left the runner's screen unanswered for
+  10 s); it now waits with the run loop going, and passes twice in a row.
 
 ## Earlier rounds (2026-10-12 and 13)
 
