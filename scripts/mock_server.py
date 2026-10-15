@@ -38,7 +38,8 @@ SOCKETS = set()
 # before a converted stream's playlist: a server starting a conversion),
 # "video_fail" (every video request answered 503: the connection lost),
 # "intro" ("5,45": an episode's intro marks, in seconds), "copy_audio"
-# ("a8:fre": one copy of a film with only that language's sound).
+# ("a8:fre": one copy of a film with only that language's sound),
+# "watched_elsewhere" ("m7": a film just played on another device).
 CONTROL = {}
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -787,7 +788,13 @@ class Handler(BaseHTTPRequestHandler):
             print(f"{time.time():.2f} home requested", flush=True)
             time.sleep(float(CONTROL.get("home_delay", os.environ.get("OPENIPTV_MOCK_HOME_DELAY", "0"))))
             progress = 5 + int(time.time()) % 90
-            return self.send({"Items": [ep(2, current), twin, movie(5) | {"UserData": {"PlayedPercentage": progress}}, ep(1, 4), ep(1, 2)]})
+            items = [ep(2, current), twin, movie(5) | {"UserData": {"PlayedPercentage": progress}}, ep(1, 4), ep(1, 2)]
+            # "watched_elsewhere": "m7": that film just played on another
+            # device, first in the list.
+            if CONTROL.get("watched_elsewhere"):
+                items.insert(0, movie(int(CONTROL["watched_elsewhere"][1:])) | {"UserData": {"PlayedPercentage": 30,
+                                                                                            "PlaybackPositionTicks": 2160000000}})
+            return self.send({"Items": items})
         if path == "/Users/U1/Items/Resume":
             return self.send({"Items": [episode(i) for i in range(3)], "TotalRecordCount": 3})
         if path == "/Users/U1/Items/Latest":

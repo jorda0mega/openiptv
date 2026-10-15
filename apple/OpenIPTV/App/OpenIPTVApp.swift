@@ -125,9 +125,10 @@ struct RootView: View {
             case .active:
                 model.connectLive()
                 Task { await model.prepareLibrary() }
-                // Watched elsewhere while away (the live connection was
-                // closed): Continue Watching is right when you look.
-                if !model.rows.isEmpty { Task { await model.refreshContinueWatching() } }
+                // Watched or put on My List on another device while away
+                // (the live connection was closed): both right when you look.
+                if !model.rows.isEmpty { Task { await model.refreshContinueWatching(returning: true) } }
+                Task { await model.refreshMyList() }
                 // What's usually watched, ready before it's chosen.
                 model.prepareRotation()
             case .background:

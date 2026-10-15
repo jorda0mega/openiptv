@@ -182,6 +182,8 @@ final class AppModel {
     }
     /// When the app last went to the background.
     @ObservationIgnored private var backgroundedAt: Date?
+    /// The card width My List was last loaded at (iPhone, iPad, Apple TV).
+    @ObservationIgnored private var myListWidth: Int?
     /// Away this long, coming back is like a launch for Home.
     private static var longAway: TimeInterval {
         #if DEBUG
@@ -943,10 +945,10 @@ final class AppModel {
     /// the player closed, or when only progress changed (the same cards in
     /// the same order); otherwise it waits with the next Home, so no card
     /// appears, goes or moves while you look.
-    private func offerContinue(_ row: HomeRow?) {
+    private func offerContinue(_ row: HomeRow?, now: Bool = false) {
         let shown = rows.first { $0.title == Self.continueTitle }
         let opening = homeOpening
-        let mayMove = opening || continueMovesUntil.map { Date() < $0 } ?? false
+        let mayMove = opening || now || continueMovesUntil.map { Date() < $0 } ?? false
         // The newest Continue Watching always waits too, so a moment
         // later never puts an older one back.
         if var staged = stagedHome {
@@ -1033,7 +1035,10 @@ final class AppModel {
     /// `afterStop`: the server's answer for what the player just stopped,
     /// the last that may move cards on the page.
     @discardableResult
-    func refreshContinueWatching(checkingHistory: Bool = false, afterStop: Bool = false) async -> Bool {
+    /// `returning`: back in the app, where it goes on at once (what was
+    /// watched on another device meanwhile is your own, not a
+    /// recommendation; it waited for the next moment and looked unsynced).
+    func refreshContinueWatching(checkingHistory: Bool = false, afterStop: Bool = false, returning: Bool = false) async -> Bool {
         guard let emby else { return false }
         async let watching = emby.watching()
         async let nextUp = emby.nextUp()
@@ -1046,7 +1051,7 @@ final class AppModel {
         let items = HomeFeed.continueItems(watching: watching, nextUp: (try? await nextUp) ?? [])
         let server = emby.showRow(Self.continueTitle, items, lastCardWidth).map { variedForTests([$0], numbered: false)[0] }
         let row = reconciled(server)
-        offerContinue(row)
+        offerContinue(row, now: returning)
         if afterStop { continueMovesUntil = nil }
         prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
         return false
@@ -2267,6 +2272,7 @@ extension AppModel {
     /// My List from the server, newest additions first, one card per
     /// title however many copies (HD, 4K) are on it.
     func loadMyList(cardWidth: Int) async {
+        myListWidth = cardWidth
         guard let emby, let found = try? await emby.favorites() else { return }
         let added = myListAdded
         let order = Dictionary(found.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -2288,6 +2294,13 @@ extension AppModel {
         if cards != myList { myList = cards }
         let ids = Set(found.map(\.id))
         if ids != myListIDs { myListIDs = ids }
+    }
+
+    /// My List read again (back in the app: something may have been put on
+    /// it on another device meanwhile).
+    func refreshMyList() async {
+        guard let myListWidth else { return }
+        await loadMyList(cardWidth: myListWidth)
     }
 
     /// Whether a title is on My List, in any copy (what the server said of

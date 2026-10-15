@@ -257,6 +257,54 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertLessThan(Double(coloured), Double(bright) * 0.1, "the chosen tab is coloured, not white: \(coloured) of \(bright) bright pixels")
     }
 
+    /// Watched on another device (the Apple TV) while the app was in the
+    /// background: back in the app, it's in Continue Watching. Regression:
+    /// it waited for the next "moment" (a tab, a pull, half an hour away),
+    /// as recommendations do, and looked like it hadn't synced.
+    func testWatchedElsewhereShowsOnReturn() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        sleep(8)
+        let elsewhere = app.buttons["continue-m7"].firstMatch
+        XCTAssertFalse(elsewhere.exists, "Movie 7 was in Continue Watching from the start")
+        XCUIDevice.shared.press(.home)
+        configure(server, ["watched_elsewhere": "m7"])
+        sleep(3)
+        app.activate()
+        XCTAssertTrue(elsewhere.waitForExistence(timeout: 8), "what was watched elsewhere isn't in Continue Watching")
+        shot("continue watching after return")
+    }
+
+    /// Put on My List on another device while the app was in the
+    /// background: back in the app, it's on My List. Regression: My List
+    /// was read only when Home first opened.
+    func testMyListFromElsewhereShowsOnReturn() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        sleep(8)
+        XCTAssertFalse(app.buttons["row-My List"].exists, "My List wasn't empty at the start")
+        XCUIDevice.shared.press(.home)
+        favorite(server, "a4")
+        sleep(3)
+        app.activate()
+        XCTAssertTrue(app.buttons["row-My List"].firstMatch.waitForExistence(timeout: 8), "what was put on My List elsewhere isn't there")
+    }
+
+    /// Puts a title on the test user's My List on the server (as another
+    /// device would).
+    private func favorite(_ server: URL, _ id: String) {
+        var request = URLRequest(url: server.appending(path: "emby/Users/U1/FavoriteItems/\(id)"))
+        request.httpMethod = "POST"
+        request.setValue("tok", forHTTPHeaderField: "X-Emby-Token")
+        let done = expectation(description: "favorite \(id)")
+        URLSession.shared.dataTask(with: request) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
+    }
+
     func testHomeCardSizes() {
         app.launch()
         sleep(8)
