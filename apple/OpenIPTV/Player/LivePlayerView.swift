@@ -125,7 +125,9 @@ struct LivePlayerView: View {
     /// menu (guide, start over, channels) at the top. Swipe up or down on
     /// the picture to change channel.
     private var controls: some View {
-        let info = model.nowNext[channel.id]
+        // This channel's own slot, as the rows read it: the guide filling in
+        // for other channels doesn't redraw the player.
+        let info = model.slot(channel.id).value
         let event = recording == nil ? model.event(of: channel) : nil
         return PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
                             note: note, paused: paused, canGoForward: !(recording == nil && atLive),
