@@ -76,20 +76,27 @@ enum PlaybackSpeed {
 /// closed at once, so subtitles could only be changed with the film paused.
 struct TrackMenuButton: View, Equatable {
     let tracks: [MPVPlayer.Track]
+    /// Languages only another copy of the title is heard in ("ja").
+    var otherLanguages: [String] = []
     let pick: (MPVPlayer.Track) -> Void
+    var pickOther: (String) -> Void = { _ in }
     let pickSubtitles: (MPVPlayer.Track?) -> Void
     let opened: () -> Void
 
-    static func == (a: Self, b: Self) -> Bool { a.tracks == b.tracks }
+    static func == (a: Self, b: Self) -> Bool { a.tracks == b.tracks && a.otherLanguages == b.otherLanguages }
 
     var body: some View {
         let audio = tracks.filter { $0.kind == .audio }
         let subtitles = tracks.filter { $0.kind == .subtitle }
         Menu {
-            if audio.count > 1 {
+            if audio.count + otherLanguages.count > 1 {
                 Section("Audio") {
                     ForEach(audio) { track in
                         Button { pick(track) } label: { item(track) }
+                    }
+                    // Picked, that copy plays from here.
+                    ForEach(otherLanguages, id: \.self) { code in
+                        Button(MoviePlayerView.languageName(code)) { pickOther(code) }
                     }
                 }
             }
@@ -744,7 +751,8 @@ struct MoviePlayerView: View {
     /// bar's end, as in the Apple TV app.
     private var trackMenu: some View {
         HStack(spacing: 0) {
-            TrackMenuButton(tracks: menuTracks, pick: { pick($0) }, pickSubtitles: { pickSubtitles($0) }) {
+            TrackMenuButton(tracks: menuTracks, otherLanguages: otherLanguages, pick: { pick($0) },
+                            pickOther: { playHeard(in: $0) }, pickSubtitles: { pickSubtitles($0) }) {
                 // Open: the controls stay up until something is picked.
                 showControls(autoHide: false)
                 Task {
@@ -774,7 +782,7 @@ struct MoviePlayerView: View {
         trackSwitched()
         player?.selectAudio(track.id)
         markSelected(track.id, kind: .audio)
-        TrackChoice.rememberAudio(track.language, role: track.role, for: trackKey)
+        TrackChoice.rememberAudio(track.language, role: track.role, for: trackKeys)
         showControls()
     }
 
@@ -782,7 +790,7 @@ struct MoviePlayerView: View {
         trackSwitched()
         player?.selectSubtitle(track?.id)
         markSelected(track?.id, kind: .subtitle)
-        TrackChoice.rememberSubtitles(track?.language, role: track?.role, for: trackKey)
+        TrackChoice.rememberSubtitles(track?.language, role: track?.role, for: trackKeys)
         showControls()
         #if DEBUG
         Task { await readTracks() }
@@ -821,6 +829,66 @@ struct MoviePlayerView: View {
     /// What a choice of tracks is kept for: the show (every episode), or
     /// the film.
     private var trackKey: String { playback.seriesId ?? playback.itemId }
+    /// Every copy's key: a pick counts for the title, whichever copy plays.
+    private var trackKeys: [String] { playback.trackKeys.isEmpty ? [trackKey] : playback.trackKeys }
+
+    /// English or Spanish that only the title's other copies are heard in,
+    /// for the audio menu after the file's own ("Spanish" in Dragon Ball
+    /// Z's English copy), as the menu lists languages (see
+    /// TrackChoice.menu). None while another title can't take this one's
+    /// place.
+    private var otherLanguages: [String] {
+        guard switchTo != nil else { return [] }
+        let here = Set(tracks.filter { $0.kind == .audio }.compactMap { $0.language.flatMap(TrackChoice.normalized) })
+            .union(playback.tracks?.basis?.audio.compactMap { $0.flatMap(TrackChoice.normalized) } ?? [])
+        var out: [String] = []
+        for code in playback.otherCopies.flatMap(\.languages) where ["en", "es"].contains(code) && !here.contains(code) && !out.contains(code) {
+            out.append(code)
+        }
+        return out
+    }
+
+    /// "Japanese" for "ja".
+    static func languageName(_ code: String) -> String {
+        Locale.current.localizedString(forLanguageCode: code) ?? code.uppercased()
+    }
+
+    /// The copy heard in `language` (only another copy has it), with no
+    /// wait and no picture loading (the user: "I don't want the picture to
+    /// load while the audio is switching"): this one plays on while the
+    /// other opens out of sight a few seconds ahead, and takes over once its
+    /// picture is ready and the film reaches that moment.
+    private func playHeard(in language: String) {
+        guard let switchTo, switching == nil else { return }
+        switching = language
+        let lead = paused ? 0.0 : 6.0
+        Task {
+            defer { switching = nil }
+            do {
+                let next = try await model.playback(heardIn: language, instead: playback, from: position + lead)
+                let hidden = model.warmSwitch(next, options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+                let ready = Date().addingTimeInterval(30)
+                while !hidden.hasStarted, !hidden.hasFailed, Date() < ready { try await Task.sleep(for: .milliseconds(50)) }
+                guard hidden.hasStarted else {
+                    model.coolDown()
+                    return note("Couldn't play it in \(Self.languageName(language))")
+                }
+                // Its picture is ready: over at the moment it's ready from.
+                let at = next.startSeconds ?? 0
+                let reached = Date().addingTimeInterval(lead + 5)
+                while !paused, position < at - 0.05, Date() < reached { try await Task.sleep(for: .milliseconds(20)) }
+                if closedAt == nil {
+                    closedAt = position
+                    var quiet = Transaction(animation: nil)
+                    quiet.disablesAnimations = true
+                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
+                }
+                switchTo(next)
+            } catch {
+                note("Couldn't play it in \(Self.languageName(language))")
+            }
+        }
+    }
 
     #if DEBUG
     /// What the player plays once the choices are in, for UI tests
@@ -879,7 +947,8 @@ struct MoviePlayerView: View {
     private var menu: TVTrackMenu? {
         switch panel {
         case .audio:
-            TVTrackMenu(heading: "Audio Track", rows: audioTracks.map { .init(label: label($0), checked: $0.selected) })
+            TVTrackMenu(heading: "Audio Track", rows: audioTracks.map { .init(label: label($0), checked: $0.selected) }
+                + otherLanguages.map { .init(label: Self.languageName($0), checked: false) })
         case .subtitles:
             TVTrackMenu(heading: "Subtitles", rows: [.init(label: "Off", checked: !subtitleTracks.contains(where: \.selected))]
                 + subtitleTracks.map { .init(label: label($0), checked: $0.selected) })
@@ -1757,19 +1826,27 @@ struct MoviePlayerView: View {
             return
         }
         let trackKind: MPVPlayer.Track.Kind = kind == .audio ? .audio : .subtitle
-        let list = tracks.filter { $0.kind == trackKind }
+        // The rows as shown (see `menu`). Regression: the row picked the
+        // file's track at that place among all of them, so English chose
+        // the Spanish listed first in the file.
+        let list = kind == .audio ? audioTracks : subtitleTracks
         let id: Int?
-        trackSwitched()
         if kind == .audio {
+            // After the file's own: languages only another copy has.
+            if row >= list.count, otherLanguages.indices.contains(row - list.count) {
+                return playHeard(in: otherLanguages[row - list.count])
+            }
             guard list.indices.contains(row) else { return }
+            trackSwitched()
             id = list[row].id
             player.selectAudio(list[row].id)
-            TrackChoice.rememberAudio(list[row].language, role: list[row].role, for: trackKey)
+            TrackChoice.rememberAudio(list[row].language, role: list[row].role, for: trackKeys)
         } else {
+            trackSwitched()
             let track = row > 0 && list.indices.contains(row - 1) ? list[row - 1] : nil
             id = track?.id
             player.selectSubtitle(id)
-            TrackChoice.rememberSubtitles(track?.language, role: track?.role, for: trackKey)
+            TrackChoice.rememberSubtitles(track?.language, role: track?.role, for: trackKeys)
         }
         tracks = tracks.map { track in
             guard track.kind == trackKind else { return track }
@@ -1777,6 +1854,9 @@ struct MoviePlayerView: View {
             marked.selected = track.id == id
             return marked
         }
+        #if DEBUG
+        Task { await readTracks() }
+        #endif
     }
 
     /// A swipe across the whole touch surface (about the screen's width)

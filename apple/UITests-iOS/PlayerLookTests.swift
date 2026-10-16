@@ -616,6 +616,97 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(tracksPlaying().hasPrefix("audio=eng"), "not in English: \(tracksPlaying())")
     }
 
+    /// Dune: Part Two in two copies, made where nobody knows (no
+    /// production country on the server, as Dragon Ball Z on the user's):
+    /// one copy's sound is a Spanish dub first, then Japanese; the other
+    /// has English. The English copy plays, subtitles off. Regression: the
+    /// dub, first in its copy, was taken for the original language, so the
+    /// title counted as Spanish-made and played in Spanish (with Spanish
+    /// subtitles) while another copy had English. Needs the multi-track
+    /// test film with no country (TEST_RUNNER_MULTI_TRACK=1).
+    func testUnknownOriginPlaysTheEnglishCopy() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["copy_audio": "a8:spa+spa+jpn"])
+        playDune(["-forgetTrackChoices", "YES"])
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player")
+        sleep(3)
+        XCTAssertEqual(item.label, "k8", "the copy with the Spanish dub played")
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=off")
+    }
+
+    /// Spanish only another copy of the film has (Dune's two copies listed
+    /// one in English, one in Spanish): the audio menu offers it after the
+    /// file's own, and picked, that copy takes over from the same moment with
+    /// no picture loading (the user: "I don't want the picture to load while
+    /// the audio is switching"), and plays first next time. Regression: the
+    /// menu listed only the playing file's tracks, so Dragon Ball Z's other
+    /// copy (the user's Spanish one) couldn't be picked.
+    func testAudioFromAnotherCopy() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["copy_audio": "a8:spa,k8:eng"])
+        playDune(["-forgetTrackChoices", "YES"])
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player")
+        sleep(8)
+        XCTAssertEqual(item.label, "k8", "not the copy in English")
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let spanish = app.buttons["Spanish"].firstMatch
+        XCTAssertTrue(spanish.waitForExistence(timeout: 5), "no Spanish in the menu: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty })")
+        // The film plays on meanwhile: where it is now, and when.
+        let before = position() ?? 0
+        let tapped = Date()
+        spanish.tap()
+        let loading = app.descendants(matching: .any)["Loading"]
+        var loaded = false
+        let deadline = Date().addingTimeInterval(30)
+        while item.label != "a8", Date() < deadline {
+            if loading.exists { loaded = true }
+            usleep(100_000)
+        }
+        XCTAssertEqual(item.label, "a8", "the Spanish copy didn't play")
+        XCTAssertFalse(loaded, "the picture loaded while the audio switched")
+        let start = app.staticTexts["debug-start"].firstMatch.label
+        XCTAssertTrue(start.hasPrefix("warm"), "the other copy wasn't ready when it took over: \(start)")
+        sleep(3)
+        // No jump back or ahead: as far on as the time since the tap.
+        XCTAssertEqual(position() ?? 0, before + Date().timeIntervalSince(tapped), accuracy: 4,
+                       "it didn't go on from the same moment")
+        shot("spanish copy")
+
+        // Next time: the copy with the language picked.
+        controlsUp()
+        app.buttons["Close player"].firstMatch.tap()
+        sleep(2)
+        app.terminate()
+        playDune([])
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player the second time")
+        sleep(3)
+        XCTAssertEqual(item.label, "a8", "the language picked wasn't kept")
+    }
+
+    /// Dune: Part Two from Search, playing.
+    private func playDune(_ arguments: [String]) {
+        app.launchArguments = ["-debugSearch", "dune"] + arguments
+        app.launch()
+        sleep(4)
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
+        sleep(3)
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dune: Part Two'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 8), "no Dune: Part Two")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 8), "no Play")
+        play.tap()
+    }
+
     func testFirstSubtitlesKeepPictureMoving() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")

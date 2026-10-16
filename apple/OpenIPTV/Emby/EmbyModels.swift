@@ -259,6 +259,22 @@ struct EmbyPlayback: Hashable, Identifiable {
     var intro: ClosedRange<Double>?
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
+    /// The title's other copies (another library's: HD and 4K, a dub) and
+    /// the languages each is heard in: the audio menu offers those it
+    /// doesn't have itself.
+    var otherCopies: [Copy] = []
+    /// Every copy's id, this one's too, and their kind: to ask again for
+    /// the copy heard in a language picked.
+    var copyIds: [String] = []
+    var copyKind: String?
+    /// The keys its track picks are kept under: every copy's show or film.
+    var trackKeys: [String] = []
+
+    struct Copy: Hashable, Sendable {
+        let itemId: String
+        /// Normalized ("en", "ja"), in the file's order.
+        let languages: [String]
+    }
     /// Subtitle files beside the film on the server (English and Spanish),
     /// added to its own tracks once fetched.
     var subtitleFiles: [SubtitleFile] = []

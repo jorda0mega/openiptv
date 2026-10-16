@@ -78,7 +78,7 @@ final class AppModel {
     private var serverSearchCache: [String: [Card]] = [:]
     /// Playback worked out ahead of a tap (Continue Watching, Next Up, an
     /// open show), so selecting it goes straight to the player.
-    private var prepared: [String: (at: Date, task: Task<EmbyPlayback, Error>)] = [:]
+    private var prepared: [String: (at: Date, task: Task<EmbyPlayback, Error>, copies: [String])] = [:]
     private var visible: Set<String> = []
     /// The rows just below the last one scrolled to, fetched ahead.
     private var lookahead: [String] = []
@@ -467,12 +467,16 @@ final class AppModel {
             return playback
         }
         let task: Task<EmbyPlayback, Error>
-        if let ready = prepared[itemId], Date().timeIntervalSince(ready.at) < 180 {
+        // Worked out with the copies known now (one prepared before the
+        // library was read knew a single copy: a film's other copy, in the
+        // language wanted, was passed over).
+        if let ready = prepared[itemId], Date().timeIntervalSince(ready.at) < 180, ready.copies == library.versions(of: itemId) {
             task = ready.task
         } else {
             guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
             let versions = library.versions(of: itemId)
-            task = Task { try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth) }
+            let shows = showCopies
+            task = Task { try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth, showCopies: shows) }
         }
         prepared[itemId] = nil
         var playback: EmbyPlayback
@@ -482,12 +486,32 @@ final class AppModel {
             // Worked out ahead and failed then (a moment's network trouble):
             // ask again now rather than fail the tap.
             guard let emby else { throw error }
-            playback = try await emby.playback(versions: library.versions(of: itemId), kind: kind, maxWidth: Self.maxWidth)
+            playback = try await emby.playback(versions: library.versions(of: itemId), kind: kind, maxWidth: Self.maxWidth,
+                                               showCopies: showCopies)
         }
         playback = withLocalResume(playback)
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
         return playback
+    }
+
+    /// The title in its copy heard in `language` (picked in the audio menu,
+    /// only another copy has it), from `seconds`: the pick is kept for
+    /// every copy, so the copies are chosen again with it.
+    func playback(heardIn language: String, instead current: EmbyPlayback, from seconds: Double) async throws -> EmbyPlayback {
+        guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
+        TrackChoice.rememberAudio(language, role: nil, for: current.trackKeys)
+        var next = try await emby.playback(versions: current.copyIds, kind: current.copyKind, maxWidth: Self.maxWidth)
+        next.startSeconds = seconds
+        next.requestedAt = Date()
+        return next
+    }
+
+    /// A show's copies by its id (another library's), to find an episode
+    /// in each of them.
+    private var showCopies: @Sendable (String) -> [String] {
+        let versions = library.versions
+        return { versions[$0] ?? [$0] }
     }
 
     // MARK: Shows
@@ -1219,6 +1243,28 @@ final class AppModel {
         previews.first { $0.id == itemId }?.data
     }
 
+    /// What plays next in the player screen, opened out of sight and paused
+    /// at `playback`'s start (another copy of the title, for a language
+    /// only it has): the screen keeps playing meanwhile and hands over once
+    /// its picture is ready (see takeWarm). Unlike warmUp, while something
+    /// plays and on any connection: it was asked for.
+    func warmSwitch(_ playback: EmbyPlayback, options: [(String, String)], hardwareDecoding: Bool) -> MPVPlayer {
+        coolDown()
+        let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding)
+        player.prepareOffscreen()
+        player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
+                    tracks: playback.tracks)
+        player.addSubtitles(playback.subtitleFiles, reference: playback.subtitleReference, speech: playback.speechStretches)
+        player.addCopies(playback.subtitleCopies)
+        warm = (playback.itemId, player, playback, false)
+        warmExpiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(120))
+            guard !Task.isCancelled else { return }
+            self?.coolDown()
+        }
+        return player
+    }
+
     /// Hands over the warmed-up player for this episode or movie, if it's
     /// open at `start` (one opened at another second, say before the last
     /// stop reached the server, would play from there: "the same frame
@@ -1350,11 +1396,12 @@ final class AppModel {
             // Kept three minutes at most anyway: drop the stale ones.
             prepared = prepared.filter { Date().timeIntervalSince($0.value.at) < 180 }
         }
-        for (id, kind) in items where prepared[id].map({ Date().timeIntervalSince($0.at) >= 180 }) ?? true {
+        for (id, kind) in items where prepared[id].map({ Date().timeIntervalSince($0.at) >= 180 || $0.copies != library.versions(of: id) }) ?? true {
             let versions = library.versions(of: id)
+            let shows = showCopies
             prepared[id] = (Date(), Task(priority: .utility) {
-                try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth)
-            })
+                try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth, showCopies: shows)
+            }, versions)
         }
     }
 

@@ -625,44 +625,93 @@ struct EmbyClient {
         return await assemble(item, info: info, resume: Self.resumePoint(item))
     }
 
-    /// One title with copies in several libraries (HD and 4K, say): the
-    /// copy that suits this screen (the sharpest, or the sharpest up to
-    /// `maxWidth`), resuming from whichever copy was watched last.
-    func playback(versions ids: [String], kind: String?, maxWidth: Int?) async throws -> EmbyPlayback {
-        guard ids.count > 1, kind != "Series" else { return try await playback(itemId: ids[0], kind: kind) }
-        let copies = await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
-            for (order, id) in ids.enumerated() {
-                group.addTask { (try? await resolve(id, kind: kind)).map { (order, $0.0, $0.1) } }
+    /// One title with copies in several libraries (HD and 4K, a dubbed
+    /// one): the copy heard in the language the title calls for (see
+    /// TrackChoice.wantedAudio), before a sharper one without it, the
+    /// sharpest of those (up to `maxWidth`), resuming from whichever copy
+    /// was watched last. A show plays its next episode (from its first
+    /// copy); an episode is also looked for in its show's other copies
+    /// (`showCopies`: a show's copies by its id), so the same episode in
+    /// another library counts as a copy too (Dragon Ball Z's English one).
+    func playback(versions ids: [String], kind: String?, maxWidth: Int?,
+                  showCopies: @escaping @Sendable (String) -> [String] = { _ in [] }) async throws -> EmbyPlayback {
+        var copies: [(item: EmbyItem, info: PlaybackInfo?)]
+        if ids.count == 1 || kind == "Series" {
+            let (item, info) = try await resolve(ids[0], kind: kind)
+            copies = [(item, info)]
+        } else {
+            copies = await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
+                for (order, id) in ids.enumerated() {
+                    group.addTask { (try? await resolve(id, kind: kind)).map { (order, $0.0, $0.1) } }
+                }
+                var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
+                for await copy in group { if let copy { out.append(copy) } }
+                return out.sorted { $0.order < $1.order }.map { ($0.item, $0.info) }
             }
-            var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
-            for await copy in group { if let copy { out.append(copy) } }
-            return out.sorted { $0.order < $1.order }
+            guard !copies.isEmpty else { return try await playback(itemId: ids[0], kind: kind) }
         }
-        guard !copies.isEmpty else { return try await playback(itemId: ids[0], kind: kind) }
+        if copies.count == 1, copies[0].item.kind == "Episode", let show = copies[0].item.seriesId {
+            let others = showCopies(show).filter { $0 != show }
+            if !others.isEmpty { copies += await sameEpisode(copies[0].item, inShows: others) }
+        }
+        return await choose(copies, kind: copies[0].item.kind == "Episode" ? "Episode" : kind, maxWidth: maxWidth)
+    }
+
+    /// The copy to play, ready (see playback(versions:)).
+    private func choose(_ copies: [(item: EmbyItem, info: PlaybackInfo?)], kind: String?, maxWidth: Int?) async -> EmbyPlayback {
         func width(_ info: PlaybackInfo?) -> Int { info?.MediaSources?.first?.videoWidth ?? 0 }
         func sound(_ info: PlaybackInfo?) -> [String] {
             (info?.MediaSources?.first?.MediaStreams ?? []).filter { $0.Type == "Audio" }
                 .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }.compactMap { $0.Language.flatMap(TrackChoice.normalized) }
         }
-        // The copies with the sound the title calls for (English, or
-        // Spanish for a Spanish-made one, or the viewer's choice), before a
-        // sharper one without it: a French-only copy left no English or
-        // Spanish to pick while another copy had it. None has it (or none
-        // says): all of them.
-        let first = copies[0]
-        let wanted = TrackChoice.wantedAudio(countries: first.item.productionLocations ?? [],
-                                             original: sound(first.info).first, key: first.item.seriesId ?? first.item.id)
-        let speaking = copies.filter { sound($0.info).contains(wanted) }
-        let pool = speaking.isEmpty ? copies : speaking
-        let fitting = pool.filter { maxWidth == nil || width($0.info) <= maxWidth! }
-        let chosen = fitting.max { width($0.info) < width($1.info) }
-            ?? pool.min { width($0.info) < width($1.info) }!
+        var keys: [String] = []
+        for copy in copies where !keys.contains(copy.item.seriesId ?? copy.item.id) { keys.append(copy.item.seriesId ?? copy.item.id) }
+        var chosen = copies[0]
+        if copies.count > 1 {
+            // The copies with the sound the title calls for (English, or
+            // Spanish for a Spanish-made one, or the viewer's choice in any
+            // copy), before a sharper one without it: a French-only copy
+            // left no English or Spanish to pick while another copy had
+            // it. None has it (or none says): all of them.
+            let first = copies[0]
+            let wanted = TrackChoice.wantedAudio(countries: first.item.productionLocations ?? [], original: sound(first.info).first,
+                                                 heard: Set(copies.flatMap { sound($0.info) }), keys: keys)
+            let speaking = copies.filter { sound($0.info).contains(wanted) }
+            let pool = speaking.isEmpty ? copies : speaking
+            let fitting = pool.filter { maxWidth == nil || width($0.info) <= maxWidth! }
+            chosen = fitting.max { width($0.info) < width($1.info) } ?? pool.min { width($0.info) < width($1.info) }!
+        }
         // Resume where any copy was left off most recently.
         let resume = copies
             .filter { Self.resumePoint($0.item) != nil }
             .max { ($0.item.userData?.lastPlayedDate ?? "") < ($1.item.userData?.lastPlayedDate ?? "") }
             .flatMap { Self.resumePoint($0.item) }
-        return await assemble(chosen.item, info: chosen.info, resume: resume)
+        var playback = await assemble(chosen.item, info: chosen.info, resume: resume, keys: keys)
+        playback.otherCopies = copies.filter { $0.item.id != chosen.item.id }.map { .init(itemId: $0.item.id, languages: sound($0.info)) }
+        playback.copyIds = copies.map(\.item.id)
+        playback.copyKind = kind
+        playback.trackKeys = keys
+        return playback
+    }
+
+    /// The same episode (its season and number) in other copies of its
+    /// show, with how to play each.
+    private func sameEpisode(_ episode: EmbyItem, inShows shows: [String]) async -> [(item: EmbyItem, info: PlaybackInfo?)] {
+        guard let season = episode.parentIndexNumber, let number = episode.indexNumber else { return [] }
+        return await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
+            for (order, show) in shows.enumerated() {
+                group.addTask {
+                    let query: [URLQueryItem] = [.init(name: "UserId", value: account.userId), .init(name: "Season", value: String(season))]
+                    guard let episodes: [EmbyItem] = try? await items("Shows/\(show)/Episodes", query),
+                          let match = episodes.first(where: { $0.parentIndexNumber == season && $0.indexNumber == number }),
+                          let found = try? await resolve(match.id, kind: "Episode") else { return nil }
+                    return (order, found.0, found.1)
+                }
+            }
+            var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
+            for await copy in group { if let copy { out.append(copy) } }
+            return out.sorted { $0.order < $1.order }.map { ($0.item, $0.info) }
+        }
     }
 
     private static func resumePoint(_ item: EmbyItem) -> Double? {
@@ -703,7 +752,7 @@ struct EmbyClient {
         return (item, prefetchedInfo)
     }
 
-    private func assemble(_ item: EmbyItem, info prefetchedInfo: PlaybackInfo?, resume: Double?) async -> EmbyPlayback {
+    private func assemble(_ item: EmbyItem, info prefetchedInfo: PlaybackInfo?, resume: Double?, keys: [String] = []) async -> EmbyPlayback {
         let (title, subtitle) = Self.titles(item)
         var playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle,
                                     url: directStreamURL(item.id, mediaSourceId: item.id, playSessionId: nil),
@@ -756,7 +805,7 @@ struct EmbyClient {
             .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }
             .map(\.Language)
         playback.tracks = TrackChoice.plan(audio: audio, countries: item.productionLocations ?? [],
-                                           key: item.seriesId ?? item.id)
+                                           key: item.seriesId ?? item.id, keys: keys)
         if let source = info?.MediaSources?.first {
             playback.subtitleLanguages = Set((source.MediaStreams ?? []).filter { $0.Type == "Subtitle" }
                 .compactMap { $0.Language.flatMap(TrackChoice.normalized) })

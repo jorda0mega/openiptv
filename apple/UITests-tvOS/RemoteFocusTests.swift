@@ -628,6 +628,34 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertGreaterThan(rate, 1.6, "2× played at \(rate)×")
     }
 
+    /// The subtitle menu's rows pick what they say: "English" shows the
+    /// English subtitles. Regression: a row picked the file's track at that
+    /// place among all of them, and the test film lists Spanish first, so
+    /// "English" showed Spanish (the menu lists English first). Needs the
+    /// multi-track test film (TEST_RUNNER_MULTI_TRACK=1).
+    func testSubtitleRowPicksItsLanguage() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals", "-forgetTrackChoices", "YES"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(8)
+        // Up lands on Audio (the player's own focus, not the system's);
+        // Subtitles is to its left.
+        press(.up, "to the round buttons")
+        press(.left, "to subtitles")
+        press(.select, "subtitles menu")
+        press(.down, "to English")
+        press(.select, "pick English")
+        sleep(2)
+        let tracks = app.staticTexts["debug-tracks"].firstMatch.label
+        XCTAssertTrue(tracks.hasSuffix("subtitles=eng"), "English picked, but: \(tracks)")
+    }
+
     /// At an episode's end the next one plays in the same player, as the
     /// Apple TV app's Auto-Play does. Regression: on Apple TV the player
     /// closed there (the iPhone already played on).

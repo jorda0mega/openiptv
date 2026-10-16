@@ -38,7 +38,8 @@ SOCKETS = set()
 # before a converted stream's playlist: a server starting a conversion),
 # "video_fail" (every video request answered 503: the connection lost),
 # "intro" ("5,45": an episode's intro marks, in seconds), "copy_audio"
-# ("a8:fre": one copy of a film with only that language's sound),
+# ("a8:fre": one copy of a film with only that language's sound;
+# "a8:spa+spa+jpn": those tracks, in that order),
 # "watched_elsewhere" ("m7": a film just played on another device),
 # "favorites_delay" (seconds before My List answers: a slow refresh),
 # "reference_delay" (seconds before one of the film's own subtitle tracks
@@ -353,13 +354,16 @@ class Handler(BaseHTTPRequestHandler):
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
             width = 3840 if item.startswith("k") else 1920
             streams = file_streams()
-            # "copy_audio": "a8:fre": that copy's sound in that language only
-            # (another copy of the same film keeps the file's).
+            # "copy_audio": "a8:fre": that copy's sound in that language only;
+            # "a8:spa+spa+jpn": those tracks in that order (another copy of the
+            # same film keeps the file's).
             for spec in filter(None, CONTROL.get("copy_audio", "").split(",")):
-                copy, language = spec.split(":")
+                copy, languages = spec.split(":")
                 if copy == item:
                     streams = [s for s in streams if s["Type"] != "Audio"] + \
-                              [{"Type": "Audio", "Index": 1, "Language": language, "Codec": "aac"}]
+                              [{"Type": "Audio", "Index": 1 + n, "Language": language, "Codec": "aac"}
+                               # "+" arrives as a space (a query's way).
+                               for n, language in enumerate(languages.replace("+", " ").split())]
             return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": 8000000,
                                                 "SupportsDirectPlay": True, "SupportsDirectStream": True,
                                                 "MediaStreams": [{"Type": "Video", "Width": width}] + streams}],

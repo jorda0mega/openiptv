@@ -24,12 +24,14 @@ struct TrackPlan: Hashable, Sendable {
         let audio: [String?]
         let countries: [String]
         let key: String
+        /// The title's other copies' keys (another library's show or film).
+        var keys: [String] = []
     }
 
     /// The plan with the viewer's newest picks.
     func refreshed() -> TrackPlan {
         guard let basis else { return self }
-        return TrackChoice.plan(audio: basis.audio, countries: basis.countries, key: basis.key)
+        return TrackChoice.plan(audio: basis.audio, countries: basis.countries, key: basis.key, keys: basis.keys)
     }
 }
 
@@ -61,22 +63,30 @@ enum TrackChoice {
 
     /// `audio`: the file's audio languages in its own order (the first is
     /// usually the original); `countries`: where the title was made, first
-    /// the main one; `key`: the show (for an episode) or the film.
+    /// the main one; `key`: the show (for an episode) or the film, and
+    /// `keys` its other copies' (a pick in any of them counts).
     /// The sound a title calls for, before looking at any file of it: the
-    /// viewer's choice for it, else Spanish for a Spanish-made title (or,
-    /// where it was made isn't known, one whose sound is Spanish), else
-    /// English.
-    static func wantedAudio(countries: [String], original: String?, key: String) -> String {
-        if let audio = remembered(key)?.audio { return audio }
+    /// viewer's choice for it, else Spanish for a Spanish-made title, else
+    /// English. Where it was made isn't known: Spanish when its sound
+    /// starts in Spanish and English isn't heard in it (`heard`: every
+    /// language in it, all its copies). Regression: Dragon Ball Z (no
+    /// country on the server) played in Spanish, the dub first in a Latin
+    /// American release, while its other copy had English.
+    static func wantedAudio(countries: [String], original: String?, heard: Set<String> = [], keys: [String]) -> String {
+        if let audio = keys.lazy.compactMap({ remembered($0)?.audio }).first { return audio }
         let made = countries.first.map { spanishCountries.contains($0) }
-        return (made ?? (original.flatMap(normalized) == "es")) ? "es" : "en"
+        return (made ?? (original.flatMap(normalized) == "es" && !heard.contains("en"))) ? "es" : "en"
     }
 
-    static func plan(audio: [String?], countries: [String], key: String) -> TrackPlan {
+    static func plan(audio: [String?], countries: [String], key: String, keys: [String] = []) -> TrackPlan {
         let languages = audio.map { $0.flatMap(normalized) }
         let original = languages.first ?? nil
-        var wanted = wantedAudio(countries: countries, original: original, key: key)
-        let kept = remembered(key)
+        let all = [key] + keys.filter { $0 != key }
+        var wanted = wantedAudio(countries: countries, original: original, heard: Set(languages.compactMap(\.self)), keys: all)
+        let kept = all.lazy.compactMap(remembered).first
+        #if DEBUG
+        NSLog("%@", "PERF plan audio=\(audio) countries=\(countries) keys=\(all) wanted=\(wanted) kept=\(kept?.audio ?? "-")")
+        #endif
         // Not in the file: the original language.
         if !languages.contains(wanted), let original { wanted = original }
         // No language on any of its sound (a fifth of one server's titles),
@@ -98,7 +108,7 @@ enum TrackChoice {
                          audioRole: kept?.audio == wanted ? kept?.audioRole : nil,
                          subtitleRole: subtitles == nil ? nil : kept?.subtitleRole,
                          spanish: spanish(for: countries),
-                         basis: TrackPlan.Basis(audio: audio, countries: countries, key: key))
+                         basis: TrackPlan.Basis(audio: audio, countries: countries, key: key, keys: keys))
     }
 
     /// The plan's tracks among a file's: its audio (nil: the player's own
@@ -276,6 +286,16 @@ enum TrackChoice {
 
     private static func remembered(_ key: String) -> Kept? {
         all()[key]
+    }
+
+    /// The viewer chose this audio track for the title, in every copy of it.
+    static func rememberAudio(_ language: String?, role: String?, for keys: [String]) {
+        for key in keys { rememberAudio(language, role: role, for: key) }
+    }
+
+    /// The viewer chose these subtitles for the title, in every copy of it.
+    static func rememberSubtitles(_ language: String?, role: String?, for keys: [String]) {
+        for key in keys { rememberSubtitles(language, role: role, for: key) }
     }
 
     /// The viewer chose this audio track (its language and kind) for the title.
