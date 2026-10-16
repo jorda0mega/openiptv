@@ -231,7 +231,8 @@ SPORTS_CATEGORIES = [("10", "NFL"), ("11", "ESPN Unlimited"), ("12", "DAZN CA")]
 
 
 def sports_games(now):
-    start = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - 1200))
+    # "sports_started": "300": the game started that many minutes ago (20).
+    start = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - 60 * int(CONTROL.get("sports_started", 20))))
     games = [("NFL 01: Eagles vs. Jaguars", "10"),
              ("ESPN UNLTD 015: Football: Eagles vs. Jaguars", "11"),
              ("ESPN UNLTD 016: Football: Eagles vs. Jaguars (Eagles vs. Jaguars (ESP))", "11"),

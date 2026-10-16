@@ -60,6 +60,9 @@ final class AppModel {
     @ObservationIgnored private var abroad: Set<String> = []
     /// Channels that wouldn't start, and when: games try others first.
     @ObservationIgnored private var liveFailures: [String: Date] = [:]
+    /// Games that played on none of their channels, and when: their rows say
+    /// so for half an hour instead of LIVE.
+    private(set) var gamesNotPlaying: [String: Date] = [:]
     /// A provider category chosen from the full list (rather than a shelf):
     /// kept until the lineup next loads.
     var browsingProviderCategory = false
@@ -1978,11 +1981,12 @@ final class AppModel {
         let events = shelf(LiveOrganizer.sportsID)?.sections.first { $0.id == "events" }?.entries ?? []
         for entry in events {
             let start = entry.event?.start.map { Int64($0.timeIntervalSince1970) }
-            if let start, now - start > 4 * 3600 { continue }
+            if let start, now - start > Int64(GameTime.listed) { continue }
             let text = GuideStore.fold(entry.title + " " + (entry.event?.league ?? ""))
             guard words.allSatisfy({ text.contains($0) }) else { continue }
             hits.append(GuideHit(title: entry.title, channel: entry.channels[0], channelTitle: entry.event?.league ?? "",
-                                 start: start, stop: start.map { $0 + 3 * 3600 }, league: entry.event?.league))
+                                 start: start, stop: start.map { $0 + Int64(GameTime.length(league: entry.event?.league ?? "", title: entry.title)) },
+                                 league: entry.event?.league))
         }
         return hits.enumerated().sorted { a, b in
             let x = a.element, y = b.element
@@ -2059,6 +2063,23 @@ final class AppModel {
     /// the others first.
     func noteLiveFailure(_ channel: LiveChannel) {
         liveFailures[channel.id] = Date()
+    }
+
+    /// A game that played on none of its channels (by any of them).
+    func noteGameNotPlaying(_ channel: LiveChannel) {
+        for copy in copies(of: channel) { gamesNotPlaying[copy.id] = Date() }
+    }
+
+    /// The game tried in the last half hour, and none of its channels played
+    /// (opened again, it's tried again).
+    func isNotPlaying(_ entry: LiveOrganizer.Entry) -> Bool {
+        entry.channels.contains { gamesNotPlaying[$0.id].map { Date().timeIntervalSince($0) < 1800 } ?? false }
+    }
+
+    /// A game playing after all: its rows say LIVE again.
+    func noteGamePlaying(_ channel: LiveChannel) {
+        guard !gamesNotPlaying.isEmpty else { return }
+        for copy in copies(of: channel) where gamesNotPlaying[copy.id] != nil { gamesNotPlaying[copy.id] = nil }
     }
 
     private var watchPicks: [String: WatchOn.Pick] {

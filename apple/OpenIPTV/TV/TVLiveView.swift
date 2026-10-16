@@ -479,12 +479,16 @@ private struct TVChannelCard: View {
 
 /// A game: league and LIVE on the tile, title and time below.
 private struct TVEventCard: View {
+    @Environment(AppModel.self) private var model
     let entry: LiveOrganizer.Entry
     let action: () -> Void
 
     var body: some View {
         let event = entry.event
         let started = event?.start.map { $0 <= Date() } ?? false
+        let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
+        // Tried in the last half hour, and none of its channels played.
+        let notPlaying = live && model.isNotPlaying(entry)
         VStack(alignment: .leading, spacing: 12) {
             Button(action: action) {
                 ZStack(alignment: .topLeading) {
@@ -502,20 +506,20 @@ private struct TVEventCard: View {
                             .multilineTextAlignment(.center)
                             .padding(30)
                     }
-                    if started {
-                        Text("LIVE")
+                    if live {
+                        Text(notPlaying ? "Not playing" : "LIVE")
                             .font(.caption.weight(.heavy))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
-                            .background(.red, in: .capsule)
+                            .background(notPlaying ? Color.white.opacity(0.25) : Color.red, in: .capsule)
                             .padding(14)
                     }
                 }
                 .frame(height: 216)
             }
             .buttonStyle(.card)
-            .accessibilityLabel([started ? "Live" : nil, entry.title, event?.league].compactMap(\.self).joined(separator: ", "))
+            .accessibilityLabel([notPlaying ? "Not playing" : live ? "Live" : nil, entry.title, event?.league].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(2)
                 Text([Self.when(event?.start, started: started), event?.league].compactMap(\.self).joined(separator: " · "))
@@ -581,7 +585,7 @@ struct TVSports: View {
     private static func events(_ shelf: LiveOrganizer.Shelf, now: Date) -> [LiveOrganizer.Entry] {
         (shelf.sections.first { $0.id == "events" }?.entries ?? []).filter { entry in
             guard let start = entry.event?.start else { return true }
-            return now.timeIntervalSince(start) < 4 * 3600
+            return now.timeIntervalSince(start) < GameTime.listed
         }
     }
 
@@ -596,7 +600,7 @@ struct TVSports: View {
         for entry in events {
             let league = entry.event?.league ?? ""
             counts[league, default: 0] += 1
-            if let start = entry.event?.start, start <= now {
+            if GameTime.state(start: entry.event?.start, league: league, title: entry.title, now: now) == .live {
                 live[league, default: 0] += 1
                 live["All", default: 0] += 1
                 if featured.contains(league) { live["Top", default: 0] += 1 }
@@ -646,10 +650,12 @@ struct TVSports: View {
             }
             let calendar = Calendar.current
             let groups: [(String, [LiveOrganizer.Entry])] = [
-                ("Live Now", shown.filter { ($0.event?.start).map { $0 <= now } ?? false }),
+                ("Live Now", shown.filter { GameTime.state(start: $0.event?.start, league: $0.event?.league ?? "", title: $0.title, now: now) == .live }),
                 ("Later Today", shown.filter { ($0.event?.start).map { $0 > now && calendar.isDate($0, inSameDayAs: now) } ?? false }),
                 ("Tomorrow", shown.filter { ($0.event?.start).map { calendar.isDateInTomorrow($0) } ?? false }),
                 ("Coming Up", shown.filter { ($0.event?.start).map { $0 > now && !calendar.isDate($0, inSameDayAs: now) && !calendar.isDateInTomorrow($0) } ?? false }),
+                // Started longer ago than such a game lasts (see GameTime).
+                ("Earlier Today", shown.filter { GameTime.state(start: $0.event?.start, league: $0.event?.league ?? "", title: $0.title, now: now) == .over }),
                 ("More Events", shown.filter { $0.event?.start == nil }),
             ]
             ForEach(groups.filter { !$0.1.isEmpty }, id: \.0) { group in

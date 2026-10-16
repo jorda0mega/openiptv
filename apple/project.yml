@@ -203,6 +203,7 @@ targets:
       - OpenIPTV/Player/QualityGovernor.swift
       - OpenIPTV/Player/RelayRoutes.swift
       - OpenIPTV/Live/WatchOn.swift
+      - OpenIPTV/Live/GameTime.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv.unittests

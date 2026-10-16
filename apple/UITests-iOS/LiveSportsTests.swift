@@ -84,6 +84,76 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(playing("NFL 01"), "the feed that never started was tried first: \(liveCopy())")
     }
 
+    /// A game's best channel that never sends a picture (its feed over, the
+    /// slot still listed) gives way to another channel showing the game
+    /// after the start limit (shortened to 5 s here). Regression: the user's
+    /// game said LIVE and spun forever.
+    func testDeadChannelGivesWayToAnother() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "2001"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "5"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        XCTAssertTrue(playing("NFL 01"), "the game didn't open on the best channel: \(liveCopy())")
+        let readout = app.staticTexts["debug-live-copy"].firstMatch
+        let deadline = Date().addingTimeInterval(20)
+        while readout.label.hasPrefix("NFL 01"), Date() < deadline { usleep(250_000) }
+        XCTAssertFalse(readout.label.hasPrefix("NFL 01"), "still waiting on the channel that sends nothing")
+        XCTAssertTrue(started(), "the next channel didn't play: \(liveCopy())")
+    }
+
+    /// No channel of the game sends a picture: after trying each, the player
+    /// says the game isn't playing, instead of spinning forever, and its row
+    /// in Sports says so too instead of LIVE.
+    func testGameNotPlayingSaysSo() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        let state = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(40)
+        while state.label != "failed", Date() < deadline { usleep(250_000) }
+        XCTAssertEqual(state.label, "failed", "still trying after every channel: \(liveCopy())")
+        let note = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'playing right now'")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 3), "no word that the game isn't playing")
+
+        // Back in Sports, the game no longer says LIVE: it says it isn't
+        // playing (for half an hour; it's tried again when opened).
+        showControls()
+        app.buttons["Close player"].firstMatch.tap()
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        XCTAssertFalse(game.label.contains("LIVE"), "still LIVE after no channel played: \(game.label)")
+        XCTAssertTrue(game.label.contains("Not playing"), "no word on the row that it isn't playing: \(game.label)")
+    }
+
+    /// A game that started longer ago than such a game lasts (an NFL game
+    /// 3 h 50 min ago, 3 h 45 min being its length) no longer says LIVE: it's
+    /// under "Earlier today".
+    /// Regression: the user's soccer game, started three hours before, was
+    /// listed LIVE and didn't play.
+    func testGameLongStartedIsntLive() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_started": "230"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20"]) }
+        app.launchArguments = ["-freshLineup", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        if tab.waitForExistence(timeout: 10) { tab.tap() }
+        let sports = app.buttons["Sports"].firstMatch
+        if sports.waitForExistence(timeout: 10) { sports.tap() }
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        XCTAssertFalse(game.label.contains("LIVE"), "a game 3 h 50 min in still says LIVE: \(game.label)")
+        XCTAssertTrue(app.staticTexts["Earlier today"].firstMatch.exists, "no Earlier today section")
+        XCTAssertFalse(app.staticTexts["Live now"].firstMatch.exists, "a game 3 h 50 min in is under Live now")
+    }
+
     /// Live TV → Sports → the game.
     private func openGame() {
         let tab = app.tabBars.buttons["Live TV"].firstMatch

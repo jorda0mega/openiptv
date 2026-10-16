@@ -50,6 +50,8 @@ struct LivePlayerView: View {
     @State private var tried: Set<String> = []
     /// The copy open now.
     @State private var playingCopy: LiveChannel?
+    /// Gives up on a copy that sends no picture (see startLimit).
+    @State private var startWatch: Task<Void, Never>?
     /// A game: every channel showing it, the one to play first at the top
     /// ("Watch On"); empty for anything else.
     @State private var choices: [AppModel.WatchChoice] = []
@@ -132,6 +134,7 @@ struct LivePlayerView: View {
             ScreenAwake.set(awakeID, playing: false)
             hideTask?.cancel()
             loadTask?.cancel()
+            startWatch?.cancel()
             player?.shutdown()
             player = nil
         }
@@ -482,9 +485,21 @@ struct LivePlayerView: View {
         showControls()
     }
 
-    /// Opens one copy of the channel.
+    /// Opens one copy of the channel. One that hasn't sent a picture by the
+    /// start limit counts as failed: the next copy is tried, or the screen
+    /// says nothing is playing. Regression: a game listed LIVE whose feed
+    /// was over (the slot still there) spun forever.
     private func open(_ copy: LiveChannel, after delay: Double = 0) {
         playingCopy = copy
+        startWatch?.cancel()
+        startWatch = Task {
+            try? await Task.sleep(for: .seconds(delay + Self.startLimit))
+            guard !Task.isCancelled, !started, error == nil, recording == nil, playingCopy?.id == copy.id else { return }
+            if !fallBack() {
+                if model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
+                fail(notPlaying)
+            }
+        }
         loadTask?.cancel()
         loadTask = Task {
             if delay > 0 {
@@ -562,6 +577,8 @@ struct LivePlayerView: View {
         case let .started(seconds):
             started = true
             buffering = false
+            startWatch?.cancel()
+            model.noteGamePlaying(channel)
             if let pendingPick, pendingPick.id == playingCopy?.id {
                 model.pickWatchChoice(pendingPick.choice, league: pendingPick.league)
             }
@@ -661,8 +678,23 @@ struct LivePlayerView: View {
 
     /// Nothing to watch, so the controls (and the way out) stay up.
     private func fail(_ message: String) {
+        startWatch?.cancel()
         error = message
         showControls()
+    }
+
+    /// Seconds a channel has to send its first picture (a provider's slow
+    /// one takes five or six). UI tests: OPENREEL_DEBUG_LIVE_START_LIMIT.
+    private static var startLimit: Double {
+        #if DEBUG
+        if let limit = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LIVE_START_LIMIT"].flatMap(Double.init) { return limit }
+        #endif
+        return 15
+    }
+
+    /// A game or channel that sent no picture on any of its channels.
+    private var notPlaying: String {
+        model.event(of: channel) != nil ? "This game isn’t playing right now." : "This channel isn’t playing right now."
     }
 
     private func step(_ delta: Int) {

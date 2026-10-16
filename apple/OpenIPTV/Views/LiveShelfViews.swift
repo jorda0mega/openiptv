@@ -89,7 +89,7 @@ struct SportsContent: View {
         // Games that started more than four hours ago are over.
         let events = (shelf.sections.first { $0.id == "events" }?.entries ?? []).filter { entry in
             guard let start = entry.event?.start else { return true }
-            return now.timeIntervalSince(start) < 4 * 3600
+            return now.timeIntervalSince(start) < GameTime.listed
         }
         let featured = Set(LiveOrganizer.featuredLeagues)
         let leagues = Self.leagues(events)
@@ -144,15 +144,22 @@ struct SportsContent: View {
     private static func buckets(_ events: [LiveOrganizer.Entry], now: Date) -> [(title: String, entries: [LiveOrganizer.Entry])] {
         let calendar = Calendar.current
         var live: [LiveOrganizer.Entry] = [], today: [LiveOrganizer.Entry] = [], tomorrow: [LiveOrganizer.Entry] = []
-        var later: [LiveOrganizer.Entry] = [], undated: [LiveOrganizer.Entry] = []
+        var later: [LiveOrganizer.Entry] = [], earlier: [LiveOrganizer.Entry] = [], undated: [LiveOrganizer.Entry] = []
         for event in events {
             guard let start = event.event?.start else { undated.append(event); continue }
-            if start <= now { live.append(event) }
-            else if calendar.isDate(start, inSameDayAs: now) { today.append(event) }
-            else if calendar.isDateInTomorrow(start) { tomorrow.append(event) }
-            else { later.append(event) }
+            // Started longer ago than such a game lasts: probably over (see
+            // GameTime), listed apart, not LIVE.
+            switch GameTime.state(start: start, league: event.event?.league ?? "", title: event.title, now: now) {
+            case .live: live.append(event)
+            case .over: earlier.append(event)
+            default:
+                if calendar.isDate(start, inSameDayAs: now) { today.append(event) }
+                else if calendar.isDateInTomorrow(start) { tomorrow.append(event) }
+                else { later.append(event) }
+            }
         }
-        return [("Live now", live), ("Later today", today), ("Tomorrow", tomorrow), ("Coming up", later), ("More events", undated)]
+        return [("Live now", live), ("Later today", today), ("Tomorrow", tomorrow), ("Coming up", later),
+                ("Earlier today", earlier), ("More events", undated)]
             .filter { !$0.1.isEmpty }
     }
 }
@@ -192,17 +199,28 @@ struct FilterChips: View {
 
 /// A game: what, when (LIVE once it's started) and which league.
 struct EventRow: View {
+    @Environment(AppModel.self) private var model
     let entry: LiveOrganizer.Entry
 
     var body: some View {
         let event = entry.event
         let started = event?.start.map { $0 <= Date() } ?? false
+        let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
+        // Tried in the last half hour, and none of its channels played.
+        let notPlaying = live && model.isNotPlaying(entry)
         HStack(spacing: 12) {
             ChannelLogo(url: entry.logo, name: event?.league ?? entry.title)
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.body.weight(.semibold)).lineLimit(2)
                 HStack(spacing: 6) {
-                    if started {
+                    if notPlaying {
+                        Text("Not playing")
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.25), in: .capsule)
+                    } else if live {
                         Text("LIVE")
                             .font(.caption2.weight(.heavy))
                             .foregroundStyle(.white)
