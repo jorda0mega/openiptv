@@ -1257,7 +1257,7 @@ final class AppModel {
         player.prepareOffscreen()
         player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
                     tracks: playback.tracks)
-        player.addSubtitles(playback.subtitleFiles, reference: playback.subtitleReference, speech: playback.speechStretches)
+        player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
         player.addCopies(playback.subtitleCopies)
         warm = (playback.itemId, player, playback, false)
         warmExpiry = Task { [weak self] in
