@@ -58,9 +58,14 @@ struct EntryRows: View {
             .buttonStyle(.plain)
             .contextMenu {
                 let channel = entry.channels[0]
-                Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
-                       systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
-                    prefs.toggleFavorite(channel)
+                if entry.event != nil {
+                    // A game: the channels showing it (the long press).
+                    WatchOnMenuItems(channel: channel) { copy in playing = .live(channels, index, copy: copy) }
+                } else {
+                    Button(prefs.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites",
+                           systemImage: prefs.isFavorite(channel) ? "star.slash" : "star") {
+                        prefs.toggleFavorite(channel)
+                    }
                 }
             }
             .onAppear {
@@ -68,6 +73,28 @@ struct EntryRows: View {
                 if entry.event == nil { model.appeared(entry.id, ahead: channels[(index + 1)...].prefix(30)) }
             }
             .onDisappear { model.disappeared(entry.id) }
+        }
+    }
+}
+
+/// A game's channels in a menu (long press on iPhone, press-and-hold on
+/// Apple TV), as Watch On lists them in the player: the one to play first
+/// at the top, each with its feed, language and picture; one picked plays.
+struct WatchOnMenuItems: View {
+    @Environment(AppModel.self) private var model
+    let channel: LiveChannel
+    let play: (LiveChannel) -> Void
+
+    var body: some View {
+        let choices = model.gameChannels(for: channel)
+        Section(choices.count > 1 ? "Watch On · \(choices.count) channels" : "Watch On") {
+            ForEach(choices) { choice in
+                let line = WatchOn.line(choice.feed, quality: choice.quality)
+                Button { play(choice.channel) } label: {
+                    Text(choice.feed.service)
+                    if !line.isEmpty { Text(line) }
+                }
+            }
         }
     }
 }
@@ -228,7 +255,9 @@ struct EventRow: View {
                             .padding(.vertical, 2)
                             .background(.red, in: .capsule)
                     }
-                    Text([Self.when(event?.start, started: started), event?.league, event?.detail]
+                    // How many channels show it: Watch On lists them.
+                    Text([Self.when(event?.start, started: started), event?.league, event?.detail,
+                          entry.channels.count > 1 ? "\(entry.channels.count) channels" : nil]
                         .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

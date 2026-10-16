@@ -2051,6 +2051,16 @@ final class AppModel {
                               failed: lately).compactMap { byId[$0.id] }
     }
 
+    /// Every channel showing this game, the one to play first at the top,
+    /// one too (its long-press menu); empty for anything but a game.
+    func gameChannels(for channel: LiveChannel) -> [WatchChoice] {
+        guard event(of: channel) != nil else { return [] }
+        let choices = watchChoices(for: channel)
+        guard choices.isEmpty else { return choices }
+        let feed = liveLibrary.feeds[channel.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
+        return [WatchChoice(channel: current(channel), feed: feed, quality: WatchOn.quality(of: channel.name).label)]
+    }
+
     /// A channel picked in Watch On: first for this league's games from
     /// now on.
     func pickWatchChoice(_ choice: WatchChoice, league: String) {

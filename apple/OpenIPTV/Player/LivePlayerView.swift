@@ -15,6 +15,9 @@ struct LivePlayerView: View {
 
     let channels: [LiveChannel]
     @State var index: Int
+    /// A game's channel picked in its Watch On menu: played first, and kept
+    /// for the league once it plays.
+    var startCopy: LiveChannel? = nil
     @State private var loadTask: Task<Void, Never>?
     @State private var player: MPVPlayer?
     @State private var timing = "Starting…"
@@ -467,7 +470,10 @@ struct LivePlayerView: View {
         let player = makePlayer(prefs: prefs)
         player.onEvent = { event in handle(event) }
         self.player = player
-        play()
+        play(copy: startCopy)
+        if let startCopy, let choice = choices.first(where: { $0.id == startCopy.id }), let league = model.event(of: channel)?.league {
+            pendingPick = (startCopy.id, choice, league)
+        }
     }
 
     /// Live, after `delay` seconds (zapping quickly). A game: on the

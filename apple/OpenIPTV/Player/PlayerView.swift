@@ -3,12 +3,14 @@ import SwiftUI
 
 /// What the full-screen player shows.
 enum PlayerItem: Identifiable {
-    case live([LiveChannel], Int)
+    /// The channels to zap through, the one to play; for a game, which of
+    /// its channels to start on (picked in its Watch On menu).
+    case live([LiveChannel], Int, copy: LiveChannel? = nil)
     case vod(EmbyPlayback)
 
     var id: String {
         switch self {
-        case let .live(channels, index): "live-\(channels[index].id)"
+        case let .live(channels, index, _): "live-\(channels[index].id)"
         case let .vod(playback): "vod-\(playback.itemId)"
         }
     }
@@ -24,7 +26,7 @@ struct PlayerScreen: View {
     var body: some View {
         Group {
             switch item {
-            case let .live(channels, index): LivePlayerView(channels: channels, index: index)
+            case let .live(channels, index, copy): LivePlayerView(channels: channels, index: index, startCopy: copy)
             case let .vod(playback): VODPlayerHost(playback: playback)
             }
         }

@@ -967,6 +967,34 @@ final class RemoteFocusTests: XCTestCase {
         return false
     }
 
+    /// Press-and-hold Select on a game's card lists the channels showing it
+    /// (Watch On, as in the player); the one picked plays.
+    func testWatchOnFromGameCard() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "none"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        sleep(8)
+        toGame()
+        XCTAssertTrue(focused().contains("Jaguars"), "the game isn't in Sports: \(focused())")
+        remote.press(.select, forDuration: 1.5)
+        sleep(1)
+        shot("game card menu")
+        // In the order they'd play: NFL, ESPN Unlimited and DAZN CA in
+        // English, then ESPN Unlimited in Spanish (the 4th) and DAZN CA in
+        // French (the language is each item's second line).
+        // The menu's items show no words to the test, its heading does; the
+        // 4th item playing the Spanish feed shows the order.
+        XCTAssertTrue(app.staticTexts["Watch On · 5 channels"].firstMatch.waitForExistence(timeout: 5),
+                      "no Watch On menu on press-and-hold")
+        for _ in 0..<3 { press(.down, "down the channels") }
+        press(.select, "pick")
+        XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't play: \(liveCopy())")
+    }
+
     private func liveCopy() -> String {
         app.staticTexts["debug-live-copy"].firstMatch.label
     }

@@ -154,6 +154,38 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Live now"].firstMatch.exists, "a game 3 h 50 min in is under Live now")
     }
 
+    /// A game's row says how many channels show it, and a long press on it
+    /// lists them (Watch On, as in the player); the one picked plays.
+    /// Regression: when Watch On would be there was a guess (the user:
+    /// "I don't know when we get Watch On versus no Watch On"), and there
+    /// was no long press.
+    func testLongPressListsTheGamesChannels() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "none"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0"]) }
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        if tab.waitForExistence(timeout: 10) { tab.tap() }
+        let sports = app.buttons["Sports"].firstMatch
+        if sports.waitForExistence(timeout: 10) { sports.tap() }
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        XCTAssertTrue(game.label.contains("5 channels"), "the row doesn't say how many channels: \(game.label)")
+        game.press(forDuration: 1.2)
+        // In the order they'd play: NFL, ESPN Unlimited and DAZN CA in
+        // English, then ESPN Unlimited in Spanish and DAZN CA in French (the
+        // language is each item's second line).
+        let espn = app.buttons.matching(NSPredicate(format: "label == 'ESPN Unlimited'"))
+        XCTAssertTrue(espn.firstMatch.waitForExistence(timeout: 5),
+                      "no channels on a long press: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.prefix(20))")
+        XCTAssertEqual(espn.count, 2, "not both ESPN Unlimited feeds")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == 'DAZN CA'")).count, 2, "not both DAZN CA feeds")
+        XCTAssertTrue(app.buttons["NFL"].firstMatch.exists, "no NFL channel")
+        espn.element(boundBy: 1).tap()
+        XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't play: \(liveCopy())")
+    }
+
     /// Live TV → Sports → the game.
     private func openGame() {
         let tab = app.tabBars.buttons["Live TV"].firstMatch

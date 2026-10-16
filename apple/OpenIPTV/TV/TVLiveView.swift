@@ -415,7 +415,8 @@ struct TVChannelGrid: View {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                         Group {
                             if entry.event != nil {
-                                TVEventCard(entry: entry) { playing = .live(channels, index) }
+                                TVEventCard(entry: entry, action: { playing = .live(channels, index) },
+                                            play: { copy in playing = .live(channels, index, copy: copy) })
                             } else {
                                 TVChannelCard(entry: entry, slot: model.slot(entry.id), favorite: prefs.isFavorite(entry.channels[0])) {
                                     playing = .live(channels, index)
@@ -482,6 +483,8 @@ private struct TVEventCard: View {
     @Environment(AppModel.self) private var model
     let entry: LiveOrganizer.Entry
     let action: () -> Void
+    /// One of its channels picked in its press-and-hold menu.
+    var play: (LiveChannel) -> Void = { _ in }
 
     var body: some View {
         let event = entry.event
@@ -519,10 +522,14 @@ private struct TVEventCard: View {
                 .frame(height: 216)
             }
             .buttonStyle(.card)
-            .accessibilityLabel([notPlaying ? "Not playing" : live ? "Live" : nil, entry.title, event?.league].compactMap(\.self).joined(separator: ", "))
+            // Press-and-hold: the channels showing it (Watch On).
+            .contextMenu { WatchOnMenuItems(channel: entry.channels[0], play: play) }
+            .accessibilityLabel([notPlaying ? "Not playing" : live ? "Live" : nil, entry.title, event?.league,
+                                 entry.channels.count > 1 ? "\(entry.channels.count) channels" : nil].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(2)
-                Text([Self.when(event?.start, started: started), event?.league].compactMap(\.self).joined(separator: " · "))
+                Text([Self.when(event?.start, started: started), event?.league,
+                      entry.channels.count > 1 ? "\(entry.channels.count) channels" : nil].compactMap(\.self).joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .accessibilityHidden(true)
