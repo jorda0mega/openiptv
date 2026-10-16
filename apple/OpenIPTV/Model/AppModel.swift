@@ -103,6 +103,18 @@ final class AppModel {
            let source = try? JSONDecoder().decode(IPTVSource.self, from: Data(raw.utf8)) {
             sources.useTemporaryIPTV(source)
         }
+        // Real-feed UI tests: the logins from a helper on the Mac. Only its
+        // address goes in the launch environment, which the simulator's
+        // system log records.
+        let environment = ProcessInfo.processInfo.environment
+        if let data = environment["OPENREEL_DEBUG_EMBY_URL"].flatMap(Self.debugFetch),
+           let account = try? JSONDecoder().decode(EmbyAccount.self, from: data) {
+            sources.useTemporaryEmby(account)
+        }
+        if let data = environment["OPENREEL_DEBUG_IPTV_URL"].flatMap(Self.debugFetch),
+           let source = try? JSONDecoder().decode(IPTVSource.self, from: data) {
+            sources.useTemporaryIPTV(source)
+        }
         #endif
         selectedCategory = UserDefaults.standard.string(forKey: "category")
         // Ready before the first film opens.
@@ -2325,6 +2337,21 @@ extension AppModel {
     private static let myListSeenKey = "myListSeen"
 
     #if DEBUG
+    /// A helper's answer at launch, in memory only (no cache on disk).
+    private static func debugFetch(_ address: String) -> Data? {
+        guard let url = URL(string: address) else { return nil }
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        var body: Data?
+        let done = DispatchSemaphore(value: 0)
+        session.dataTask(with: url) { data, response, _ in
+            if (response as? HTTPURLResponse)?.statusCode == 200 { body = data }
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 5)
+        return body
+    }
+
     /// UI tests: `-forgetWatchOnPicks YES` at launch starts with no channel
     /// picked for any league.
     static func forgetWatchOnPicksForTesting() {

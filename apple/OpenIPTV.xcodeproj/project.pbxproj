@@ -47,6 +47,7 @@
 		21102DA03C0F276A1F777950 /* XtreamProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B14B5E25BA30ECE2BD6E701 /* XtreamProvider.swift */; };
 		21673D3FCC00E6AAD2482428 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9272170531EC055784C91DD9 /* SearchView.swift */; };
 		2174A08ABD27777FA42CA50C /* ChannelGuideSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */; };
+		2189DEC59E88C8D452C4B465 /* RealFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12195947E258462DA892954B /* RealFeedTests.swift */; };
 		23168F779200D94FECA8F7DF /* Libmpv.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */; };
 		23B67B05DCEB22C87EDA490A /* StalkerProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01633BC141A3C9A9B66CFBB /* StalkerProvider.swift */; };
 		240BD0211D4FCFCF292DBB40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA8AA4353609B682F3F99884 /* Assets.xcassets */; };
@@ -68,6 +69,7 @@
 		3669B888FFC12686AC7BEDBC /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */; };
 		3812ABE7BE5B9ED6B758FD0C /* Libplacebo.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 17EBB6B2E9C237BA7C90687B /* Libplacebo.xcframework */; };
 		3BB4FDFD021DAA0FA5600914 /* Libuavs3d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */; };
+		3C08CEF60D0EC57E6C0B56D7 /* RealFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */; };
 		3CF2A50D68BC65F97FF790C5 /* Libcrypto.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B41963718B2429F644A73CAD /* Libcrypto.xcframework */; };
 		3E9B707F4696C5845239813A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2DE48775D87FC33EDCE40F /* AppModel.swift */; };
 		41A98F0B32F251A20091582A /* ShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63408BC25C1847C3DC54CDDE /* ShowView.swift */; };
@@ -287,6 +289,7 @@
 		0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVPlayerOverlay.swift; sourceTree = "<group>"; };
 		0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scrubber.swift; sourceTree = "<group>"; };
 		0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK.xcframework; path = Vendor/MoltenVK.xcframework; sourceTree = "<group>"; };
+		12195947E258462DA892954B /* RealFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealFeedTests.swift; sourceTree = "<group>"; };
 		12232F30722138C0CC3DF129 /* RemoteSwipeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSwipeTests.swift; sourceTree = "<group>"; };
 		12D689360F95FEEBC85A1443 /* libxml2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libxml2.tbd; path = usr/lib/libxml2.tbd; sourceTree = SDKROOT; };
 		160DAC2CECE83C76B2E1CA51 /* OpenIPTV UnitTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "OpenIPTV UnitTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -313,6 +316,7 @@
 		404C86B1D60778438688EBC2 /* PictureInPicture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureInPicture.swift; sourceTree = "<group>"; };
 		42E78408F03F84F6461620D2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libunibreak.xcframework; path = Vendor/Libunibreak.xcframework; sourceTree = "<group>"; };
+		44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealFeedTests.swift; sourceTree = "<group>"; };
 		4842B481085D3917305982E1 /* libiconv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libiconv.tbd; path = usr/lib/libiconv.tbd; sourceTree = SDKROOT; };
 		4B0770E7215519F6AED0BA2C /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 		4FF14463A6C22E095CC94044 /* IOSurface.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOSurface.framework; path = System/Library/Frameworks/IOSurface.framework; sourceTree = SDKROOT; };
@@ -692,6 +696,7 @@
 				60039C18093C4A9478614C1B /* PersonPageTests.swift */,
 				FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */,
 				DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */,
+				12195947E258462DA892954B /* RealFeedTests.swift */,
 				050F50A01718229F1DF48EE0 /* SearchStabilityTests.swift */,
 			);
 			path = "UITests-iOS";
@@ -730,6 +735,7 @@
 			isa = PBXGroup;
 			children = (
 				1C6E6C6920060C5CF3CC65EF /* HomeStabilityTests.swift */,
+				44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */,
 				890075B848C59F9A66DD756E /* RemoteFocusTests.swift */,
 			);
 			path = "UITests-tvOS";
@@ -1016,6 +1022,7 @@
 				201B09174ED3CF5739821CA4 /* PersonPageTests.swift in Sources */,
 				790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */,
 				DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */,
+				2189DEC59E88C8D452C4B465 /* RealFeedTests.swift in Sources */,
 				296D7A13458E6C452ABC7FC1 /* SearchStabilityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1117,6 +1124,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1B573875ED79BC2420B63AE6 /* HomeStabilityTests.swift in Sources */,
+				3C08CEF60D0EC57E6C0B56D7 /* RealFeedTests.swift in Sources */,
 				764C48551392DEFB47995D89 /* RemoteFocusTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
