@@ -74,6 +74,12 @@ final class SpeechSyncTests: XCTestCase {
         XCTAssertNil(SubtitleSync.fit(spoken, toSpeech: []))
     }
 
+    /// Stretches are asked for so the first half already spans the film.
+    func testStretchesSpreadAcrossTheFilm() {
+        XCTAssertEqual(SubtitleSync.spread(Array(0..<16)), [0, 8, 4, 12, 2, 6, 10, 14, 1, 3, 5, 7, 9, 11, 13, 15])
+        XCTAssertEqual(SubtitleSync.spread(Array(0..<5)), [0, 4, 2, 1, 3])
+    }
+
     /// Lines that only describe a sound or music aren't speech.
     func testSoundDescriptionsAreNotSpoken() {
         let srt = """

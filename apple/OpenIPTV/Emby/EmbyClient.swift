@@ -916,7 +916,7 @@ struct EmbyClient {
             playback.subtitleCopies = subtitleCopies(item.id, source)
             // For the files, and for any the server finds later (only
             // addresses: nothing is asked for until a file needs it).
-            playback.subtitleReference = subtitleReference(item.id, source)
+            playback.subtitleReferences = subtitleReferences(item.id, source)
             playback.speechStretches = speechStretches(item, source)
         }
         #if DEBUG
@@ -964,28 +964,36 @@ struct EmbyClient {
 
     /// One of the film's own text subtitle tracks (any language, a full
     /// one before forced lines), as SRT from the server.
-    private func subtitleReference(_ itemId: String, _ source: PlaybackInfo.Source) -> URL? {
+    /// The film's own text track (one, not forced: the server reads the
+    /// whole film to extract it), then its other text files in any
+    /// language, at most eight in all.
+    private func subtitleReferences(_ itemId: String, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SubtitleReference] {
         let text: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
-        let own = (source.MediaStreams ?? []).filter {
-            $0.Type == "Subtitle" && $0.IsExternal != true && text.contains($0.Codec?.lowercased() ?? "")
+        let tracks = (source.MediaStreams ?? []).filter { $0.Type == "Subtitle" && text.contains($0.Codec?.lowercased() ?? "") }
+        let own = tracks.filter { $0.IsExternal != true }
+        let ownIndex = (own.first { $0.IsForced != true } ?? own.first)?.Index
+        let files = tracks.filter { $0.IsExternal == true && $0.IsForced != true }.compactMap(\.Index)
+        func url(_ index: Int) -> URL? {
+            var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.srt"),
+                                      resolvingAgainstBaseURL: false)!
+            parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
+            return parts.url
         }
-        guard let index = (own.first { $0.IsForced != true } ?? own.first)?.Index else { return nil }
-        var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.srt"),
-                                  resolvingAgainstBaseURL: false)!
-        parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
-        return parts.url
+        let references = (ownIndex.map { [($0, true)] } ?? []) + files.map { ($0, false) }
+        return references.prefix(8).compactMap { index, own in url(index).map { .init(url: $0, own: own) } }
     }
 
-    /// Eight one-minute stretches across the film (past the opening and
-    /// before the credits) as audio alone, mono MP3 at 64 kb/s (about 0.5 MB
+    /// Sixteen one-minute stretches evenly across the film (from 2% to 92%:
+    /// a file for another cut can be off differently in each part, the
+    /// opening too) as audio alone, mono MP3 at 64 kb/s (about 0.5 MB
     /// each). Each its own play session: under one, the server kept sending
     /// the first stretch's sound for every later one.
     private func speechStretches(_ item: EmbyItem, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SpeechStretch] {
         guard let ticks = item.runTimeTicks, ticks > 0 else { return [] }
         let length = Double(ticks) / 10_000_000
         guard length > 2 * SpeechHeard.seconds else { return [] }
-        return (0..<8).compactMap { i in
-            let start = (length * (0.06 + 0.11 * Double(i))).rounded()
+        return (0..<16).compactMap { i in
+            let start = (length * (0.02 + 0.06 * Double(i))).rounded()
             guard start + SpeechHeard.seconds <= length else { return nil }
             var parts = URLComponents(url: Self.api(account.serverURL, "Audio/\(item.id)/stream.mp3"), resolvingAgainstBaseURL: false)!
             parts.queryItems = [.init(name: "MediaSourceId", value: source.Id),

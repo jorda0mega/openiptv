@@ -10,18 +10,27 @@ enum SpeechHeard {
     /// The length of a stretch (seconds).
     static let seconds = 60.0
 
-    /// Every stretch heard (two at a time); those the server didn't give
-    /// are left out.
-    static func listen(_ stretches: [EmbyPlayback.SpeechStretch]) async -> [SubtitleSync.Speech] {
+    /// Every stretch heard (four at a time); those the server didn't give
+    /// are left out. Asked for in an order that spreads the first half
+    /// across the whole film (the 1st, 9th, 5th, 13th…), so `halfway` gets
+    /// what's heard by then: enough to put most files in time while the
+    /// rest comes.
+    static func listen(_ stretches: [EmbyPlayback.SpeechStretch],
+                       halfway: (@Sendable ([SubtitleSync.Speech]) async -> Void)? = nil) async -> [SubtitleSync.Speech] {
         await withTaskGroup(of: SubtitleSync.Speech?.self) { group in
             var heard: [SubtitleSync.Speech] = []
-            var queue = stretches[...]
-            for _ in 0..<2 {
+            var queue = SubtitleSync.spread(stretches)[...]
+            var done = 0
+            for _ in 0..<4 {
                 guard let next = queue.popFirst() else { break }
                 group.addTask { await hear(next) }
             }
             for await speech in group {
+                done += 1
                 if let speech { heard.append(speech) }
+                if done == stretches.count / 2, stretches.count >= 8, let halfway {
+                    await halfway(heard.sorted { $0.start < $1.start })
+                }
                 if let next = queue.popFirst() { group.addTask { await hear(next) } }
             }
             return heard.sorted { $0.start < $1.start }

@@ -23,6 +23,42 @@ final class RealFeedTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// Asterix and Cleopatra (1968): French sound, and an English subtitle
+    /// file made for another cut: 0.7 s early for its first 9 minutes, 6.5 s
+    /// until the fortieth, 7.3 s after (measured against the film's speech
+    /// and its Hebrew file, which is in time). Regression: one shift for the
+    /// whole film (6.45 s) put the opening 6 s late. The player shows it
+    /// rewritten in three sections, within four minutes (sixteen stretches
+    /// of speech from this server).
+    func testSubtitleFileInTimeBySpeech() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchArguments += ["-debugSearch", "Asterix and Cleopatra", "-forgetSubtitleTimings", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Asterix and Cleopatra'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 30), "no Asterix and Cleopatra in the results")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
+        play.tap()
+        XCTAssertNotNil(waitForPosition(timeout: 45), "the film didn't open")
+        let shift = app.staticTexts["debug-subshift"].firstMatch
+        let tracks = app.staticTexts["debug-tracks"].firstMatch
+        let opened = Date()
+        while Date().timeIntervalSince(opened) < 240, !(shift.exists && shift.label.hasPrefix("sections")) { sleep(2) }
+        print("REAL tracks: \(tracks.exists ? tracks.label : "none") | shift \(shift.exists ? shift.label : "none") after \(Int(Date().timeIntervalSince(opened))) s")
+        shot("asterix subtitles")
+        // "sections 0:+0.70 538:+6.50 2390:+7.30" (from, in the file's seconds: shift).
+        let label = shift.label
+        XCTAssertTrue(label.hasPrefix("sections"), "the English file wasn't put in time part by part in 4 minutes: \(label)")
+        let delays = label.split(separator: " ").dropFirst().compactMap { $0.split(separator: ":").last.flatMap { Double($0) } }
+        XCTAssertEqual(delays.count, 3, "not three sections: \(label)")
+        guard delays.count == 3 else { return }
+        for (found, expected) in zip(delays, [0.7, 6.5, 7.3]) { XCTAssertEqual(found, expected, accuracy: 0.4, label) }
+    }
+
     /// Home fills in from the server, and a title from it plays.
     func testHomePlaysATitle() throws {
         // Emby only: no IPTV requests the test doesn't need.

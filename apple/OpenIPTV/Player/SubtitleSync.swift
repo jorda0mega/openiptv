@@ -32,6 +32,20 @@ enum SubtitleSync {
     /// The best shift and stretch of `file` onto `reference`; nil when they
     /// don't match well enough to trust (another cut, another film).
     static func fit(_ file: [Cue], to reference: [Cue]) -> Fit? {
+        // Lined up, most of the speech meets; at a random shift, much less.
+        // (Another film's lines meet as often at one shift as at another.)
+        guard let best = closest(file, to: reference), best.fit.score >= referenceScore, best.lift >= referenceLift else { return nil }
+        return best.fit
+    }
+
+    /// What `fit(_:to:)` trusts: this much of the speech meeting, this much
+    /// more than at a typical shift.
+    private static let referenceScore = 0.55
+    private static let referenceLift = 0.3
+
+    /// The best shift and stretch of `file` onto `reference`, trusted or
+    /// not, and how far it stands above a typical shift.
+    private static func closest(_ file: [Cue], to reference: [Cue]) -> (fit: Fit, lift: Double)? {
         guard file.count >= 10, reference.count >= 10 else { return nil }
         var best: (fit: Fit, lift: Double)?
         for speed in speeds {
@@ -39,10 +53,7 @@ enum SubtitleSync {
             guard let (delay, score, typical) = shift(stretched, onto: reference) else { continue }
             if score > (best?.fit.score ?? 0) + 0.02 { best = (Fit(delay: delay, speed: speed, score: score), score - typical) }
         }
-        // Lined up, most of the speech meets; at a random shift, much less.
-        // (Another film's lines meet as often at one shift as at another.)
-        guard let best, best.fit.score >= 0.55, best.lift >= 0.3 else { return nil }
-        return best.fit
+        return best
     }
 
     /// The shift of `file` that lands most of its speech on `reference`'s,
@@ -145,6 +156,13 @@ enum SubtitleSync {
     /// own to match against; nil when none stands out (too little speech,
     /// another film). Its score is how far the match stands out.
     static func fit(_ file: [Cue], toSpeech heard: [Speech]) -> Fit? {
+        guard let best = closest(file, toSpeech: heard), best.score >= speechTrust else { return nil }
+        return best
+    }
+
+    /// The best shift and stretch of `file` against the speech heard,
+    /// trusted or not.
+    private static func closest(_ file: [Cue], toSpeech heard: [Speech]) -> Fit? {
         let heard = heard.filter { $0.confidence.count > 20 }
         guard file.count >= 10, !heard.isEmpty else { return nil }
         let lags = Int(speechReach / step)
@@ -172,7 +190,6 @@ enum SubtitleSync {
             let fit = Fit(delay: speechReach - Double(top) * step, speed: speed, score: Double(normalised[top]))
             if fit.score > (best?.score ?? -.infinity) { best = fit }
         }
-        guard let best, best.score >= speechTrust else { return nil }
         return best
     }
 
@@ -183,6 +200,367 @@ enum SubtitleSync {
         var out = [Float](repeating: 0, count: x.count)
         vDSP_vsadd(x, 1, &shift, &out, 1, vDSP_Length(x.count))
         return out
+    }
+
+    // MARK: Part by part
+
+    /// A file made for another cut of the film (a scene a little longer, a
+    /// logo shorter) is off by different amounts in different parts.
+    /// Asterix and Cleopatra's English file: 0.7 s early for its first ten
+    /// minutes, 6.5 s until the fortieth, 7.2 s after; one shift for the
+    /// whole film (6.45 s) put its opening 6 s late.
+
+    /// From `from` (the file's own time) on, its lines need time × speed +
+    /// delay.
+    struct Section: Equatable, Codable, Sendable {
+        let from: Double
+        let delay: Double
+        let speed: Double
+    }
+
+    /// A subtitle track of the film to put files in time with: its own
+    /// (in time with it by definition), or another file (trusted once the
+    /// speech heard, or another file, agrees it's in time).
+    struct Reference {
+        let cues: [Cue]
+        let own: Bool
+    }
+
+    /// How well a subtitle file fits the film, and how to put it in time.
+    struct Match: Comparable, Sendable, Codable {
+        let sections: [Section]
+        /// How clearly it matches, as a multiple of what's trusted (1 and
+        /// up: trusted), on the same scale for speech and for references.
+        let score: Double
+        /// The share of the film's measured parts that agree with
+        /// `sections` (0-1).
+        let evenness: Double
+
+        var isGoodEnough: Bool { score >= 1 && evenness >= 0.7 }
+
+        /// Where a line at `time` (the file's own) belongs in the film.
+        func film(_ time: Double) -> Double {
+            let section = sections.last { $0.from <= time } ?? sections[0]
+            return time * section.speed + section.delay
+        }
+
+        /// Good enough first, then the clearer and more even.
+        static func < (a: Match, b: Match) -> Bool {
+            if a.isGoodEnough != b.isGoodEnough { return !a.isGoodEnough }
+            return a.score * a.evenness < b.score * b.evenness
+        }
+    }
+
+    /// A part measured on its own: this many lines (a film's opening has few
+    /// lines, credits and music, so a part is lines, not minutes).
+    private static let partLines = 20
+    /// How far a part may differ from the whole file's shift (seconds).
+    private static let partReach = 12.0
+    /// A part's own best shift counts when it stands out this much
+    /// (standard deviations above the part's other shifts).
+    private static let partTrust: Float = 1.5
+    /// What a new section costs: a part's disagreement with its section is
+    /// its clarity × the gap (seconds), the gap counted up to
+    /// `strayGap`. So a stray part never makes a section on its own, while
+    /// a few parts that agree do.
+    private static let newSection = 6.0
+    private static let strayGap = 2.0
+    /// Shifts within this of each other (seconds) are one section.
+    private static let sameShift = 0.5
+
+    /// `text`, put in time part by part: the whole file's shift and stretch
+    /// first (by the clearest of the trusted references and the speech);
+    /// then each run of `partLines` lines' own best shift near it (within
+    /// `partReach`), against the same; then the parts grouped into the
+    /// sections that fit them best, each at its parts' weighted median,
+    /// where a section costs `newSection` (dynamic programming). A new
+    /// section starts at the longest pause between lines where the shift
+    /// changes: films are cut where nobody speaks. Nil when nothing to
+    /// match against was given.
+    static func match(_ text: String, speech: [Speech], references: [Reference]) -> Match? {
+        let all = cues(text), spoken = spokenCues(text)
+        guard all.count >= 10 else { return nil }
+        let heard = speech.filter { $0.confidence.count > 20 }
+        let trusted = trustedReferences(references, heard: heard)
+        // The whole file.
+        var whole: (fit: Fit, score: Double)?
+        for reference in trusted {
+            guard let best = closest(all, to: reference) else { continue }
+            let score = min(best.fit.score / referenceScore, best.lift / referenceLift)
+            if score > (whole?.score ?? -.infinity) { whole = (best.fit, score) }
+        }
+        if let best = closest(spoken, toSpeech: heard) {
+            let score = best.score / speechTrust
+            if score > (whole?.score ?? -.infinity) { whole = (best, score) }
+        }
+        guard let whole else { return nil }
+        let speed = whole.fit.speed, delay = whole.fit.delay
+        let placed = all.map { Cue(start: $0.start * speed + delay, end: $0.end * speed + delay) }
+        let placedSpoken = spoken.map { Cue(start: $0.start * speed + delay, end: $0.end * speed + delay) }
+        // Each part: its lines' span, and its own best shift and how clearly.
+        var parts: [(from: Double, to: Double, shift: Double?, clarity: Double)] = []
+        var i = 0
+        while i < placed.count {
+            var j = min(placed.count, i + partLines)
+            // The few lines left at the end go with the part before.
+            if placed.count - j < partLines / 2 { j = placed.count }
+            let from = max(0, placed[i].start), to = placed[i..<j].map(\.end).max() ?? from
+            var shift: Double?, clarity = 0.0
+            if let curve = partCurve(placed, placedSpoken, from: from, length: max(to - from, step), references: trusted, heard: heard),
+               let top = curve.indices.max(by: { curve[$0] < curve[$1] }), top > 0, top < curve.count - 1, curve[top] >= partTrust {
+                shift = Double(top) * step - partReach
+                clarity = Double(curve[top])
+            }
+            parts.append((from, to, shift, clarity))
+            i = j
+        }
+        // The measured parts grouped into sections: best[k] is the least
+        // cost of the first k, with each group at its weighted median.
+        let points = parts.indices.filter { parts[$0].shift != nil }
+        func cost(_ range: Range<Int>) -> (Double, Double) {
+            let level = weightedMedian(range.map { (parts[points[$0]].shift!, parts[points[$0]].clarity) })
+            let spread = range.reduce(0.0) { $0 + parts[points[$1]].clarity * min(strayGap, abs(parts[points[$1]].shift! - level)) }
+            return (spread, level)
+        }
+        var best = [0.0] + [Double](repeating: .infinity, count: points.count)
+        var start = [Int](repeating: 0, count: points.count + 1)
+        if !points.isEmpty {
+            for k in 1...points.count {
+                for first in 0..<k {
+                    let total = best[first] + cost(first..<k).0 + (first > 0 ? newSection : 0)
+                    if total < best[k] { best[k] = total; start[k] = first }
+                }
+            }
+        }
+        var groups: [Range<Int>] = []
+        var end = points.count
+        while end > 0 { groups.insert(start[end]..<end, at: 0); end = start[end] }
+        // Agreement: the share of the measured parts' weight within
+        // sameShift of their section.
+        var weight = 0.0, agreeing = 0.0
+        for group in groups {
+            let level = cost(group).1
+            for k in group {
+                weight += parts[points[k]].clarity
+                if abs(parts[points[k]].shift! - level) <= sameShift { agreeing += parts[points[k]].clarity }
+            }
+        }
+        let evenness = weight == 0 ? 1 : agreeing / weight
+        // Runs of parts: each group from its first measured part (the
+        // unmeasured ones before go with it).
+        let runs: [(first: Int, last: Int, residual: Double)] = groups.map { (points[$0.lowerBound], points[$0.upperBound - 1], cost($0).1) }
+        guard !runs.isEmpty else {
+            return Match(sections: [Section(from: 0, delay: delay, speed: speed)], score: whole.score, evenness: evenness)
+        }
+        var sections: [Section] = []
+        for (n, run) in runs.enumerated() {
+            let shift = delay + run.residual
+            guard n > 0 else {
+                sections.append(Section(from: 0, delay: shift, speed: speed))
+                continue
+            }
+            // Somewhere from the previous run's last part to this run's
+            // first (the file's own times): the pause that splits the lines
+            // best.
+            let previous = sections[n - 1], next = Section(from: 0, delay: shift, speed: speed)
+            let lower = (parts[runs[n - 1].last].from - previous.delay) / speed, upper = (parts[run.first].to - shift) / speed
+            let at = cut(all, between: lower, and: upper, from: previous, to: next, references: trusted, heard: heard)
+            sections.append(Section(from: at, delay: shift, speed: speed))
+        }
+        return Match(sections: sections, score: whole.score, evenness: evenness)
+    }
+
+    /// Where between two sections the file changes: the pause between
+    /// lines that splits them best, those before lining up with the
+    /// references and the speech at the first section's shift, those after
+    /// at the second's (the file's own times).
+    private static func cut(_ lines: [Cue], between lower: Double, and upper: Double, from a: Section, to b: Section,
+                            references: [[Cue]], heard: [Speech]) -> Double {
+        let region = lines.filter { $0.end >= lower && $0.start <= upper }.sorted { $0.start < $1.start }
+        guard region.count >= 2 else { return (lower + upper) / 2 }
+        let sorted = references.map { $0.sorted { $0.start < $1.start } }
+        func evidence(_ line: Cue, _ section: Section) -> Double {
+            let start = line.start * section.speed + section.delay, end = line.end * section.speed + section.delay
+            let length = max(end - start, step)
+            var total = 0.0
+            for reference in sorted {
+                var low = 0, high = reference.count
+                while low < high { let mid = (low + high) / 2; if reference[mid].end <= start { low = mid + 1 } else { high = mid } }
+                var k = low, covered = 0.0
+                while k < reference.count, reference[k].start < end {
+                    covered += max(0, min(end, reference[k].end) - max(start, reference[k].start))
+                    k += 1
+                }
+                total += covered / length
+            }
+            for stretch in heard {
+                let i = Int((start - stretch.start) / step), j = Int((end - stretch.start) / step)
+                guard i >= 0, j <= stretch.confidence.count, j > i else { continue }
+                // How much surer of speech than usual in that stretch.
+                let usual = stretch.confidence.reduce(0, +) / Float(stretch.confidence.count)
+                total += Double(stretch.confidence[i..<j].reduce(0, +) / Float(j - i) - usual)
+            }
+            return total
+        }
+        let before = region.map { evidence($0, a) }, after = region.map { evidence($0, b) }
+        var best = 1, bestValue = -Double.infinity
+        var first = 0.0, rest = after.reduce(0, +)
+        for k in 1..<region.count {
+            first += before[k - 1]
+            rest -= after[k - 1]
+            if first + rest > bestValue { bestValue = first + rest; best = k }
+        }
+        return (region[best - 1].end + region[best].start) / 2
+    }
+
+    /// The references to trust: the film's own; another file when the
+    /// speech heard puts it in time (within half a second, unstretched), or
+    /// when another reference already trusted, or another file, lines up
+    /// with it as it is. (A file for another release, off by a minute at
+    /// another frame rate, would put everything wrong.) At most eight, the
+    /// film's own first.
+    private static func trustedReferences(_ references: [Reference], heard: [Speech]) -> [[Cue]] {
+        let own = references.filter(\.own).map(\.cues)
+        var others = references.filter { !$0.own }.map(\.cues).filter { $0.count >= 10 }.prefix(8).map { $0 }
+        func inTime(_ fit: Fit?) -> Bool { fit.map { abs($0.delay) <= 0.5 && $0.speed == 1 } ?? false }
+        var trusted = own
+        var undecided: [[Cue]] = []
+        for other in others {
+            if own.contains(where: { inTime(fit(other, to: $0)) }) || (!heard.isEmpty && inTime(fit(other, toSpeech: heard))) {
+                trusted.append(other)
+            } else {
+                undecided.append(other)
+            }
+        }
+        // Two files that agree with each other as they are.
+        others = undecided
+        var agreed = Set<Int>()
+        for i in others.indices {
+            for j in others.indices where j > i && inTime(fit(others[i], to: others[j])) {
+                agreed.insert(i)
+                agreed.insert(j)
+            }
+        }
+        trusted += agreed.sorted().map { others[$0] }
+        return Array(trusted.prefix(8))
+    }
+
+    /// For the part of the film from `from` (`length` long): how well each
+    /// shift within `partReach` lines `file` (already placed by the whole
+    /// file's shift) up with the references and the speech heard there, in
+    /// standard deviations above the part's typical shift (index k: moved
+    /// k·step − reach later). Nil when there's nothing there to measure.
+    private static func partCurve(_ file: [Cue], _ spoken: [Cue], from: Double, length: Double, references: [[Cue]],
+                                  heard: [Speech]) -> [Float]? {
+        let lags = Int(partReach / step), shifts = 2 * lags + 1
+        let n = Int(length / step)
+        guard n > 0 else { return nil }
+        var total = [Float](repeating: 0, count: shifts)
+        var sources = 0
+        func add(_ curve: [Float], reversed: Bool) {
+            var mean: Float = 0, deviation: Float = 0
+            var normalised = [Float](repeating: 0, count: shifts)
+            vDSP_normalize(curve, 1, &normalised, 1, &mean, &deviation, vDSP_Length(shifts))
+            guard deviation > 0 else { return }
+            vDSP_vadd(total, 1, reversed ? normalised.reversed() : normalised, 1, &total, 1, vDSP_Length(shifts))
+            sources += 1
+        }
+        let lines = centred(signal(file.map { Cue(start: $0.start - from, end: $0.end - from) }, n))
+        guard lines.contains(where: { $0 > 0 }) else { return nil }
+        for reference in references {
+            // The reference from reach before the part to reach after it;
+            // curve[k]: the file moved k·step − reach later.
+            let around = centred(signal(reference.map { Cue(start: $0.start - from + partReach, end: $0.end - from + partReach) }, n + 2 * lags))
+            var curve = [Float](repeating: 0, count: shifts)
+            vDSP_conv(around, 1, lines, 1, &curve, 1, vDSP_Length(shifts), vDSP_Length(n))
+            add(curve, reversed: false)
+        }
+        for stretch in heard where stretch.start + Double(stretch.confidence.count) * step > from && stretch.start < from + length {
+            // As in fit(_:toSpeech:): curve[k] is the file moved reach − k·step.
+            let m = stretch.confidence.count
+            let near = centred(signal(spoken.map { Cue(start: $0.start - stretch.start + partReach, end: $0.end - stretch.start + partReach) }, m + 2 * lags))
+            var curve = [Float](repeating: 0, count: shifts)
+            vDSP_conv(near, 1, centred(stretch.confidence), 1, &curve, 1, vDSP_Length(shifts), vDSP_Length(m))
+            add(curve, reversed: true)
+        }
+        guard sources > 0 else { return nil }
+        var scale = 1 / Float(Double(sources).squareRoot())
+        vDSP_vsmul(total, 1, &scale, &total, 1, vDSP_Length(shifts))
+        return total
+    }
+
+    /// The value that half the weight is at or below.
+    private static func weightedMedian(_ values: [(value: Double, weight: Double)]) -> Double {
+        let sorted = values.sorted { $0.value < $1.value }
+        let half = sorted.reduce(0) { $0 + $1.weight } / 2
+        var sum = 0.0
+        for item in sorted {
+            sum += item.weight
+            if sum >= half { return item.value }
+        }
+        return sorted.last?.value ?? 0
+    }
+
+    /// `text` (SRT, WebVTT or ASS/SSA) with every line's times moved where
+    /// `match` puts them: each line by the section its start is in.
+    static func retimed(_ text: String, by match: Match) -> String {
+        let ass = text.contains("[Events]")
+        var lines = text.components(separatedBy: "\n")
+        for (i, line) in lines.enumerated() {
+            if ass {
+                guard line.hasPrefix("Dialogue:") else { continue }
+                var fields = line.split(separator: ",", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+                guard fields.count >= 4, let start = clock(fields[1]), let end = clock(fields[2]) else { continue }
+                let (a, b) = moved(start, end, match)
+                fields[1] = assClock(a)
+                fields[2] = assClock(b)
+                lines[i] = fields.joined(separator: ",")
+            } else {
+                let parts = line.components(separatedBy: "-->")
+                guard parts.count == 2, let start = clock(parts[0]) else { continue }
+                let rest = parts[1].trimmingCharacters(in: .whitespaces)
+                let endText = String(rest.split(separator: " ", maxSplits: 1).first ?? "")
+                guard let end = clock(endText) else { continue }
+                let tail = rest.dropFirst(endText.count)
+                let comma = parts[0].contains(",")
+                let (a, b) = moved(start, end, match)
+                lines[i] = srtClock(a, comma: comma) + " --> " + srtClock(b, comma: comma) + tail
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// A line's times moved by the section its start is in.
+    private static func moved(_ start: Double, _ end: Double, _ match: Match) -> (Double, Double) {
+        let section = match.sections.last { $0.from <= start } ?? match.sections[0]
+        return (max(0, start * section.speed + section.delay), max(0, end * section.speed + section.delay))
+    }
+
+    /// "01:02:03,456" (SRT) or "01:02:03.456" (WebVTT).
+    private static func srtClock(_ seconds: Double, comma: Bool) -> String {
+        let ms = Int((seconds * 1000).rounded())
+        return String(format: "%02d:%02d:%02d%@%03d", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, comma ? "," : ".", ms % 1000)
+    }
+
+    /// "1:02:03.45" (ASS).
+    private static func assClock(_ seconds: Double) -> String {
+        let cs = Int((seconds * 100).rounded())
+        return String(format: "%d:%02d:%02d.%02d", cs / 360_000, cs / 6000 % 60, cs / 100 % 60, cs % 100)
+    }
+
+    /// 0, 8, 4, 12, 2, 6, 10, 14, 1, 3, … of sixteen: the first half (and
+    /// quarter) spread across them all; the order SpeechHeard asks for the
+    /// film's stretches in.
+    static func spread<T>(_ items: [T]) -> [T] {
+        var order: [Int] = []
+        var step = 1
+        while step < items.count { step *= 2 }
+        var stride = step
+        while stride >= 1 {
+            for i in Swift.stride(from: 0, to: step, by: stride) where i < items.count && !order.contains(i) { order.append(i) }
+            stride /= 2
+        }
+        return order.map { items[$0] }
     }
 
     // MARK: Reading subtitle files

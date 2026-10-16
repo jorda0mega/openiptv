@@ -1101,7 +1101,7 @@ struct MoviePlayerView: View {
             // original actually stalls.
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
                         readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks)
-            player.addSubtitles(playback.subtitleFiles, reference: playback.subtitleReference, speech: playback.speechStretches)
+            player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
             player.addCopies(playback.subtitleCopies)
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
@@ -1253,7 +1253,7 @@ struct MoviePlayerView: View {
             if playback.mediaSourceId != nil {
                 Task {
                     let files = await model.fetchMissingSubtitles(for: playback)
-                    if !files.isEmpty { player?.addSubtitles(files, reference: playback.subtitleReference, speech: playback.speechStretches) }
+                    if !files.isEmpty { player?.addSubtitles(files, references: playback.subtitleReferences, speech: playback.speechStretches) }
                 }
             }
             #if DEBUG && os(iOS)
