@@ -198,6 +198,9 @@ final class PhoneHomeStabilityTests: XCTestCase {
     /// opens its title. Regression: row names opened nothing.
     func testRowNameOpensWholeRow() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone's three across")
+        // A test before may have left titles on My List (then its row,
+        // with three, came first).
+        if let server = testServer() { configure(server, ["reset": "1"]) }
         app.launch()
         sleep(8)
         drag(from: 0.75, to: 0.35)
@@ -360,14 +363,23 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertEqual(cards.prefix(3).map { $0.components(separatedBy: ",")[0] }, ["Weapons", "American Animals", "Animal House"], "\(cards)")
     }
 
-    /// My List's cards, left to right (labels).
+    /// My List's cards, left to right (labels), read in one snapshot (read
+    /// one by one, a card could go between listing and reading it).
     private func myListCards() -> [String] {
         let heading = app.buttons["row-My List"].firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 8), "no My List row")
         sleep(3)
         for _ in 0..<4 where !heading.isHittable { app.swipeUp(); sleep(1) }
-        return app.buttons.allElementsBoundByIndex
-            .filter { $0.frame.minY > heading.frame.maxY && $0.frame.minY < heading.frame.maxY + 40 && !$0.identifier.hasPrefix("row-") }
+        guard let root = try? app.snapshot() else { return [] }
+        var buttons: [(frame: CGRect, label: String, id: String)] = []
+        func walk(_ node: XCUIElementSnapshot) {
+            if node.elementType == .button { buttons.append((node.frame, node.label, node.identifier)) }
+            node.children.forEach(walk)
+        }
+        walk(root)
+        guard let top = buttons.first(where: { $0.id == "row-My List" })?.frame.maxY else { return [] }
+        return buttons
+            .filter { $0.frame.minY > top && $0.frame.minY < top + 40 && !$0.id.hasPrefix("row-") }
             .sorted { $0.frame.minX < $1.frame.minX }
             .map(\.label)
     }

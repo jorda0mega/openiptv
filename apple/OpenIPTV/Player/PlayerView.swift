@@ -447,11 +447,17 @@ struct MoviePlayerView: View {
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
                 PlayerRenders.Readout()
-                debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
-                debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
-                #if os(iOS)
-                debugReadout(player?.subtitleShift ?? "", "debug-subshift")
-                #endif
+                // Not the player's own state: read again every half second
+                // (the player isn't drawn again for the clock any more).
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    ZStack {
+                        debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
+                        debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
+                        #if os(iOS)
+                        debugReadout(player?.subtitleShift ?? "", "debug-subshift")
+                        #endif
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .ignoresSafeArea()

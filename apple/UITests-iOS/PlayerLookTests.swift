@@ -1008,7 +1008,9 @@ final class PlayerLookTests: XCTestCase {
     /// unlabelled sound). Speech test film, OPENIPTV_MOCK_COUNTRIES=France,
     /// OPENIPTV_MOCK_SUBTITLE_FILES="eng||…/in-time.srt"; TEST_RUNNER_RULE_UNLABELLED=1.
     func testUnlabelledSoundFromAbroadShowsSubtitles() throws {
-        XCTAssertTrue(try startingTracks("RULE_UNLABELLED").hasSuffix("subtitles=eng"), "no English subtitles: \(tracksPlaying())")
+        // Outside the assertion: a skip inside one counted as a failure.
+        let playing = try startingTracks("RULE_UNLABELLED")
+        XCTAssertTrue(playing.hasSuffix("subtitles=eng"), "no English subtitles: \(playing)")
     }
 
     /// French sound with a Spanish file listed before an English one:
@@ -1017,7 +1019,9 @@ final class PlayerLookTests: XCTestCase {
     /// (Either Way). foreign.mkv, OPENIPTV_MOCK_COUNTRIES=France,
     /// OPENIPTV_MOCK_SUBTITLE_FILES="spa||…;eng||…"; TEST_RUNNER_RULE_ORDER=1.
     func testEnglishSubtitlesBeforeSpanish() throws {
-        XCTAssertTrue(try startingTracks("RULE_ORDER").hasSuffix("subtitles=eng"), "not English subtitles: \(tracksPlaying())")
+        // Outside the assertion: a skip inside one counted as a failure.
+        let playing = try startingTracks("RULE_ORDER")
+        XCTAssertTrue(playing.hasSuffix("subtitles=eng"), "not English subtitles: \(playing)")
     }
 
     /// Sound marked "English" (the word, not "eng") in an American film:
