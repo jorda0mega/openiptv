@@ -657,7 +657,7 @@ final class MPVPlayer: @unchecked Sendable {
                 let text = try? String(contentsOf: local, encoding: .utf8)
                 if let text { fetched.append((file, text)) }
                 // In time from the first line when it played before.
-                let remembered = text == nil ? nil : SubtitleTiming.remembered(file.url)
+                let remembered = text.flatMap { SubtitleTiming.remembered(file.url, text: $0) }
                 self?.queue.async { [weak self] in
                     self?.add(file, at: local)
                     if let remembered, let text { self?.apply(remembered, to: file.url, text: text, why: "remembered") }
@@ -673,7 +673,7 @@ final class MPVPlayer: @unchecked Sendable {
                 guard !references.isEmpty, stage == "files" || references.contains(where: \.own) else { continue }
                 for (file, text) in fetched {
                     guard let match = SubtitleSync.match(text, speech: [], references: references), match.score >= 1 else { continue }
-                    SubtitleTiming.remember(match, for: file.url)
+                    SubtitleTiming.remember(match, for: file.url, text: text)
                     self?.queue.async { [weak self] in self?.apply(match, to: file.url, text: text, why: "references (\(stage))") }
                     // The film's own track is in time with it: no need to hear it.
                     if stage == "own", match.isGoodEnough { settled.insert(file.url) }
@@ -687,7 +687,7 @@ final class MPVPlayer: @unchecked Sendable {
                 guard let self else { return }
                 speechStretches = stretches
                 self.guides = guides
-                for (file, text) in fetched where !settled.contains(file.url) && SubtitleTiming.remembered(file.url)?.isGoodEnough != true {
+                for (file, text) in fetched where !settled.contains(file.url) && SubtitleTiming.remembered(file.url, text: text)?.isGoodEnough != true {
                     bySpeech[file.url] = text
                 }
                 fitBySpeechIfShown()
@@ -721,7 +721,7 @@ final class MPVPlayer: @unchecked Sendable {
             NSLog("%@", "PERF subsync speech \(heard.count) stretches, \(guides.count) references: " + Self.describe(match))
             #endif
             guard let match, match.score >= 1 else { return }
-            SubtitleTiming.remember(match, for: url)
+            SubtitleTiming.remember(match, for: url, text: text)
             self?.queue.async { [weak self] in self?.apply(match, to: url, text: text, why: "speech") }
         }
     }

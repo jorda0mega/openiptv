@@ -188,10 +188,19 @@ enum SubtitleSync {
             // match[k]: the file's lines k steps after `from` against the
             // stretch, so a line at t (stretched) was heard at t + reach - k·step.
             let fit = Fit(delay: speechReach - Double(top) * step, speed: speed, score: Double(normalised[top]))
-            if fit.score > (best?.score ?? -.infinity) { best = fit }
+            // Another speed than the film's own only when it's clearly better:
+            // over a few minutes of speech a slight stretch (24/23.976) fits
+            // about as well, and was chosen for a file that only needed a
+            // shift (6.2 s × 1.001 for 6.5 s).
+            let bar = speed == 1 || best?.speed != 1 ? (best?.score ?? -.infinity) : (best?.score ?? -.infinity) * speechSpeedMargin
+            if fit.score > bar { best = fit }
         }
         return best
     }
+
+    /// How much better (as a share) another speed's match must be than the
+    /// film's own speed's to be chosen.
+    private static let speechSpeedMargin = 1.05
 
     private static func centred(_ x: [Float]) -> [Float] {
         var mean: Float = 0

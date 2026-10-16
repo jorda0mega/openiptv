@@ -1095,10 +1095,10 @@ final class PlayerLookTests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_SPEECH"] != nil, "needs the speech test film")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
-        openFilm(["-forgetTrackChoices", "YES"])
+        openFilm(["-forgetTrackChoices", "YES", "-forgetSubtitleTimings", "YES"])
         sleep(4)
         // Watched without subtitles, nothing of its sound is asked for
-        // (eight conversions on the server). Regression: asked for every
+        // (sixteen conversions on the server). Regression: asked for every
         // film played or got ready, subtitles or not.
         sleep(10)
         XCTAssertEqual(audioRequests(server), 0, "the film's sound was asked for with no subtitles showing")
@@ -1128,7 +1128,17 @@ final class PlayerLookTests: XCTestCase {
         shot("early file in time by speech")
         XCTAssertEqual(parts.first ?? 0, 6.5, accuracy: 0.2, "the early file wasn't shifted into time: \(readout.label)")
         XCTAssertEqual(parts.last ?? 0, 1, accuracy: 0.0001, "the file was stretched: \(readout.label)")
-        XCTAssertEqual(audioRequests(server), 8, "not eight stretches of its sound, once")
+        // Stretches across the film (a file for another cut is off
+        // differently in each part): 15 of the 16 fit in this 8-minute film
+        // (the last would run past its end), each asked for once; the file
+        // is put in time at half of them, the rest still coming.
+        var asked = audioRequests(server)
+        for _ in 0..<60 where asked < 15 {
+            sleep(1)
+            asked = audioRequests(server)
+        }
+        sleep(3)
+        XCTAssertEqual(audioRequests(server), 15, "not fifteen stretches of its sound, once")
     }
 
     /// How many stretches of a film's sound the test server was asked for.
