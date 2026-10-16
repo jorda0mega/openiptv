@@ -31,14 +31,16 @@ final class SubtitleSectionTests: XCTestCase {
 
     /// Sixteen one-minute stretches across the film, as the app asks for:
     /// the classifier sure on most spoken lines, unsure on some, noise.
-    private func heard(seed: UInt64 = 3) -> [SubtitleSync.Speech] {
+    /// `late`: stretches whose speech is heard that much later.
+    private func heard(seed: UInt64 = 3, late: [Int: Double] = [:]) -> [SubtitleSync.Speech] {
         var random = Random(seed: seed)
         let step = SubtitleSync.speechStep
         return (0..<16).map { i in
             let start = (4340 * (0.02 + 0.06 * Double(i))).rounded()
+            let off = late[i] ?? 0
             let confidence = (0..<Int(60 / step)).map { j -> Float in
                 let t = start + Double(j) * step
-                let speaking = spoken.contains { $0.start <= t && t < $0.end }
+                let speaking = spoken.contains { $0.start + off <= t && t < $0.end + off }
                 let base = speaking ? (random.next() < 0.75 ? 0.8 : 0.15) : 0.1
                 return Float(min(1, max(0, base + (random.next() - 0.5) * 0.3)))
             }
@@ -120,6 +122,47 @@ final class SubtitleSectionTests: XCTestCase {
         }
         let match = try XCTUnwrap(SubtitleSync.match(srt(slipped), speech: heard(), references: [otherLanguage]))
         XCTAssertEqual(match.sections.count, 1, "\(match.sections)")
+    }
+
+    /// A file in time all through stays one section, though both other
+    /// files are in time only for the first half (made for another cut,
+    /// edited all through the second). Regression: Barrio Brawler's third
+    /// file, in time all through, was split into eight sections between
+    /// −5 and +10 s, some starting before the one before, by its two other
+    /// files (one file twice), in time for its first 45 minutes only.
+    func testReferenceInTimeForPartOfTheFilm() throws {
+        var random = Random(seed: 11)
+        // From 2000 s on, every 150 s: another 3-11 s, early or late.
+        let shifts = (0..<20).map { _ in (random.next() < 0.5 ? -1.0 : 1.0) * (3 + random.next() * 8) }
+        let partly = otherLanguage.cues.map { line -> SubtitleSync.Cue in
+            guard line.start >= 2000 else { return line }
+            let shift = shifts[Int((line.start - 2000) / 150)]
+            return .init(start: line.start + shift, end: line.end + shift)
+        }
+        let copies = [SubtitleSync.Reference(cues: partly, own: false), .init(cues: partly, own: false)]
+        let match = try XCTUnwrap(SubtitleSync.match(srt(spoken), speech: heard(), references: copies))
+        XCTAssertEqual(match.sections.count, 1, "\(match.sections)")
+        XCTAssertEqual(try XCTUnwrap(match.sections.first).delay, 0, accuracy: 0.1)
+    }
+
+    /// Two copies of one file agree with each other whatever the film: with
+    /// nothing else to go by, neither is trusted. (Two copies of a file 4 s
+    /// late put a file in time 4 s late.)
+    func testCopiesOfOneFileAreOneWitness() {
+        let late = otherLanguage.cues.map { SubtitleSync.Cue(start: $0.start + 4, end: $0.end + 4) }
+        let copies = [SubtitleSync.Reference(cues: late, own: false), .init(cues: late, own: false)]
+        XCTAssertNil(SubtitleSync.match(srt(spoken), speech: [], references: copies))
+    }
+
+    /// One minute's speech that fits another shift, the others not: no
+    /// section (a part's best shift is the best of 481, and stands out by
+    /// chance now and then). Regression: Chicks' file got a section 7 s
+    /// early for six minutes from one minute of speech; the film's last
+    /// minute heard 7 s late moved its last nine minutes.
+    func testOneStretchOffIsNotASection() throws {
+        let match = try XCTUnwrap(SubtitleSync.match(srt(spoken), speech: heard(late: [15: 7]), references: []))
+        XCTAssertEqual(match.sections.count, 1, "\(match.sections)")
+        XCTAssertEqual(try XCTUnwrap(match.sections.first).delay, 0, accuracy: 0.1)
     }
 
     /// A file for another release (a minute off, at another frame rate)

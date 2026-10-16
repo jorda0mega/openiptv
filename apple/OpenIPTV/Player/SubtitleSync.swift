@@ -274,6 +274,13 @@ enum SubtitleSync {
     /// a few parts that agree do.
     private static let newSection = 6.0
     private static let strayGap = 2.0
+    /// A section among others needs this many measurements at its shift
+    /// (within `sameShift`), and more than half of its measurements: a
+    /// part's best shift is the best of 481, so by chance alone it stands
+    /// out as much as a real one (by 2-4.5) now and then. Chicks' speech
+    /// made one minute 7 s off on its own; three of twenty parts of a file
+    /// for another cut agreed by chance.
+    private static let sectionParts = 2
     /// Shifts within this of each other (seconds) are one section.
     private static let sameShift = 0.5
 
@@ -331,12 +338,22 @@ enum SubtitleSync {
             let spread = range.reduce(0.0) { $0 + parts[points[$1]].clarity * min(strayGap, abs(parts[points[$1]].shift! - level)) }
             return (spread, level)
         }
+        // A section among others: enough measurements at its shift, and
+        // most. (Parts measured by the same speech alone, the same stretch,
+        // measure the same: one measurement.)
+        func holds(_ range: Range<Int>, _ level: Double) -> Bool {
+            let measured = Set(range.map { SIMD2(parts[points[$0]].shift!, parts[points[$0]].clarity) })
+            let agreeing = measured.filter { abs($0.x - level) <= sameShift }.count
+            return agreeing >= sectionParts && 2 * agreeing > measured.count
+        }
         var best = [0.0] + [Double](repeating: .infinity, count: points.count)
         var start = [Int](repeating: 0, count: points.count + 1)
         if !points.isEmpty {
             for k in 1...points.count {
                 for first in 0..<k {
-                    let total = best[first] + cost(first..<k).0 + (first > 0 ? newSection : 0)
+                    let (spread, level) = cost(first..<k)
+                    if first > 0 || k < points.count, !holds(first..<k, level) { continue }
+                    let total = best[first] + spread + (first > 0 ? newSection : 0)
                     if total < best[k] { best[k] = total; start[k] = first }
                 }
             }
@@ -370,9 +387,9 @@ enum SubtitleSync {
             }
             // Somewhere from the previous run's last part to this run's
             // first (the file's own times): the pause that splits the lines
-            // best.
+            // best. (The parts are where the whole file's shift put them.)
             let previous = sections[n - 1], next = Section(from: 0, delay: shift, speed: speed)
-            let lower = (parts[runs[n - 1].last].from - previous.delay) / speed, upper = (parts[run.first].to - shift) / speed
+            let lower = max(previous.from, (parts[runs[n - 1].last].from - delay) / speed), upper = (parts[run.first].to - delay) / speed
             let at = cut(all, between: lower, and: upper, from: previous, to: next, references: trusted, heard: heard)
             sections.append(Section(from: at, delay: shift, speed: speed))
         }
@@ -426,13 +443,16 @@ enum SubtitleSync {
     /// speech heard puts it in time (within half a second, unstretched), or
     /// when another reference already trusted, or another file, lines up
     /// with it as it is. (A file for another release, off by a minute at
-    /// another frame rate, would put everything wrong.) At most eight, the
+    /// another frame rate, would put everything wrong.) Copies of one file
+    /// (the same times) are one file: they agree whatever the film, and
+    /// only one is kept. Each file other than the film's own is then kept
+    /// only where it's in time (`kept(_:own:heard:)`). At most eight, the
     /// film's own first.
     private static func trustedReferences(_ references: [Reference], heard: [Speech]) -> [[Cue]] {
         let own = references.filter(\.own).map(\.cues)
         var others = references.filter { !$0.own }.map(\.cues).filter { $0.count >= 10 }.prefix(8).map { $0 }
         func inTime(_ fit: Fit?) -> Bool { fit.map { abs($0.delay) <= 0.5 && $0.speed == 1 } ?? false }
-        var trusted = own
+        var trusted: [[Cue]] = []
         var undecided: [[Cue]] = []
         for other in others {
             if own.contains(where: { inTime(fit(other, to: $0)) }) || (!heard.isEmpty && inTime(fit(other, toSpeech: heard))) {
@@ -445,14 +465,78 @@ enum SubtitleSync {
         others = undecided
         var agreed = Set<Int>()
         for i in others.indices {
-            for j in others.indices where j > i && inTime(fit(others[i], to: others[j])) {
+            for j in others.indices where j > i && !sameTimes(others[i], others[j]) && inTime(fit(others[i], to: others[j])) {
                 agreed.insert(i)
                 agreed.insert(j)
             }
         }
         trusted += agreed.sorted().map { others[$0] }
-        return Array(trusted.prefix(8))
+        trusted = trusted.map { kept($0, own: own, heard: heard) }.filter { $0.count >= 10 }
+        var distinct: [[Cue]] = []
+        for reference in own + trusted where !distinct.contains(where: { sameTimes(reference, $0) }) { distinct.append(reference) }
+        return Array(distinct.prefix(8))
     }
+
+    /// Whether most of `a`'s lines start when one of `b`'s does (within
+    /// 0.02 s): copies of one file, or translations on its times.
+    private static func sameTimes(_ a: [Cue], _ b: [Cue]) -> Bool {
+        let starts = b.map(\.start).sorted()
+        guard !a.isEmpty, !starts.isEmpty else { return false }
+        let same = a.filter { line in
+            var low = 0, high = starts.count
+            while low < high { let mid = (low + high) / 2; if starts[mid] < line.start - 0.02 { low = mid + 1 } else { high = mid } }
+            return low < starts.count && starts[low] <= line.start + 0.02
+        }.count
+        return Double(same) / Double(a.count) >= 0.8
+    }
+
+    /// `file` (another subtitle file, trusted as a whole) kept only where
+    /// it's in time as it is. Judged by each stretch of speech heard and
+    /// each `judgeLength` of the film's own track: in time where no shift
+    /// fits clearly better than none (within `judgeMargin`), out where one
+    /// does. Kept from the film's start to its end except where a judge
+    /// finds it out, up to the nearest judges either side that find it in
+    /// time. Whole when no judge can tell. A file for another cut is in
+    /// time only up to the first cut: two of Barrio Brawler's files (one
+    /// file twice) were in time for its first 45 minutes, then off by
+    /// 3-12 s, and split its third, in time all through, into eight
+    /// sections between −5 and +10 s.
+    private static func kept(_ file: [Cue], own: [[Cue]], heard: [Speech]) -> [Cue] {
+        var verdicts: [(from: Double, to: Double, inTime: Bool)] = []
+        func judge(from: Double, length: Double, references: [[Cue]], heard: [Speech]) {
+            guard let curve = partCurve(file, file, from: from, length: length, references: references, heard: heard),
+                  let top = curve.indices.max(by: { curve[$0] < curve[$1] }), curve[top] >= partTrust else { return }
+            verdicts.append((from, from + length, curve[top] - curve[curve.count / 2] <= judgeMargin))
+        }
+        for stretch in heard {
+            judge(from: stretch.start, length: Double(stretch.confidence.count) * step, references: [], heard: [stretch])
+        }
+        for reference in own {
+            var from = reference.map(\.start).min() ?? 0
+            let last = reference.map(\.end).max() ?? 0
+            while from < last {
+                judge(from: from, length: judgeLength, references: [reference], heard: [])
+                from += judgeLength
+            }
+        }
+        verdicts.sort { $0.from < $1.from }
+        var out: [(from: Double, to: Double)] = []
+        for (k, verdict) in verdicts.enumerated() where !verdict.inTime {
+            let before = verdicts[..<k].last { $0.inTime }?.to ?? -.infinity
+            let after = verdicts[(k + 1)...].first { $0.inTime }?.from ?? .infinity
+            out.append((before, after))
+        }
+        return file.filter { line in !out.contains { line.start >= $0.from && line.start < $0.to } }
+    }
+
+    /// What a judge of `kept(_:own:heard:)` covers of the film's own track
+    /// (seconds).
+    private static let judgeLength = 300.0
+    /// How much better (in standard deviations) another shift must fit than
+    /// none for a judge to find a file out of time. Barrio Brawler's parts
+    /// in time measured up to 0.9 better elsewhere by chance; against its
+    /// two files where they were off, 1.1-4.5.
+    private static let judgeMargin: Float = 1
 
     /// For the part of the film from `from` (`length` long): how well each
     /// shift within `partReach` lines `file` (already placed by the whole
