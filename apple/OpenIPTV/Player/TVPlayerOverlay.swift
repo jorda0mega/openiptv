@@ -266,7 +266,7 @@ struct TVPlayerInfoTab: View {
             .glassEffect(focused ? .identity : selected ? .regular.tint(.white.opacity(0.3)) : .regular, in: .capsule)
             .scaleEffect(focused ? 1.05 : 1)
             .shadow(color: .black.opacity(focused ? 0.3 : 0), radius: 12, y: 6)
-            .accessibilityIdentifier(title == "Info" ? "player.info.tab" : "player.episodes.tab")
+            .accessibilityIdentifier("player.\(title.lowercased().replacingOccurrences(of: " ", with: "")).tab")
             .accessibilityAddTraits(focused ? [.isButton, .isSelected] : .isButton)
     }
 }

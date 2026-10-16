@@ -215,6 +215,22 @@ GUIDE_TITLES = ["The Simpsons", "Friends", "SportsCenter", "World News Tonight",
                 "NBA Today", "College GameDay", "Pardon the Interruption", "The Daily Show", "Saturday Night Live",
                 "Shark Tank", "Survivor", "Grey's Anatomy", "Chicago Fire", "NCIS", "Blue Bloods", "Yellowstone"]
 LINEUP = None
+
+# /mock/set?sports=1: one game listed by three services, as real event
+# lists name them, in English, Spanish and French (Watch On).
+SPORTS_CATEGORIES = [("10", "NFL"), ("11", "ESPN Unlimited"), ("12", "DAZN CA")]
+
+
+def sports_games(now):
+    start = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - 1200))
+    games = [("NFL 01: Eagles vs. Jaguars", "10"),
+             ("ESPN UNLTD 015: Football: Eagles vs. Jaguars", "11"),
+             ("ESPN UNLTD 016: Football: Eagles vs. Jaguars (Eagles vs. Jaguars (ESP))", "11"),
+             ("DAZN CA 17: Eagles vs. Jaguars", "12"),
+             ("DAZN CA 19: Eagles vs. Jaguars (In French)", "12")]
+    return [{"num": 2001 + n, "name": f"{name} ({start})", "stream_id": str(2001 + n), "stream_icon": "",
+             "epg_channel_id": None, "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0}
+            for n, (name, cat) in enumerate(games)]
 if os.environ.get("OPENIPTV_MOCK_LINEUP"):
     with open(os.environ["OPENIPTV_MOCK_LINEUP"]) as f:
         LINEUP = json.load(f)
@@ -457,7 +473,11 @@ class Handler(BaseHTTPRequestHandler):
         if action == "get_live_categories":
             return self.send([{"category_id": "1", "category_name": "UK", "parent_id": 0},
                               {"category_id": "2", "category_name": "US | Local ABC", "parent_id": 0},
-                              {"category_id": "3", "category_name": "US | Local CBS", "parent_id": 0}])
+                              {"category_id": "3", "category_name": "US | Local CBS", "parent_id": 0}]
+                             + ([{"category_id": c, "category_name": n, "parent_id": 0} for c, n in SPORTS_CATEGORIES]
+                                if CONTROL.get("sports") == "1" else []))
+        if action == "get_live_streams" and CONTROL.get("sports") == "1" and q.get("category_id") in dict(SPORTS_CATEGORIES):
+            return self.send([g for g in sports_games(now) if g["category_id"] == q["category_id"]])
         if action == "get_live_streams":
             # A few local stations, named the way real providers name them.
             local = [("TX: ABC 13 Houston (KTRK)", "2"), ("TX: ABC 8 Dallas (WFAA)", "2"), ("NY: ABC 7 New York (WABC)", "2"),
@@ -468,7 +488,8 @@ class Handler(BaseHTTPRequestHandler):
                  "tv_archive": i % 2, "tv_archive_duration": "7" if i % 2 else 0}
                 for i in range(1, CHANNELS + 1)
             ] + [{"num": 900 + n, "name": name, "stream_id": str(900 + n), "stream_icon": "", "epg_channel_id": None,
-                  "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0} for n, (name, cat) in enumerate(local)])
+                  "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0} for n, (name, cat) in enumerate(local)]
+              + (sports_games(now) if CONTROL.get("sports") == "1" else []))
         if action == "get_simple_data_table":
             # A channel's schedule two days back to a day ahead; channels with
             # archives mark what's recorded.

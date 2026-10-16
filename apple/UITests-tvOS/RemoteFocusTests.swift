@@ -672,9 +672,10 @@ final class RemoteFocusTests: XCTestCase {
     /// Sets the test server's behaviour (scripts/mock_server.py, /mock/set).
     private func configure(_ server: URL, _ settings: [String: String]) {
         let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
-        let done = expectation(description: "configure")
-        URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
-        wait(for: [done], timeout: 10)
+        // A semaphore, not an expectation: it runs in tear-down too.
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: url) { _, _, _ in done.signal() }.resume()
+        _ = done.wait(timeout: .now() + 10)
     }
 
     /// The player's second, from its debug readout ("72.4 playing").
@@ -881,6 +882,76 @@ final class RemoteFocusTests: XCTestCase {
         sleep(2)
         shot("home")
         XCTAssertTrue(app.buttons["More Info"].exists, "no featured title")
+    }
+
+    /// A game on several channels (the test server's `sports=1`): it plays
+    /// on the best one; with the controls up Select opens Watch On, the
+    /// remote moves along it, Select plays the one it's on, and that one
+    /// plays first for the league's games after.
+    func testWatchOnRemote() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0"]) }
+        // The test server's channels (its test login, for this run).
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        sleep(8)
+        toGame()
+        XCTAssertTrue(focused().contains("Jaguars"), "the game isn't in Sports: \(focused())")
+        press(.select, "play the game")
+        XCTAssertTrue(playing("NFL 01"), "the game didn't start on the best channel: \(liveCopy())")
+        let cards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'player.watchon.' AND identifier != 'player.watchon.tab'"))
+        // Controls up, then Watch On (Select shows them if they'd gone).
+        for _ in 0..<2 where !cards.firstMatch.exists { press(.select, "watch on") }
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 3), "Select didn't open Watch On")
+        XCTAssertEqual(cards.count, 5, "not every channel showing the game")
+        shot("watch on")
+        let spanish = cards.matching(NSPredicate(format: "label CONTAINS 'Spanish'")).firstMatch
+        for _ in 0..<5 where !spanish.isSelected { press(.right, "along") }
+        XCTAssertTrue(spanish.isSelected, "the remote didn't reach the Spanish feed")
+        press(.select, "pick")
+        XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't open: \(liveCopy())")
+        XCTAssertTrue(started(), "the channel picked didn't play")
+        press(.menu, "leave")
+        toGame()
+        press(.select, "the game again")
+        XCTAssertTrue(playing("ESPN UNLTD 016"), "the league's pick didn't play first: \(liveCopy())")
+    }
+
+    /// Down from the tab bar to the game's card: the Live TV list opens
+    /// on Sports, its NFL opens the league's games.
+    private func toGame() {
+        for _ in 0..<6 where !focused().contains("Jaguars") {
+            if focused().contains("label='NFL") { press(.select, "nfl") } else { press(.down, "down to the game") }
+        }
+    }
+
+    /// The live player shows a picture within 15 s.
+    private func started() -> Bool {
+        let readout = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            if readout.exists, readout.label == "playing" { return true }
+            usleep(250_000)
+        }
+        return false
+    }
+
+    private func liveCopy() -> String {
+        app.staticTexts["debug-live-copy"].firstMatch.label
+    }
+
+    /// The live player's channel starts with `name`, within 10 s.
+    private func playing(_ name: String) -> Bool {
+        let readout = app.staticTexts["debug-live-copy"].firstMatch
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if readout.exists, readout.label.hasPrefix(name) { return true }
+            usleep(250_000)
+        }
+        return false
     }
 
     /// Sports in the list: Select opens its leagues (with live counts), and

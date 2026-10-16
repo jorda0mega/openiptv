@@ -270,14 +270,15 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
         ZStack {
             TVPlayerShade(full: true)
             if busy { ProgressView().controlSize(.large) }
-            TVPlayerLayout(showsBelow: false) {
+            TVPlayerLayout(showsBelow: !pills.isEmpty) {
                 TVPlayerTitles(caption: caption, title: title, note: note) { accessory }
             } buttons: {
                 trailing
             } bar: {
                 bar
             } below: {
-                EmptyView()
+                // Lit: Select opens it (the live player's Watch On).
+                ForEach(pills) { pill in TVPlayerInfoTab(title: pill.title, focused: true) }
             }
         }
     }
@@ -441,6 +442,7 @@ struct PlayerInfoPanelView: View {
                                     Button(action: card.action) { pictureCard(card) }
                                         .buttonStyle(.plain)
                                         .accessibilityLabel(label(card))
+                                        .accessibilityIdentifier("player.card.\(card.id)")
                                     more(card)
                                 }
                                 .id(card.id)
@@ -465,6 +467,7 @@ struct PlayerInfoPanelView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(label(card))
+                                    .accessibilityIdentifier("player.card.\(card.id)")
                                     more(card)
                                 }
                                 .id(card.id)

@@ -48,6 +48,15 @@ struct LivePlayerView: View {
     /// Copies of this channel already tried (the provider often lists one
     /// channel several times; if one won't start, the next is tried).
     @State private var tried: Set<String> = []
+    /// The copy open now.
+    @State private var playingCopy: LiveChannel?
+    /// A game: every channel showing it, the one to play first at the top
+    /// ("Watch On"); empty for anything else.
+    @State private var choices: [AppModel.WatchChoice] = []
+    /// Watch On open: iPhone's panel, Apple TV's row (and the card the
+    /// remote is on).
+    @State private var showWatchOn = false
+    @State private var watchOnIndex = 0
 
     struct Window: Equatable {
         var start: Double
@@ -83,6 +92,10 @@ struct LivePlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
+            #if DEBUG
+            debugReadout(playingCopy?.name ?? "", "debug-live-copy")
+            debugReadout(error != nil ? "failed" : started ? "playing" : "starting", "debug-live-state")
+            #endif
         }
         #if os(iOS)
         .statusBarHidden(!controlsVisible)
@@ -92,7 +105,11 @@ struct LivePlayerView: View {
         }
         #else
         .focusable()
+        // Select on the remote (the picture's own tap reached it only with
+        // the controls hidden).
+        .onTapGesture { pictureTapped() }
         .onMoveCommand { direction in
+            if showWatchOn { return moveInWatchOn(direction) }
             switch direction {
             case .up: step(-1)
             case .down: step(1)
@@ -102,7 +119,7 @@ struct LivePlayerView: View {
             }
         }
         .onPlayPauseCommand { error == nil ? togglePause() : play() }
-        .onExitCommand { close() }
+        .onExitCommand { showWatchOn ? closeWatchOn() : close() }
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
@@ -124,15 +141,29 @@ struct LivePlayerView: View {
     /// in, or the whole recording) with LIVE beside it; rotate and a "…"
     /// menu (guide, start over, channels) at the top. Swipe up or down on
     /// the picture to change channel.
-    private var controls: some View {
+    @ViewBuilder private var controls: some View {
         // This channel's own slot, as the rows read it: the guide filling in
         // for other channels doesn't redraw the player.
         let info = model.slot(channel.id).value
         let event = recording == nil ? model.event(of: channel) : nil
-        return PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
+        #if os(tvOS)
+        if showWatchOn {
+            TVWatchOnRow(choices: choices, playing: playingCopy?.id, focused: watchOnIndex)
+                .transition(.opacity.combined(with: .offset(y: 40)))
+        } else {
+            chrome(info: info, event: event)
+        }
+        #else
+        chrome(info: info, event: event)
+        #endif
+    }
+
+    private func chrome(info: NowNext?, event: LiveOrganizer.Event?) -> some View {
+        PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
                             note: note, paused: paused, canGoForward: !(recording == nil && atLive),
                             busy: (buffering || !started) && error == nil, ready: started,
-                            pills: livePills,
+                            pills: livePills, selectedPill: showWatchOn ? "Watch On" : nil,
+                            panel: watchOnPanel,
                             close: { close() }, back: { skip(-10) },
                             playPause: { error == nil ? togglePause() : retry() }, forward: { skip(10) }) {
             #if os(iOS)
@@ -151,8 +182,8 @@ struct LivePlayerView: View {
     private var picture: some View {
         Color.clear
             .contentShape(Rectangle())
-            .onTapGesture { toggleControls() }
             #if os(iOS)
+            .onTapGesture { pictureTapped() }
             .gesture(
                 DragGesture(minimumDistance: 40).onEnded { value in
                     guard abs(value.translation.height) > abs(value.translation.width) else { return }
@@ -248,13 +279,93 @@ struct LivePlayerView: View {
         #endif
     }
 
-    /// iPhone: the guide, under the bar like the Apple TV app's pills.
+    /// iPhone: the guide, under the bar like the Apple TV app's pills. A
+    /// game on more than one channel: Watch On (Apple TV: under the bar,
+    /// Select opens it).
     private var livePills: [PlayerAction] {
+        var pills: [PlayerAction] = []
         #if os(iOS)
-        [PlayerAction(title: "Guide") { showGuide = true }]
-        #else
-        []
+        pills.append(PlayerAction(title: "Guide") { showGuide = true })
         #endif
+        if recording == nil, choices.count > 1 { pills.append(PlayerAction(title: "Watch On") { toggleWatchOn() }) }
+        return pills
+    }
+
+    // MARK: Watch On
+
+    /// iPhone: the channels showing the game, as in the Apple TV app's
+    /// Episodes panel: the service, then the feed, language and picture;
+    /// "Playing" on the one playing. A tap switches to it.
+    private var watchOnPanel: PlayerInfoPanel? {
+        #if os(iOS)
+        guard showWatchOn else { return nil }
+        return PlayerInfoPanel(title: "Watch On", meta: "", cards: choices.map { choice in
+            let playing = choice.id == playingCopy?.id
+            let line = WatchOn.line(choice.feed, quality: choice.quality)
+            let subtitle = [playing ? "Playing" : nil, line.isEmpty ? nil : line].compactMap(\.self).joined(separator: " · ")
+            return PlayerCard(id: choice.id, title: choice.feed.service, subtitle: subtitle.isEmpty ? nil : subtitle,
+                              images: choice.channel.logo.map { [CardImage(url: $0.absoluteString, contain: true)] } ?? [],
+                              loading: playing && !started && error == nil) { watch(on: choice) }
+        }, focus: playingCopy?.id)
+        #else
+        return nil
+        #endif
+    }
+
+    private func toggleWatchOn() {
+        if showWatchOn { return closeWatchOn() }
+        watchOnIndex = choices.firstIndex { $0.id == playingCopy?.id } ?? 0
+        withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) { showWatchOn = true }
+        // Open: the controls stay until it's closed.
+        showControls(autoHide: false)
+    }
+
+    private func closeWatchOn() {
+        withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) { showWatchOn = false }
+        showControls()
+    }
+
+    #if os(tvOS)
+    /// Apple TV: left and right along the row, up closes it.
+    private func moveInWatchOn(_ direction: MoveCommandDirection) {
+        switch direction {
+        case .left: watchOnIndex = max(0, watchOnIndex - 1)
+        case .right: watchOnIndex = min(choices.count - 1, watchOnIndex + 1)
+        case .up: closeWatchOn()
+        default: break
+        }
+    }
+    #endif
+
+    /// The channel picked: it plays, and is first for this league's games
+    /// from now on.
+    private func watch(on choice: AppModel.WatchChoice) {
+        if let league = model.event(of: channel)?.league { model.pickWatchChoice(choice, league: league) }
+        withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) { showWatchOn = false }
+        guard choice.id != playingCopy?.id else { return showControls() }
+        reset()
+        recording = nil
+        tried = [choice.id]
+        open(choice.channel)
+        showControls()
+    }
+
+    /// The picture's tap (Apple TV: Select): shows or hides the controls.
+    /// Apple TV, a game on more than one channel: with the controls up it
+    /// opens Watch On, and there plays the card the remote is on.
+    private func pictureTapped() {
+        #if os(tvOS)
+        if showWatchOn {
+            if choices.indices.contains(watchOnIndex) { watch(on: choices[watchOnIndex]) }
+            return
+        }
+        if controlsVisible {
+            if livePills.contains(where: { $0.title == "Watch On" }) { toggleWatchOn() }
+            return
+        }
+        #endif
+        if showWatchOn { return closeWatchOn() }
+        toggleControls()
     }
 
     #if os(iOS)
@@ -349,19 +460,23 @@ struct LivePlayerView: View {
         play()
     }
 
-    /// Live, after `delay` seconds (zapping quickly).
-    private func play(after delay: Double = 0) {
+    /// Live, after `delay` seconds (zapping quickly). A game: on the
+    /// channel that comes first in Watch On, unless `copy` says which.
+    private func play(after delay: Double = 0, copy: LiveChannel? = nil) {
         reset()
         recording = nil
-        tried = [channel.id]
+        choices = model.watchChoices(for: channel)
+        let first = copy ?? choices.first?.channel ?? channel
+        tried = [first.id]
         model.noteChannel(channel.id)
-        open(channel, after: delay)
+        open(first, after: delay)
         showAround()
         showControls()
     }
 
     /// Opens one copy of the channel.
     private func open(_ copy: LiveChannel, after delay: Double = 0) {
+        playingCopy = copy
         loadTask?.cancel()
         loadTask = Task {
             if delay > 0 {
@@ -382,8 +497,10 @@ struct LivePlayerView: View {
     /// The next copy of this channel, if one hasn't been tried; false when
     /// there's none left.
     private func fallBack() -> Bool {
-        guard recording == nil, !started,
-              let next = model.copies(of: channel).first(where: { !tried.contains($0.id) }) else { return false }
+        guard recording == nil, !started else { return false }
+        if let playingCopy { model.noteLiveFailure(playingCopy) }
+        let copies = choices.isEmpty ? model.copies(of: channel) : choices.map(\.channel)
+        guard let next = copies.first(where: { !tried.contains($0.id) }) else { return false }
         tried.insert(next.id)
         timing = "Trying another copy…"
         open(next)
@@ -464,7 +581,7 @@ struct LivePlayerView: View {
         case .ended:
             // A recording finished, or the provider closed the stream (a long
             // pause can outlast what it holds): carry on live.
-            if started { play() } else if !fallBack() { fail("The channel stopped before it started.") }
+            if started { play(copy: recording == nil ? playingCopy : nil) } else if !fallBack() { fail("The channel stopped before it started.") }
         default:
             break
         }
@@ -537,6 +654,7 @@ struct LivePlayerView: View {
     }
 
     private func step(_ delta: Int) {
+        showWatchOn = false
         index = (index + delta + channels.count) % channels.count
         let quick = Date().timeIntervalSince(lastStep) < 0.8
         lastStep = Date()
@@ -560,10 +678,23 @@ struct LivePlayerView: View {
         guard autoHide, started, error == nil, !paused else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))
-            guard !Task.isCancelled, started, error == nil, !paused, scrubbing == nil, !showGuide, !showMore else { return }
+            guard !Task.isCancelled, started, error == nil, !paused, scrubbing == nil, !showGuide, !showMore, !showWatchOn else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
         }
     }
+
+    #if DEBUG
+    /// For UI tests: the copy open, and whether it plays.
+    private func debugReadout(_ text: String, _ id: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .lineLimit(1)
+            .frame(width: 1, height: 1)
+            .opacity(0.02)
+            .accessibilityLabel(text)
+            .accessibilityIdentifier(id)
+    }
+    #endif
 
     static func time(_ seconds: Double) -> String {
         let s = Int(seconds.rounded())

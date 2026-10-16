@@ -12,6 +12,7 @@ struct OpenIPTVApp: App {
     init() {
         TrackChoice.forgetForTesting()
         AppModel.forgetMyListOrderForTesting()
+        AppModel.forgetWatchOnPicksForTesting()
     }
     #endif
 

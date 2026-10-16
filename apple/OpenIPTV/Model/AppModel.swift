@@ -58,6 +58,8 @@ final class AppModel {
     /// search; and channels from abroad, listed after the rest.
     @ObservationIgnored private var guideChannels: [String: LiveChannel] = [:]
     @ObservationIgnored private var abroad: Set<String> = []
+    /// Channels that wouldn't start, and when: games try others first.
+    @ObservationIgnored private var liveFailures: [String: Date] = [:]
     /// A provider category chosen from the full list (rather than a shelf):
     /// kept until the lineup next loads.
     var browsingProviderCategory = false
@@ -96,6 +98,10 @@ final class AppModel {
         if let raw = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_EMBY"],
            let account = try? JSONDecoder().decode(EmbyAccount.self, from: Data(raw.utf8)) {
             sources.useTemporaryEmby(account)
+        }
+        if let raw = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_IPTV"],
+           let source = try? JSONDecoder().decode(IPTVSource.self, from: Data(raw.utf8)) {
+            sources.useTemporaryIPTV(source)
         }
         #endif
         selectedCategory = UserDefaults.standard.string(forKey: "category")
@@ -1627,7 +1633,7 @@ final class AppModel {
             liveErrors = []
             return
         }
-        if allChannels.isEmpty, let saved = await Self.savedLineup(), saved.sources == iptv.map(\.id) {
+        if allChannels.isEmpty, !Self.freshLineup, let saved = await Self.savedLineup(), saved.sources == iptv.map(\.id) {
             await applyLineup(categories: saved.categories, channels: saved.channels)
             // Saved within the hour: good as it is (event categories are
             // fetched again on their own when opened). Not playlists': their
@@ -1951,6 +1957,51 @@ final class AppModel {
         liveLibrary.events[channel.id]
     }
 
+    /// One of the channels showing a game ("Watch On").
+    struct WatchChoice: Identifiable {
+        let channel: LiveChannel
+        let feed: WatchOn.Feed
+        /// "HD", "SD"; nil when the name doesn't say.
+        let quality: String?
+        var id: String { channel.id }
+    }
+
+    /// Every channel showing this game, the one to play first at the top
+    /// (see WatchOn.ranked); empty unless it's a game on more than one.
+    func watchChoices(for channel: LiveChannel) -> [WatchChoice] {
+        guard let event = event(of: channel) else { return [] }
+        let copies = copies(of: channel)
+        guard copies.count > 1 else { return [] }
+        let choices = copies.map { copy in
+            let feed = liveLibrary.feeds[copy.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
+            return WatchChoice(channel: current(copy), feed: feed, quality: WatchOn.quality(of: copy.name).label)
+        }
+        let byId = Dictionary(choices.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let options = choices.map { WatchOn.Option(id: $0.id, feed: $0.feed, quality: WatchOn.quality(of: $0.channel.name).score) }
+        let lately = Set(liveFailures.filter { Date().timeIntervalSince($0.value) < 600 }.keys)
+        return WatchOn.ranked(options, pick: watchPicks[event.league],
+                              preferred: WatchOn.preferredLanguage(league: event.league, title: title(of: channel)),
+                              failed: lately).compactMap { byId[$0.id] }
+    }
+
+    /// A channel picked in Watch On: first for this league's games from
+    /// now on.
+    func pickWatchChoice(_ choice: WatchChoice, league: String) {
+        var picks = watchPicks
+        picks[league] = WatchOn.Pick(service: choice.feed.service, language: choice.feed.language)
+        UserDefaults.standard.set(try? JSONEncoder().encode(picks), forKey: "watchOnPicks")
+    }
+
+    /// A channel that wouldn't start: for the next ten minutes, games try
+    /// the others first.
+    func noteLiveFailure(_ channel: LiveChannel) {
+        liveFailures[channel.id] = Date()
+    }
+
+    private var watchPicks: [String: WatchOn.Pick] {
+        UserDefaults.standard.data(forKey: "watchOnPicks").flatMap { try? JSONDecoder().decode([String: WatchOn.Pick].self, from: $0) } ?? [:]
+    }
+
     /// Event lists change names game by game: when Sports opens, the ones
     /// not fetched in the last 15 minutes are fetched again (four at a
     /// time) and applied together.
@@ -1997,6 +2048,7 @@ final class AppModel {
     /// Playlist stream URLs can hold a login, so they're saved blank and
     /// the providers' current lineup supplies them.
     private nonisolated static func saveLineup(sources: [UUID], categories: [LiveCategory], channels: [LiveChannel]) {
+        guard !freshLineup else { return }
         Task.detached(priority: .utility) {
             AppCache.write(lineupFile, SavedLineup(sources: sources, categories: categories,
                                                    channels: channels.map(\.withoutSecrets), savedAt: Date()))
@@ -2271,6 +2323,21 @@ extension AppModel {
 
     /// Every copy on My List the last time this device read it.
     private static let myListSeenKey = "myListSeen"
+
+    #if DEBUG
+    /// UI tests: `-forgetWatchOnPicks YES` at launch starts with no channel
+    /// picked for any league.
+    static func forgetWatchOnPicksForTesting() {
+        guard UserDefaults.standard.bool(forKey: "forgetWatchOnPicks") else { return }
+        UserDefaults.standard.removeObject(forKey: "watchOnPicks")
+    }
+
+    /// UI tests: `-freshLineup YES` asks the provider for its lineup at
+    /// launch, and keeps it for this run only (the saved one stays).
+    private nonisolated static var freshLineup: Bool { UserDefaults.standard.bool(forKey: "freshLineup") }
+    #else
+    private nonisolated static let freshLineup = false
+    #endif
 
     #if DEBUG
     /// UI tests: `-forgetMyListOrder YES` at launch starts with no order

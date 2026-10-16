@@ -1,0 +1,140 @@
+import Foundation
+
+/// "Watch On": the channels showing one game, side by side. Each one's
+/// service, feed, commentary language and picture; which plays first.
+enum WatchOn {
+    /// What one channel's listing says about how it shows a game.
+    struct Feed: Hashable, Sendable {
+        /// The category listing it ("ESPN Unlimited", "DAZN CA").
+        let service: String
+        /// Its network or feed ("ESPN2", "Sharks Broadcast").
+        var detail: String?
+        /// The commentary's language ("es", "fr"); nil for the main one.
+        var language: String?
+    }
+
+    /// One channel showing the game, as the ranking sees it.
+    struct Option: Hashable, Sendable {
+        let id: String
+        let feed: Feed
+        /// The picture, as `quality(of:)` scores it.
+        var quality: Int
+    }
+
+    /// The channel picked for a league last time: its service and language.
+    struct Pick: Codable, Hashable, Sendable {
+        let service: String
+        let language: String?
+    }
+
+    // MARK: Language
+
+    /// "(ESP)", "(Spanish Broadcast)", "(In French)": a feed's language,
+    /// after the game's name.
+    private static let marker = try! NSRegularExpression(
+        pattern: #"\s*\(\s*(?:in\s+)?(esp|spa|spn|spanish|espa[ñn]ol|castellano|french|fran[çc]ais|fr)(?:\s+(?:broadcast|feed|audio|commentary|language|version))?\s*\)"#,
+        options: [.caseInsensitive])
+    /// "En Español-Elche CF vs. Celta de Vigo".
+    private static let spanishLead = try! NSRegularExpression(pattern: #"^\s*en\s+espa[ñn]ol\s*[-–:]\s*"#, options: [.caseInsensitive])
+    /// Networks that only speak one language. Not "Deportes" or "Español"
+    /// alone: teams have them (Deportes Tolima, Español Osorno).
+    private static let networks: [(pattern: String, language: String)] = [
+        (#"\b(espn|fox|bein sports|bein)\s*deportes\b"#, "es"), (#"\b(tudn|univision|unimas|telemundo|galavisi[oó]n)\b"#, "es"),
+        (#"\btv ?azteca\b"#, "es"), (#"\b(bein sports|bein)\s*(ñ|espa[ñn]ol)\b"#, "es"), (#"\bspanish (broadcast|feed|audio|commentary)\b"#, "es"),
+        (#"\ben espa[ñn]ol\b"#, "es"), (#"\b(rds|tva sports)\b"#, "fr"), (#"\bfrench (broadcast|feed|audio|commentary)\b"#, "fr"),
+    ]
+    private static let spanishRegions: Set<String> = ["ES", "MX", "AR", "CL", "CO", "PE", "CR", "DO", "SV", "PA", "PR", "LAT"]
+
+    /// A game's name without its language marker, and the language it named.
+    static func withoutLanguage(_ title: String) -> (title: String, language: String?) {
+        var title = title
+        var language: String?
+        let range = NSRange(title.startIndex..., in: title)
+        if let match = spanishLead.firstMatch(in: title, range: range), let cut = Range(match.range, in: title) {
+            title.removeSubrange(cut)
+            language = "es"
+        }
+        while let match = marker.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+              let cut = Range(match.range, in: title), let word = Range(match.range(at: 1), in: title) {
+            language = code(String(title[word]))
+            title.removeSubrange(cut)
+        }
+        return (title.trimmingCharacters(in: .whitespaces), language)
+    }
+
+    /// The language a channel's name or category gives its commentary;
+    /// nil when it doesn't say.
+    static func language(in text: String) -> String? {
+        if let marked = withoutLanguage(text).language { return marked }
+        let lower = text.lowercased()
+        return networks.first { lower.range(of: $0.pattern, options: .regularExpression) != nil }?.language
+    }
+
+    /// A category's region's language: Spanish for Spain and Latin America,
+    /// French for France.
+    static func language(ofRegion region: String?) -> String? {
+        guard let region else { return nil }
+        if spanishRegions.contains(region) { return "es" }
+        return region == "FR" ? "fr" : nil
+    }
+
+    /// The language to hear a game in: Spanish for Spanish and Latin
+    /// American football, otherwise the main (English) commentary.
+    static func preferredLanguage(league: String, title: String) -> String? {
+        let text = "\(league) \(title)".lowercased()
+        let spanish = ["la liga", "laliga", "liga mx", "copa del rey", "libertadores", "sudamericana", "liga profesional",
+                       "primera división", "primera division", "liga betplay", "segunda división", "segunda division"]
+        return spanish.contains { text.contains($0) } ? "es" : nil
+    }
+
+    static func languageName(_ code: String) -> String {
+        Locale(identifier: "en").localizedString(forLanguageCode: code) ?? code.uppercased()
+    }
+
+    private static func code(_ word: String) -> String {
+        let lower = word.lowercased()
+        return lower.hasPrefix("fr") ? "fr" : "es"
+    }
+
+    // MARK: Picture
+
+    /// The picture a channel's name promises: 6 full HD, 5 HD or 4K, 4
+    /// unsaid, 2 SD, 1 low bandwidth, 0 a backup; and its label.
+    static func quality(of name: String) -> (score: Int, label: String?) {
+        let upper = name.uppercased()
+        let words = Set(upper.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
+        if upper.contains("BACKUP") { return (0, "Backup") }
+        if upper.hasPrefix("LBW") || upper.contains("(LBW)") { return (1, "Low Bandwidth") }
+        if words.contains("FHD") || upper.contains("1080") { return (6, "HD") }
+        if words.contains("UHD") || words.contains("4K") { return (5, "4K") }
+        if words.contains("HD") || upper.contains("ᴴᴰ") { return (5, "HD") }
+        if words.contains("SD") || upper.contains("ˢᴰ") { return (2, "SD") }
+        return (4, nil)
+    }
+
+    // MARK: Order
+
+    /// Which plays first: not one that failed lately; then the one picked
+    /// for this league before; then the language (the pick's, else the
+    /// league's), the main commentary next and others last; then the
+    /// service picked; then the better picture; then as listed.
+    static func ranked(_ options: [Option], pick: Pick?, preferred: String?, failed: Set<String>) -> [Option] {
+        let language = pick.map(\.language) ?? preferred
+        func key(_ option: Option) -> [Int] {
+            let feed = option.feed
+            let exact = pick.map { $0.service == feed.service && $0.language == feed.language } ?? false
+            let spoken = feed.language == language ? 0 : feed.language == nil ? 1 : 2
+            return [failed.contains(option.id) ? 1 : 0, exact ? 0 : 1, spoken,
+                    pick?.service == feed.service ? 0 : 1, -option.quality]
+        }
+        return options.enumerated().sorted { a, b in
+            let ka = key(a.element), kb = key(b.element)
+            return ka != kb ? ka.lexicographicallyPrecedes(kb) : a.offset < b.offset
+        }.map(\.element)
+    }
+
+    /// "Spanish · HD", for a channel in the list.
+    static func line(_ feed: Feed, quality: String?) -> String {
+        [feed.detail, feed.language.map(languageName), quality].compactMap(\.self).joined(separator: " · ")
+    }
+}

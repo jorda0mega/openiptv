@@ -65,6 +65,8 @@ enum LiveOrganizer {
         /// player).
         var titles: [String: String] = [:]
         var events: [String: Event] = [:]
+        /// Each game channel's own service, feed and language ("Watch On").
+        var feeds: [String: WatchOn.Feed] = [:]
     }
 
     static let sportsID = "shelf:sports"
@@ -110,6 +112,7 @@ enum LiveOrganizer {
         var shelves = ShelfSet()
         var events: [Entry] = []
         var eventCategories: [String] = []
+        var feeds: [String: WatchOn.Feed] = [:]
         /// Low-bandwidth copies, kept to fall back to: region → name key.
         var spare: [String: [String: [LiveChannel]]] = [:]
 
@@ -134,6 +137,9 @@ enum LiveOrganizer {
                     switch EventName.parse(channel.name, kind: kind, now: now) {
                     case let .event(entry):
                         listed.append(Entry(title: entry.title, channels: [channel], event: entry.event))
+                        let language = entry.language ?? WatchOn.language(in: channel.name) ?? WatchOn.language(in: category.name)
+                            ?? WatchOn.language(ofRegion: kind.region)
+                        feeds[channel.id] = WatchOn.Feed(service: kind.label, detail: entry.event.detail, language: language)
                     case .emptySlot:
                         slots += 1
                     case .none:
@@ -161,6 +167,7 @@ enum LiveOrganizer {
 
         var library = Library()
         library.eventCategories = eventCategories
+        library.feeds = feeds
         let sportsEvents = mergeEvents(events, now: now)
         library.shelves = shelves.build(events: sportsEvents)
         for shelf in library.shelves {
@@ -432,16 +439,7 @@ enum LiveOrganizer {
     static func bestFirst(_ channels: [LiveChannel]) -> [LiveChannel] {
         guard channels.count > 1 else { return channels }
         func score(_ channel: LiveChannel) -> Int {
-            let upper = channel.name.uppercased()
-            let words = Set(upper.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
-            var quality = 4
-            if words.contains("FHD") || upper.contains("1080") { quality = 6 }
-            else if words.contains("UHD") || words.contains("4K") { quality = 5 }
-            else if words.contains("HD") || upper.contains("ᴴᴰ") { quality = 5 }
-            else if words.contains("SD") || upper.contains("ˢᴰ") { quality = 2 }
-            if upper.hasPrefix("LBW") || upper.contains("(LBW)") { quality = 1 }
-            if upper.contains("BACKUP") { quality = 0 }
-            return quality * 10 + (channel.epgId != nil ? 2 : 0) + (channel.archiveDays != nil ? 1 : 0)
+            WatchOn.quality(of: channel.name).score * 10 + (channel.epgId != nil ? 2 : 0) + (channel.archiveDays != nil ? 1 : 0)
         }
         return channels.enumerated().sorted { a, b in
             let sa = score(a.element), sb = score(b.element)
@@ -484,6 +482,8 @@ enum LiveOrganizer {
         struct Entry {
             let title: String
             let event: Event
+            /// The commentary's language when the name says ("(ESP)").
+            var language: String? = nil
         }
 
         /// "NFL 01: ", "MLB 01 | ", "(FLSP 001) | ", "(UK) Dazn  01: ",
@@ -542,7 +542,10 @@ enum LiveOrganizer {
                 rest = "\(rest[home]) vs \(rest[away]) @ \(rest[day]) \(months[monthNumber - 1]) \(rest[hour]):\(rest[minute]) London"
             }
             let (start, withoutTime) = EventTime.extract(from: rest, region: kind.region, now: now)
-            rest = withoutTime
+            // "(ESP)", "(In French)": the feed's language, not the game's
+            // name (the same game in two languages is one game).
+            let (withoutLanguage, language) = WatchOn.withoutLanguage(withoutTime)
+            rest = withoutLanguage
             // Title, then a network or feed after "|".
             var pieces = rest.split(separator: "|").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " @-–_")) }
                 .filter { !$0.isEmpty }
@@ -576,7 +579,8 @@ enum LiveOrganizer {
             // Long finished.
             if let start, now.timeIntervalSince(start) > 8 * 3600 { return .emptySlot }
             let league = kind.league ?? LiveOrganizer.league(in: title) ?? sport ?? LiveOrganizer.serviceName(kind.label)
-            return .event(Entry(title: LiveOrganizer.tidyCase(title), event: Event(league: league, start: start, detail: detail)))
+            return .event(Entry(title: LiveOrganizer.tidyCase(title), event: Event(league: league, start: start, detail: detail),
+                                language: language))
         }
     }
 
@@ -713,6 +717,11 @@ enum LiveOrganizer {
             }
             if let found {
                 merged[found].channels += event.channels
+                // A league one listing names and another doesn't (it fell
+                // back to its service's name): the league.
+                if let league = event.event?.league, isLeague(league), let current = merged[found].event, !isLeague(current.league) {
+                    merged[found].event = Event(league: league, start: current.start, detail: current.detail)
+                }
                 // Keep the fuller title ("Edmonton Oilers vs. San Jose Sharks").
                 if event.title.count > merged[found].title.count, w.count >= wordsOf[found].count {
                     let channels = merged[found].channels
@@ -759,6 +768,11 @@ enum LiveOrganizer {
     ]
 
     /// The league a category or event title names, if any.
+    /// One of the leagues known by name (not a service's name).
+    static func isLeague(_ name: String) -> Bool {
+        leagues.contains { $0.name == name }
+    }
+
     static func league(in text: String) -> String? {
         let upper = text.uppercased()
         let words = Set(upper.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))

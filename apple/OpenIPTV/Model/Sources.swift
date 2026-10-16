@@ -98,6 +98,12 @@ final class SourceStore {
     func useTemporaryEmby(_ account: EmbyAccount) {
         emby = account
     }
+
+    /// Debug builds only: a subscription for this run (UI tests: the test
+    /// server's), not saved.
+    func useTemporaryIPTV(_ source: IPTVSource) {
+        iptv = [source]
+    }
     #endif
 
     /// Adding a subscription that's already here updates it in place (new
