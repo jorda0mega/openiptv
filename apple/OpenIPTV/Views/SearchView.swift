@@ -909,6 +909,13 @@ struct GenreView: View {
             .padding(.bottom, 30)
         }
         .navigationTitle(route.name)
+        #if DEBUG
+        .background {
+            let scans = String(model.library.genreScansOnMain)
+            Text(scans).frame(width: 1, height: 1).opacity(0.02)
+                .accessibilityLabel(scans).accessibilityIdentifier("debug-genre-scans")
+        }
+        #endif
     }
 
     private func poster(_ card: Card) -> some View {

@@ -82,6 +82,13 @@ final class SearchStabilityTests: XCTestCase {
         // The test library's most common genre is Adventure (the Zorro films).
         let titles = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Zorro'"))
         XCTAssertGreaterThanOrEqual(titles.count, 2, "the \(name) page doesn't list its titles")
+        // The tiles and the page came from the genres worked out in the
+        // background: no scan of the whole catalog on the main thread.
+        // Regression: each drawing of a genre page scanned and sorted every
+        // title there (129,000 on the user's server).
+        let scans = app.staticTexts["debug-genre-scans"].firstMatch
+        XCTAssertTrue(scans.waitForExistence(timeout: 3), "no genre scan count")
+        XCTAssertEqual(scans.label, "0", "the genres were worked out on the main thread \(scans.label) times")
     }
 
     /// The chosen scope (All, Movies, …) in a white pill with black words,

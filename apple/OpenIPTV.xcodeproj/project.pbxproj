@@ -28,6 +28,7 @@
 		0D646AB8C8A7382117611F70 /* TMDbPopularity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9007B25996DDA88FE40D727B /* TMDbPopularity.swift */; };
 		0DE6D69F6DA84444642E07C3 /* OpenIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */; };
 		0E87FB9A008BD21779D3A16E /* Libmpv.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */; };
+		0F17FC6D59F61D4C73D05371 /* GenreShelves.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CAE1CF7CCB0FDCBC324E5F0 /* GenreShelves.swift */; };
 		0F5DA94E3A68E664F7B7DDFD /* LiveShelfViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766249862D814DF2C6786AF4 /* LiveShelfViews.swift */; };
 		0FB942BAE8072453D1B7CD43 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */; };
 		10831580B6F72D43D2609FD1 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
@@ -153,6 +154,7 @@
 		91F2A548D81B99D0F53961DA /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
 		9259FCFBEFAD1A28D4C6ECB0 /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
 		929935BAF2C575D8C698AB7A /* PictureInPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 404C86B1D60778438688EBC2 /* PictureInPicture.swift */; };
+		957B94088B5D3887723013A3 /* GenreShelves.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CAE1CF7CCB0FDCBC324E5F0 /* GenreShelves.swift */; };
 		972CFEF9670619E14A53FC6D /* QualityGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */; };
 		976B05916C747916000E1666 /* LivePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */; };
 		9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
@@ -323,6 +325,7 @@
 		68BDF569FD33B278E6B18C1B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		6C786F389C51A2833D4205BE /* TitleHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleHero.swift; sourceTree = "<group>"; };
 		6C97593A755F65E9694219D4 /* IMDbCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMDbCatalog.swift; sourceTree = "<group>"; };
+		6CAE1CF7CCB0FDCBC324E5F0 /* GenreShelves.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenreShelves.swift; sourceTree = "<group>"; };
 		7155AE8826997263B83512B3 /* PlayerClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerClock.swift; sourceTree = "<group>"; };
 		72303AAC600EF3DE6075EF7A /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		73F945F999C40400846D4CCB /* QualityGovernorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QualityGovernorTests.swift; sourceTree = "<group>"; };
@@ -732,6 +735,7 @@
 		E44E52CEEFAA9AF5C6CB4BBC /* Search */ = {
 			isa = PBXGroup;
 			children = (
+				6CAE1CF7CCB0FDCBC324E5F0 /* GenreShelves.swift */,
 				CC1500ACB77AA629F7F047BF /* Gzip.swift */,
 				6C97593A755F65E9694219D4 /* IMDbCatalog.swift */,
 				C6C136886855C91760BFF6EF /* IMDbRatings.swift */,
@@ -1028,6 +1032,7 @@
 				A836B9DAC9566FBE6B593F57 /* EmbyLive.swift in Sources */,
 				E40A99A7F0AB7CF0C2BEC24E /* EmbyModels.swift in Sources */,
 				C2FA9C8739B0E46A8270DC84 /* Flex.swift in Sources */,
+				0F17FC6D59F61D4C73D05371 /* GenreShelves.swift in Sources */,
 				028C183EB3E8EC859906DC4A /* Guide.swift in Sources */,
 				58E6D3829366CA7178C840B0 /* Gzip.swift in Sources */,
 				14A08E4F734C8F088B866562 /* HomeFeed.swift in Sources */,
@@ -1108,6 +1113,7 @@
 				5412E25247B36394D2775B17 /* EmbyLive.swift in Sources */,
 				FFA65B87FDAD93B66C25DE91 /* EmbyModels.swift in Sources */,
 				87A1B9D7209C39E0CE907BA4 /* Flex.swift in Sources */,
+				957B94088B5D3887723013A3 /* GenreShelves.swift in Sources */,
 				6C46F5C97FF574089046DC42 /* Guide.swift in Sources */,
 				5E075ACFCF2BDA408958FA86 /* Gzip.swift in Sources */,
 				04AE6345E43EBEAD9501E04E /* HomeFeed.swift in Sources */,

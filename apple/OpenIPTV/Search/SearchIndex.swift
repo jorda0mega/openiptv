@@ -462,6 +462,7 @@ final class LibraryIndex {
             outdated = false
             corpus = SearchCorpus(name: \.name)
             generation += 1
+            catalogChanged()
             if let (cache, legacy) = await Self.readCache(), cache.server == server {
                 pages = cache.pages
                 total = cache.total
@@ -557,6 +558,7 @@ final class LibraryIndex {
 
     private func apply(_ ratings: IMDbRatings, downloaded: Bool) async {
         self.ratings = ratings
+        catalogChanged()
         if downloaded {
             let titles = Set(corpus.items.compactMap { $0.imdb.flatMap(IMDbRatings.number) })
             let history = votes
@@ -571,6 +573,7 @@ final class LibraryIndex {
         let boosted = await Self.boost(corpus, ratings)
         guard generation == start else { return await apply(ratings, downloaded: false) }
         corpus = boosted
+        catalogChanged()
         await rank()
     }
 
@@ -628,6 +631,7 @@ final class LibraryIndex {
         guard server == account else { return }
         generation += 1
         self.corpus = corpus
+        catalogChanged()
         self.versions = versions
         entryById = byId
         await rank()
@@ -670,13 +674,16 @@ final class LibraryIndex {
 
     /// A genre's titles, best-known first (a genre tile's page).
     func titles(inGenre genre: String, limit: Int) -> [LibraryEntry] {
-        let found: [LibraryEntry] = corpus.items.filter { $0.genres?.contains(genre) == true }
-        let scored: [(entry: LibraryEntry, votes: Int)] = found.map { ($0, rating($0)?.votes ?? 0) }
-        let sorted = scored.sorted { a, b in a.votes != b.votes ? a.votes > b.votes : a.entry.name < b.entry.name }
-        return Array(sorted.prefix(limit).map(\.entry))
+        guard limit <= GenreShelves.kept else {
+            let found: [LibraryEntry] = corpus.items.filter { $0.genres?.contains(genre) == true }
+            let scored: [(entry: LibraryEntry, votes: Int)] = found.map { ($0, rating($0)?.votes ?? 0) }
+            let sorted = scored.sorted { a, b in a.votes != b.votes ? a.votes > b.votes : a.entry.name < b.entry.name }
+            return Array(sorted.prefix(limit).map(\.entry))
+        }
+        return Array((currentShelves.titles[genre] ?? []).prefix(limit))
     }
 
-    private var genresMade: (key: String, list: [(name: String, entry: LibraryEntry)])?
+    @ObservationIgnored private var genresMade: (key: Int, limit: Int, list: [(name: String, entry: LibraryEntry)])?
 
     /// The genres with the most titles, most first, each with its
     /// best-known title that has a poster and isn't on an earlier tile
@@ -684,29 +691,55 @@ final class LibraryIndex {
     /// whose every title is already on a tile is left out. Worked out once
     /// per version of the index.
     func topGenres(limit: Int) -> [(name: String, entry: LibraryEntry)] {
-        let key = "\(count)|\(changedAt?.timeIntervalSince1970 ?? 0)|\(ratings != nil)|\(limit)"
-        if let made = genresMade, made.key == key { return made.list }
-        var counts: [String: Int] = [:]
-        var candidates: [String: [(entry: LibraryEntry, votes: Int)]] = [:]
-        for entry in corpus.items {
-            guard let genres = entry.genres, !genres.isEmpty else { continue }
-            let votes = rating(entry)?.votes ?? 0
-            for genre in genres {
-                counts[genre, default: 0] += 1
-                if entry.imageTag != nil { candidates[genre, default: []].append((entry, votes)) }
-            }
-        }
+        let shelves = currentShelves
+        if let made = genresMade, made.key == shelves.version, made.limit == limit { return made.list }
         var used: Set<String> = []
         var list: [(name: String, entry: LibraryEntry)] = []
-        for genre in counts.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }) where list.count < limit {
-            let ranked = (candidates[genre.key] ?? [])
-                .sorted { $0.votes != $1.votes ? $0.votes > $1.votes : $0.entry.name < $1.entry.name }
-            guard let pick = ranked.first(where: { !used.contains($0.entry.titleKey) }) else { continue }
+        for genre in shelves.counts.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }) where list.count < limit {
+            guard let pick = (shelves.withPosters[genre.key] ?? []).first(where: { !used.contains($0.entry.titleKey) }) else { continue }
             used.insert(pick.entry.titleKey)
             list.append((genre.key, pick.entry))
         }
-        genresMade = (key, list)
+        genresMade = (shelves.version, limit, list)
         return list
+    }
+
+    // MARK: Genres, worked out ahead
+
+    @ObservationIgnored private var shelves: GenreShelves?
+    @ObservationIgnored private var catalogVersion = 0
+    @ObservationIgnored private var shelvesTask: Task<Void, Never>?
+    #if DEBUG
+    /// UI tests: genre lists worked out on the main thread (a page drawn
+    /// before the background had them).
+    @ObservationIgnored private(set) var genreScansOnMain = 0
+    #endif
+
+    /// The catalog or the ratings changed: the genres again, in the
+    /// background.
+    private func catalogChanged() {
+        catalogVersion += 1
+        shelvesTask?.cancel()
+        let items = corpus.items, ratings = ratings, version = catalogVersion
+        shelvesTask = Task { [weak self] in
+            let made = await Task.detached(priority: .utility) { GenreShelves(items, ratings: ratings, version: version) }.value
+            guard !Task.isCancelled, let self, self.catalogVersion == version else { return }
+            self.shelves = made
+        }
+    }
+
+    /// The genres for this catalog: those worked out ahead, else at once.
+    private var currentShelves: GenreShelves {
+        // Read so a page showing a genre is drawn again when they change.
+        _ = corpus
+        _ = ratings
+        if let shelves, shelves.version == catalogVersion { return shelves }
+        #if DEBUG
+        genreScansOnMain += 1
+        #endif
+        let made = GenreShelves(corpus.items, ratings: ratings, version: catalogVersion)
+        shelves = made
+        return made
     }
 
     /// The whole catalog, resuming from whatever pages are already here. A
@@ -785,6 +818,7 @@ final class LibraryIndex {
         cancelCatalog()
         corpus = SearchCorpus(name: \.name)
         generation += 1
+        catalogChanged()
         versions = [:]
         entryById = [:]
         similarity = nil
