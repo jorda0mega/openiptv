@@ -277,7 +277,7 @@ struct TVMovieOverlay: View {
     let title: String
     var note: (text: String, color: Color)?
     var busy = false
-    let bar: TVTransportBar
+    let bar: TVClockedBar
     /// The bar alone (playing, or just after a jump).
     let compact: Bool
     let panel: TVPlayerPanel?

@@ -225,7 +225,14 @@ struct MoviePlayerView: View {
     /// Plays another title in this player screen (Continue Watching).
     var switchTo: ((EmbyPlayback) -> Void)? = nil
     @State private var player: MPVPlayer?
-    @State private var position: Double = 0
+    /// The position and the point being chosen (see PlayerClock): the
+    /// handlers read and set them here; the views that show them read the
+    /// clock themselves.
+    @State private var playClock = PlayerClock()
+    private var position: Double {
+        get { playClock.position }
+        nonmutating set { playClock.position = newValue }
+    }
     @State private var duration: Double?
     @State private var paused = false
     @State private var started = false
@@ -234,7 +241,10 @@ struct MoviePlayerView: View {
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var lastReport: Double = 0
-    @State private var scrubbing: Double?
+    private var scrubbing: Double? {
+        get { playClock.scrubbing }
+        nonmutating set { playClock.scrubbing = newValue }
+    }
     /// How many fallback streams have been tried after the first failed.
     @State private var attempt = 0
     /// Where a server-converted (HLS) fallback starts, since its clock starts at 0.
@@ -340,7 +350,6 @@ struct MoviePlayerView: View {
     @State private var qualityReadout = "original"
     /// Debug builds: "72.4 playing" (the player's second, and whether it
     /// plays), for UI tests.
-    @State private var positionReadout = ""
     /// Reads back into the film so far (see StreamRelay.readsBack).
     @State private var relayReadout = ""
     /// Debug builds: how it started ("warm 0.3": a player kept or opened
@@ -349,6 +358,9 @@ struct MoviePlayerView: View {
     #endif
 
     var body: some View {
+        #if DEBUG
+        let _ = PlayerRenders.note()
+        #endif
         ZStack {
             Color.black.ignoresSafeArea()
             if let player {
@@ -369,15 +381,7 @@ struct MoviePlayerView: View {
             }
             // Choosing where to jump: the still for that moment, full-screen,
             // until the player has the frame itself.
-            if let still = stillWhileChoosing {
-                Image(uiImage: still)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-            }
+            StillWhileChoosing(clock: playClock, thumbnails: thumbnails, previewShown: previewShown, offset: offset)
             #if os(iOS)
             // Taps on the picture show and hide the controls (a tap on the
             // Info panel's background closes it first). Under the controls:
@@ -397,9 +401,11 @@ struct MoviePlayerView: View {
             }
             if controlsVisible { controls.transition(.opacity) }
             #if os(iOS)
-            if showsSkipIntro { skipIntroButton.transition(.opacity) }
+            DuringIntro(clock: playClock, intro: playback.intro, allowed: skipIntroAllowed) {
+                skipIntroButton.transition(.opacity)
+            }
             #else
-            if showsSkipIntro {
+            DuringIntro(clock: playClock, intro: playback.intro, allowed: skipIntroAllowed) {
                 // Apple TV: the one thing a click does meanwhile, so it
                 // looks focused, as Apple's does.
                 Text("Skip Intro")
@@ -436,10 +442,11 @@ struct MoviePlayerView: View {
             ZStack {
                 debugReadout(trackReadout, "debug-tracks")
                 debugReadout(qualityReadout, "debug-quality")
-                debugReadout(positionReadout, "debug-position")
+                ClockReadout(clock: playClock)
                 debugReadout(startReadout, "debug-start")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
+                PlayerRenders.Readout()
                 debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
                 debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
                 #if os(iOS)
@@ -491,7 +498,7 @@ struct MoviePlayerView: View {
         // an episode: "S1:E3 · Name" over the show, and as Info's heading.
         let film = playback.seriesId == nil
         return TVMovieOverlay(caption: film ? nil : playback.subtitle, title: playback.title, note: note,
-                       busy: (buffering || !started) && error == nil, bar: transportBar, compact: compact,
+                       busy: (buffering || !started) && error == nil, bar: TVClockedBar(clock: playClock, total: total, holdDirection: holdDirection, paused: paused), compact: compact,
                        panel: panel, focus: focus, hasSubtitles: tracks.contains { $0.kind == .subtitle },
                        info: TVPlayerInfo(heading: film ? playback.title : playback.subtitle, overview: playback.overview,
                                           runtime: film ? [playback.subtitle, runtime].compactMap(\.self).joined(separator: " · ") : runtime,
@@ -852,29 +859,14 @@ struct MoviePlayerView: View {
         // While scrubbing the picture itself shows where it'll land (no
         // preview box), and a slower drag says its speed at the end.
         #if os(iOS)
-        TimeBar(leading: phoneClock(scrubbing ?? position),
-                trailing: scrubSpeed ?? "−" + phoneClock(max(0, total - (scrubbing ?? position)))) {
-            Scrubber(position: position, total: max(total, 1), scrubbing: $scrubbing, speedLabel: $scrubSpeed,
-                     onChanged: { liveScrub($0) }, onCommit: { commitScrub($0) })
-        }
+        PhoneClockBar(clock: playClock, total: total, speedLabel: $scrubSpeed,
+                      onChanged: { liveScrub($0) }, onCommit: { commitScrub($0) })
         #else
-        transportBar
+        TVClockedBar(clock: playClock, total: total, holdDirection: holdDirection, paused: paused)
         #endif
     }
 
     #if os(tvOS)
-    private var transportBar: TVTransportBar {
-        let at = scrubbing ?? position
-        let state: TVTransportBar.State = if let holdDirection {
-            holdDirection > 0 ? .forward : .backward
-        } else if paused, scrubbing == nil {
-            .paused
-        } else {
-            .playing
-        }
-        return TVTransportBar(fraction: at / max(total, 1), time: clock(at), remaining: "-" + clock(max(0, total - at)), state: state)
-    }
-
     private var menu: TVTrackMenu? {
         switch panel {
         case .audio:
@@ -908,13 +900,7 @@ struct MoviePlayerView: View {
 
     // MARK: Tracks and times (both platforms)
 
-    /// "07:48" under an hour, "1:52:07" over, as Apple's player writes it.
-    private func clock(_ seconds: Double) -> String {
-        let s = Int(seconds.rounded())
-        return s >= 3600
-            ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
-            : String(format: "%02d:%02d", s / 60, s % 60)
-    }
+    private func clock(_ seconds: Double) -> String { PlayerClock.tvTime(seconds) }
 
     /// "10 min", "1 hr 52 min".
     private var runtime: String? {
@@ -932,14 +918,7 @@ struct MoviePlayerView: View {
     private var audioTracks: [MPVPlayer.Track] { menuTracks.filter { $0.kind == .audio } }
     private var subtitleTracks: [MPVPlayer.Track] { menuTracks.filter { $0.kind == .subtitle } }
 
-    /// iPhone, as the Apple TV app writes it: "0:00:03" when the film runs
-    /// an hour or more, "4:05" otherwise.
-    private func phoneClock(_ seconds: Double) -> String {
-        let s = Int(seconds.rounded())
-        return total >= 3600
-            ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
-            : String(format: "%d:%02d", s / 60, s % 60)
-    }
+    private func phoneClock(_ seconds: Double) -> String { PlayerClock.phoneTime(seconds, total: total) }
 
     private func label(_ track: MPVPlayer.Track) -> String { Self.label(track) }
 
@@ -977,13 +956,6 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// The preview still for where a jump would land, while the player's
-    /// own picture is still on its way there.
-    private var stillWhileChoosing: UIImage? {
-        guard let target = scrubbing, let thumbnails else { return nil }
-        if let shown = previewShown, abs(shown - (target - offset)) < 2 { return nil }
-        return thumbnails.image(near: target)
-    }
 
     /// The film's preview thumbnails: at once when they came with the
     /// player got ready before the tap, else a second after the first frame
@@ -1241,7 +1213,7 @@ struct MoviePlayerView: View {
             NSLog("%@", String(format: "PERF net %.1f Mbps buffer %.1f s at %.1f", bytesPerSecond * 8 / 1e6, buffer, position))
             let quality = governor?.current.map { String(format: "converted %.1f Mbps", Double($0) / 1e6) } ?? "original"
             if quality != qualityReadout { qualityReadout = quality }
-            positionReadout = String(format: "%.1f %@", position, paused ? "paused" : "playing")
+            playClock.readout = String(format: "%.1f %@", position, paused ? "paused" : "playing")
             relayReadout = String(StreamRelay.shared.readsBack)
             let file = playback.bitrate.map { String(format: "file %.1f Mbps", Double($0) / 1e6) } ?? "file bitrate ?"
             stats = String(format: "%@ · %@ · speed %.1f Mbps · %.0f s buffered", quality, file,
@@ -1284,7 +1256,7 @@ struct MoviePlayerView: View {
                 if !why.isEmpty, error != nil { error = "Couldn't play. \(why)" }
             }
         case let .time(rawPosition, newDuration):
-            if let newDuration, offset == 0 { duration = newDuration }
+            if let newDuration, offset == 0, duration != newDuration { duration = newDuration }
             if let until = jumpUntil {
                 guard Date() >= until else { return }
                 jumpUntil = nil
@@ -1294,7 +1266,7 @@ struct MoviePlayerView: View {
             #if DEBUG
             // With the position itself: the network reports (about once a
             // second, none once the buffer is full) left it a second behind.
-            positionReadout = String(format: "%.1f %@", newPosition, paused ? "paused" : "playing")
+            playClock.readout = String(format: "%.1f %@", newPosition, paused ? "paused" : "playing")
             #endif
             // Into the last fifth of an episode: the next one, ready.
             if !preparedNext, playback.seriesId != nil, total > 0, newPosition >= total * 0.8 {
@@ -1314,7 +1286,7 @@ struct MoviePlayerView: View {
             #if DEBUG
             // At once: the network reports that also refresh it stop once
             // the buffer is full, and it said "playing" after a pause.
-            positionReadout = String(format: "%.1f %@", position, isPaused ? "paused" : "playing")
+            playClock.readout = String(format: "%.1f %@", position, isPaused ? "paused" : "playing")
             #endif
             // Paused: choosing where to go is likely next.
             if isPaused { thumbnails?.warm(around: position) }
@@ -1873,13 +1845,17 @@ struct MoviePlayerView: View {
     /// second before its end; not with a panel open, or while choosing a
     /// point on the bar. Apple TV: while it plays (a click then skips).
     private var showsSkipIntro: Bool {
-        guard let intro = playback.intro, started, scrubbing == nil else { return false }
+        skipIntroAllowed && PlayerClock.inIntro(position, scrubbing: scrubbing, intro: playback.intro)
+    }
+
+    /// When else Skip Intro may show (the clock says whether it's the intro).
+    private var skipIntroAllowed: Bool {
+        guard playback.intro != nil, started else { return false }
         #if os(iOS)
-        guard !showInfo, !showContinue, !showEpisodes else { return false }
+        return !showInfo && !showContinue && !showEpisodes
         #else
-        guard panel == nil, !paused else { return false }
+        return panel == nil && !paused
         #endif
-        return position >= intro.lowerBound && position < intro.upperBound - 1
     }
 
     /// Seconds from here to the end of the file, when its length is known.
@@ -1942,3 +1918,29 @@ extension Int64 {
         Date(timeIntervalSince1970: TimeInterval(self)).formatted(date: .omitted, time: .shortened)
     }
 }
+
+#if DEBUG
+/// UI tests: how many times the player screen has been drawn (its body
+/// run), read once a second by a view of its own, so reading it doesn't
+/// draw the player again.
+@MainActor
+enum PlayerRenders {
+    private(set) static var count = 0
+    static func note() { count += 1 }
+
+    struct Readout: View {
+        var body: some View {
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                let text = String(PlayerRenders.count)
+                Text(text)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.02)
+                    .accessibilityLabel(text)
+                    .accessibilityIdentifier("debug-player-renders")
+            }
+        }
+    }
+}
+#endif

@@ -1051,6 +1051,27 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(playing.hasSuffix("subtitles=eng"), "no English subtitles came: \(playing)")
     }
 
+    /// Playing with the controls up, the player screen isn't drawn again
+    /// for every tick of the clock (about four a second): only the bar and
+    /// what shows the time are. Regression: the whole player was, with every
+    /// view in it, four times a second. Counted by the app (DEBUG).
+    func testPlayerIsNotRedrawnEveryTick() {
+        openFilm()
+        sleep(3)
+        controlsUp()
+        let readout = app.staticTexts["debug-player-renders"].firstMatch
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "no render count")
+        sleep(1)
+        let before = Int(readout.label) ?? 0
+        sleep(5)
+        let after = Int(readout.label) ?? 0
+        let position = app.staticTexts["debug-position"].firstMatch.label
+        XCTAssertTrue(position.hasSuffix("playing"), "not playing: \(position)")
+        // The controls hiding by themselves (one change) and a network note
+        // or two may draw it; the clock alone would be about twenty.
+        XCTAssertLessThanOrEqual(after - before, 6, "the player was drawn \(after - before) times in 5 s of playing")
+    }
+
     /// The app's debug readout of the player: its second, and whether it plays.
     private func playerState() -> (seconds: Double, playing: Bool)? {
         let parts = app.staticTexts["debug-position"].firstMatch.label.split(separator: " ")
