@@ -326,6 +326,14 @@ struct LibraryEntry: Codable, Hashable, Identifiable, Sendable {
     /// a 4K film, say): its IMDb or TMDb id, else its name and year.
     var titleKey: String { Self.titleKey(kind: kind, name: name, year: year, imdb: imdb, tmdb: tmdb) }
 
+    /// Every id that marks the same title in another library: its IMDb id
+    /// and its TMDb id (of its kind), else its name and year.
+    var titleKeys: [String] {
+        let k = kind == "Series" ? "s" : "m"
+        let ids = [imdb.map { "i:" + $0 }, tmdb.map { "t:\(k):\($0)" }].compactMap(\.self)
+        return ids.isEmpty ? [titleKey] : ids
+    }
+
     static func titleKey(kind: String, name: String, year: Int?, imdb: String?, tmdb: Int?) -> String {
         if let imdb { return "i:" + imdb }
         let k = kind == "Series" ? "s" : "m"
@@ -887,16 +895,21 @@ final class LibraryIndex {
             #endif
             var seenIds = Set<String>()
             seenIds.reserveCapacity(entries.count)
+            // One title's copies share an IMDb id or a TMDb id (of its
+            // kind); either is enough. Regression: by IMDb id first, the
+            // user's two Dragon Ball Z shows (one listed with a wrong IMDb
+            // id, both TMDb 12971) were two titles.
             var groupOf: [String: Int] = [:]
-            groupOf.reserveCapacity(entries.count)
+            groupOf.reserveCapacity(entries.count * 2)
             var titles: [LibraryEntry] = []
             var copies: [[String]] = []
             for entry in entries where seenIds.insert(entry.id).inserted {
-                let key = entry.titleKey
-                if let group = groupOf[key] {
+                let keys = entry.titleKeys
+                if let group = keys.lazy.compactMap({ groupOf[$0] }).first {
                     copies[group].append(entry.id)
+                    for key in keys where groupOf[key] == nil { groupOf[key] = group }
                 } else {
-                    groupOf[key] = titles.count
+                    for key in keys { groupOf[key] = titles.count }
                     titles.append(entry)
                     copies.append([entry.id])
                 }

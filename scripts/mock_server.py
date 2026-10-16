@@ -39,7 +39,8 @@ SOCKETS = set()
 # "video_fail" (every video request answered 503: the connection lost),
 # "intro" ("5,45": an episode's intro marks, in seconds), "copy_audio"
 # ("a8:fre": one copy of a film with only that language's sound;
-# "a8:spa+spa+jpn": those tracks, in that order),
+# "a8:spa+spa+jpn": those tracks, in that order), "imdb" ("k8:tt0000001":
+# that copy listed with another IMDb id, its TMDb id the same),
 # "watched_elsewhere" ("m7": a film just played on another device),
 # "favorites_delay" (seconds before My List answers: a slow refresh),
 # "reference_delay" (seconds before one of the film's own subtitle tracks
@@ -161,6 +162,12 @@ _STREAMS = None
 
 def known_item(entry, played=False):
     id_, name, kind, year, imdb, tmdb = entry
+    # "imdb": "k8:tt0000001": that copy's IMDb id is another (a server's
+    # metadata gets one copy wrong; it keeps its TMDb id).
+    for spec in filter(None, CONTROL.get("imdb", "").split(",")):
+        copy, other = spec.split(":")
+        if copy == id_:
+            imdb = other
     providers = {"Tmdb": tmdb} | ({"Imdb": imdb} if imdb else {})
     return {"Id": id_, "Name": name, "Type": kind, "ProductionYear": year, "ProviderIds": providers,
             "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{len(id_) * 7 + int(id_[1:])}"},

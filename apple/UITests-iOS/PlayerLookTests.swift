@@ -638,6 +638,28 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=off")
     }
 
+    /// Two copies of a film whose server lists them with different IMDb ids
+    /// but the same TMDb id (one copy's metadata is wrong) are one title:
+    /// the English copy plays. Regression: copies were grouped by IMDb id
+    /// first, so the user's two Dragon Ball Z shows (tt0214341, tt0121220;
+    /// both TMDb 12971) were two titles, and the Spanish one couldn't give
+    /// way to the English one, nor offer its sound. A fresh cache folder:
+    /// the library is read with the ids as listed now. Needs
+    /// TEST_RUNNER_MULTI_TRACK=1.
+    func testCopiesWithDifferentIMDbAreOneTitle() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["copy_audio": "a8:spa+spa+jpn", "imdb": "k8:tt0000001"])
+        playDune(["-forgetTrackChoices", "YES", "-cacheFolder", "imdb-\(UUID().uuidString.prefix(8))"])
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player")
+        sleep(3)
+        XCTAssertEqual(item.label, "k8", "the copy with the Spanish dub played")
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=off")
+    }
+
     /// Spanish only another copy of the film has (Dune's two copies listed
     /// one in English, one in Spanish): the audio menu offers it after the
     /// file's own, and picked, that copy takes over from the same moment with

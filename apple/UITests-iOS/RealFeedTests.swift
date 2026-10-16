@@ -167,14 +167,22 @@ final class RealFeedTests: XCTestCase {
         sleep(4)
         let item = app.staticTexts["debug-item"].firstMatch
         let tracks = app.staticTexts["debug-tracks"].firstMatch
+        // A real server lists the tracks a few seconds after the picture.
+        let listed = Date().addingTimeInterval(20)
+        while tracks.label.isEmpty, Date() < listed { usleep(250_000) }
         print("REAL Dragon Ball Z: item \(item.label), \(tracks.label)")
         XCTAssertEqual(item.label, "6327691", "not the copy with English sound")
         XCTAssertTrue(tracks.label.hasPrefix("audio=eng"), "not in English: \(tracks.label)")
 
-        showControls()
-        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        // The controls hide on their own: up again until the menu opens.
+        let menu = app.buttons["Audio and Subtitles"].firstMatch
         let spanish = app.buttons["Spanish"].firstMatch
-        XCTAssertTrue(spanish.waitForExistence(timeout: 5), "no Spanish in the menu")
+        for _ in 0..<3 where !spanish.exists {
+            showControls()
+            if menu.waitForExistence(timeout: 2) { menu.tap() }
+            _ = spanish.waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(spanish.exists, "no Spanish in the menu: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.prefix(25))")
         shot("dragon ball z audio menu")
         spanish.tap()
         let loading = app.descendants(matching: .any)["Loading"]
