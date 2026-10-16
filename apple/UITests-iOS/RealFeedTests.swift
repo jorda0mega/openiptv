@@ -59,6 +59,33 @@ final class RealFeedTests: XCTestCase {
         for (found, expected) in zip(delays, [0.7, 6.5, 7.3]) { XCTAssertEqual(found, expected, accuracy: 0.4, label) }
     }
 
+    /// Junun (2015): Hindi sound, and on the server only Portuguese and
+    /// German subtitles. The server's provider is asked, its likeliest
+    /// files read through the server (nothing saved: the viewer's account
+    /// may not), and English shows. Regression: the server was asked to
+    /// download one and refused, and the film had none.
+    func testFoundSubtitlesOnARealFilm() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchArguments += ["-debugSearch", "Junun", "-forgetSubtitleSearches", "YES", "-forgetTrackChoices", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Junun'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 30), "no Junun in the results")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
+        play.tap()
+        XCTAssertNotNil(waitForPosition(timeout: 45), "the film didn't open")
+        let tracks = app.staticTexts["debug-tracks"].firstMatch
+        let opened = Date()
+        while Date().timeIntervalSince(opened) < 90, !(tracks.exists && tracks.label.hasSuffix("subtitles=eng")) { sleep(2) }
+        print("REAL found subtitles: \(tracks.exists ? tracks.label : "none") after \(Int(Date().timeIntervalSince(opened))) s")
+        shot("junun found subtitles")
+        XCTAssertTrue(tracks.label.hasSuffix("subtitles=eng"), "no English subtitles found: \(tracks.label)")
+    }
+
     /// Home fills in from the server, and a title from it plays.
     func testHomePlaysATitle() throws {
         // Emby only: no IPTV requests the test doesn't need.
@@ -144,6 +171,10 @@ final class RealFeedTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(cards.count, 2, "Watch On has one channel")
         for card in cards.allElementsBoundByIndex { print("REAL choice: \(card.label)") }
         shot("watch on")
+        // Each feed once (a provider lists one feed in two slots; the user
+        // saw "Football · Soccer, OneSoccer Feed" twice).
+        let named = cards.allElementsBoundByIndex.map { $0.label.components(separatedBy: ", ").filter { !$0.contains("Playing") }.joined(separator: ", ") }
+        XCTAssertEqual(Set(named).count, named.count, "a feed listed twice: \(named)")
         // The others in turn until one plays (an event's feed can be over).
         let others = cards.allElementsBoundByIndex.map(\.label).filter { !$0.contains("Playing") }
         var picked: String?
