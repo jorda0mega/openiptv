@@ -201,6 +201,7 @@ targets:
       - OpenIPTV/Player/RemoteSwipe.swift
       - OpenIPTV/Player/SubtitleSync.swift
       - OpenIPTV/Player/QualityGovernor.swift
+      - OpenIPTV/Player/RelayRoutes.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv.unittests

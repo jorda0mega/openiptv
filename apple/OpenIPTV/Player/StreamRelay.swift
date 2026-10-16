@@ -25,7 +25,7 @@ final class StreamRelay: @unchecked Sendable {
     private let lock = NSLock()
     private var listener: NWListener?
     private var port: UInt16?
-    private var routes: [String: (url: URL, headers: [(String, String)])] = [:]
+    private var routes = RelayRoutes()
     /// What's been fetched of the last few files (the one playing, ones
     /// opened or fetched ahead), by their real address without the
     /// server's per-request session (asked again later, a title's address
@@ -81,11 +81,9 @@ final class StreamRelay: @unchecked Sendable {
             let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             return pair.count == 2 ? (pair[0], pair[1]) : nil
         }
-        // A new address each time; keep the last few (a warmed-up player
-        // and the one playing).
-        if routes.count > 16 { routes.removeAll() }
+        // A new address each time (see RelayRoutes).
         let token = UUID().uuidString.lowercased()
-        routes[token] = (url, pairs)
+        routes.add((url, pairs), token: token)
         // Keep the file extension: it helps the player pick the demuxer.
         let ext = url.pathExtension.isEmpty ? "" : "." + url.pathExtension
         return URL(string: "http://127.0.0.1:\(port)/\(token)\(ext)")
@@ -120,7 +118,7 @@ final class StreamRelay: @unchecked Sendable {
         let method = String(request[0])
         let token = String(request[1].dropFirst().split(separator: ".").first ?? "")
         lock.lock()
-        let route = routes[token]
+        let route = routes.route(token)
         lock.unlock()
         guard let route, method == "GET" || method == "HEAD" else { return fail(connection, 404) }
 
