@@ -18,8 +18,9 @@ final class RealFeedTests: XCTestCase {
         // log records the launch environment. The app fetches them.
         app.launchEnvironment["OPENREEL_DEBUG_EMBY_URL"] = feed!.appending(path: "emby").absoluteString
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = feed!.appending(path: "iptv").absoluteString
-        // The viewer's own account: playing reports nothing to the server.
-        app.launchArguments = ["-readOnlyServer", "YES"]
+        // The viewer's own account: playing reports nothing to the server;
+        // what the tests cache is kept apart from the test server's.
+        app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", "real"]
     }
 
     /// A live game on several channels, with the remote: it starts on one;

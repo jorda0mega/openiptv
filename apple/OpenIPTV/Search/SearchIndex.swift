@@ -1008,7 +1008,21 @@ final class LibraryIndex {
 
 /// Small JSON files in Caches: display data only, never logins or stream URLs.
 enum AppCache {
-    static let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    static let directory: URL = {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        #if DEBUG
+        // UI tests on a real server (`-cacheFolder real`): its library, Home
+        // and lineup kept apart from the test server's. Regression: after a
+        // real run, the test server's search found its titles before its
+        // copies were grouped again, so a film's other copy went unseen.
+        if let folder = UserDefaults.standard.string(forKey: "cacheFolder"), !folder.isEmpty {
+            let url = caches.appending(path: folder)
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
+        #endif
+        return caches
+    }()
 
     /// Downloads cut off when the app last closed, which the system leaves
     /// in the temporary folder (a dataset is hundreds of megabytes). Only

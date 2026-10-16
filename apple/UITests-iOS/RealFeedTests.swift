@@ -19,7 +19,7 @@ final class RealFeedTests: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = feed!.appending(path: "iptv").absoluteString
         // The viewer's own account: playing reports nothing to the server,
         // so where they are in a title stays as it was.
-        app.launchArguments = ["-readOnlyServer", "YES"]
+        app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", "real"]
         XCUIDevice.shared.orientation = .portrait
     }
 
@@ -144,6 +144,50 @@ final class RealFeedTests: XCTestCase {
         XCTAssertEqual(waitForCopy(timeout: 10), pick, "the league's pick didn't play first")
         XCTAssertEqual(waitForState(timeout: 30), "playing", "the pick didn't start the second time")
         shot("pick first")
+    }
+
+    /// Dragon Ball Z: two copies on the server (720p with English sound;
+    /// 1080p with a Spanish dub first, then Japanese) and no country. It
+    /// plays the English copy; the audio menu offers Spanish from the other
+    /// one, and Spanish picked takes over with no picture loading.
+    func testDragonBallZInEnglish() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchArguments += ["-debugSearch", "Dragon Ball Z", "-forgetTrackChoices", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dragon Ball Z,' OR label == 'Dragon Ball Z'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 30), "no Dragon Ball Z in the results")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the show's page has no Play")
+        play.tap()
+        XCTAssertNotNil(waitForPosition(timeout: 45), "the episode didn't open")
+        sleep(4)
+        let item = app.staticTexts["debug-item"].firstMatch
+        let tracks = app.staticTexts["debug-tracks"].firstMatch
+        print("REAL Dragon Ball Z: item \(item.label), \(tracks.label)")
+        XCTAssertEqual(item.label, "6327691", "not the copy with English sound")
+        XCTAssertTrue(tracks.label.hasPrefix("audio=eng"), "not in English: \(tracks.label)")
+
+        showControls()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let spanish = app.buttons["Spanish"].firstMatch
+        XCTAssertTrue(spanish.waitForExistence(timeout: 5), "no Spanish in the menu")
+        shot("dragon ball z audio menu")
+        spanish.tap()
+        let loading = app.descendants(matching: .any)["Loading"]
+        var loaded = false
+        let deadline = Date().addingTimeInterval(45)
+        while item.label == "6327691", Date() < deadline {
+            if loading.exists { loaded = true }
+            usleep(100_000)
+        }
+        print("REAL switched to \(item.label), start \(app.staticTexts["debug-start"].firstMatch.label)")
+        XCTAssertEqual(item.label, "7085005", "the Spanish copy didn't take over")
+        XCTAssertFalse(loaded, "the picture loaded while the audio switched")
+        shot("dragon ball z spanish")
     }
 
     // MARK: Helpers
