@@ -111,11 +111,22 @@ struct EmbyClient {
         _ = try? await HTTP.data(request)
     }
 
+    /// Debug builds, UI tests on a real server: `-readOnlyServer YES` sends
+    /// nothing that changes it (where titles were left, My List, its
+    /// order, subtitle downloads), so a test leaves the viewer's account
+    /// as it was.
+    #if DEBUG
+    static var readOnly: Bool { UserDefaults.standard.bool(forKey: "readOnlyServer") }
+    #else
+    static let readOnly = false
+    #endif
+
     // MARK: My List
 
     /// Puts a film or show on the viewer's My List (Emby's favorites), or
     /// takes it off.
     func setFavorite(_ itemId: String, _ on: Bool) async throws {
+        guard !Self.readOnly else { return }
         var request = URLRequest(url: Self.api(account.serverURL, "Users/\(account.userId)/FavoriteItems/\(itemId)"))
         request.httpMethod = on ? "POST" : "DELETE"
         authorize(&request)
@@ -136,6 +147,7 @@ struct EmbyClient {
 
     /// Writes that record (item id → seconds since 1970), replacing it.
     func saveMyListDates(_ dates: [String: Double]) async {
+        guard !Self.readOnly else { return }
         var parts = URLComponents(url: Self.api(account.serverURL, "DisplayPreferences/\(Self.myListRecord)"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [.init(name: "userId", value: account.userId), .init(name: "client", value: Self.recordClient)]
         var request = URLRequest(url: parts.url!)
@@ -169,6 +181,7 @@ struct EmbyClient {
     /// Has the server download one of them; it's then one of the item's
     /// subtitle files.
     func downloadSubtitle(_ itemId: String, mediaSourceId: String?, id: String) async throws {
+        guard !Self.readOnly else { return }
         var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(itemId)/RemoteSearch/Subtitles"),
                                   resolvingAgainstBaseURL: false)!
         // The provider's id as one path segment, escaped once (escaped by
@@ -1004,6 +1017,7 @@ struct EmbyClient {
     /// Keeps Continue Watching right on every device.
     func report(_ event: PlaybackEvent, itemId: String, seconds: Double,
                 mediaSourceId: String? = nil, playSessionId: String? = nil) async {
+        guard !Self.readOnly else { return }
         var request = URLRequest(url: Self.api(account.serverURL, event.rawValue))
         request.httpMethod = "POST"
         // A slow report mustn't hold up the ones behind it (Stopped above all).

@@ -18,12 +18,14 @@ final class RealFeedTests: XCTestCase {
         // log records the launch environment. The app fetches them.
         app.launchEnvironment["OPENREEL_DEBUG_EMBY_URL"] = feed!.appending(path: "emby").absoluteString
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = feed!.appending(path: "iptv").absoluteString
+        // The viewer's own account: playing reports nothing to the server.
+        app.launchArguments = ["-readOnlyServer", "YES"]
     }
 
     /// A live game on several channels, with the remote: it starts on one;
     /// Select opens Watch On, Right and Select play another.
     func testLiveGameWatchOn() throws {
-        app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launchArguments += ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
         app.launch()
         // The real lineup takes a while. A wait that keeps the run loop
         // going: a 20 s sleep got the test runner stopped by the watchdog.

@@ -17,6 +17,9 @@ final class RealFeedTests: XCTestCase {
         // log records the launch environment. The app fetches them.
         app.launchEnvironment["OPENREEL_DEBUG_EMBY_URL"] = feed!.appending(path: "emby").absoluteString
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = feed!.appending(path: "iptv").absoluteString
+        // The viewer's own account: playing reports nothing to the server,
+        // so where they are in a title stays as it was.
+        app.launchArguments = ["-readOnlyServer", "YES"]
         XCUIDevice.shared.orientation = .portrait
     }
 
@@ -60,7 +63,7 @@ final class RealFeedTests: XCTestCase {
     /// A live game on several channels: it starts on one, Watch On lists
     /// them all, another picked plays, and it plays first the next time.
     func testLiveGameWatchOn() throws {
-        app.launchArguments = ["-forgetWatchOnPicks", "YES", "-freshLineup", "YES"]
+        app.launchArguments += ["-forgetWatchOnPicks", "YES", "-freshLineup", "YES"]
         app.launch()
         let tab = app.tabBars.buttons["Live TV"].firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Live TV tab")
