@@ -339,8 +339,10 @@ struct LivePlayerView: View {
     // MARK: Playing
 
     private func start() {
-        // A film warmed up in the background would only compete.
+        // A film warmed up in the background would only compete, as would
+        // what was fetched ahead for Continue Watching.
         model.coolDown()
+        StreamRelay.shared.stopAhead(keeping: nil)
         let player = makePlayer(prefs: prefs)
         player.onEvent = { event in handle(event) }
         self.player = player

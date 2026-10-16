@@ -474,6 +474,9 @@ struct MoviePlayerView: View {
         .task(id: playback.itemId) { await loadSeason() }
         .onAppear {
             PlaybackActivity.began()
+            // What was fetched ahead for other titles stops (and none starts
+            // while this plays): it has the connection to itself.
+            StreamRelay.shared.stopAhead(keeping: playback.url)
             #if DEBUG
             model.debugPlayerUp = true
             #endif

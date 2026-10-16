@@ -31,6 +31,16 @@ final class StreamRelay: @unchecked Sendable {
     /// server's per-request session (asked again later, a title's address
     /// differs only there).
     private var caches: [(key: String, cache: ByteCache)] = []
+    /// Fetches ahead of a tap (prefetchStart), by the file they're for:
+    /// stopped when something starts playing, except the file playing (its
+    /// bytes are the ones about to be read). Regression: they went on, each
+    /// step after the last, competing with the film just started.
+    private var ahead: [String: [URLSessionDataTask]] = [:]
+    private var aheadFiles: Set<String> = []
+    private var stoppedAhead: Set<String> = []
+    /// The file playing (none: nothing yet): while something plays, no
+    /// other file is fetched ahead.
+    private var playingFile: String?
     private static let keptFiles = 6
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
@@ -270,6 +280,15 @@ final class StreamRelay: @unchecked Sendable {
     /// resumes); one from the beginning, once.
     func prefetchStart(url: URL, headers: [String], at seconds: Double) {
         start()
+        let key = Self.cacheKey(url)
+        // Asked a moment after something started playing: not now.
+        let allowed = lock.withLock { () -> Bool in
+            guard !PlaybackActivity.isPlaying || key == playingFile else { return false }
+            stoppedAhead.remove(key)
+            aheadFiles.insert(key)
+            return true
+        }
+        guard allowed else { return }
         let route = (url: url, headers: headers.compactMap { header -> (String, String)? in
             let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             return pair.count == 2 ? (pair[0], pair[1]) : nil
@@ -279,20 +298,20 @@ final class StreamRelay: @unchecked Sendable {
             #if DEBUG
             let started = CFAbsoluteTimeGetCurrent()
             #endif
-            self.ensure(route, cache, from: 0, count: 1 << 18) { [weak self] head, total in
+            self.ensure(route, cache, from: 0, count: 1 << 18, ahead: key) { [weak self] head, total in
                 guard let self, let head, let total else { return }
                 cache.noteFile(total: total, contentType: nil)
                 guard let layout = Matroska.layout(in: [UInt8](head)), let cues = layout.cues, cues < total else { return }
-                self.ensure(route, cache, from: cues, count: min(1 << 16, total - cues)) { [weak self] first, _ in
+                self.ensure(route, cache, from: cues, count: min(1 << 16, total - cues), ahead: key) { [weak self] first, _ in
                     guard let self, let first, let length = Matroska.elementLength([UInt8](first.prefix(16))) else { return }
                     let size = min(length, min(Int64(32 << 20), total - cues))
-                    self.ensure(route, cache, from: cues, count: size) { [weak self] index, _ in
+                    self.ensure(route, cache, from: cues, count: size, ahead: key) { [weak self] index, _ in
                         guard let self, let index,
                               let cluster = Matroska.clusterPosition(in: [UInt8](index), at: seconds, scale: layout.timecodeScale)
                         else { return }
                         let at = layout.segmentStart + cluster
                         guard at < total else { return }
-                        self.ensure(route, cache, from: at, count: min(Int64(8 << 20), total - at)) { _, _ in
+                        self.ensure(route, cache, from: at, count: min(Int64(8 << 20), total - at), ahead: key) { _, _ in
                             #if DEBUG
                             NSLog("%@", String(format: "PERF relay start fetched ahead at %.0f s in %.0f ms", seconds,
                                                (CFAbsoluteTimeGetCurrent() - started) * 1000))
@@ -305,24 +324,54 @@ final class StreamRelay: @unchecked Sendable {
     }
 
     /// These bytes of the file in the cache (fetched unless already there),
-    /// then `then` with them and the file's size (nil: failed).
+    /// then `then` with them and the file's size (nil: failed). `ahead`:
+    /// fetched ahead of a tap for this file (low priority; nothing more once
+    /// something else plays, see stopAhead).
     private func ensure(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, from: Int64, count: Int64,
-                        then: @escaping @Sendable (Data?, Int64?) -> Void) {
+                        ahead key: String? = nil, then: @escaping @Sendable (Data?, Int64?) -> Void) {
         if count > 0, cache.available(from: from) >= count, let kept = cache.read(from, Int(count)) {
             return then(kept, cache.total)
         }
+        if let key, lock.withLock({ stoppedAhead.contains(key) }) { return then(nil, nil) }
         var request = URLRequest(url: route.url)
         request.timeoutInterval = 30
         for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("bytes=\(from)-\(from + count - 1)", forHTTPHeaderField: "Range")
-        HTTP.session.dataTask(with: request) { data, response, _ in
+        var made: URLSessionDataTask?
+        let task = HTTP.session.dataTask(with: request) { [weak self] data, response, _ in
+            if let key, let made { self?.lock.withLock { self?.ahead[key]?.removeAll { $0 === made } } }
             let http = response as? HTTPURLResponse
             let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
             guard http?.statusCode == 206, let data, !data.isEmpty else { return then(nil, nil) }
             if let total { cache.noteFile(total: total, contentType: http?.value(forHTTPHeaderField: "Content-Type")) }
             cache.store(data, at: from, evicting: false)
             then(data, total ?? cache.total)
-        }.resume()
+        }
+        made = task
+        if let key {
+            task.priority = URLSessionTask.lowPriority
+            lock.withLock { ahead[key, default: []].append(task) }
+        }
+        task.resume()
+    }
+
+    /// Something starts playing: what was being fetched ahead for other
+    /// files stops (under way and still to come), so it has the connection
+    /// to itself; that for `playing` (the same file) goes on.
+    func stopAhead(keeping playing: URL?) {
+        let keep = playing.map(Self.cacheKey)
+        let stopping: [URLSessionDataTask] = lock.withLock {
+            playingFile = keep
+            let others = aheadFiles.filter { $0 != keep }
+            stoppedAhead.formUnion(others)
+            aheadFiles.subtract(others)
+            let tasks = others.flatMap { ahead.removeValue(forKey: $0) ?? [] }
+            return tasks
+        }
+        stopping.forEach { $0.cancel() }
+        #if DEBUG
+        if !stopping.isEmpty { NSLog("%@", "PERF relay stopped \(stopping.count) fetches ahead") }
+        #endif
     }
 
     // MARK: The file's index

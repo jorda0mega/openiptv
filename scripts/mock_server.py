@@ -49,6 +49,9 @@ CONTROL = {}
 # Apps' own records in the user's display preferences, by (id, client):
 # the app keeps when each title was put on My List there.
 PREFERENCES = {}
+# Requests for a film's file, (time, item id): GET /mock/video_requests?since=
+# (a time from GET /mock/mark) lists the items asked for since.
+VIDEO_REQUESTS = []
 # Requests for a stretch of a film's sound (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0]
 MOVIE_TICKS = int(float(os.environ.get("OPENIPTV_MOCK_RUNTIME", "7200")) * 10_000_000)
@@ -355,11 +358,17 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/embywebsocket" and q.get("api_key") == "tok":
             return self.websocket()
+        if path == "/mock/mark":
+            return self.send({"t": time.time()})
+        if path == "/mock/video_requests":
+            since = float(q.get("since", "0"))
+            return self.send({"items": [item for t, item in VIDEO_REQUESTS if t >= since]})
         if path == "/mock/audio_requests":
             return self.send({"count": AUDIO_REQUESTS[0]})
         if path == "/mock/set":
             if "reset" in q:
                 AUDIO_REQUESTS[0] = 0
+                VIDEO_REQUESTS.clear()
                 PREFERENCES.clear()
                 DOWNLOADED.clear()
                 CONTROL.clear()
@@ -753,7 +762,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(out, "application/x-subrip")
             return self.send({"error": "not found"}, status=404)
         if path.startswith("/Videos/") and "/stream" in path:
-            print(f"{time.time():.2f} stream {path.split('/')[2]}", flush=True)
+            print(f"{time.time():.2f} stream {path.split('/')[2]} {self.headers.get('Range', '')}", flush=True)
+            VIDEO_REQUESTS.append((time.time(), path.split('/')[2]))
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")
             if video and os.path.exists(video):
                 return self.send_file(video)

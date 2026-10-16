@@ -1072,6 +1072,60 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertLessThanOrEqual(after - before, 6, "the player was drawn \(after - before) times in 5 s of playing")
     }
 
+    /// Pressing play stops what was fetched ahead for the other titles
+    /// (Continue Watching's files: their start, their index, where they
+    /// resume): the film playing has the connection to itself. Regression:
+    /// those fetches went on, each step after the last, competing with it.
+    /// A slow server (6 s before each answer, four steps each) keeps them
+    /// going long enough.
+    func testFetchingAheadStopsWhenAFilmPlays() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        // From its start (resumed at the end of the 10-minute test film, the
+        // next episode would follow at once).
+        configure(server, ["video_delay": "6", "episode_resume": "0"])
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
+        // The fetches ahead under way (their first step).
+        sleep(3)
+        card.tap()
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 20), "the player didn't open")
+        // From a moment after the player opened (a request sent just before
+        // can still arrive): each further step of a fetch ahead would come.
+        sleep(1)
+        let mark = markTime(server)
+        let playing = item.label
+        sleep(20)
+        let others = videoRequests(server, since: mark).filter { $0 != playing }
+        XCTAssertEqual(others, [], "other titles' files were still fetched after \(playing) started")
+    }
+
+    private func markTime(_ server: URL) -> Double {
+        var t = 0.0
+        let done = expectation(description: "mark")
+        URLSession.shared.dataTask(with: server.appending(path: "mock/mark")) { data, _, _ in
+            t = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Double] })?["t"] ?? 0
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return t
+    }
+
+    private func videoRequests(_ server: URL, since: Double) -> [String] {
+        var items: [String] = []
+        let done = expectation(description: "video requests")
+        let url = server.appending(path: "mock/video_requests").appending(queryItems: [.init(name: "since", value: String(since))])
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            items = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?["items"] ?? []
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return items
+    }
+
     /// The app's debug readout of the player: its second, and whether it plays.
     private func playerState() -> (seconds: Double, playing: Bool)? {
         let parts = app.staticTexts["debug-position"].firstMatch.label.split(separator: " ")
