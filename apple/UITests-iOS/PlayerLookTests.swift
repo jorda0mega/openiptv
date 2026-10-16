@@ -1221,6 +1221,62 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(playing.hasSuffix("subtitles=eng"), "no English subtitles came: \(playing)")
     }
 
+    /// The same on an account that may not manage subtitles on the server
+    /// (Emby refuses it the download): the providers' file is read through
+    /// the server instead, kept on the device, and shown. Regression: the
+    /// server was asked to download it, refused, and the film had none (the
+    /// user's account: "a lot of titles have no subtitles whatsoever").
+    func testFoundSubtitlesWithoutTheRightToSave() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["REMOTE_SUBTITLES"] != nil, "needs the French-only test film")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["subtitle_rights": "none"])
+        openFilm(["-forgetTrackChoices", "YES", "-forgetSubtitleSearches", "YES"])
+        var playing = ""
+        for _ in 0..<15 where !playing.contains("subtitles=eng") {
+            sleep(1)
+            playing = tracksPlaying()
+        }
+        shot("found subtitles without the right to save")
+        XCTAssertTrue(playing.hasSuffix("subtitles=eng"), "no English subtitles came: \(playing)")
+    }
+
+    /// Of the files the providers find, the one that fits the film shows,
+    /// in time, and only it: the most downloaded is another film's, the
+    /// next this film's, 6.5 s early. The first shows at once; once the
+    /// speech is heard, the second takes its place, 6.5 s later. Needs the
+    /// speech test film from France with no subtitles
+    /// (OPENIPTV_MOCK_VIDEO=…/speech.mkv, OPENIPTV_MOCK_COUNTRIES=France,
+    /// OPENIPTV_MOCK_RUNTIME=480, OPENIPTV_MOCK_REMOTE_SUBTITLE="…/other.srt;…/early.srt";
+    /// TEST_RUNNER_FOUND_SUBTITLES=1). Regression: the most downloaded was
+    /// taken, whatever film it was for.
+    func testFoundSubtitlesThatFitShow() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["FOUND_SUBTITLES"] != nil, "needs the speech test film")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["subtitle_rights": "none"])
+        openFilm(["-forgetTrackChoices", "YES", "-forgetSubtitleSearches", "YES", "-forgetSubtitleTimings", "YES"])
+        let readout = app.staticTexts["debug-subshift"].firstMatch
+        var parts: [Double] = []
+        for _ in 0..<150 where parts.first.map({ abs($0 - 6.5) > 0.2 }) ?? true {
+            sleep(1)
+            parts = readout.label.split(separator: " ").compactMap { Double($0) }
+        }
+        shot("found subtitles that fit")
+        XCTAssertEqual(parts.first ?? 0, 6.5, accuracy: 0.2, "the file that fits isn't showing in time: \(readout.label)")
+        XCTAssertTrue(tracksPlaying().hasSuffix("subtitles=eng"), "no English subtitles: \(tracksPlaying())")
+        // One English file in the menu: the other went.
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let off = app.buttons["Off"].firstMatch
+        XCTAssertTrue(off.waitForExistence(timeout: 5), "the menu didn't open")
+        let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).allElementsBoundByIndex
+            .filter { $0.frame.minY > off.frame.minY }
+        XCTAssertEqual(english.count, 1, "not one English file: \(english.map(\.label))")
+    }
+
     /// Playing with the controls up, the player screen isn't drawn again
     /// for every tick of the clock (about four a second): only the bar and
     /// what shows the time are. Regression: the whole player was, with every

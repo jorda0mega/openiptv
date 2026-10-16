@@ -1357,25 +1357,36 @@ final class AppModel {
         }
     }
 
-    /// A film heard in neither English nor Spanish with no subtitles in
-    /// either: the server's subtitle providers are asked for some (English
-    /// first), once a week at most per title, and the subtitle files it
-    /// then has are returned for the player to add (and show). Nothing is
-    /// asked when the film has what's needed.
-    func fetchMissingSubtitles(for playback: EmbyPlayback) async -> [EmbyPlayback.SubtitleFile] {
+    /// Subtitle files found for a film heard in neither English nor
+    /// Spanish with none in either: the server's providers are asked
+    /// (English first), and the likeliest few (made for this file, then
+    /// the most downloaded) are read through the server and kept on the
+    /// device, unless written in another language. Returned likeliest
+    /// first, or only the one picked before (`notePickedSubtitle`): the
+    /// player shows the first at once and puts another in its place if it
+    /// fits the film clearly better. Asked once a week at most when none
+    /// are found; nothing is asked when the film has what's needed or the
+    /// files are on the device. Regression: the server was asked to
+    /// download the most downloaded one, which an account without the
+    /// right to manage subtitles may not, so those films never had any.
+    func findMissingSubtitles(for playback: EmbyPlayback) async -> [EmbyPlayback.SubtitleFile] {
         #if DEBUG
         NSLog("%@", "PERF subtitles needed? wanted=\(playback.tracks?.subtitles ?? []) has=\(playback.subtitleLanguages.sorted()) source=\(playback.mediaSourceId ?? "none")")
         #endif
         guard let emby, let wanted = playback.tracks?.subtitles,
               playback.subtitleLanguages.isDisjoint(with: ["en", "es"]) else { return [] }
-        let key = "subtitleSearch." + playback.itemId
-        var recent = (UserDefaults.standard.object(forKey: key) as? Date).map { Date().timeIntervalSince($0) < 7 * 86_400 } ?? false
+        let folder = FoundSubtitles.folder(playback.itemId)
         #if DEBUG
         // UI tests: `-forgetSubtitleSearches YES` asks again.
-        if UserDefaults.standard.bool(forKey: "forgetSubtitleSearches") { recent = false }
+        let forget = UserDefaults.standard.bool(forKey: "forgetSubtitleSearches")
+        if forget { try? FileManager.default.removeItem(at: folder) }
+        #else
+        let forget = false
         #endif
-        if recent { return [] }
-        UserDefaults.standard.set(Date(), forKey: key)
+        if let kept = FoundSubtitles.read(folder)?.subtitleFiles(in: folder), !kept.isEmpty { return kept }
+        let key = "subtitleSearch." + playback.itemId
+        let recent = (UserDefaults.standard.object(forKey: key) as? Date).map { Date().timeIntervalSince($0) < 7 * 86_400 } ?? false
+        if recent, !forget { return [] }
         let languages = wanted.compactMap { TrackChoice.normalized($0) }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         for language in languages {
             let code = language == "es" ? "spa" : "eng"
@@ -1384,20 +1395,58 @@ final class AppModel {
                 #if DEBUG
                 NSLog("%@", "PERF subtitles search failed: \(error)")
                 #endif
-                continue
+                // Asked again next time.
+                return []
             }
-            guard let best = found.first,
-                  (try? await emby.downloadSubtitle(playback.itemId, mediaSourceId: playback.mediaSourceId, id: best.Id)) != nil
-            else { continue }
+            // One made for this very file fits it: the only one read. The
+            // others all at once.
+            let tried = Array(found.prefix(found.first?.IsHashMatch == true ? 1 : FoundSubtitles.tried))
+            let texts = await withTaskGroup(of: (Int, String?).self) { group in
+                for (n, candidate) in tried.enumerated() { group.addTask { (n, await emby.subtitleText(id: candidate.Id)) } }
+                var texts = [String?](repeating: nil, count: tried.count)
+                for await (n, text) in group { texts[n] = text }
+                return texts
+            }
+            var kept: [FoundSubtitles.File] = []
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            for (candidate, text) in zip(tried, texts) {
+                guard let text, SubtitleSync.cues(text).count >= 10, !SubtitleLanguage.writtenInAnother(language, text) else { continue }
+                let name = "\(kept.count).\(text.contains("[Events]") ? "ass" : text.hasPrefix("WEBVTT") ? "vtt" : "srt")"
+                guard (try? text.write(to: folder.appending(path: name), atomically: true, encoding: .utf8)) != nil else { continue }
+                kept.append(.init(name: name, id: candidate.Id, language: code))
+            }
             #if DEBUG
-            NSLog("%@", "PERF subtitles fetched from \(best.ProviderName ?? "the server"): \(language)")
+            NSLog("%@", "PERF subtitles found \(found.count) \(language), kept \(kept.map(\.id))")
             #endif
-            // The server lists its new file now.
-            if let fresh = try? await emby.playback(versions: [playback.itemId], kind: nil, maxWidth: Self.maxWidth) {
-                return fresh.subtitleFiles
+            guard !kept.isEmpty else { continue }
+            let index = FoundSubtitles(files: kept, picked: nil)
+            index.write(folder)
+            return index.subtitleFiles(in: folder)
+        }
+        UserDefaults.standard.set(Date(), forKey: key)
+        return []
+    }
+
+    /// The found file that fits the film best (the player matched them):
+    /// the only one from now on, and saved on the server too when the
+    /// account may (then it's one of the film's files for every app).
+    func notePickedSubtitle(itemId: String, mediaSourceId: String?, url: URL) {
+        let folder = FoundSubtitles.folder(itemId)
+        guard var index = FoundSubtitles.read(folder), let file = index.files.first(where: { $0.name == url.lastPathComponent }),
+              index.picked != file.name else { return }
+        index.picked = file.name
+        index.write(folder)
+        #if DEBUG
+        NSLog("%@", "PERF subtitles picked \(file.id)")
+        #endif
+        guard let emby else { return }
+        Task(priority: .utility) {
+            do { try await emby.downloadSubtitle(itemId, mediaSourceId: mediaSourceId, id: file.id) } catch {
+                #if DEBUG
+                NSLog("%@", "PERF subtitles not saved on the server: \(error)")
+                #endif
             }
         }
-        return []
     }
 
     /// Works out how to play these in the background; a later tap uses it.

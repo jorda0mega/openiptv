@@ -24,7 +24,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 PANEL_TZ = timezone(timedelta(hours=1))
 CHANNELS = 40
@@ -120,7 +120,7 @@ def file_streams():
     _file_streams_cached()
     # (Files downloaded through the providers are listed fresh each time.)
     return _STREAMS + [{"Type": "Subtitle", "Index": 200 + n, "Language": lang, "Codec": "srt", "IsExternal": True,
-                        "IsTextSubtitleStream": True, "DeliveryMethod": "External"} for n, lang in enumerate(DOWNLOADED)]
+                        "IsTextSubtitleStream": True, "DeliveryMethod": "External"} for n, (_, lang) in enumerate(DOWNLOADED)]
 
 
 _STREAMS_LOCK = threading.Lock()
@@ -157,11 +157,27 @@ def _file_streams_cached():
         _STREAMS = streams
 
 
+def remote_subtitles():
+    """The providers' subtitles on offer ("path;path;…", most downloaded
+    first): their paths."""
+    return [f for f in os.environ.get("OPENIPTV_MOCK_REMOTE_SUBTITLE", "").split(";") if f]
+
+
+def remote_subtitle(subtitle_id):
+    """The path of the provider's subtitle "os-<n>-<language>" (n from 1)."""
+    try:
+        n = int(subtitle_id.split("-")[1])
+    except (IndexError, ValueError):
+        return None
+    files = remote_subtitles()
+    return files[n - 1] if 1 <= n <= len(files) else None
+
+
 def subtitle_file(index):
     """The path of subtitle file `index` (100, 101, … beside the film; 200,
     201, … downloaded)."""
     if index >= 200:
-        return os.environ.get("OPENIPTV_MOCK_REMOTE_SUBTITLE") if index - 200 < len(DOWNLOADED) else None
+        return remote_subtitle(DOWNLOADED[index - 200][0]) if index - 200 < len(DOWNLOADED) else None
     files = [f for f in os.environ.get("OPENIPTV_MOCK_SUBTITLE_FILES", "").split(";") if f]
     n = index - 100
     return files[n].split("|", 2)[2] if 0 <= n < len(files) else None
@@ -361,8 +377,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"", status=204)
         if "/RemoteSearch/Subtitles/" in self.path and self.headers.get("X-Emby-Token") == "tok":
             # Download one: it's a subtitle file of the item from now on.
-            subtitle = urlparse(self.path).path.rsplit("/", 1)[1]
-            DOWNLOADED.append(subtitle.rsplit("-", 1)[1])
+            # "subtitle_rights": "none": an account that may not manage
+            # subtitles (Emby refuses it).
+            subtitle = unquote(urlparse(self.path).path.rsplit("/", 1)[1])
+            if CONTROL.get("subtitle_rights") == "none":
+                print(f"{time.time():.2f} subtitle download {subtitle} refused", flush=True)
+                return self.send({"error": "forbidden"}, status=403)
+            DOWNLOADED.append((subtitle, subtitle.rsplit("-", 1)[1]))
             print(f"{time.time():.2f} subtitle download {subtitle}", flush=True)
             return self.send({"NewIndex": 199 + len(DOWNLOADED)})
         if "/DisplayPreferences/" in self.path and self.headers.get("X-Emby-Token") == "tok":
@@ -786,11 +807,20 @@ class Handler(BaseHTTPRequestHandler):
         if "/RemoteSearch/Subtitles/" in path:
             # The providers' subtitles for an item in a language.
             language = path.rsplit("/", 1)[1]
-            remote = os.environ.get("OPENIPTV_MOCK_REMOTE_SUBTITLE")
-            print(f"{time.time():.2f} subtitle search {language} ({'offered' if remote else 'none'})", flush=True)
-            return self.send([{"Id": f"os-1-{language}", "Name": f"Release.{language}", "ProviderName": "Open Subtitles",
-                               "Format": "srt", "Language": language, "IsHashMatch": True, "DownloadCount": 100}]
-                             if remote else [])
+            remote = remote_subtitles()
+            print(f"{time.time():.2f} subtitle search {language} ({len(remote)} offered)", flush=True)
+            return self.send([{"Id": f"os-{n}-{language}", "Name": f"Release.{n}.{language}", "ProviderName": "Open Subtitles",
+                               "Format": "srt", "Language": language, "IsHashMatch": False, "DownloadCount": 100 - n}
+                              for n in range(1, len(remote) + 1)])
+        if path.startswith("/Providers/Subtitles/Subtitles/"):
+            # A provider's subtitle read through the server (nothing saved).
+            subtitle = unquote(path.rsplit("/", 1)[1])
+            found = remote_subtitle(subtitle)
+            print(f"{time.time():.2f} subtitle read {subtitle}", flush=True)
+            if not found:
+                return self.send({"error": "not found"}, status=404)
+            with open(found, "rb") as f:
+                return self.send(f.read(), "text/plain; charset=utf-8")
         if path.startswith("/DisplayPreferences/"):
             key = (path.rsplit("/", 1)[1], q.get("client", ""))
             return self.send({"Id": key[0], "Client": key[1], "SortBy": "SortName", "CustomPrefs": PREFERENCES.get(key, {})})

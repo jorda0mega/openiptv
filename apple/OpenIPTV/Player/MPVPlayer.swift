@@ -695,6 +695,66 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    /// Subtitle files the server's providers found for the film (see
+    /// AppModel.findMissingSubtitles), likeliest first: that one is added
+    /// as a server file is, and shows at once. With others, each is matched
+    /// against the references and the speech heard once they're in, and
+    /// the one that fits the film clearly better takes its place (in time
+    /// from its first line); `picked` hears which one fits best, when one
+    /// fits well enough. Only one shows in the menu either way: the viewer
+    /// never chooses among them.
+    func addFound(_ files: [EmbyPlayback.SubtitleFile], references: [EmbyPlayback.SubtitleReference],
+                  speech stretches: [EmbyPlayback.SpeechStretch], picked: @escaping @Sendable (URL) -> Void) {
+        guard let first = files.first else { return }
+        addSubtitles([first], references: references, speech: stretches)
+        guard files.count > 1 else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            let texts = files.compactMap { file in (try? String(contentsOf: file.url, encoding: .utf8)).map { (file: file, text: $0) } }
+            guard let asked = self?.stateLock.withLock({ self?.references }) ?? nil else { return }
+            let guides = await asked.files.value + asked.own.value
+            // After the file showing has started listening: it's put in
+            // time at half the stretches heard already.
+            try? await Task.sleep(for: .seconds(2))
+            let heard = stretches.isEmpty ? [] : await self?.listen(stretches).value ?? []
+            let matched = texts.compactMap { file, text in
+                SubtitleSync.match(text, speech: heard, references: guides).map { (file: file, text: text, match: $0) }
+            }
+            #if DEBUG
+            NSLog("%@", "PERF subtitles found, matched: " + matched.map { "\($0.file.url.lastPathComponent) " + Self.describe($0.match) }.joined(separator: " | "))
+            #endif
+            guard let self, let best = matched.max(by: { $0.match < $1.match }) else { return }
+            let shown = matched.first { $0.file.url == first.url }?.match
+            guard best.file.url != first.url, Self.clearlyBetter(best.match, than: shown) else {
+                if let shown, shown.isGoodEnough { picked(first.url) }
+                return
+            }
+            SubtitleTiming.remember(best.match, for: best.file.url, text: best.text)
+            picked(best.file.url)
+            queue.async { [weak self] in self?.replaceFound(first.url, with: best.file, references: references, speech: stretches) }
+        }
+    }
+
+    /// Good enough where the other isn't, or a clearly closer fit.
+    private static func clearlyBetter(_ a: SubtitleSync.Match, than b: SubtitleSync.Match?) -> Bool {
+        guard a.isGoodEnough else { return false }
+        guard let b, b.isGoodEnough else { return true }
+        return a.score * a.evenness > 1.25 * b.score * b.evenness
+    }
+
+    /// On the queue: a found file in another's place: the other's track
+    /// taken off, this one added (and shown, if subtitles are wanted).
+    private func replaceFound(_ old: URL, with file: EmbyPlayback.SubtitleFile, references: [EmbyPlayback.SubtitleReference],
+                              speech stretches: [EmbyPlayback.SpeechStretch]) {
+        if let id = fileTracks.removeValue(forKey: old) {
+            command(["sub-remove", String(id)])
+            fits[id] = nil
+        }
+        bySpeech[old] = nil
+        fileInfo[old] = nil
+        emit(.tracksChanged)
+        addSubtitles([file], references: references, speech: stretches)
+    }
+
     /// On the queue: the file showing, if it waits for the speech heard,
     /// put in time by it and the references (the stretches are listened
     /// to once a film).
@@ -849,6 +909,8 @@ final class MPVPlayer: @unchecked Sendable {
         let folder = FileManager.default.temporaryDirectory.appending(path: "subtitles")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let local = folder.appending(path: "\(UUID().uuidString).\(file.url.pathExtension.isEmpty ? "srt" : file.url.pathExtension)")
+        // Found by the providers: on the device already.
+        if file.url.isFileURL { return (try? FileManager.default.copyItem(at: file.url, to: local)) != nil ? local : nil }
         guard let (data, response) = try? await (patient ? HTTP.patient : HTTP.session).data(from: file.url),
               (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty,
               (try? data.write(to: local)) != nil else { return nil }

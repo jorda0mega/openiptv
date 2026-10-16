@@ -264,20 +264,37 @@ struct EmbyClient {
     }
 
     /// Has the server download one of them; it's then one of the item's
-    /// subtitle files.
+    /// subtitle files. Refused for an account without the right to manage
+    /// subtitles.
     func downloadSubtitle(_ itemId: String, mediaSourceId: String?, id: String) async throws {
         guard !Self.readOnly else { return }
         var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(itemId)/RemoteSearch/Subtitles"),
                                   resolvingAgainstBaseURL: false)!
-        // The provider's id as one path segment, escaped once (escaped by
-        // hand and then by the URL, "-" arrived as "%252D").
-        let segment = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
-        parts.percentEncodedPath += "/" + (id.addingPercentEncoding(withAllowedCharacters: segment) ?? id)
+        parts.percentEncodedPath += "/" + Self.segment(id)
         if let mediaSourceId { parts.queryItems = [.init(name: "MediaSourceId", value: mediaSourceId)] }
         var request = URLRequest(url: parts.url!)
         request.httpMethod = "POST"
         authorize(&request)
         _ = try await HTTP.data(request)
+    }
+
+    /// One of them, read through the server (nothing saved there: any
+    /// account may). Nil when it can't be read or isn't text.
+    func subtitleText(id: String) async -> String? {
+        var parts = URLComponents(url: Self.api(account.serverURL, "Providers/Subtitles/Subtitles"), resolvingAgainstBaseURL: false)!
+        parts.percentEncodedPath += "/" + Self.segment(id)
+        var request = URLRequest(url: parts.url!)
+        authorize(&request)
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        guard let data = try? await HTTP.data(request), !data.isEmpty else { return nil }
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+    }
+
+    /// A provider's id as one path segment, escaped once (escaped by hand
+    /// and then by the URL, "-" arrived as "%252D").
+    private static func segment(_ id: String) -> String {
+        let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+        return id.addingPercentEncoding(withAllowedCharacters: allowed) ?? id
     }
 
     struct RemoteSubtitle: Decodable {

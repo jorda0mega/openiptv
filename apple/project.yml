@@ -201,6 +201,7 @@ targets:
       - OpenIPTV/Player/RemoteSwipe.swift
       - OpenIPTV/Player/SubtitleSync.swift
       - OpenIPTV/Player/SubtitleTiming.swift
+      - OpenIPTV/Player/SubtitleLanguage.swift
       - OpenIPTV/Player/QualityGovernor.swift
       - OpenIPTV/Player/RelayRoutes.swift
       - OpenIPTV/Live/WatchOn.swift

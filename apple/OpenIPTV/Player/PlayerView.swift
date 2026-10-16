@@ -1249,11 +1249,16 @@ struct MoviePlayerView: View {
             startReadout = String(format: "%@ %.1f at %.0f", warmStart ? "warm" : "cold", total, position)
             #endif
             Task { await loadTrackInfo() }
-            // No subtitles a foreign film needs: the server finds some.
+            // No subtitles a foreign film needs: the server's providers
+            // find some, and the one that fits the film best stays.
             if playback.mediaSourceId != nil {
                 Task {
-                    let files = await model.fetchMissingSubtitles(for: playback)
-                    if !files.isEmpty { player?.addSubtitles(files, references: playback.subtitleReferences, speech: playback.speechStretches) }
+                    let files = await model.findMissingSubtitles(for: playback)
+                    guard !files.isEmpty else { return }
+                    let (item, source) = (playback.itemId, playback.mediaSourceId)
+                    player?.addFound(files, references: playback.subtitleReferences, speech: playback.speechStretches) { url in
+                        Task { @MainActor in model.notePickedSubtitle(itemId: item, mediaSourceId: source, url: url) }
+                    }
                 }
             }
             #if DEBUG && os(iOS)
