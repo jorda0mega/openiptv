@@ -57,6 +57,9 @@ struct LivePlayerView: View {
     /// remote is on).
     @State private var showWatchOn = false
     @State private var watchOnIndex = 0
+    /// A channel picked in Watch On, kept for its league once it plays (a
+    /// feed that never starts isn't tried first next time).
+    @State private var pendingPick: (id: String, choice: AppModel.WatchChoice, league: String)?
 
     struct Window: Equatable {
         var start: Double
@@ -337,12 +340,16 @@ struct LivePlayerView: View {
     }
     #endif
 
-    /// The channel picked: it plays, and is first for this league's games
-    /// from now on.
+    /// The channel picked: it plays, and once it does it's first for this
+    /// league's games from now on.
     private func watch(on choice: AppModel.WatchChoice) {
-        if let league = model.event(of: channel)?.league { model.pickWatchChoice(choice, league: league) }
+        let league = model.event(of: channel)?.league
         withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) { showWatchOn = false }
-        guard choice.id != playingCopy?.id else { return showControls() }
+        guard choice.id != playingCopy?.id else {
+            if started, let league { model.pickWatchChoice(choice, league: league) }
+            return showControls()
+        }
+        pendingPick = league.map { (choice.id, choice, $0) }
         reset()
         recording = nil
         tried = [choice.id]
@@ -465,6 +472,7 @@ struct LivePlayerView: View {
     private func play(after delay: Double = 0, copy: LiveChannel? = nil) {
         reset()
         recording = nil
+        pendingPick = nil
         choices = model.watchChoices(for: channel)
         let first = copy ?? choices.first?.channel ?? channel
         tried = [first.id]
@@ -554,6 +562,10 @@ struct LivePlayerView: View {
         case let .started(seconds):
             started = true
             buffering = false
+            if let pendingPick, pendingPick.id == playingCopy?.id {
+                model.pickWatchChoice(pendingPick.choice, league: pendingPick.league)
+            }
+            pendingPick = nil
             ScreenAwake.set(awakeID, playing: !paused)
             #if DEBUG
             NSLog("%@", String(format: "PERF live start %.3f", seconds))

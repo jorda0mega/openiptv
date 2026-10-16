@@ -890,7 +890,7 @@ final class RemoteFocusTests: XCTestCase {
     /// plays first for the league's games after.
     func testWatchOnRemote() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
-        configure(server, ["sports": "1"])
+        configure(server, ["sports": "1", "dead_live": "none"])
         addTeardownBlock { [self] in configure(server, ["sports": "0"]) }
         // The test server's channels (its test login, for this run).
         app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#

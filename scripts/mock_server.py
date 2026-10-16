@@ -437,6 +437,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"\x47" * 188 * 64, "video/mp2t")
         if path.startswith("/live/u/p/"):
             name = path.rsplit("/", 1)[1]
+            # /mock/set?dead_live=2003,2005: those channels answer and never
+            # send a picture (an event feed that's over).
+            if name.split(".")[0] in CONTROL.get("dead_live", "").split(","):
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp2t")
+                self.end_headers()
+                time.sleep(120)
+                self.close_connection = True
+                return
             if name.endswith(".ts") and os.environ.get("OPENIPTV_MOCK_VIDEO") and shutil.which("ffmpeg"):
                 return self.live_video()
             if name.endswith(".m3u8"):

@@ -27,7 +27,7 @@ final class LiveSportsTests: XCTestCase {
     /// one picked plays and comes first for the league's games after.
     func testGameOnSeveralChannelsOffersWatchOn() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
-        configure(server, ["sports": "1"])
+        configure(server, ["sports": "1", "dead_live": "none"])
         addTeardownBlock { [self] in configure(server, ["sports": "0"]) }
         app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
         app.launch()
@@ -56,6 +56,32 @@ final class LiveSportsTests: XCTestCase {
         app.buttons["Close player"].firstMatch.tap()
         openGame()
         XCTAssertTrue(playing("ESPN UNLTD 016"), "the league's pick didn't play first: \(liveCopy())")
+    }
+
+    /// Regression: a channel picked in Watch On that never started (an
+    /// event feed that was over) was remembered for the league, so the
+    /// league's next game opened on it and hung.
+    func testFeedThatNeverStartsIsNotRemembered() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "2003"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none"]) }
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        XCTAssertTrue(playing("NFL 01"), "the game didn't start on the best channel: \(liveCopy())")
+        showControls()
+        app.buttons["Watch On"].firstMatch.tap()
+        let spanish = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.' AND label CONTAINS 'Spanish'")).firstMatch
+        XCTAssertTrue(spanish.waitForExistence(timeout: 5), "no Spanish feed in Watch On")
+        spanish.tap()
+        XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't open: \(liveCopy())")
+        sleep(6)
+        XCTAssertEqual(app.staticTexts["debug-live-state"].firstMatch.label, "starting", "the dead feed played")
+
+        showControls()
+        app.buttons["Close player"].firstMatch.tap()
+        openGame()
+        XCTAssertTrue(playing("NFL 01"), "the feed that never started was tried first: \(liveCopy())")
     }
 
     /// Live TV → Sports → the game.
