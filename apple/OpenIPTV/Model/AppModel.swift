@@ -485,6 +485,13 @@ final class AppModel {
         var playback: EmbyPlayback
         do {
             playback = try await task.value
+            // Got ready without the server's track list (it didn't answer
+            // then): asked again now, or it plays with no subtitle files.
+            // Regression: a title got ready at launch played without them.
+            if !playback.listed, let emby {
+                playback = (try? await emby.playback(versions: library.versions(of: itemId), kind: kind, maxWidth: Self.maxWidth,
+                                                     showCopies: showCopies)) ?? playback
+            }
         } catch {
             // Worked out ahead and failed then (a moment's network trouble):
             // ask again now rather than fail the tap.

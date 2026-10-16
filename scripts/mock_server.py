@@ -123,10 +123,18 @@ def file_streams():
                         "IsTextSubtitleStream": True, "DeliveryMethod": "External"} for n, lang in enumerate(DOWNLOADED)]
 
 
+_STREAMS_LOCK = threading.Lock()
+
+
 def _file_streams_cached():
+    """Read once. Under a lock and assigned when complete: a request during
+    the read got an empty list (the app asks for several titles at once at
+    launch, and kept the ones with no tracks)."""
     global _STREAMS
-    if _STREAMS is None:
-        _STREAMS = []
+    with _STREAMS_LOCK:
+        if _STREAMS is not None:
+            return
+        streams = []
         video = os.environ.get("OPENIPTV_MOCK_VIDEO")
         if video and shutil.which("ffprobe"):
             out = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", video],
@@ -134,18 +142,19 @@ def _file_streams_cached():
             for s in json.loads(out or "{}").get("streams", []):
                 kind = {"audio": "Audio", "subtitle": "Subtitle"}.get(s.get("codec_type"))
                 if kind:
-                    _STREAMS.append({"Type": kind, "Index": s.get("index"),
-                                     "Language": (s.get("tags") or {}).get("language"),
-                                     "Codec": s.get("codec_name"),
-                                     "IsForced": bool((s.get("disposition") or {}).get("forced")),
-                                     "IsDefault": bool((s.get("disposition") or {}).get("default"))})
+                    streams.append({"Type": kind, "Index": s.get("index"),
+                                    "Language": (s.get("tags") or {}).get("language"),
+                                    "Codec": s.get("codec_name"),
+                                    "IsForced": bool((s.get("disposition") or {}).get("forced")),
+                                    "IsDefault": bool((s.get("disposition") or {}).get("default"))})
         # Subtitle files beside the film, as Emby lists them after its own
         # tracks: "language|title|path;…".
         for n, spec in enumerate(f for f in os.environ.get("OPENIPTV_MOCK_SUBTITLE_FILES", "").split(";") if f):
             language, title, _ = spec.split("|", 2)
-            _STREAMS.append({"Type": "Subtitle", "Index": 100 + n, "Language": language, "Title": title or None,
-                             "Codec": "srt", "IsExternal": True, "IsTextSubtitleStream": True,
-                             "IsHearingImpaired": "sdh" in title.lower(), "DeliveryMethod": "External"})
+            streams.append({"Type": "Subtitle", "Index": 100 + n, "Language": language, "Title": title or None,
+                            "Codec": "srt", "IsExternal": True, "IsTextSubtitleStream": True,
+                            "IsHearingImpaired": "sdh" in title.lower(), "DeliveryMethod": "External"})
+        _STREAMS = streams
 
 
 def subtitle_file(index):

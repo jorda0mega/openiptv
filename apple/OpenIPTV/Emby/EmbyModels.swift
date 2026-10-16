@@ -259,6 +259,9 @@ struct EmbyPlayback: Hashable, Identifiable {
     var intro: ClosedRange<Double>?
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
+    /// The server said how to play it (its tracks and subtitle files);
+    /// false when it didn't answer in time and a guess stands in.
+    var listed = true
     /// The title's other copies (another library's: HD and 4K, a dub) and
     /// the languages each is heard in: the audio menu offers those it
     /// doesn't have itself.

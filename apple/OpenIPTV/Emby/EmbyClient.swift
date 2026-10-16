@@ -865,7 +865,14 @@ struct EmbyClient {
         // source id can differ from the item id, and some sources are remote
         // files to open directly. Fall back to direct stream if this fails.
         let info: PlaybackInfo?
-        if let prefetchedInfo { info = prefetchedInfo } else { info = try? await playbackInfo(item.id, startSeconds: resume) }
+        if let prefetchedInfo { info = prefetchedInfo } else {
+            do { info = try await playbackInfo(item.id, startSeconds: resume) } catch {
+                #if DEBUG
+                NSLog("%@", "PERF playback info failed for \(item.id): \(error)")
+                #endif
+                info = nil
+            }
+        }
         if let info, let source = info.MediaSources?.first {
             playback.mediaSourceId = source.Id
             playback.playSessionId = info.PlaySessionId
@@ -892,6 +899,7 @@ struct EmbyClient {
             }
         }
         playback.bitrate = info?.MediaSources?.first?.Bitrate
+        playback.listed = info?.MediaSources?.first != nil
         playback.seriesId = item.seriesId
         playback.overview = item.overview
         playback.intro = item.intro
