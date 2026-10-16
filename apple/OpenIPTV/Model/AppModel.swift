@@ -1492,6 +1492,10 @@ final class AppModel {
         playingItem = nil
         let duration = playback.durationSeconds ?? 0
         stops[playback.itemId] = (duration > 0 && seconds >= duration * 0.9 ? 0 : seconds, Date())
+        // Where it was stopped, for every device's Continue Watching (the
+        // server keeps nothing this early in a title).
+        let finished = duration > 0 && seconds >= duration * 0.9
+        if let emby { Task(priority: .utility) { await emby.noteStarted(playback.itemId, seconds: finished ? nil : seconds) } }
         #if DEBUG
         debugStop = "stop noted player=\(debugPlayerUp ? "up" : "gone")"
         #endif

@@ -638,6 +638,49 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=off")
     }
 
+    /// A film stopped 20 seconds in (under 5% of it, where Emby keeps no
+    /// place, so its own Continue Watching leaves it out) is in Continue
+    /// Watching the next time the app opens, Home built again from the
+    /// server, and plays on from where it stopped. Regression: the user
+    /// watched CSI under 2 minutes, and on reopening the app it wasn't in
+    /// Continue Watching.
+    func testShortWatchStaysInContinueWatching() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["min_resume_pct": "5"])
+        openFilm()
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "no player")
+        let film = item.label
+        sleep(20)
+        let stopped = position() ?? 0
+        XCTAssertGreaterThan(stopped, 10, "it didn't play")
+        controlsUp()
+        app.buttons["Close player"].firstMatch.tap()
+        sleep(3)
+        app.terminate()
+
+        app.launchEnvironment["OPENREEL_DEBUG_HOME_STALE"] = "1"
+        app.launchArguments = []
+        app.launch()
+        let home = app.tabBars.buttons["Home"].firstMatch
+        if home.waitForExistence(timeout: 10) { home.tap() }
+        let card = app.buttons["continue-\(film)"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "the film watched 20 s isn't in Continue Watching")
+        card.tap()
+        let resume = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        let readout = app.staticTexts["debug-position"].firstMatch
+        let deadline = Date().addingTimeInterval(15)
+        while !readout.exists, Date() < deadline {
+            if resume.exists, resume.isHittable { resume.tap(); break }
+            usleep(250_000)
+        }
+        XCTAssertTrue(item.waitForExistence(timeout: 15), "it didn't play")
+        sleep(2)
+        XCTAssertEqual(position() ?? 0, stopped, accuracy: 8, "it didn't go on from where it stopped")
+    }
+
     /// Two copies of a film whose server lists them with different IMDb ids
     /// but the same TMDb id (one copy's metadata is wrong) are one title:
     /// the English copy plays. Regression: copies were grouped by IMDb id

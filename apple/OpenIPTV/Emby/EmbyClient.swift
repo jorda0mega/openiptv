@@ -1,4 +1,5 @@
 import Foundation
+import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -147,25 +148,91 @@ struct EmbyClient {
 
     /// Writes that record (item id → seconds since 1970), replacing it.
     func saveMyListDates(_ dates: [String: Double]) async {
+        await saveRecord(Self.myListRecord, dates.mapValues { String(Int($0)) })
+    }
+
+    /// Replaces one of the app's records on the server (in the viewer's
+    /// display preferences, under the app's own name).
+    private func saveRecord(_ id: String, _ values: [String: String]) async {
         guard !Self.readOnly else { return }
-        var parts = URLComponents(url: Self.api(account.serverURL, "DisplayPreferences/\(Self.myListRecord)"), resolvingAgainstBaseURL: false)!
+        var parts = URLComponents(url: Self.api(account.serverURL, "DisplayPreferences/\(id)"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [.init(name: "userId", value: account.userId), .init(name: "client", value: Self.recordClient)]
         var request = URLRequest(url: parts.url!)
         request.httpMethod = "POST"
         authorize(&request)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // The fields Emby's display preferences always carry, then the dates.
+        // The fields Emby's display preferences always carry, then the values.
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "Id": Self.myListRecord, "Client": Self.recordClient, "SortBy": "SortName", "SortOrder": "Ascending",
+            "Id": id, "Client": Self.recordClient, "SortBy": "SortName", "SortOrder": "Ascending",
             "RememberIndexing": false, "RememberSorting": false, "ShowBackdrop": false, "ShowSidebar": false,
             "PrimaryImageHeight": 0, "PrimaryImageWidth": 0, "ScrollDirection": "Horizontal",
-            "CustomPrefs": dates.mapValues { String(Int($0)) },
+            "CustomPrefs": values,
         ])
         _ = try? await HTTP.data(request)
     }
 
     private static let myListRecord = "zapline-mylist"
     private static let recordClient = "zapline"
+
+    // MARK: Short watches
+
+    /// Where a title was last stopped (seconds in), and when (seconds since
+    /// 1970), by any of the viewer's devices.
+    struct Started: Sendable, Equatable {
+        let seconds: Double
+        let at: Double
+    }
+
+    /// The app's record of where titles were stopped: Emby keeps no place
+    /// before 5% of a title (two minutes of an episode), so its Continue
+    /// Watching leaves those out; this record keeps them, for every device.
+    /// Nil when the server didn't answer.
+    func startedRecord() async -> [String: Started]? {
+        struct Preferences: Decodable { let CustomPrefs: [String: String]? }
+        guard let found: Preferences = try? await get("DisplayPreferences/\(Self.startedRecordId)", [
+            .init(name: "userId", value: account.userId), .init(name: "client", value: Self.recordClient),
+        ]) else { return nil }
+        return (found.CustomPrefs ?? [:]).compactMapValues { value in
+            let parts = value.split(separator: "|").compactMap { Double($0) }
+            return parts.count == 2 ? Started(seconds: parts[0], at: parts[1]) : nil
+        }
+    }
+
+    /// A title stopped `seconds` in (nil: finished): kept in the record (the
+    /// newest 40), or taken out once finished. Under ten seconds changes
+    /// nothing (opened by mistake).
+    func noteStarted(_ itemId: String, seconds: Double?) async {
+        guard !Self.readOnly else { return }
+        var record = await startedRecord() ?? [:]
+        if let seconds {
+            guard seconds >= 10 else { return }
+            record[itemId] = Started(seconds: seconds, at: Date().timeIntervalSince1970)
+        } else {
+            guard record.removeValue(forKey: itemId) != nil else { return }
+        }
+        if record.count > 40 {
+            record = Dictionary(uniqueKeysWithValues: record.sorted { $0.value.at > $1.value.at }.prefix(40).map { ($0.key, $0.value) })
+        }
+        Self.started.withLock { $0 = (true, record) }
+        await saveRecord(Self.startedRecordId, record.mapValues { "\(Int($0.seconds))|\(Int($0.at))" })
+    }
+
+    /// The record as last read or written (and whether it's been read this
+    /// run): where a title it holds starts.
+    private static let started = OSAllocatedUnfairLock(initialState: (read: false, record: [String: Started]()))
+    private static let startedRecordId = "zapline-started"
+
+    /// Where the record says a title was stopped, unless it's been finished
+    /// since (the server knows). The record is read first if nothing has
+    /// read it this run: a title got ready at launch, from the Home saved
+    /// before, started from the beginning.
+    private func recordedStart(_ item: EmbyItem) async -> Double? {
+        guard item.userData?.played != true else { return nil }
+        if !Self.started.withLock({ $0.read }), let record = await startedRecord() {
+            Self.started.withLock { $0 = (true, record) }
+        }
+        return Self.started.withLock { $0.record[item.id]?.seconds }
+    }
 
     /// Subtitles the server's providers (OpenSubtitles, …) offer for an
     /// item in a language ("eng", "spa"), best first: made for this exact
@@ -248,13 +315,42 @@ struct EmbyClient {
         ])) ?? []
     }
 
-    /// Partly watched, most recent first.
+    /// Partly watched, most recent first: the server's, and the titles
+    /// stopped too early for it to keep (see startedRecord), each where it
+    /// was stopped. Regression: CSI watched under two minutes wasn't in
+    /// Continue Watching the next time the app opened.
     func watching() async throws -> [EmbyItem] {
-        try await items("Users/\(account.userId)/Items", Self.cardQuery + [
+        async let record = startedRecord()
+        let resumable: [EmbyItem] = try await items("Users/\(account.userId)/Items", Self.cardQuery + [
             .init(name: "Filters", value: "IsResumable"), .init(name: "Recursive", value: "true"),
             .init(name: "SortBy", value: "DatePlayed"), .init(name: "SortOrder", value: "Descending"),
             .init(name: "IncludeItemTypes", value: "Movie,Episode"), .init(name: "Limit", value: "30"),
         ])
+        guard let record = await record else { return resumable }
+        Self.started.withLock { $0 = (true, record) }
+        let listed = Set(resumable.map(\.id))
+        let missing = record.filter { !listed.contains($0.key) }.sorted { $0.value.at > $1.value.at }.prefix(20)
+        guard !missing.isEmpty else { return resumable }
+        let stamp = ISO8601DateFormatter()
+        let extra: [EmbyItem] = await items(ids: missing.map(\.key)).compactMap { found in
+            guard found.userData?.played != true, let start = record[found.id] else { return nil }
+            var item = found
+            var user = item.userData ?? EmbyItem.UserData()
+            user.playbackPositionTicks = Int64(start.seconds * 10_000_000)
+            if let ticks = item.runTimeTicks, ticks > 0 { user.playedPercentage = start.seconds * 10_000_000 / Double(ticks) * 100 }
+            user.lastPlayedDate = stamp.string(from: Date(timeIntervalSince1970: start.at))
+            item.userData = user
+            return item
+        }
+        // In among the server's by when each was played (the server's
+        // own order kept).
+        func when(_ item: EmbyItem) -> Substring { (item.userData?.lastPlayedDate ?? "").prefix(19) }
+        var merged = resumable
+        for item in extra.sorted(by: { when($0) > when($1) }) {
+            let at = merged.firstIndex { when($0) < when(item) } ?? merged.endIndex
+            merged.insert(item, at: at)
+        }
+        return merged
     }
 
     /// Recently finished, most recent first.
@@ -622,7 +718,8 @@ struct EmbyClient {
     /// are fetched at the same time instead of one after the other.
     func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
         let (item, info) = try await resolve(itemId, kind: kind)
-        return await assemble(item, info: info, resume: Self.resumePoint(item))
+        let resume: Double? = if let point = Self.resumePoint(item) { point } else { await recordedStart(item) }
+        return await assemble(item, info: info, resume: resume)
     }
 
     /// One title with copies in several libraries (HD and 4K, a dubbed
@@ -682,10 +779,16 @@ struct EmbyClient {
             chosen = fitting.max { width($0.info) < width($1.info) } ?? pool.min { width($0.info) < width($1.info) }!
         }
         // Resume where any copy was left off most recently.
-        let resume = copies
+        var resume = copies
             .filter { Self.resumePoint($0.item) != nil }
             .max { ($0.item.userData?.lastPlayedDate ?? "") < ($1.item.userData?.lastPlayedDate ?? "") }
             .flatMap { Self.resumePoint($0.item) }
+        // Too early in it for the server: where the app's record has it.
+        if resume == nil {
+            for copy in copies {
+                if let start = await recordedStart(copy.item) { resume = start; break }
+            }
+        }
         var playback = await assemble(chosen.item, info: chosen.info, resume: resume, keys: keys)
         playback.otherCopies = copies.filter { $0.item.id != chosen.item.id }.map { .init(itemId: $0.item.id, languages: sound($0.info)) }
         playback.copyIds = copies.map(\.item.id)

@@ -39,7 +39,8 @@ SOCKETS = set()
 # "video_fail" (every video request answered 503: the connection lost),
 # "intro" ("5,45": an episode's intro marks, in seconds), "copy_audio"
 # ("a8:fre": one copy of a film with only that language's sound;
-# "a8:spa+spa+jpn": those tracks, in that order), "imdb" ("k8:tt0000001":
+# "a8:spa+spa+jpn": those tracks, in that order), "min_resume_pct" ("5":
+# like Emby, a stop before 5% of a title keeps no place), "imdb" ("k8:tt0000001":
 # that copy listed with another IMDb id, its TMDb id the same),
 # "watched_elsewhere" ("m7": a film just played on another device),
 # "favorites_delay" (seconds before My List answers: a slow refresh),
@@ -337,7 +338,12 @@ class Handler(BaseHTTPRequestHandler):
             # "ignore_reports": a server that hasn't heard (or kept) them.
             if self.path.split("?")[0].endswith(("/Progress", "/Stopped")) and body.get("ItemId") \
                     and CONTROL.get("ignore_reports") != "1":
-                POSITIONS[body["ItemId"]] = int(float(body.get("PositionTicks") or 0))
+                ticks = int(float(body.get("PositionTicks") or 0))
+                # "min_resume_pct": "5": like Emby, a place before that share
+                # of the title isn't kept (it isn't in Continue Watching).
+                if ticks < MOVIE_TICKS * float(CONTROL.get("min_resume_pct", 0)) / 100:
+                    ticks = 0
+                POSITIONS[body["ItemId"]] = ticks
             return self.send(b"", status=204)
         if "/RemoteSearch/Subtitles/" in self.path and self.headers.get("X-Emby-Token") == "tok":
             # Download one: it's a subtitle file of the item from now on.
