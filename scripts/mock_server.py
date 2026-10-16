@@ -236,7 +236,7 @@ LINEUP = None
 
 # /mock/set?sports=1: one game listed by three services, as real event
 # lists name them, in English, Spanish and French (Watch On).
-SPORTS_CATEGORIES = [("10", "NFL"), ("11", "ESPN Unlimited"), ("12", "DAZN CA")]
+SPORTS_CATEGORIES = [("10", "NFL"), ("11", "ESPN Unlimited"), ("12", "DAZN CA"), ("13", "Football / Soccer")]
 
 
 def sports_games(now):
@@ -247,6 +247,10 @@ def sports_games(now):
              ("ESPN UNLTD 016: Football: Eagles vs. Jaguars (Eagles vs. Jaguars (ESP))", "11"),
              ("DAZN CA 17: Eagles vs. Jaguars", "12"),
              ("DAZN CA 19: Eagles vs. Jaguars (In French)", "12")]
+    # "sports_dupes": "1": one feed listed in two slots of a sport's own
+    # category (the user's OneSoccer twice).
+    if CONTROL.get("sports_dupes") == "1":
+        games += [("Soccer04: Eagles vs. Jaguars ( OneSoccer Feed )", "13"), ("Soccer05: Eagles vs. Jaguars ( OneSoccer Feed )", "13")]
     return [{"num": 2001 + n, "name": f"{name} ({start})", "stream_id": str(2001 + n), "stream_icon": "",
              "epg_channel_id": None, "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0}
             for n, (name, cat) in enumerate(games)]

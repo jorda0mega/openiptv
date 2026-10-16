@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 #if canImport(UIKit)
@@ -2037,14 +2038,21 @@ final class AppModel {
         let feed: WatchOn.Feed
         /// "HD", "SD"; nil when the name doesn't say.
         let quality: String?
+        /// The same feed on other channels (a provider lists one feed in two
+        /// slots): not listed, tried after this one if it doesn't play.
+        var others: [LiveChannel] = []
         var id: String { channel.id }
+        /// Its name in the list and the line under it (see WatchOn.label).
+        var label: (title: String, line: String) { WatchOn.label(feed, quality: quality) }
     }
 
     /// Every channel showing this game, the one to play first at the top
     /// (see WatchOn.ranked); empty unless it's a game on more than one.
     func watchChoices(for channel: LiveChannel) -> [WatchChoice] {
         guard let event = event(of: channel) else { return [] }
-        let copies = copies(of: channel)
+        // Each channel once (a provider can list one in two categories).
+        var seen = Set<String>()
+        let copies = copies(of: channel).filter { seen.insert($0.id).inserted }
         guard copies.count > 1 else { return [] }
         let choices = copies.map { copy in
             let feed = liveLibrary.feeds[copy.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
@@ -2053,9 +2061,29 @@ final class AppModel {
         let byId = Dictionary(choices.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let options = choices.map { WatchOn.Option(id: $0.id, feed: $0.feed, quality: WatchOn.quality(of: $0.channel.name).score) }
         let lately = Set(liveFailures.filter { Date().timeIntervalSince($0.value) < 600 }.keys)
-        return WatchOn.ranked(options, pick: watchPicks[event.league],
-                              preferred: WatchOn.preferredLanguage(league: event.league, title: title(of: channel)),
-                              failed: lately).compactMap { byId[$0.id] }
+        let ranked = WatchOn.ranked(options, pick: watchPicks[event.league],
+                                    preferred: WatchOn.preferredLanguage(league: event.league, title: title(of: channel)),
+                                    failed: lately)
+        // The same feed on several channels: one entry (the user saw
+        // "Football · Soccer, OneSoccer Feed" twice).
+        let grouped: [WatchChoice] = WatchOn.grouped(ranked).compactMap { group in
+            guard var choice = byId[group.option.id] else { return nil }
+            choice.others = group.others.compactMap { byId[$0.id]?.channel }
+            return choice
+        }
+        return grouped.count > 1 ? grouped : []
+    }
+
+    /// How many different feeds show this game (its channels, the same feed
+    /// on two counted once): what its row says, and when Watch On is there.
+    func feedCount(_ entry: LiveOrganizer.Entry) -> Int {
+        var keys = Set<String>()
+        for channel in entry.channels {
+            let feed = liveLibrary.feeds[channel.id]
+            keys.insert([feed?.service ?? channel.id, feed?.detail ?? "", feed?.language ?? "",
+                         String(WatchOn.quality(of: channel.name).score)].joined(separator: "|"))
+        }
+        return keys.count
     }
 
     /// Every channel showing this game, the one to play first at the top,
@@ -2065,7 +2093,8 @@ final class AppModel {
         let choices = watchChoices(for: channel)
         guard choices.isEmpty else { return choices }
         let feed = liveLibrary.feeds[channel.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
-        return [WatchChoice(channel: current(channel), feed: feed, quality: WatchOn.quality(of: channel.name).label)]
+        let others = copies(of: channel).filter { $0.id != channel.id }
+        return [WatchChoice(channel: current(channel), feed: feed, quality: WatchOn.quality(of: channel.name).label, others: others)]
     }
 
     /// A channel picked in Watch On: first for this league's games from
@@ -2082,9 +2111,44 @@ final class AppModel {
         liveFailures[channel.id] = Date()
     }
 
-    /// A game that played on none of its channels (by any of them).
+    /// A game that played on none of its channels (by any of them): so for
+    /// half an hour on every device (the app's record on the server).
     func noteGameNotPlaying(_ channel: LiveChannel) {
-        for copy in copies(of: channel) { gamesNotPlaying[copy.id] = Date() }
+        let all = copies(of: channel)
+        for copy in all { gamesNotPlaying[copy.id] = Date() }
+        let keys = all.compactMap(sharedKey)
+        guard let emby, !keys.isEmpty else { return }
+        Task(priority: .utility) {
+            let now = Date().timeIntervalSince1970
+            var record = (await emby.notPlayingRecord() ?? [:]).filter { now - $0.value < 1800 }
+            for key in keys { record[key] = now }
+            await emby.saveNotPlaying(record)
+        }
+    }
+
+    /// What other devices found not playing in the last half hour, on this
+    /// device's game rows too (asked when Sports opens).
+    func syncGamesNotPlaying() async {
+        guard let emby, let record = await emby.notPlayingRecord(), !record.isEmpty else { return }
+        let now = Date().timeIntervalSince1970
+        for id in liveLibrary.feeds.keys {
+            guard let channel = channelById[id], let key = sharedKey(channel), let at = record[key], now - at < 1800 else { continue }
+            gamesNotPlaying[id] = Date(timeIntervalSince1970: at)
+        }
+    }
+
+    /// A channel's name the same on every device (each names its own
+    /// subscription differently): its provider's address and its number
+    /// there, hashed, so the Emby server's owner reads nothing of it.
+    private func sharedKey(_ channel: LiveChannel) -> String? {
+        guard let source = sources.iptv.first(where: { $0.id == channel.sourceId }) else { return nil }
+        let place: String = switch source.kind {
+        case let .xtream(server, _, _): server.host() ?? server.absoluteString
+        case let .m3u(playlist, _): playlist.host() ?? playlist.absoluteString
+        case let .stalker(portal, _): portal.host() ?? portal.absoluteString
+        }
+        let digest = SHA256.hash(data: Data("\(place)|\(channel.nativeId)".utf8))
+        return digest.prefix(10).map { String(format: "%02x", $0) }.joined()
     }
 
     /// The game tried in the last half hour, and none of its channels played
@@ -2093,10 +2157,19 @@ final class AppModel {
         entry.channels.contains { gamesNotPlaying[$0.id].map { Date().timeIntervalSince($0) < 1800 } ?? false }
     }
 
-    /// A game playing after all: its rows say LIVE again.
+    /// A game playing after all: its rows say LIVE again, on every device.
     func noteGamePlaying(_ channel: LiveChannel) {
         guard !gamesNotPlaying.isEmpty else { return }
-        for copy in copies(of: channel) where gamesNotPlaying[copy.id] != nil { gamesNotPlaying[copy.id] = nil }
+        let all = copies(of: channel).filter { gamesNotPlaying[$0.id] != nil }
+        guard !all.isEmpty else { return }
+        for copy in all { gamesNotPlaying[copy.id] = nil }
+        let keys = all.compactMap(sharedKey)
+        guard let emby, !keys.isEmpty else { return }
+        Task(priority: .utility) {
+            guard var record = await emby.notPlayingRecord(), keys.contains(where: { record[$0] != nil }) else { return }
+            for key in keys { record[key] = nil }
+            await emby.saveNotPlaying(record)
+        }
     }
 
     private var watchPicks: [String: WatchOn.Pick] {
@@ -2107,6 +2180,8 @@ final class AppModel {
     /// not fetched in the last 15 minutes are fetched again (four at a
     /// time) and applied together.
     func refreshEvents() async {
+        // What other devices found not playing (one small request).
+        await syncGamesNotPlaying()
         guard !refreshingEvents else { return }
         let stale = liveLibrary.eventCategories.filter { categoryFetchedAt[$0].map { Date().timeIntervalSince($0) >= 900 } ?? true }
         guard !stale.isEmpty else { return }

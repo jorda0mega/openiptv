@@ -89,10 +89,10 @@ struct WatchOnMenuItems: View {
         let choices = model.gameChannels(for: channel)
         Section(choices.count > 1 ? "Watch On · \(choices.count) channels" : "Watch On") {
             ForEach(choices) { choice in
-                let line = WatchOn.line(choice.feed, quality: choice.quality)
+                let label = choice.label
                 Button { play(choice.channel) } label: {
-                    Text(choice.feed.service)
-                    if !line.isEmpty { Text(line) }
+                    Text(label.title)
+                    if !label.line.isEmpty { Text(label.line) }
                 }
             }
         }
@@ -233,6 +233,8 @@ struct EventRow: View {
         let event = entry.event
         let started = event?.start.map { $0 <= Date() } ?? false
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
+        // Different feeds showing it (the same feed on two channels once).
+        let channels = model.feedCount(entry)
         // Tried in the last half hour, and none of its channels played.
         let notPlaying = live && model.isNotPlaying(entry)
         HStack(spacing: 12) {
@@ -257,7 +259,7 @@ struct EventRow: View {
                     }
                     // How many channels show it: Watch On lists them.
                     Text([Self.when(event?.start, started: started), event?.league, event?.detail,
-                          entry.channels.count > 1 ? "\(entry.channels.count) channels" : nil]
+                          channels > 1 ? "\(channels) channels" : nil]
                         .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

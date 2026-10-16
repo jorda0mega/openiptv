@@ -736,7 +736,9 @@ enum LiveOrganizer {
         }
         return merged.map { entry in
             var entry = entry
-            entry.channels = bestFirst(entry.channels)
+            // Each channel once: a provider can list one in two categories.
+            var seen = Set<String>()
+            entry.channels = bestFirst(entry.channels.filter { seen.insert($0.id).inserted })
             return entry
         }.sorted { a, b in
             switch (a.event?.start, b.event?.start) {

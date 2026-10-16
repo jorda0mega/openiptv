@@ -186,6 +186,68 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't play: \(liveCopy())")
     }
 
+    /// One feed listed in two slots of a sport's own category ("Football /
+    /// Soccer: … ( OneSoccer Feed )" twice, as the user saw): one entry in
+    /// Watch On, named by the network with the category under it, and
+    /// counted once on the game's row. Regression: two identical entries
+    /// "Football · Soccer, OneSoccer Feed".
+    func testSameFeedOnTwoChannelsIsOneEntry() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_dupes": "1", "dead_live": "none"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_dupes": "0"]) }
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        if tab.waitForExistence(timeout: 10) { tab.tap() }
+        let sports = app.buttons["Sports"].firstMatch
+        if sports.waitForExistence(timeout: 10) { sports.tap() }
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        XCTAssertTrue(game.label.contains("6 channels"), "the same feed counted twice: \(game.label)")
+        game.tap()
+        XCTAssertTrue(playing("NFL 01"), "the game didn't start: \(liveCopy())")
+        showControls()
+        app.buttons["Watch On"].firstMatch.tap()
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.'"))
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 5), "Watch On listed nothing")
+        XCTAssertEqual(cards.count, 6, "the same feed listed twice: \(cards.allElementsBoundByIndex.map(\.label))")
+        let soccer = cards.matching(NSPredicate(format: "label BEGINSWITH 'OneSoccer' AND label CONTAINS 'Football · Soccer'"))
+        XCTAssertEqual(soccer.count, 1, "not one OneSoccer entry: \(cards.allElementsBoundByIndex.map(\.label))")
+    }
+
+    /// A game found playing on none of its channels says so on every
+    /// device: the app opened afresh (as another device, nothing of this
+    /// one's kept) shows its row "Not playing" from the app's record on the
+    /// server. Regression: only the device that tried it knew.
+    func testNotPlayingIsSharedAcrossDevices() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        let state = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(40)
+        while state.label != "failed", Date() < deadline { usleep(250_000) }
+        XCTAssertEqual(state.label, "failed", "still trying after every channel")
+        sleep(2)
+        app.terminate()
+
+        // Another device: a fresh start, the server's record only.
+        app.launch()
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        if tab.waitForExistence(timeout: 10) { tab.tap() }
+        let sports = app.buttons["Sports"].firstMatch
+        if sports.waitForExistence(timeout: 10) { sports.tap() }
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        let shown = Date().addingTimeInterval(10)
+        while !game.label.contains("Not playing"), Date() < shown { usleep(250_000) }
+        XCTAssertTrue(game.label.contains("Not playing"), "the other device's finding isn't shown: \(game.label)")
+    }
+
     /// Live TV → Sports → the game.
     private func openGame() {
         let tab = app.tabBars.buttons["Live TV"].firstMatch

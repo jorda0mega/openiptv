@@ -133,8 +133,56 @@ enum WatchOn {
         }.map(\.element)
     }
 
+    /// How a channel is named in the list: by its service ("ESPN
+    /// Unlimited"), or, when its category only names a sport or league
+    /// ("Football / Soccer"), by the network its feed names ("OneSoccer"
+    /// for "OneSoccer Feed"), the category under it. Then its feed, language
+    /// and picture.
+    static func label(_ feed: Feed, quality: String?) -> (title: String, line: String) {
+        if isGeneric(feed.service), let detail = feed.detail, let network = network(detail) {
+            let line = [feed.service, feed.language.map(languageName), quality].compactMap(\.self).joined(separator: " · ")
+            return (network, line)
+        }
+        return (feed.service, line(feed, quality: quality))
+    }
+
     /// "Spanish · HD", for a channel in the list.
     static func line(_ feed: Feed, quality: String?) -> String {
         [feed.detail, feed.language.map(languageName), quality].compactMap(\.self).joined(separator: " · ")
+    }
+
+    /// A category that names a sport or a league, not who shows it.
+    static func isGeneric(_ service: String) -> Bool {
+        let words = ["soccer", "football", "futbol", "basketball", "hockey", "baseball", "rugby", "cricket", "tennis", "golf",
+                     "boxing", "mma", "nfl", "nba", "nhl", "mlb", "mls", "ncaa", "sports", "events", "ppv"]
+        let text = service.lowercased()
+        return words.contains { text.range(of: "\\b\($0)\\b", options: .regularExpression) != nil }
+    }
+
+    /// "OneSoccer Feed" → "OneSoccer"; "ESPN Deportes USA Feed" → "ESPN
+    /// Deportes USA"; a team's own feed ("Sharks Broadcast") as it is.
+    private static func network(_ detail: String) -> String? {
+        let name = detail.replacingOccurrences(of: #"\s+feed$"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
+    }
+
+    /// The same feed on several channels (a provider lists one feed in two
+    /// slots): one entry, the best first, the others kept to fall back to.
+    /// The same: the same service, feed, language and picture.
+    static func grouped(_ options: [Option]) -> [(option: Option, others: [Option])] {
+        var out: [(option: Option, others: [Option])] = []
+        var at: [String: Int] = [:]
+        for option in options {
+            let feed = option.feed
+            let key = [feed.service, feed.detail ?? "", feed.language ?? "", String(option.quality)].joined(separator: "|")
+            if let index = at[key] {
+                out[index].others.append(option)
+            } else {
+                at[key] = out.count
+                out.append((option, []))
+            }
+        }
+        return out
     }
 }

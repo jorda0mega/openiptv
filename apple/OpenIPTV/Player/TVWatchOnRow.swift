@@ -49,18 +49,19 @@ struct TVWatchOnRow: View {
     }
 
     private func card(_ choice: AppModel.WatchChoice, on: Bool) -> some View {
-        let line = WatchOn.line(choice.feed, quality: choice.quality)
-        let status = [choice.id == playing ? "Playing" : nil, line.isEmpty ? nil : line].compactMap(\.self).joined(separator: " · ")
+        let label = choice.label
+        let isPlaying = choice.id == playing || choice.others.contains { $0.id == playing }
+        let status = [isPlaying ? "Playing" : nil, label.line.isEmpty ? nil : label.line].compactMap(\.self).joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 10) {
             CoverImage(images: choice.channel.logo.map { [CardImage(url: $0.absoluteString, contain: true)] } ?? [],
-                       title: choice.feed.service)
+                       title: label.title)
                 .frame(width: 320, height: 180)
                 .background(Color(white: 0.14))
                 .clipShape(.rect(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(on ? 0.9 : 0.15), lineWidth: on ? 3 : 1))
                 // Without a logo it shows the service's name, read below.
                 .accessibilityHidden(true)
-            Text(choice.feed.service).font(.system(size: 25, weight: .semibold)).lineLimit(1)
+            Text(label.title).font(.system(size: 25, weight: .semibold)).lineLimit(1)
             if !status.isEmpty {
                 Text(status).font(.system(size: 22)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
             }

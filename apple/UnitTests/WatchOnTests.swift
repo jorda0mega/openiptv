@@ -83,4 +83,33 @@ final class WatchOnTests: XCTestCase {
         XCTAssertEqual(ranked(failed: ["nfl"]), ["espn", "dazn", "espn-es", "dazn-fr", "nfl"])
         XCTAssertEqual(ranked(pick: .init(service: "DAZN CA", language: nil), failed: ["dazn"]).first, "nfl")
     }
+
+    /// One feed listed on two channels (the user's "Football · Soccer, OneSoccer
+    /// Feed" twice): one entry, the second kept to fall back to.
+    func testSameFeedTwiceIsOneEntry() {
+        let feed = WatchOn.Feed(service: "Football · Soccer", detail: "OneSoccer Feed")
+        let options = [WatchOn.Option(id: "a", feed: feed, quality: 4), option("b", "ESPN Unlimited"),
+                       WatchOn.Option(id: "c", feed: feed, quality: 4), WatchOn.Option(id: "d", feed: feed, quality: 6)]
+        let grouped = WatchOn.grouped(options)
+        XCTAssertEqual(grouped.map(\.option.id), ["a", "b", "d"], "the same feed in the same picture twice")
+        XCTAssertEqual(grouped[0].others.map(\.id), ["c"])
+    }
+
+    /// Named by the network when the category only names a sport.
+    func testNamedByTheNetwork() {
+        let generic = WatchOn.label(.init(service: "Football · Soccer", detail: "OneSoccer Feed"), quality: nil)
+        XCTAssertEqual(generic.title, "OneSoccer")
+        XCTAssertEqual(generic.line, "Football · Soccer")
+        let spanish = WatchOn.label(.init(service: "Soccer", detail: "ESPN Deportes USA Feed", language: "es"), quality: "HD")
+        XCTAssertEqual(spanish.title, "ESPN Deportes USA")
+        XCTAssertEqual(spanish.line, "Soccer · Spanish · HD")
+        // A service keeps its name; its feed is the line under it.
+        let service = WatchOn.label(.init(service: "ESPN Unlimited", detail: "Senators Broadcast"), quality: nil)
+        XCTAssertEqual(service.title, "ESPN Unlimited")
+        XCTAssertEqual(service.line, "Senators Broadcast")
+        XCTAssertFalse(WatchOn.isGeneric("FloSports"))
+        XCTAssertTrue(WatchOn.isGeneric("NFL"))
+        // A sport category with no feed named keeps its name.
+        XCTAssertEqual(WatchOn.label(.init(service: "NFL"), quality: nil).title, "NFL")
+    }
 }

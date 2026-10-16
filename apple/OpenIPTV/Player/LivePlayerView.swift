@@ -309,10 +309,10 @@ struct LivePlayerView: View {
         #if os(iOS)
         guard showWatchOn else { return nil }
         return PlayerInfoPanel(title: "Watch On", meta: "", cards: choices.map { choice in
-            let playing = choice.id == playingCopy?.id
-            let line = WatchOn.line(choice.feed, quality: choice.quality)
-            let subtitle = [playing ? "Playing" : nil, line.isEmpty ? nil : line].compactMap(\.self).joined(separator: " · ")
-            return PlayerCard(id: choice.id, title: choice.feed.service, subtitle: subtitle.isEmpty ? nil : subtitle,
+            let playing = choice.id == playingCopy?.id || choice.others.contains { $0.id == playingCopy?.id }
+            let label = choice.label
+            let subtitle = [playing ? "Playing" : nil, label.line.isEmpty ? nil : label.line].compactMap(\.self).joined(separator: " · ")
+            return PlayerCard(id: choice.id, title: label.title, subtitle: subtitle.isEmpty ? nil : subtitle,
                               images: choice.channel.logo.map { [CardImage(url: $0.absoluteString, contain: true)] } ?? [],
                               loading: playing && !started && error == nil) { watch(on: choice) }
         }, focus: playingCopy?.id)
@@ -528,7 +528,8 @@ struct LivePlayerView: View {
     private func fallBack() -> Bool {
         guard recording == nil, !started else { return false }
         if let playingCopy { model.noteLiveFailure(playingCopy) }
-        let copies = choices.isEmpty ? model.copies(of: channel) : choices.map(\.channel)
+        // Each feed in Watch On's order, its other channels after it.
+        let copies = choices.isEmpty ? model.copies(of: channel) : choices.flatMap { [$0.channel] + $0.others }
         guard let next = copies.first(where: { !tried.contains($0.id) }) else { return false }
         tried.insert(next.id)
         timing = "Trying another copy…"

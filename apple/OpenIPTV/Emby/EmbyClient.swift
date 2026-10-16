@@ -174,6 +174,24 @@ struct EmbyClient {
     private static let myListRecord = "zapline-mylist"
     private static let recordClient = "zapline"
 
+    /// Games found playing on none of their channels, by any of the
+    /// viewer's devices: a channel's key (see AppModel.sharedKey: hashed,
+    /// nothing of the provider readable) → when (seconds since 1970). Nil
+    /// when the server didn't answer.
+    func notPlayingRecord() async -> [String: Double]? {
+        struct Preferences: Decodable { let CustomPrefs: [String: String]? }
+        guard let found: Preferences = try? await get("DisplayPreferences/\(Self.notPlayingRecordId)", [
+            .init(name: "userId", value: account.userId), .init(name: "client", value: Self.recordClient),
+        ]) else { return nil }
+        return (found.CustomPrefs ?? [:]).compactMapValues(Double.init)
+    }
+
+    func saveNotPlaying(_ record: [String: Double]) async {
+        await saveRecord(Self.notPlayingRecordId, record.mapValues { String(Int($0)) })
+    }
+
+    private static let notPlayingRecordId = "zapline-notplaying"
+
     // MARK: Short watches
 
     /// Where a title was last stopped (seconds in), and when (seconds since

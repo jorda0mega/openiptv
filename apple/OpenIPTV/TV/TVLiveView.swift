@@ -492,6 +492,8 @@ private struct TVEventCard: View {
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
         // Tried in the last half hour, and none of its channels played.
         let notPlaying = live && model.isNotPlaying(entry)
+        // Different feeds showing it (the same feed on two channels once).
+        let channels = model.feedCount(entry)
         VStack(alignment: .leading, spacing: 12) {
             Button(action: action) {
                 ZStack(alignment: .topLeading) {
@@ -525,11 +527,11 @@ private struct TVEventCard: View {
             // Press-and-hold: the channels showing it (Watch On).
             .contextMenu { WatchOnMenuItems(channel: entry.channels[0], play: play) }
             .accessibilityLabel([notPlaying ? "Not playing" : live ? "Live" : nil, entry.title, event?.league,
-                                 entry.channels.count > 1 ? "\(entry.channels.count) channels" : nil].compactMap(\.self).joined(separator: ", "))
+                                 channels > 1 ? "\(channels) channels" : nil].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(2)
                 Text([Self.when(event?.start, started: started), event?.league,
-                      entry.channels.count > 1 ? "\(entry.channels.count) channels" : nil].compactMap(\.self).joined(separator: " · "))
+                      channels > 1 ? "\(channels) channels" : nil].compactMap(\.self).joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .accessibilityHidden(true)
