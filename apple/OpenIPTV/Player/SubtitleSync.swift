@@ -272,6 +272,12 @@ enum SubtitleSync {
         }
     }
 
+    /// Raised whenever `match` puts files in time differently: a timing a
+    /// device kept from an earlier version is shown, then worked out again
+    /// (SubtitleTiming.settles). 2: parts at odds measured again and heard
+    /// in more places (Asterix and Cleopatra's first scene).
+    static let version = 2
+
     /// A part measured on its own: this many lines (a film's opening has few
     /// lines, credits and music, so a part is lines, not minutes).
     private static let partLines = 20

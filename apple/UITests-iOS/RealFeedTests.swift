@@ -62,6 +62,33 @@ final class RealFeedTests: XCTestCase {
         for (found, expected) in zip(delays, [0.7, 6.5, 7.3]) { XCTAssertEqual(found, expected, accuracy: 0.4, label) }
     }
 
+    /// Asterix and Cleopatra as a viewer plays it, with whatever timing
+    /// this device kept from an earlier play (no "forget" flag): three
+    /// sections within 150 s. Regression: a device that had played it on
+    /// an earlier build kept that build's two sections (its first scene 6 s
+    /// late) for good; reproduced by putting such a timing back on the test
+    /// iPhone before the run.
+    func testAsterixAsPlayedBefore() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchArguments += ["-debugSearch", "Asterix and Cleopatra"]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Asterix and Cleopatra'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 30), "no Asterix and Cleopatra in the results")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
+        play.tap()
+        XCTAssertNotNil(waitForPosition(timeout: 45), "the film didn't open")
+        let shift = app.staticTexts["debug-subshift"].firstMatch
+        let opened = Date()
+        while Date().timeIntervalSince(opened) < 150, !(shift.exists && shift.label.split(separator: " ").count >= 4) { sleep(2) }
+        print("REAL as played before: \(shift.exists ? shift.label : "none")")
+        XCTAssertEqual(shift.label.split(separator: " ").count - 1, 3, "not three sections: \(shift.label)")
+    }
+
     /// Sentimental Destinies: French sound, and on the server only French
     /// subtitles (Junun, tried first, has Spanish ones now). The server's
     /// provider is asked, its likeliest files read through the server

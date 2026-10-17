@@ -728,7 +728,7 @@ final class MPVPlayer: @unchecked Sendable {
                 guard let self else { return }
                 speechStretches = stretches
                 self.guides = guides
-                for (file, text) in fetched where !settled.contains(file.url) && SubtitleTiming.remembered(file.url, text: text)?.isGoodEnough != true {
+                for (file, text) in fetched where !settled.contains(file.url) && !SubtitleTiming.settles(file.url, text: text) {
                     bySpeech[file.url] = text
                 }
                 fitBySpeechIfShown()

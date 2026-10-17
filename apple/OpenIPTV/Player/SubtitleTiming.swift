@@ -15,6 +15,8 @@ enum SubtitleTiming {
     private struct Saved: Codable {
         let match: SubtitleSync.Match
         let at: Date
+        /// SubtitleSync.version when worked out (nil: before versions).
+        var version: Int?
     }
 
     static func remembered(_ file: URL, text: String) -> SubtitleSync.Match? {
@@ -25,9 +27,19 @@ enum SubtitleTiming {
         return saved()[name(file, text)]?.match
     }
 
-    static func remember(_ match: SubtitleSync.Match, for file: URL, text: String) {
+    /// Whether the file's kept timing is the last word: good enough, and
+    /// worked out by this version of the sync. One from an earlier version
+    /// shows at once, and is worked out again. Regression: Asterix and
+    /// Cleopatra's English file kept the timing an earlier build had worked
+    /// out, its first scene 6 s late, after a later build could do better.
+    static func settles(_ file: URL, text: String) -> Bool {
+        guard remembered(file, text: text)?.isGoodEnough == true else { return false }
+        return saved()[name(file, text)]?.version == SubtitleSync.version
+    }
+
+    static func remember(_ match: SubtitleSync.Match, for file: URL, text: String, version: Int = SubtitleSync.version) {
         var all = saved()
-        all[name(file, text)] = Saved(match: match, at: Date())
+        all[name(file, text)] = Saved(match: match, at: Date(), version: version)
         if all.count > kept {
             for (old, _) in all.sorted(by: { $0.value.at < $1.value.at }).prefix(all.count - kept) { all[old] = nil }
         }
