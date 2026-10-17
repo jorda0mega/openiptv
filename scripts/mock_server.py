@@ -23,10 +23,12 @@ import zlib
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 PANEL_TZ = timezone(timedelta(hours=1))
+EASTERN = ZoneInfo("America/New_York")
 CHANNELS = 40
 SLOT = 1800
 SOCKETS = set()
@@ -257,8 +259,10 @@ SPORTS_CATEGORIES = [("10", "NFL"), ("11", "ESPN Unlimited"), ("12", "DAZN CA"),
 
 
 def sports_games(now):
-    # "sports_started": "300": the game started that many minutes ago (20).
-    start = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - 60 * int(CONTROL.get("sports_started", 20))))
+    # "sports_started": "300": the game started that many minutes ago (20;
+    # negative: it starts in that many). Stamped in Eastern time, as real
+    # providers stamp event channels.
+    start = datetime.fromtimestamp(now - 60 * int(CONTROL.get("sports_started", 20)), EASTERN).strftime("%Y-%m-%d %H:%M:%S")
     games = [("NFL 01: Eagles vs. Jaguars", "10"),
              ("ESPN UNLTD 015: Football: Eagles vs. Jaguars", "11"),
              ("ESPN UNLTD 016: Football: Eagles vs. Jaguars (Eagles vs. Jaguars (ESP))", "11"),

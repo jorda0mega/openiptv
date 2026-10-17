@@ -586,6 +586,10 @@ enum LiveOrganizer {
 
     /// Start times in the forms event channels use, read in the zone they
     /// name (ET when they don't, London for UK lists, Sydney for Australian).
+    /// Date stamps ("(2026-10-17 12:00:05)") name none: the provider's own
+    /// Eastern time. Regression: read as UTC, noon games were LIVE from 8 AM
+    /// (Mississippi State vs. LSU, kickoff noon ET) and didn't play, and
+    /// didn't merge with the same game listed "12:00 PM ET" elsewhere.
     enum EventTime {
         private static let zone = #"(?:\s*(ET|EST|EDT|CT|CST|CDT|MT|MST|MDT|PT|PST|PDT|UK|London|BST|GMT|UTC|CET|CEST|AEST|AEDT))?"#
         private static let month = #"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"#
@@ -619,7 +623,6 @@ enum LiveOrganizer {
                 case .iso:
                     parts.year = group(1).flatMap(Int.init); parts.month = group(2).flatMap(Int.init)
                     parts.day = group(3).flatMap(Int.init); parts.hour = group(4).flatMap(Int.init); parts.minute = group(5).flatMap(Int.init)
-                    zoneName = "UTC"
                 case .dayMonth:
                     parts.day = group(1).flatMap(Int.init); parts.month = monthNumber(group(2))
                     parts.hour = group(3).flatMap(Int.init); parts.minute = group(4).flatMap(Int.init)
