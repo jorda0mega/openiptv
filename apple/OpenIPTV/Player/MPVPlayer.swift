@@ -320,6 +320,10 @@ final class MPVPlayer: @unchecked Sendable {
         mpv_observe_property(mpv, 0, "cache-speed", MPV_FORMAT_INT64)
         mpv_observe_property(mpv, 0, "sid", MPV_FORMAT_STRING)
         mpv_observe_property(mpv, 0, "aid", MPV_FORMAT_STRING)
+        #if DEBUG
+        // Told when it changes: asking for it waits on a busy player.
+        mpv_observe_property(mpv, 0, "sub-text", MPV_FORMAT_STRING)
+        #endif
         // A file's tracks are known, none picked yet: see handle(_:).
         mpv_hook_add(mpv, 0, "on_preloaded", 50)
         mpv_set_wakeup_callback(mpv, { context in
@@ -1314,15 +1318,6 @@ final class MPVPlayer: @unchecked Sendable {
                 guard now - lastTimeEmit >= 0.25 || abs(position - lastTimePosition) > 1.5 else { break }
                 lastTimeEmit = now
                 lastTimePosition = position
-                #if DEBUG
-                if let mpv, let text = mpv_get_property_string(mpv, "sub-text") {
-                    let shown = String(cString: text)
-                    mpv_free(text)
-                    stateLock.withLock { line = shown }
-                } else {
-                    stateLock.withLock { line = "" }
-                }
-                #endif
                 emit(.time(position: position, duration: duration))
             case "demuxer-cache-duration" where property.format == MPV_FORMAT_DOUBLE:
                 buffered = value.assumingMemoryBound(to: Double.self).pointee
@@ -1330,6 +1325,11 @@ final class MPVPlayer: @unchecked Sendable {
             case "cache-speed" where property.format == MPV_FORMAT_INT64:
                 downloadSpeed = Double(value.assumingMemoryBound(to: Int64.self).pointee)
                 reportNetwork()
+            #if DEBUG
+            case "sub-text" where property.format == MPV_FORMAT_STRING:
+                let shown = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.map { String(cString: $0) } ?? ""
+                stateLock.withLock { line = shown }
+            #endif
             case "aid" where property.format == MPV_FORMAT_STRING:
                 // The film's own audio track (not a converted version's).
                 let id = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.flatMap { Int(String(cString: $0)) }
