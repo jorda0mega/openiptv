@@ -554,6 +554,29 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=spa")
     }
 
+    /// A lower quality on a slow connection plays on from the same second:
+    /// the server's converted version is the whole film (its playlist from
+    /// the start, as Emby makes it, whatever second it's asked from), so
+    /// it's played from where the film was. Regression: it was played from
+    /// its start (the user: "it stops loading and then starts playing from
+    /// the beginning"); the stream's own clock tells.
+    func testLowerQualityPlaysOnFromTheSameSecond() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
+        openFilm()
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        var lowered = false
+        for _ in 0..<40 where !lowered {
+            sleep(1)
+            lowered = quality.exists && quality.label.hasPrefix("converted")
+        }
+        XCTAssertTrue(lowered, "the quality wasn't lowered: \(quality.exists ? quality.label : "no readout")")
+        sleep(4)
+        let stream = Double(app.staticTexts["debug-stream-time"].firstMatch.label) ?? -1
+        let film = position() ?? -1
+        XCTAssertGreaterThan(stream, 12, "the converted version plays from the film's start: its clock at \(stream) s, the film at \(film) s")
+        XCTAssertEqual(stream, film, accuracy: 2, "the stream and the film's place differ")
+    }
+
     /// Subtitles showing stay, in time, when a slow connection lowers the
     /// film to the server's converted version (a new stream, with none of
     /// them, its clock from 0 where it starts), and its audio is said in

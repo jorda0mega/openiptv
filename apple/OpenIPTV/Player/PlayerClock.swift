@@ -14,6 +14,8 @@ final class PlayerClock {
     #if DEBUG
     /// UI tests: "72.4 playing".
     var readout = ""
+    /// UI tests: the stream's own second (its clock, before `offset`).
+    var streamReadout = ""
     #endif
 
     /// In the marked intro, until a second before its end, and not while
@@ -140,6 +142,12 @@ struct ClockReadout: View {
             .opacity(0.02)
             .accessibilityLabel(clock.readout)
             .accessibilityIdentifier("debug-position")
+        Text(clock.streamReadout)
+            .font(.caption2)
+            .frame(width: 1, height: 1)
+            .opacity(0.02)
+            .accessibilityLabel(clock.streamReadout)
+            .accessibilityIdentifier("debug-stream-time")
     }
 }
 #endif

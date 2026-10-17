@@ -89,6 +89,43 @@ final class RealFeedTests: XCTestCase {
         XCTAssertEqual(shift.label.split(separator: " ").count - 1, 3, "not three sections: \(shift.label)")
     }
 
+    /// Asterix and Cleopatra lowered to the server's converted version
+    /// after 25 s (as on a slow connection) plays on from the same second.
+    /// Regression: Emby's converted version is the whole film, and it was
+    /// played from its start, after a pause.
+    func testLowerQualityPlaysOnFromTheSameSecond() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "25"
+        app.launchArguments += ["-debugSearch", "Asterix and Cleopatra"]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Asterix and Cleopatra'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 30), "no Asterix and Cleopatra in the results")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
+        play.tap()
+        let opened = try XCTUnwrap(waitForPosition(timeout: 45), "the film didn't open")
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        let deadline = Date().addingTimeInterval(90)
+        while Date() < deadline, !(quality.exists && quality.label.hasPrefix("converted")) { sleep(1) }
+        XCTAssertTrue(quality.label.hasPrefix("converted"), "the quality wasn't lowered: \(quality.label)")
+        // The server converting from that second: a few seconds to start.
+        let lowered = Date()
+        var stream = -1.0, film = -1.0
+        while Date().timeIntervalSince(lowered) < 45 {
+            sleep(2)
+            stream = Double(app.staticTexts["debug-stream-time"].firstMatch.label) ?? -1
+            film = position() ?? -1
+            if stream > opened + 20 { break }
+        }
+        print("REAL lowered: opened at \(opened) s, now the film at \(film) s, the stream's clock at \(stream) s")
+        XCTAssertGreaterThan(stream, opened + 20, "the converted version plays from the film's start")
+        XCTAssertEqual(stream, film, accuracy: 3, "the stream and the film's place differ")
+    }
+
     /// Sentimental Destinies: French sound, and on the server only French
     /// subtitles (Junun, tried first, has Spanish ones now). The server's
     /// provider is asked, its likeliest files read through the server

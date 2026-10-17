@@ -256,7 +256,12 @@ struct MoviePlayerView: View {
     }
     /// How many fallback streams have been tried after the first failed.
     @State private var attempt = 0
-    /// Where a server-converted (HLS) fallback starts, since its clock starts at 0.
+    /// Where in the film the stream's clock starts: 0 for the file and for
+    /// the server's converted versions, whose playlist is the whole film
+    /// whatever second they're asked from (Emby 4.9). Regression: taken as
+    /// starting at the second asked from, a lowered quality played the film
+    /// from its beginning, after a pause (the server converting from that
+    /// second, the player asking for the start).
     @State private var offset: Double = 0
     /// "Started in …" for a few seconds after the first frame (development
     /// builds with the stats on).
@@ -966,13 +971,7 @@ struct MoviePlayerView: View {
 
     /// "From Beginning": the start, playing.
     private func restart() {
-        if offset > 0, let bitrate = governor?.current,
-           let url = model.convertedURL(for: playback, bitrate: bitrate, start: 0, audio: player?.audioStreamIndex) {
-            offset = 0
-            player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks, sameFilm: offset)
-        } else {
-            player?.seek(to: 0, exact: true)
-        }
+        player?.seek(to: 0, exact: true)
         lastSeek = Date()
         position = 0
         jumpUntil = Date().addingTimeInterval(1.5)
@@ -1182,8 +1181,10 @@ struct MoviePlayerView: View {
             revertTo = nil
             lastConverted = bitrate
             guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at, audio: player.audioStreamIndex) else { return }
-            offset = at
-            player.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks, sameFilm: offset)
+            // The server's converted version is the whole film (its playlist
+            // from the start, converted from `at` on): played from `at`.
+            offset = 0
+            player.load(url, headers: playback.fallbackHeaders, start: at, file: false, tracks: playback.tracks, sameFilm: 0)
             note("Lower quality to keep playing smoothly")
         case .original:
             revertTo = lastConverted
@@ -1321,8 +1322,8 @@ struct MoviePlayerView: View {
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
                 revertTo = nil
                 governor?.revert(to: bitrate)
-                offset = position
-                player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks, sameFilm: offset)
+                offset = 0
+                player?.load(url, headers: playback.fallbackHeaders, start: position, file: false, tracks: playback.tracks, sameFilm: 0)
                 note("Staying at lower quality")
                 return
             }
@@ -1340,9 +1341,9 @@ struct MoviePlayerView: View {
                 let next = playback.fallbacks[attempt]
                 attempt += 1
                 let converted = next.path().hasSuffix(".m3u8")
-                offset = converted ? (playback.startSeconds ?? 0) : 0
-                player?.load(next, headers: playback.fallbackHeaders, start: converted ? nil : playback.startSeconds, file: !converted,
-                              tracks: playback.tracks, sameFilm: offset)
+                offset = 0
+                player?.load(next, headers: playback.fallbackHeaders, start: playback.startSeconds, file: !converted,
+                              tracks: playback.tracks, sameFilm: 0)
                 return
             }
             error = "Couldn't play: \(message)"
@@ -1364,6 +1365,7 @@ struct MoviePlayerView: View {
             // With the position itself: the network reports (about once a
             // second, none once the buffer is full) left it a second behind.
             playClock.readout = String(format: "%.1f %@", newPosition, paused ? "paused" : "playing")
+            playClock.streamReadout = String(format: "%.1f", rawPosition)
             #endif
             // Into the last fifth of an episode: the next one, ready.
             if !preparedNext, playback.seriesId != nil, total > 0, newPosition >= total * 0.8 {
