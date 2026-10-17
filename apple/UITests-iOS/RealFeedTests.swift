@@ -28,8 +28,8 @@ final class RealFeedTests: XCTestCase {
     /// until the fortieth, 7.3 s after (measured against the film's speech
     /// and its Hebrew file, which is in time). Regression: one shift for the
     /// whole film (6.45 s) put the opening 6 s late. The player shows it
-    /// rewritten in three sections, within four minutes (sixteen stretches
-    /// of speech from this server).
+    /// rewritten in three sections, within five minutes (sixteen stretches
+    /// of speech from this server, then four more over its first scene).
     func testSubtitleFileInTimeBySpeech() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         app.launchArguments += ["-debugSearch", "Asterix and Cleopatra", "-forgetSubtitleTimings", "YES"]
@@ -47,12 +47,15 @@ final class RealFeedTests: XCTestCase {
         let shift = app.staticTexts["debug-subshift"].firstMatch
         let tracks = app.staticTexts["debug-tracks"].firstMatch
         let opened = Date()
-        while Date().timeIntervalSince(opened) < 240, !(shift.exists && shift.label.hasPrefix("sections")) { sleep(2) }
+        // The speech heard first, then more of it where parts were at odds
+        // (the first scene): three sections in the end.
+        func sections() -> Int { shift.exists && shift.label.hasPrefix("sections") ? shift.label.split(separator: " ").count - 1 : 0 }
+        while Date().timeIntervalSince(opened) < 300, sections() < 3 { sleep(2) }
         print("REAL tracks: \(tracks.exists ? tracks.label : "none") | shift \(shift.exists ? shift.label : "none") after \(Int(Date().timeIntervalSince(opened))) s")
         shot("asterix subtitles")
         // "sections 0:+0.70 538:+6.50 2390:+7.30" (from, in the file's seconds: shift).
         let label = shift.label
-        XCTAssertTrue(label.hasPrefix("sections"), "the English file wasn't put in time part by part in 4 minutes: \(label)")
+        XCTAssertTrue(label.hasPrefix("sections"), "the English file wasn't put in time part by part in 5 minutes: \(label)")
         let delays = label.split(separator: " ").dropFirst().compactMap { $0.split(separator: ":").last.flatMap { Double($0) } }
         XCTAssertEqual(delays.count, 3, "not three sections: \(label)")
         guard delays.count == 3 else { return }
