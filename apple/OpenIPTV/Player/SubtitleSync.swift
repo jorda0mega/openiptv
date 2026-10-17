@@ -244,6 +244,18 @@ enum SubtitleSync {
         /// The share of the film's measured parts that agree with
         /// `sections` (0-1).
         let evenness: Double
+        /// The parts at odds with their section, most at odds first (one
+        /// measurement alone, which can't make a section of its own: it may
+        /// be chance), then those beside them that measured nothing: where
+        /// more of the speech heard would tell (`moreSpeech`). Nil in
+        /// matches remembered from before.
+        var unsure: [Unsure]? = nil
+
+        /// A part's lines: where each starts in the film (by the whole
+        /// file's shift).
+        struct Unsure: Equatable, Sendable, Codable {
+            let lines: [Double]
+        }
 
         var isGoodEnough: Bool { score >= 1 && evenness >= 0.7 }
 
@@ -281,6 +293,8 @@ enum SubtitleSync {
     /// made one minute 7 s off on its own; three of twenty parts of a file
     /// for another cut agreed by chance.
     private static let sectionParts = 2
+    /// The fewest lines in a half of a part measured again (see match).
+    private static let minimumHalf = 6
     /// Shifts within this of each other (seconds) are one section.
     private static let sameShift = 0.5
 
@@ -314,69 +328,118 @@ enum SubtitleSync {
         let placed = all.map { Cue(start: $0.start * speed + delay, end: $0.end * speed + delay) }
         let placedSpoken = spoken.map { Cue(start: $0.start * speed + delay, end: $0.end * speed + delay) }
         // Each part: its lines' span, and its own best shift and how clearly.
-        var parts: [(from: Double, to: Double, shift: Double?, clarity: Double)] = []
-        var i = 0
-        while i < placed.count {
-            var j = min(placed.count, i + partLines)
-            // The few lines left at the end go with the part before.
-            if placed.count - j < partLines / 2 { j = placed.count }
-            let from = max(0, placed[i].start), to = placed[i..<j].map(\.end).max() ?? from
+        // `origin`: the part it's a half of (measured again, see below).
+        typealias Part = (from: Double, to: Double, shift: Double?, clarity: Double, lines: Range<Int>, origin: Int)
+        func measure(_ lines: Range<Int>, origin: Int) -> Part {
+            let from = max(0, placed[lines.lowerBound].start), to = placed[lines].map(\.end).max() ?? from
             var shift: Double?, clarity = 0.0
             if let curve = partCurve(placed, placedSpoken, from: from, length: max(to - from, step), references: trusted, heard: heard),
                let top = curve.indices.max(by: { curve[$0] < curve[$1] }), top > 0, top < curve.count - 1, curve[top] >= partTrust {
                 shift = Double(top) * step - partReach
                 clarity = Double(curve[top])
             }
-            parts.append((from, to, shift, clarity))
+            return (from, to, shift, clarity, lines, origin)
+        }
+        var parts: [Part] = []
+        var i = 0
+        while i < placed.count {
+            var j = min(placed.count, i + partLines)
+            // The few lines left at the end go with the part before.
+            if placed.count - j < partLines / 2 { j = placed.count }
+            parts.append(measure(i..<j, origin: parts.count))
             i = j
         }
-        // The measured parts grouped into sections: best[k] is the least
-        // cost of the first k, with each group at its weighted median.
-        let points = parts.indices.filter { parts[$0].shift != nil }
-        func cost(_ range: Range<Int>) -> (Double, Double) {
-            let level = weightedMedian(range.map { (parts[points[$0]].shift!, parts[points[$0]].clarity) })
-            let spread = range.reduce(0.0) { $0 + parts[points[$1]].clarity * min(strayGap, abs(parts[points[$1]].shift! - level)) }
-            return (spread, level)
+        // The measured parts (`points`, their places in `parts`) grouped
+        // into sections: best[k] is the least cost of the first k, with
+        // each group at its weighted median.
+        func grouped(_ parts: [Part]) -> (points: [Int], groups: [Range<Int>], levels: [Double]) {
+            let points = parts.indices.filter { parts[$0].shift != nil }
+            func cost(_ range: Range<Int>) -> (Double, Double) {
+                let level = weightedMedian(range.map { (parts[points[$0]].shift!, parts[points[$0]].clarity) })
+                let spread = range.reduce(0.0) { $0 + parts[points[$1]].clarity * min(strayGap, abs(parts[points[$1]].shift! - level)) }
+                return (spread, level)
+            }
+            // A section among others: enough measurements at its shift, and
+            // most. (Parts measured by the same speech alone, the same
+            // stretch, measure the same; two halves of a part are its lines
+            // measured again: one measurement each.)
+            func measurements(_ parts: [Part]) -> Int {
+                var values = Set<SIMD2<Double>>(), origins = Set<Int>()
+                for part in parts where values.insert(SIMD2(part.shift!, part.clarity)).inserted { origins.insert(part.origin) }
+                return origins.count
+            }
+            func holds(_ range: Range<Int>, _ level: Double) -> Bool {
+                let measured = range.map { parts[points[$0]] }
+                let agreeing = measurements(measured.filter { abs($0.shift! - level) <= sameShift })
+                return agreeing >= sectionParts && 2 * agreeing > measurements(measured)
+            }
+            var best = [0.0] + [Double](repeating: .infinity, count: points.count)
+            var start = [Int](repeating: 0, count: points.count + 1)
+            if !points.isEmpty {
+                for k in 1...points.count {
+                    for first in 0..<k {
+                        let (spread, level) = cost(first..<k)
+                        if first > 0 || k < points.count, !holds(first..<k, level) { continue }
+                        let total = best[first] + spread + (first > 0 ? newSection : 0)
+                        if total < best[k] { best[k] = total; start[k] = first }
+                    }
+                }
+            }
+            var groups: [Range<Int>] = []
+            var end = points.count
+            while end > 0 { groups.insert(start[end]..<end, at: 0); end = start[end] }
+            return (points, groups, groups.map { cost($0).1 })
         }
-        // A section among others: enough measurements at its shift, and
-        // most. (Parts measured by the same speech alone, the same stretch,
-        // measure the same: one measurement.)
-        func holds(_ range: Range<Int>, _ level: Double) -> Bool {
-            let measured = Set(range.map { SIMD2(parts[points[$0]].shift!, parts[points[$0]].clarity) })
-            let agreeing = measured.filter { abs($0.x - level) <= sameShift }.count
-            return agreeing >= sectionParts && 2 * agreeing > measured.count
-        }
-        var best = [0.0] + [Double](repeating: .infinity, count: points.count)
-        var start = [Int](repeating: 0, count: points.count + 1)
-        if !points.isEmpty {
-            for k in 1...points.count {
-                for first in 0..<k {
-                    let (spread, level) = cost(first..<k)
-                    if first > 0 || k < points.count, !holds(first..<k, level) { continue }
-                    let total = best[first] + spread + (first > 0 ? newSection : 0)
-                    if total < best[k] { best[k] = total; start[k] = first }
+        // A part at odds with its section is measured again in halves, and
+        // so is one beside it that measured nothing: one across a cut is
+        // half one section and half the next, and measures neither, or
+        // wrong. Asterix and Cleopatra's English file: the twenty lines
+        // across its first cut (0.7 s early, then 6.5 s), and the twenty
+        // before (its opening narration, and its first scene's lines after
+        // five minutes of credits).
+        func atOdds(_ parts: [Part], _ grouping: (points: [Int], groups: [Range<Int>], levels: [Double])) -> [(part: Int, weight: Double)] {
+            zip(grouping.groups, grouping.levels).flatMap { group, level in
+                group.compactMap { k -> (Int, Double)? in
+                    let part = parts[grouping.points[k]], gap = abs(part.shift! - level)
+                    return gap > sameShift ? (grouping.points[k], part.clarity * min(strayGap, gap)) : nil
                 }
             }
         }
-        var groups: [Range<Int>] = []
-        var end = points.count
-        while end > 0 { groups.insert(start[end]..<end, at: 0); end = start[end] }
+        var grouping = grouped(parts)
+        let odd = Set(atOdds(parts, grouping).map(\.part))
+        let beside = Set(odd.flatMap { [$0 - 1, $0 + 1] }.filter { parts.indices.contains($0) && parts[$0].shift == nil })
+        let split = odd.union(beside).filter { parts[$0].lines.count >= 2 * minimumHalf }
+        if !split.isEmpty {
+            parts = parts.enumerated().flatMap { n, part -> [Part] in
+                guard split.contains(n) else { return [part] }
+                let middle = part.lines.lowerBound + part.lines.count / 2
+                return [measure(part.lines.lowerBound..<middle, origin: part.origin), measure(middle..<part.lines.upperBound, origin: part.origin)]
+            }
+            grouping = grouped(parts)
+        }
+        let (points, groups, levels) = grouping
         // Agreement: the share of the measured parts' weight within
         // sameShift of their section.
         var weight = 0.0, agreeing = 0.0
-        for group in groups {
-            let level = cost(group).1
+        for (group, level) in zip(groups, levels) {
             for k in group {
                 weight += parts[points[k]].clarity
                 if abs(parts[points[k]].shift! - level) <= sameShift { agreeing += parts[points[k]].clarity }
             }
         }
         let evenness = weight == 0 ? 1 : agreeing / weight
+        // Those still at odds, and the parts beside them that measured
+        // nothing: where more speech would tell.
+        let stillOdd = atOdds(parts, grouping).sorted { $0.weight > $1.weight }.map(\.part)
+        let unmeasured = stillOdd.flatMap { [$0 - 1, $0 + 1] }.filter { parts.indices.contains($0) && parts[$0].shift == nil }
+        var listed = Set<Int>()
+        let unsure = (stillOdd + unmeasured).filter { listed.insert($0).inserted }
+            .map { Match.Unsure(lines: placed[parts[$0].lines].map(\.start)) }
         // Runs of parts: each group from its first measured part (the
         // unmeasured ones before go with it).
-        let runs: [(first: Int, last: Int, residual: Double)] = groups.map { (points[$0.lowerBound], points[$0.upperBound - 1], cost($0).1) }
+        let runs: [(first: Int, last: Int, residual: Double)] = zip(groups, levels).map { (points[$0.lowerBound], points[$0.upperBound - 1], $1) }
         guard !runs.isEmpty else {
-            return Match(sections: [Section(from: 0, delay: delay, speed: speed)], score: whole.score, evenness: evenness)
+            return Match(sections: [Section(from: 0, delay: delay, speed: speed)], score: whole.score, evenness: evenness, unsure: unsure)
         }
         var sections: [Section] = []
         for (n, run) in runs.enumerated() {
@@ -393,8 +456,42 @@ enum SubtitleSync {
             let at = cut(all, between: lower, and: upper, from: previous, to: next, references: trusted, heard: heard)
             sections.append(Section(from: at, delay: shift, speed: speed))
         }
-        return Match(sections: sections, score: whole.score, evenness: evenness)
+        return Match(sections: sections, score: whole.score, evenness: evenness, unsure: unsure)
     }
+
+    /// Where to hear more of the film's speech (each a stretch's start):
+    /// over the lines of the parts at odds with their section (`unsure`,
+    /// most at odds first), where the most of them are, at least
+    /// `spacing` from any stretch heard or asked for, at most two a part
+    /// and `most` in all. What was heard over them already didn't settle
+    /// them (music over the words, often), so it doesn't count. A part
+    /// disagreeing alone can't make a section; heard in more places, it
+    /// can. Asterix and Cleopatra's English file: its first scene (0.7 s
+    /// early, the rest 6.5 s) had one stretch near it, under music; more
+    /// found it.
+    static func moreSpeech(_ unsure: [Match.Unsure], heard: [Speech], most: Int = 6) -> [Double] {
+        var taken = heard.map(\.start)
+        var starts: [Double] = []
+        for part in unsure {
+            var open = part.lines
+            for _ in 0..<2 where starts.count < most {
+                func covered(_ start: Double) -> Int { open.filter { (start..<start + stretchLength).contains($0) }.count }
+                // Starting just before a line.
+                let candidates = open.map { max(0, $0 - 5) }.filter { start in taken.allSatisfy { abs($0 - start) >= spacing } }
+                guard let start = candidates.max(by: { covered($0) < covered($1) }), covered(start) >= 3 else { break }
+                starts.append(start)
+                taken.append(start)
+                open.removeAll { (start..<start + stretchLength).contains($0) }
+            }
+        }
+        return starts
+    }
+
+    /// The least time between two stretches' starts (seconds).
+    private static let spacing = 30.0
+
+    /// The length of a stretch of speech asked for (seconds).
+    private static let stretchLength = 60.0
 
     /// Where between two sections the file changes: the pause between
     /// lines that splits them best, those before lining up with the

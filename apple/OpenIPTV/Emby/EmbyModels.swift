@@ -302,6 +302,20 @@ struct EmbyPlayback: Hashable, Identifiable {
         /// Where it starts in the film (seconds).
         let start: Double
         let url: URL
+
+        /// The same from `start`, in its own play session (each stretch
+        /// is converted apart).
+        func moved(to start: Double) -> SpeechStretch {
+            guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return self }
+            parts.queryItems = (parts.queryItems ?? []).map { item in
+                switch item.name {
+                case "StartTimeTicks": URLQueryItem(name: item.name, value: String(Int64(start * 10_000_000)))
+                case "PlaySessionId": URLQueryItem(name: item.name, value: UUID().uuidString.replacingOccurrences(of: "-", with: ""))
+                default: item
+                }
+            }
+            return .init(start: start, url: parts.url ?? url)
+        }
     }
     /// The languages of every subtitle track the server knows for it (the
     /// film's own and files), normalized ("en", "es").

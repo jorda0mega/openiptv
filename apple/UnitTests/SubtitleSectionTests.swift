@@ -32,11 +32,12 @@ final class SubtitleSectionTests: XCTestCase {
     /// Sixteen one-minute stretches across the film, as the app asks for:
     /// the classifier sure on most spoken lines, unsure on some, noise.
     /// `late`: stretches whose speech is heard that much later.
-    private func heard(seed: UInt64 = 3, late: [Int: Double] = [:]) -> [SubtitleSync.Speech] {
+    private func heard(seed: UInt64 = 3, late: [Int: Double] = [:], at starts: [Double]? = nil) -> [SubtitleSync.Speech] {
         var random = Random(seed: seed)
         let step = SubtitleSync.speechStep
-        return (0..<16).map { i in
-            let start = (4340 * (0.02 + 0.06 * Double(i))).rounded()
+        let starts = starts ?? (0..<16).map { (4340 * (0.02 + 0.06 * Double($0))).rounded() }
+        return starts.indices.map { i in
+            let start = starts[i]
             let off = late[i] ?? 0
             let confidence = (0..<Int(60 / step)).map { j -> Float in
                 let t = start + Double(j) * step
@@ -163,6 +164,32 @@ final class SubtitleSectionTests: XCTestCase {
         let match = try XCTUnwrap(SubtitleSync.match(srt(spoken), speech: heard(late: [15: 7]), references: []))
         XCTAssertEqual(match.sections.count, 1, "\(match.sections)")
         XCTAssertEqual(try XCTUnwrap(match.sections.first).delay, 0, accuracy: 0.1)
+    }
+
+    /// The opening's own shift, heard in one stretch only, is one
+    /// measurement: no section. The parts at odds are where to hear more,
+    /// and with that the opening is its own section. Regression: Asterix
+    /// and Cleopatra's English file, 0.7 s early for its first scene and
+    /// 6.5 s after, had one stretch of speech near the scene, under
+    /// music, and its first lines showed 6 s late.
+    func testOneStretchInTheOpeningAsksForMore() throws {
+        var starts = (0..<16).map { (4340 * (0.02 + 0.06 * Double($0))).rounded() }
+        starts.remove(at: 1)
+        let first = try XCTUnwrap(SubtitleSync.match(srt(otherCut), speech: heard(at: starts), references: []))
+        XCTAssertGreaterThan(abs(try XCTUnwrap(first.sections.first).delay - 0.7), 5, "the opening found already: \(first.sections)")
+        let more = SubtitleSync.moreSpeech(first.unsure ?? [], heard: heard(at: starts))
+        XCTAssertFalse(more.isEmpty, "no more speech asked for")
+        XCTAssertTrue(more.allSatisfy { $0 < 520 }, "more speech asked for outside the opening: \(more)")
+        XCTAssertLessThanOrEqual(more.count, 6)
+        let again = try XCTUnwrap(SubtitleSync.match(srt(otherCut), speech: heard(at: (starts + more).sorted()), references: []))
+        XCTAssertEqual(try XCTUnwrap(again.sections.first).delay, 0.7, accuracy: 0.3, "\(again.sections)")
+        XCTAssertGreaterThan(inTime(again, tolerance: 1), 0.9)
+    }
+
+    /// Nothing at odds, nothing more to hear: a file in time.
+    func testInTimeFileAsksForNoMore() throws {
+        let match = try XCTUnwrap(SubtitleSync.match(srt(spoken), speech: heard(), references: [otherLanguage]))
+        XCTAssertEqual(SubtitleSync.moreSpeech(match.unsure ?? [], heard: heard()), [])
     }
 
     /// A file for another release (a minute off, at another frame rate)

@@ -817,6 +817,7 @@ final class MPVPlayer: @unchecked Sendable {
             guard let match, match.score >= 1, match.sections.count == 1, match.evenness >= 0.9 else { return }
             self?.queue.async { [weak self] in self?.apply(match, to: url, text: text, why: "speech (half)") }
         }
+        let stretches = speechStretches
         Task.detached(priority: .utility) { [weak self] in
             let heard = await listening.value
             let match = SubtitleSync.match(text, speech: heard, references: guides)
@@ -826,6 +827,18 @@ final class MPVPlayer: @unchecked Sendable {
             guard let match, match.score >= 1 else { return }
             SubtitleTiming.remember(match, for: url, text: text)
             self?.queue.async { [weak self] in self?.apply(match, to: url, text: text, why: "speech") }
+            // Parts at odds with their section: heard in more places, then
+            // matched again (see SubtitleSync.moreSpeech).
+            let more = SubtitleSync.moreSpeech(match.unsure ?? [], heard: heard)
+            guard let template = stretches.first, !more.isEmpty, self != nil else { return }
+            let extra = await SpeechHeard.listen(more.map { template.moved(to: $0) })
+            let again = SubtitleSync.match(text, speech: (heard + extra).sorted { $0.start < $1.start }, references: guides)
+            #if DEBUG
+            NSLog("%@", "PERF subsync more speech at \(more.map { Int($0) }), \(extra.count) heard: " + Self.describe(again))
+            #endif
+            guard let again, again.score >= 1, again != match else { return }
+            SubtitleTiming.remember(again, for: url, text: text)
+            self?.queue.async { [weak self] in self?.apply(again, to: url, text: text, why: "more speech") }
         }
     }
 
