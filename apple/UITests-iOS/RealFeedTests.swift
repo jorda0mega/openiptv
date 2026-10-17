@@ -154,6 +154,57 @@ final class RealFeedTests: XCTestCase {
         XCTAssertGreaterThan(later, at + 3, "the title doesn't play on (\(at) → \(later))")
     }
 
+    /// Sports as the viewer sees it now (diagnostic): every game row, then
+    /// the first ten live ones tried in turn, playing or not.
+    func testSportsAsSeenNow() throws {
+        app.launchArguments += ["-forgetWatchOnPicks", "YES", "-freshLineup", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Live TV tab")
+        tab.tap()
+        let sports = app.buttons["Sports"].firstMatch
+        XCTAssertTrue(sports.waitForExistence(timeout: 90), "the lineup has no Sports")
+        sports.tap()
+        let games = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Started' OR label CONTAINS 'Not playing' OR label CONTAINS 'LIVE'"))
+        _ = games.firstMatch.waitForExistence(timeout: 60)
+        sleep(3)
+        shot("sports now")
+        let labels = games.allElementsBoundByIndex.map(\.label)
+        print("REAL rows: \(labels.count) live or started, \(labels.filter { $0.contains("channels") }.count) with N channels, \(labels.filter { $0.contains("Not playing") }.count) not playing")
+        for label in labels.prefix(40) { print("REAL row: \(label)") }
+        for index in 0..<min(games.count, 10) {
+            let game = games.element(boundBy: index)
+            guard game.isHittable else { continue }
+            let label = game.label
+            game.tap()
+            _ = waitForCopy(timeout: 10)
+            let state = waitForState(timeout: 25)
+            showControls()
+            let offered = app.buttons["Watch On"].firstMatch.waitForExistence(timeout: 2)
+            print("REAL tried \(label): \(state), copy \(liveCopy()), \(offered ? "Watch On" : "no Watch On")")
+            app.buttons["Close player"].firstMatch.tap()
+            sleep(2)
+        }
+        shot("sports after")
+        print("REAL rows after: " + games.allElementsBoundByIndex.prefix(12).map(\.label).joined(separator: " | "))
+        // Games named in REAL_FEED_GAMES ("LSU,Boston College"), found by
+        // scrolling, then tried.
+        for name in (ProcessInfo.processInfo.environment["REAL_FEED_GAMES"] ?? "").split(separator: ",").map(String.init) {
+            let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
+            for _ in 0..<12 where !(row.exists && row.isHittable) { app.swipeUp() }
+            guard row.exists, row.isHittable else { print("REAL \(name): no row"); continue }
+            let label = row.label
+            row.tap()
+            _ = waitForCopy(timeout: 10)
+            let state = waitForState(timeout: 25)
+            showControls()
+            let offered = app.buttons["Watch On"].firstMatch.waitForExistence(timeout: 2)
+            print("REAL tried \(label): \(state), copy \(liveCopy()), \(offered ? "Watch On" : "no Watch On")")
+            app.buttons["Close player"].firstMatch.tap()
+            sleep(2)
+        }
+    }
+
     /// A live game on several channels: it starts on one, Watch On lists
     /// them all, another picked plays, and it plays first the next time.
     func testLiveGameWatchOn() throws {
