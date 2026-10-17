@@ -363,6 +363,29 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertEqual(cards.prefix(3).map { $0.components(separatedBy: ",")[0] }, ["Weapons", "American Animals", "Animal House"], "\(cards)")
     }
 
+    /// Titles stamped all in one second, later than one put on My List by
+    /// itself, don't come before it: a device that took a whole list as
+    /// just added stamped them, not the viewer. And the stamps leave the
+    /// record. Regression: 46 of the user's 52 titles, stamped together by
+    /// a device that had only seen the test server's list, came first, by
+    /// name, before what they had just put on it.
+    func testMassStampedTitlesDontComeFirst() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        for id in ["a2", "a3", "a5", "a9", "a11"] { favorite(server, id) }
+        saveMyListRecord(server, ["a11": "1792090000", "a2": "1792095000", "a3": "1792095000", "a5": "1792095000", "a9": "1792095000"])
+        app.launchArguments += ["-forgetMyListOrder", "YES"]
+        app.launch()
+        sleep(8)
+        let cards = myListCards()
+        shot("my list with a mass stamp")
+        XCTAssertEqual(cards.first?.hasPrefix("Weapons"), true, "the mass-stamped titles came first: \(cards)")
+        let record = myListRecord(server)
+        XCTAssertNil(record["a2"], "the mass stamp is still in the record: \(record)")
+        XCTAssertEqual(record["a11"], "1792090000", "the real date left the record: \(record)")
+    }
+
     /// My List's cards, left to right (labels), read in one snapshot (read
     /// one by one, a card could go between listing and reading it).
     private func myListCards() -> [String] {

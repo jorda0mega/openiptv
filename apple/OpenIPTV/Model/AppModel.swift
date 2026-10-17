@@ -2547,8 +2547,14 @@ extension AppModel {
         set { UserDefaults.standard.set(newValue, forKey: Self.myListOrderKey) }
     }
 
-    /// Every copy on My List the last time this device read it.
+    /// Every copy on My List the last time this device read it, for this
+    /// server and viewer: what another account's list held says nothing of
+    /// this one. Regression: a device that had only seen the test server's
+    /// list took all 46 titles of the real one as just put on it.
     private static let myListSeenKey = "myListSeen"
+    private var myListSeenKey: String {
+        Self.myListSeenKey + (sources.emby.map { ".\($0.serverURL.host() ?? "")|\($0.userId)" } ?? "")
+    }
 
     #if DEBUG
     /// A helper's answer at launch, in memory only (no cache on disk).
@@ -2586,7 +2592,9 @@ extension AppModel {
     static func forgetMyListOrderForTesting() {
         guard UserDefaults.standard.bool(forKey: "forgetMyListOrder") else { return }
         UserDefaults.standard.removeObject(forKey: myListOrderKey)
-        UserDefaults.standard.removeObject(forKey: myListSeenKey)
+        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix(myListSeenKey) {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
     #endif
 
@@ -2607,13 +2615,20 @@ extension AppModel {
         let record = await shared
         var added = myListAdded
         for (id, date) in record ?? [:] where (added[id] ?? 0) < date { added[id] = date }
+        // A second shared by several titles is nobody's pick: a device
+        // stamped them all at once. Undated (the server's order), here and,
+        // once written back, in the record. Regression: 46 of the user's 52
+        // titles stamped at once came first, by name, before what they had
+        // just put on it.
+        let stamps = Dictionary(grouping: added.values, by: { $0.rounded(.down) })
+        added = added.filter { (stamps[$0.value.rounded(.down)]?.count ?? 0) < Self.massStamp }
         let defaults = UserDefaults.standard
-        if let seen = defaults.stringArray(forKey: Self.myListSeenKey).map(Set.init) {
+        if let seen = defaults.stringArray(forKey: myListSeenKey).map(Set.init) {
             let now = Date().timeIntervalSince1970
             for item in found where !seen.contains(item.id) && added[item.id] == nil { added[item.id] = now }
         }
         if added != myListAdded { myListAdded = added }
-        defaults.set(found.map(\.id), forKey: Self.myListSeenKey)
+        defaults.set(found.map(\.id), forKey: myListSeenKey)
         // The record kept to what's on the list, with what this device knows.
         if let record {
             let onList = Set(found.map(\.id))
@@ -2641,6 +2656,10 @@ extension AppModel {
         let ids = Set(found.map(\.id))
         if ids != myListIDs { myListIDs = ids }
     }
+
+    /// The titles that can share one second of being put on My List, at
+    /// most, before it's taken for a device's mass stamp.
+    private static let massStamp = 3
 
     /// My List read again (back in the app: something may have been put on
     /// it on another device meanwhile).
