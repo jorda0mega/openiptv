@@ -60,13 +60,17 @@ extension JSONDecoder {
 enum SourceError: LocalizedError {
     case rejected
     case http(Int)
+    /// No connection: the request never reached the server.
+    case offline
     case network(String)
     case unexpected(String)
 
     var errorDescription: String? {
         switch self {
         case .rejected: "The login was rejected. Check the details and try again."
+        case .http(429): "Your provider is busy right now (too many requests)."
         case let .http(code): "The server answered with an error (HTTP \(code))."
+        case .offline: "No internet connection."
         case let .network(message): message
         case let .unexpected(message): message
         }
@@ -77,7 +81,7 @@ enum SourceError: LocalizedError {
         if let error = error as? SourceError { return error }
         if let error = error as? URLError {
             switch error.code {
-            case .notConnectedToInternet: return .network("No internet connection.")
+            case .notConnectedToInternet: return .offline
             case .timedOut: return .network("The server took too long to answer.")
             case .cannotFindHost, .dnsLookupFailed: return .network("That server address couldn't be found.")
             case .cannotConnectToHost: return .network("Couldn't connect to the server.")

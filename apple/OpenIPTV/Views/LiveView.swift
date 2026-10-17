@@ -56,8 +56,11 @@ struct LiveView: View {
                 } else if shelf == nil, displayed.isEmpty, model.liveLoading {
                     HStack { Spacer(); ProgressView("Loading channels…"); Spacer() }.padding(.vertical, 40)
                 }
-                ForEach(model.liveErrors, id: \.self) { message in
-                    Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+                // Not on Sports, which says it itself.
+                if shelf?.id != LiveOrganizer.sportsID {
+                    ForEach(model.liveErrors, id: \.self) { message in
+                        Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+                    }
                 }
                 if let shelf {
                     ShelfContent(shelf: shelf, playing: $playing)
@@ -111,19 +114,11 @@ struct LiveView: View {
             .sheet(isPresented: $showingAllCategories) { categoryPicker }
             .sheet(isPresented: $addingSource) { AddIPTVView() }
             .sheet(isPresented: $choosingArea) { NavigationStack { AreaPicker() } }
-            // Event and PPV categories change names per game: fresh on open.
-            .task(id: model.selectedCategory) {
-                if model.selectedCategory == LiveOrganizer.sportsID {
-                    await model.refreshEvents()
-                } else {
-                    await model.refreshCategory(model.selectedCategory)
-                }
-            }
+            .keepsLiveCurrent(showing: model.selectedCategory)
             .task {
                 if model.selectedCategory == nil, !prefs.favorites.isEmpty {
                     model.selectedCategory = AppModel.favoritesID
                 }
-                await model.loadLive()
             }
         }
     }

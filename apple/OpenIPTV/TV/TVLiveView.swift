@@ -79,12 +79,10 @@ struct TVLiveView: View {
             .navigationDestination(for: LiveCategory.self) { category in
                 TVSectionsPage(title: category.name, channels: model.channels(in: category.id, favorites: prefs.favorites),
                                playing: $playing)
-                    .task { await model.refreshCategory(category.id) }
+                    .keepsLiveCurrent(showing: category.id)
             }
         }
-        .task(id: id) {
-            if id == LiveOrganizer.sportsID { await model.refreshEvents() }
-        }
+        .keepsLiveCurrent(showing: id)
     }
 
     // MARK: The page
@@ -583,6 +581,7 @@ struct TVSports: View {
     /// Top, All, a league, or Channels (chosen in the slide-out list).
     let filter: String
     @Binding var playing: PlayerItem?
+    @Environment(AppModel.self) private var model
 
     /// What Sports can show, in order, and how many games each has on now.
     struct Choices {
@@ -670,9 +669,7 @@ struct TVSports: View {
             ForEach(groups.filter { !$0.1.isEmpty }, id: \.0) { group in
                 TVChannelGrid(title: group.0, entries: group.1, playing: $playing)
             }
-            if shown.isEmpty {
-                Text("Nothing on right now").foregroundStyle(.secondary).padding(.leading, 90)
-            }
+            GamesNoticeView(notice: model.gamesNotice, nothingListed: shown.isEmpty).padding(.leading, 90)
         }
     }
 }
