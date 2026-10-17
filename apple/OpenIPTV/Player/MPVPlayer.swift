@@ -1052,7 +1052,7 @@ final class MPVPlayer: @unchecked Sendable {
         let local = folder.appending(path: "\(UUID().uuidString).\(file.url.pathExtension.isEmpty ? "srt" : file.url.pathExtension)")
         // Found by the providers: on the device already.
         if file.url.isFileURL { return (try? FileManager.default.copyItem(at: file.url, to: local)) != nil ? local : nil }
-        guard let (data, response) = try? await (patient ? HTTP.patient : HTTP.session).data(from: file.url),
+        guard let (data, response) = try? await (patient ? HTTP.patient : HTTP.session).data(for: HTTP.keyInHeader(file.url)),
               (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty,
               (try? data.write(to: local)) != nil else { return nil }
         return local

@@ -1167,6 +1167,11 @@ final class PlayerLookTests: XCTestCase {
         shot("early file in time by speech")
         XCTAssertEqual(parts.first ?? 0, 6.5, accuracy: 0.2, "the early file wasn't shifted into time: \(readout.label)")
         XCTAssertEqual(parts.last ?? 0, 1, accuracy: 0.0001, "the file was stretched: \(readout.label)")
+        // Each stretch is stopped once a minute is read, and the system
+        // logs a stopped request's address: the key goes in a header.
+        // Regression: the Emby session's key was in the simulator's system
+        // log 104 times after one real-feed round.
+        XCTAssertEqual(audioRequests(server, keyed: true), 0, "stretches asked for with the key in their address")
         // Stretches across the film (a file for another cut is off
         // differently in each part): 15 of the 16 fit in this 8-minute film
         // (the last would run past its end), each asked for once; the file
@@ -1181,11 +1186,12 @@ final class PlayerLookTests: XCTestCase {
     }
 
     /// How many stretches of a film's sound the test server was asked for.
-    private func audioRequests(_ server: URL) -> Int {
+    /// `keyed`: only those with the key in their address.
+    private func audioRequests(_ server: URL, keyed: Bool = false) -> Int {
         var count = -1
         let done = expectation(description: "audio requests")
         URLSession.shared.dataTask(with: server.appending(path: "mock/audio_requests")) { data, _, _ in
-            count = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Int] })?["count"] ?? -1
+            count = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Int] })?[keyed ? "keyed" : "count"] ?? -1
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 10)

@@ -141,6 +141,20 @@ enum HTTP {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
+    /// `url` as a request with its `api_key` sent as the X-Emby-Token
+    /// header instead: the system logs the address of a request stopped or
+    /// failed, key and all (speech stretches are stopped once a minute is
+    /// read). Players still get addresses with the key.
+    static func keyInHeader(_ url: URL) -> URLRequest {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let key = parts.queryItems?.first(where: { $0.name == "api_key" })?.value else { return URLRequest(url: url) }
+        parts.queryItems = parts.queryItems?.filter { $0.name != "api_key" }
+        if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
+        var request = URLRequest(url: parts.url ?? url)
+        request.setValue(key, forHTTPHeaderField: "X-Emby-Token")
+        return request
+    }
+
     static func data(_ request: URLRequest) async throws -> Data {
         do {
             // Only reads go ahead (and may be asked twice): a POST (playback

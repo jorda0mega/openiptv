@@ -55,8 +55,9 @@ PREFERENCES = {}
 # Requests for a film's file, (time, item id): GET /mock/video_requests?since=
 # (a time from GET /mock/mark) lists the items asked for since.
 VIDEO_REQUESTS = []
-# Requests for a stretch of a film's sound (GET /mock/audio_requests).
-AUDIO_REQUESTS = [0]
+# Requests for a stretch of a film's sound, and those with the key in
+# their address (GET /mock/audio_requests).
+AUDIO_REQUESTS = [0, 0]
 MOVIE_TICKS = int(float(os.environ.get("OPENIPTV_MOCK_RUNTIME", "7200")) * 10_000_000)
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -432,10 +433,10 @@ class Handler(BaseHTTPRequestHandler):
             since = float(q.get("since", "0"))
             return self.send({"items": [item for t, item in VIDEO_REQUESTS if t >= since]})
         if path == "/mock/audio_requests":
-            return self.send({"count": AUDIO_REQUESTS[0]})
+            return self.send({"count": AUDIO_REQUESTS[0], "keyed": AUDIO_REQUESTS[1]})
         if path == "/mock/set":
             if "reset" in q:
-                AUDIO_REQUESTS[0] = 0
+                AUDIO_REQUESTS[0] = AUDIO_REQUESTS[1] = 0
                 VIDEO_REQUESTS.clear()
                 PREFERENCES.clear()
                 DOWNLOADED.clear()
@@ -829,6 +830,10 @@ class Handler(BaseHTTPRequestHandler):
             # MP3 (Emby converts it; read for as long as it's wanted).
             start = int(q.get("StartTimeTicks", "0")) / 10_000_000
             AUDIO_REQUESTS[0] += 1
+            # The key in the address: the system logs it when the app stops
+            # the request, as it does each once a minute is read.
+            if "api_key" in q:
+                AUDIO_REQUESTS[1] += 1
             print(f"{time.time():.2f} audio {path.split('/')[2]} from {start:.0f} s, session {q.get('PlaySessionId', '-')}", flush=True)
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")
             if not video or not shutil.which("ffmpeg"):
