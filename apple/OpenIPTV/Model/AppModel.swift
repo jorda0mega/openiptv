@@ -46,7 +46,11 @@ final class AppModel {
     private(set) var categories: [LiveCategory] = []
     private(set) var allChannels: [LiveChannel] = []
     private(set) var liveLoading = false
-    var liveErrors: [String] = []
+    /// Each source's last lineup check (when it answered, why it failed):
+    /// the failure lines and Sports' notice derive from it.
+    private var liveChecks: [UUID: LineupCheck] = [:]
+    /// The one lineup update running; a later caller waits for it.
+    @ObservationIgnored private var liveUpdate: Task<Void, Never>?
     var selectedCategory: String? {
         didSet { UserDefaults.standard.set(selectedCategory, forKey: "category") }
     }
@@ -67,7 +71,6 @@ final class AppModel {
     /// A provider category chosen from the full list (rather than a shelf):
     /// kept until the lineup next loads.
     var browsingProviderCategory = false
-    private var refreshingEvents = false
 
     static let favoritesID = "__favorites"
     /// The channels of the area set in Settings.
@@ -1735,6 +1738,7 @@ final class AppModel {
         clearNowNext()
         localCache = nil
         providers = [:]
+        liveChecks = [:]
         providerEPG = [:]
         selectedCategory = nil
         guideState = .idle
@@ -1742,79 +1746,161 @@ final class AppModel {
 
     // MARK: Live TV
 
-    /// Loads every source's lineup in parallel, then refreshes the full
-    /// guide in the background if it's stale.
-    /// The lineup saved on the device (names, logos, categories; never a
-    /// URL that could hold a login) shows at once, then the providers'
-    /// current one replaces it in the background.
+    /// Sports and the providers' event lists: game names change game by
+    /// game.
+    private static var gamesMaxAge: TimeInterval {
+        #if DEBUG
+        // UI tests (OPENREEL_DEBUG_GAMES_MAX_AGE=seconds): a shorter wait.
+        if let seconds = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_GAMES_MAX_AGE"].flatMap(Double.init) { return seconds }
+        #endif
+        return 15 * 60
+    }
+
+    /// Every other page, and the lineup fetched at launch.
+    private static let lineupMaxAge: TimeInterval = 3600
+
+    /// How old the lineup may be for `page` (a shelf, Favorites, Local, or
+    /// a provider category browsed from the full list).
+    private func liveMaxAge(_ page: String?) -> TimeInterval {
+        if page == LiveOrganizer.sportsID { return Self.gamesMaxAge }
+        if let page, liveLibrary.eventCategories.contains(page) { return Self.gamesMaxAge }
+        return Self.lineupMaxAge
+    }
+
+    /// Keeps the lineup as current as `page` needs (Sports and event lists
+    /// 15 minutes, other pages an hour) for as long as the calling task
+    /// runs: a page's task, so it stops when the page goes or the app
+    /// leaves the front (View.keepsLiveCurrent). Sports also picks up what
+    /// other devices found not playing. Cancel the task to stop it.
+    func keepLiveCurrent(showing page: String?) async {
+        while !Task.isCancelled {
+            await updateLive(for: page)
+            if page == LiveOrganizer.sportsID { await syncGamesNotPlaying() }
+            let maxAge = liveMaxAge(page)
+            let next = sources.iptv.map { liveChecks[$0.id, default: LineupCheck()].nextAsk(maxAge: maxAge) }.min()
+            let wait = min(max(next?.timeIntervalSinceNow ?? maxAge, 1), maxAge)
+            try? await Task.sleep(for: .seconds(wait))
+        }
+    }
+
+    /// The lineup at launch, after adding or removing a source, and Apple
+    /// TV's Try Again (`force`: every source asked now). An update already
+    /// running is waited for first.
     func loadLive(force: Bool = false) async {
+        await updateLive(for: nil, force: force)
+    }
+
+    /// One line per source whose last check failed ("Test: Your provider
+    /// is busy right now (too many requests).").
+    var liveErrors: [String] {
+        sources.iptv.compactMap { source in
+            liveChecks[source.id]?.problem.map { "\(source.name): \($0.localizedDescription)" }
+        }
+    }
+
+    var gamesNotice: GamesNotice {
+        let checks = sources.iptv.map { liveChecks[$0.id, default: LineupCheck()] }
+        let failed = checks.filter { $0.problem != nil }
+        if !failed.isEmpty {
+            return .couldNotUpdate(lastUpdated: failed.compactMap(\.answeredAt).min(), reason: liveErrors.joined(separator: " "))
+        }
+        if liveLoading, checks.contains(where: { $0.askedAt == nil }) { return .checking }
+        return .current
+    }
+
+    /// One update at a time: a caller arriving mid-update waits for it,
+    /// then decides with what it left, so at a launch the saved lineup is
+    /// in before anyone decides whether to ask. The update runs in its own
+    /// task: a page leaving never cuts a load off halfway.
+    private func updateLive(for page: String?, force: Bool = false) async {
+        while let running = liveUpdate {
+            await running.value
+            // Whoever wakes first lets go of the finished update: waiting on
+            // a finished task returns without yielding, so a waiter that
+            // left this to the task's starter could spin here forever.
+            if liveUpdate == running { liveUpdate = nil }
+        }
+        // userInitiated: HTTP sends a read at utility or below on its
+        // prefetch connections, where it may be sent twice.
+        let update = Task(priority: .userInitiated) { await runLiveUpdate(for: page, force: force) }
+        liveUpdate = update
+        await update.value
+        if liveUpdate == update { liveUpdate = nil }
+    }
+
+    /// The lineup saved on the device (names, logos, categories; never a
+    /// URL that could hold a login) shows at once. Then the sources whose
+    /// lineup is older than `page` allows are asked, in parallel, and each
+    /// that answered replaces its channels; a source not asked, or that
+    /// failed, keeps the channels it had, so one failing provider never
+    /// empties another's list. Only an answer changes the page or the file:
+    /// a failure never makes old games look current.
+    private func runLiveUpdate(for page: String?, force: Bool) async {
         let iptv = sources.iptv
         guard !iptv.isEmpty else {
             categories = []
             allChannels = []
             channelsByCategory = [:]
             localCache = nil
-            liveErrors = []
+            liveChecks = [:]
             return
         }
+        liveChecks = liveChecks.filter { id, _ in iptv.contains { $0.id == id } }
         if allChannels.isEmpty, !Self.freshLineup, let saved = await Self.savedLineup(), saved.sources == iptv.map(\.id) {
             await applyLineup(categories: saved.categories, channels: saved.channels)
-            // Saved within the hour: good as it is (event categories are
-            // fetched again on their own when opened). Not playlists': their
-            // stream addresses can hold a login, so they're saved blank and
-            // only the provider's current lineup can play them.
-            let blank = saved.channels.contains { channel in
+            // Playlists' stream addresses can hold a login, so they're saved
+            // blank and only the provider's current lineup can play them:
+            // never answered, as far as the file goes.
+            let blank = Set(saved.channels.filter { channel in
                 if case let .url(url, _, _) = channel.stream { return url.scheme == "about" }
                 return false
-            }
-            if !blank, let at = saved.savedAt, Date().timeIntervalSince(at) < 3600 { liveFetchedAt = at }
+            }.map(\.sourceId))
+            liveChecks = Dictionary(uniqueKeysWithValues: iptv.map { source in
+                (source.id, LineupCheck(answeredAt: blank.contains(source.id) ? nil : saved.answered?[source.id]))
+            })
         }
-        guard force || liveFetchedAt.map({ Date().timeIntervalSince($0) >= 3600 }) ?? true, !liveLoading else { return }
+        // The page's limit read now: an event list's needs the saved lineup in.
+        let maxAge = liveMaxAge(page), now = Date()
+        let due = force ? iptv : iptv.filter { liveChecks[$0.id, default: LineupCheck()].nextAsk(maxAge: maxAge) <= now }
+        guard !due.isEmpty else { return }
         liveLoading = true
         defer { liveLoading = false }
-        providers = Dictionary(uniqueKeysWithValues: iptv.map { ($0.id, Providers.make($0)) })
-        let multiple = iptv.count > 1
-        var lineups: [(IPTVSource, Result<LiveLineup, Error>)] = []
-        await withTaskGroup(of: (IPTVSource, Result<LiveLineup, Error>).self) { group in
-            for source in iptv {
+        for source in due { providers[source.id] = Providers.make(source) }
+        providers = providers.filter { id, _ in iptv.contains { $0.id == id } }
+        var results: [UUID: Result<LiveLineup, SourceError>] = [:]
+        await withTaskGroup(of: (UUID, Result<LiveLineup, SourceError>).self) { group in
+            for source in due {
                 let provider = providers[source.id]!
                 group.addTask {
-                    do { return (source, .success(try await provider.load())) } catch { return (source, .failure(error)) }
+                    do { return (source.id, .success(try await provider.load())) } catch { return (source.id, .failure(SourceError.wrap(error))) }
                 }
             }
-            for await result in group { lineups.append(result) }
+            for await (id, result) in group { results[id] = result }
         }
-        let order = Dictionary(uniqueKeysWithValues: iptv.enumerated().map { ($1.id, $0) })
-        lineups.sort { (order[$0.0.id] ?? 0) < (order[$1.0.id] ?? 0) }
+        let answered = Date()
+        for (id, result) in results { liveChecks[id, default: LineupCheck()].record(result.map { _ in () }, at: answered) }
 
-        // A source that can't be reached keeps the channels it had (saved
-        // or from earlier), so one failing provider doesn't empty the list.
+        let multiple = iptv.count > 1
         let previousCategories = categories, previousChannels = allChannels
         var cats: [LiveCategory] = []
         var channels: [LiveChannel] = []
-        var errors: [String] = []
         var guideURLs: [URL] = []
-        for (source, result) in lineups {
-            switch result {
-            case let .success(lineup):
+        for source in iptv {
+            if case let .success(lineup)? = results[source.id] {
                 let (ownCategories, ownChannels) = LiveOrganizer.withoutLogin(categories: lineup.categories, channels: lineup.channels)
                 cats += ownCategories.map {
                     LiveCategory(id: $0.id, name: multiple ? "\(source.name) · \($0.name)" : $0.name, channels: $0.channels)
                 }
                 channels += ownChannels
                 guideURLs += lineup.guideURLs
-            case let .failure(error):
-                errors.append("\(source.name): \(SourceError.wrap(error).localizedDescription)")
+            } else {
                 cats += previousCategories.filter { $0.id.hasPrefix(source.id.uuidString + "|") }
                 channels += previousChannels.filter { $0.sourceId == source.id }
             }
         }
-        liveErrors = errors
-        if !channels.isEmpty {
-            await applyLineup(categories: cats, channels: channels)
-            liveFetchedAt = Date()
-            Self.saveLineup(sources: iptv.map(\.id), categories: cats, channels: channels)
-        }
+        guard results.values.contains(where: { (try? $0.get()) != nil }) else { return }
+        await applyLineup(categories: cats, channels: channels)
+        await Self.saveLineup(sources: iptv.map(\.id), categories: cats, channels: channels, answered: liveChecks.compactMapValues(\.answeredAt))
 
         let keep = Set(channels.compactMap(\.epgId))
         let stale = await guide.isStale()
@@ -1869,41 +1955,14 @@ final class AppModel {
 
     // MARK: Saved lineup
 
-    /// When the providers' lineup was last fetched (or saved, if recent).
-    private var liveFetchedAt: Date?
-    private var categoryFetchedAt: [String: Date] = [:]
-
     private struct SavedLineup: Codable {
         let sources: [UUID]
         let categories: [LiveCategory]
         let channels: [LiveChannel]
-        var savedAt: Date?
-    }
-
-    /// Event and PPV categories are renamed for every game: the one being
-    /// looked at is fetched again on its own (at most every 5 minutes),
-    /// instead of the whole lineup.
-    func refreshCategory(_ id: String?) async {
-        guard let id, id != Self.favoritesID, id != Self.localID,
-              let category = categories.first(where: { $0.id == id }), Self.isEventCategory(category.name),
-              categoryFetchedAt[id].map({ Date().timeIntervalSince($0) >= 300 }) ?? true,
-              let sourceId = id.split(separator: "|").first.flatMap({ UUID(uuidString: String($0)) }),
-              let provider = providers[sourceId] ?? sources.iptv.first(where: { $0.id == sourceId }).map(Providers.make),
-              let listed = try? await provider.channels(inCategory: id)
-        else { return }
-        let fresh = listed.filter { !LiveOrganizer.leaksLogin($0.name) }
-        categoryFetchedAt[id] = Date()
-        guard fresh != channelsByCategory[id] else { return }
-        let channels = allChannels.filter { $0.categoryId != id } + fresh
-        await applyLineup(categories: categories, channels: channels)
-        Self.saveLineup(sources: sources.iptv.map(\.id), categories: categories, channels: channels)
-    }
-
-    private static func isEventCategory(_ name: String) -> Bool {
-        let upper = name.uppercased()
-        return ["PPV", "EVENT", "NFL", "NBA", "NHL", "MLB", "MLS", "UFC", "BOXING", "DAZN", "ESPN+", "PEACOCK", "FLO",
-                "NCAA", "KAYO", "PARAMOUNT+", "MAX", "FANATIZ", "TSN+", "VICTORY+", "SEC+", "BIG TEN+", "FIFA+", "F1 TV", "LIVE"]
-            .contains { upper.contains($0) }
+        /// When each source last returned its lineup; a source that failed
+        /// keeps its earlier time. Missing in files from before it was
+        /// kept: every source is asked again once.
+        var answered: [UUID: Date]?
     }
 
     // v2: channels say how many days the provider records. v3: without the
@@ -2177,8 +2236,8 @@ final class AppModel {
     }
 
     /// What other devices found not playing in the last half hour, on this
-    /// device's game rows too (asked when Sports opens).
-    func syncGamesNotPlaying() async {
+    /// device's game rows too (asked while Sports is open).
+    private func syncGamesNotPlaying() async {
         guard let emby, let record = await emby.notPlayingRecord(), !record.isEmpty else { return }
         let now = Date().timeIntervalSince1970
         for id in liveLibrary.feeds.keys {
@@ -2226,59 +2285,20 @@ final class AppModel {
         UserDefaults.standard.data(forKey: "watchOnPicks").flatMap { try? JSONDecoder().decode([String: WatchOn.Pick].self, from: $0) } ?? [:]
     }
 
-    /// Event lists change names game by game: when Sports opens, the ones
-    /// not fetched in the last 15 minutes are fetched again (four at a
-    /// time) and applied together.
-    func refreshEvents() async {
-        // What other devices found not playing (one small request).
-        await syncGamesNotPlaying()
-        guard !refreshingEvents else { return }
-        let stale = liveLibrary.eventCategories.filter { categoryFetchedAt[$0].map { Date().timeIntervalSince($0) >= 900 } ?? true }
-        guard !stale.isEmpty else { return }
-        refreshingEvents = true
-        defer { refreshingEvents = false }
-        var work: [(id: String, provider: any LiveProvider)] = []
-        for id in stale {
-            guard let sourceId = id.split(separator: "|").first.flatMap({ UUID(uuidString: String($0)) }),
-                  let source = sources.iptv.first(where: { $0.id == sourceId }) else { continue }
-            let provider = providers[sourceId] ?? Providers.make(source)
-            providers[sourceId] = provider
-            work.append((id, provider))
-        }
-        var fresh: [String: [LiveChannel]] = [:]
-        await withTaskGroup(of: (String, [LiveChannel]?).self) { group in
-            var queue = work[...]
-            for _ in 0..<4 {
-                guard let next = queue.popFirst() else { break }
-                group.addTask { (next.id, try? await next.provider.channels(inCategory: next.id)) }
-            }
-            for await (id, listed) in group {
-                categoryFetchedAt[id] = Date()
-                if let listed { fresh[id] = listed.filter { !LiveOrganizer.leaksLogin($0.name) } }
-                if let next = queue.popFirst() {
-                    group.addTask { (next.id, try? await next.provider.channels(inCategory: next.id)) }
-                }
-            }
-        }
-        let changed = fresh.filter { $0.value != channelsByCategory[$0.key] }
-        guard !changed.isEmpty else { return }
-        let channels = allChannels.filter { !changed.keys.contains($0.categoryId ?? "") } + changed.values.flatMap { $0 }
-        await applyLineup(categories: categories, channels: channels)
-        Self.saveLineup(sources: sources.iptv.map(\.id), categories: categories, channels: allChannels)
-    }
-
     private nonisolated static func savedLineup() async -> SavedLineup? {
         await Task.detached(priority: .userInitiated) { AppCache.read(lineupFile) as SavedLineup? }.value
     }
 
     /// Playlist stream URLs can hold a login, so they're saved blank and
-    /// the providers' current lineup supplies them.
-    private nonisolated static func saveLineup(sources: [UUID], categories: [LiveCategory], channels: [LiveChannel]) {
+    /// the providers' current lineup supplies them. Awaited: two saves
+    /// land in the order asked.
+    private nonisolated static func saveLineup(sources: [UUID], categories: [LiveCategory], channels: [LiveChannel],
+                                               answered: [UUID: Date]) async {
         guard !freshLineup else { return }
-        Task.detached(priority: .utility) {
+        await Task.detached(priority: .utility) {
             AppCache.write(lineupFile, SavedLineup(sources: sources, categories: categories,
-                                                   channels: channels.map(\.withoutSecrets), savedAt: Date()))
-        }
+                                                   channels: channels.map(\.withoutSecrets), answered: answered))
+        }.value
     }
 
     /// Swap saved channels for their current lineup entries (fresh stream

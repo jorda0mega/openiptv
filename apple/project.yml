@@ -206,6 +206,8 @@ targets:
       - OpenIPTV/Player/RelayRoutes.swift
       - OpenIPTV/Live/WatchOn.swift
       - OpenIPTV/Live/GameTime.swift
+      - OpenIPTV/Live/LineupCheck.swift
+      - OpenIPTV/Model/Flex.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv.unittests

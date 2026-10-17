@@ -108,6 +108,7 @@ struct SportsContent: View {
     let shelf: LiveOrganizer.Shelf
     @Binding var playing: PlayerItem?
     @State private var filter: String?
+    @Environment(AppModel.self) private var model
 
     private static let top = "Top", all = "All", channels = "Channels"
 
@@ -142,9 +143,7 @@ struct SportsContent: View {
                 default: entry.event?.league == chosen
                 }
             }
-            if shown.isEmpty {
-                Text("Nothing on right now").foregroundStyle(.secondary)
-            }
+            GamesNoticeView(notice: model.gamesNotice, nothingListed: shown.isEmpty)
             ForEach(Self.buckets(shown, now: now), id: \.title) { bucket in
                 Section(bucket.title) { EntryRows(entries: bucket.entries, playing: $playing) }
             }
@@ -328,5 +327,66 @@ struct CountryChannels: View {
         .listStyle(.plain)
         .navigationTitle("\(LiveOrganizer.flag(code)) \(LiveOrganizer.countryName(code))")
         .inlineTitle()
+    }
+}
+
+// MARK: - Keeping the lineup current
+
+extension View {
+    /// Keeps Live TV's lineup as current as `page` needs while this view is
+    /// on screen and the app is in front (AppModel.keepLiveCurrent).
+    func keepsLiveCurrent(showing page: String?) -> some View {
+        modifier(KeepLiveCurrent(page: page))
+    }
+}
+
+/// Leaving the page or the app cancels the task; coming back starts it
+/// again, and it asks at once if the lineup is due.
+private struct KeepLiveCurrent: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
+    let page: String?
+
+    private struct Visit: Hashable {
+        let page: String?
+        let inFront: Bool
+    }
+
+    func body(content: Content) -> some View {
+        let inFront = scenePhase != .background
+        return content.task(id: Visit(page: page, inFront: inFront)) {
+            guard inFront else { return }
+            await model.keepLiveCurrent(showing: page)
+        }
+    }
+}
+
+/// Under Sports' filters: what to say when nothing is listed, or when the
+/// games may not be current.
+struct GamesNoticeView: View {
+    let notice: GamesNotice
+    /// Nothing listed under the chosen filter.
+    let nothingListed: Bool
+
+    var body: some View {
+        switch notice {
+        case .current:
+            if nothingListed { Text("Nothing on right now").foregroundStyle(.secondary) }
+        case .checking:
+            if nothingListed { Text("Checking for games…").foregroundStyle(.secondary) }
+        case let .couldNotUpdate(lastUpdated, reason):
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Couldn't update the games", systemImage: "exclamationmark.triangle").font(.headline)
+                Text(Self.detail(lastUpdated: lastUpdated, reason: reason, now: Date()))
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// "Last updated 2 hours ago. Test: Your provider is busy right now (too
+    /// many requests)."; with no known time, the reason alone.
+    static func detail(lastUpdated: Date?, reason: String, now: Date) -> String {
+        let age = lastUpdated.map { "Last updated \(RelativeDateTimeFormatter().localizedString(for: $0, relativeTo: now)). " } ?? ""
+        return age + reason
     }
 }
