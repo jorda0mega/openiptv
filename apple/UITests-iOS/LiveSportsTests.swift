@@ -269,6 +269,139 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(game.label.contains("Not playing"), "the other device's finding isn't shown: \(game.label)")
     }
 
+    /// Sports opened right after the lineup loaded asks the provider for
+    /// nothing: the lineup it has is minutes old. Regression: it asked for
+    /// every event category again (76 requests on a real lineup, a third
+    /// to a half of them refused as too many).
+    func testOpeningSportsAfterLoadAsksNothing() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0"]) }
+        app.launchArguments = ["-freshLineup", "YES", "-category", "__local"]
+        app.launch()
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        if tab.waitForExistence(timeout: 10) { tab.tap() }
+        let sports = app.buttons["Sports"].firstMatch
+        XCTAssertTrue(sports.waitForExistence(timeout: 20), "no Sports tab: the lineup didn't load")
+        let mark = markTime(server)
+        sports.tap()
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        sleep(3)
+        XCTAssertEqual(lineupRequests(server, since: mark), [], "Sports asked the provider again for a lineup minutes old")
+    }
+
+    /// The provider refusing (429, too many requests) at a relaunch: Sports
+    /// says it couldn't update the games and how old its list is, instead
+    /// of "Nothing on right now"; once the provider answers again it asks
+    /// again (the wait shortened to 5 s) and the game shows LIVE.
+    /// Regression: a refused check was silent and counted as done.
+    func testSportsSaysWhenItCouldNotUpdate() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_started": "300"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20", "xtream_status": "0"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "5"
+        app.launchArguments = ["-cacheFolder", "live-\(UUID().uuidString.prefix(8))"]
+        app.launch()
+        openSports()
+        XCTAssertTrue(app.staticTexts["Nothing on right now"].firstMatch.waitForExistence(timeout: 20), "a game five hours in is still listed")
+        app.terminate()
+
+        configure(server, ["xtream_status": "429", "sports_started": "20"])
+        sleep(6)
+        app.launch()
+        openSports()
+        let notice = app.staticTexts["Couldn't update the games"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 20), "no word that the games couldn't be updated")
+        let detail = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Last updated' AND label CONTAINS 'too many requests'")).firstMatch
+        XCTAssertTrue(detail.exists, "the notice doesn't say how old the list is and why")
+        XCTAssertFalse(app.staticTexts["Nothing on right now"].firstMatch.exists, "\"Nothing on right now\" with the check refused")
+
+        configure(server, ["xtream_status": "0"])
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game didn't show once the provider answered again")
+        XCTAssertTrue(game.label.contains("LIVE") && game.label.contains("5 channels"), "the game's row: \(game.label)")
+        XCTAssertFalse(notice.exists, "the notice stayed after a good check")
+    }
+
+    /// A refused check leaves the saved lineup's age as it was: relaunched
+    /// once the provider answers again, the app sees a list older than the
+    /// limit (30 s here) and asks at once. Had the refusal stamped the file
+    /// as just checked, the old list would stay another 30 s.
+    func testFailedCheckKeepsTheListsAge() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_started": "300"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20", "xtream_status": "0"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "30"
+        app.launchArguments = ["-cacheFolder", "live-\(UUID().uuidString.prefix(8))"]
+        app.launch()
+        openSports()
+        XCTAssertTrue(app.staticTexts["Nothing on right now"].firstMatch.waitForExistence(timeout: 20), "a game five hours in is still listed")
+        app.terminate()
+        sleep(35)
+
+        configure(server, ["xtream_status": "429", "sports_started": "20"])
+        app.launch()
+        openSports()
+        XCTAssertTrue(app.staticTexts["Couldn't update the games"].firstMatch.waitForExistence(timeout: 20),
+                      "no word that the games couldn't be updated")
+        app.terminate()
+
+        configure(server, ["xtream_status": "0"])
+        app.launch()
+        openSports()
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the list wasn't checked at once: the refused check made it look current")
+        XCTAssertTrue(game.label.contains("LIVE"), "the game's row: \(game.label)")
+    }
+
+    /// Sports left open: a game that starts meanwhile shows on its own (the
+    /// lineup is checked every 15 minutes; 10 s here). Regression: the list
+    /// stayed as it was when the page opened.
+    func testSportsLeftOpenStaysCurrent() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_started": "300"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "10"
+        app.launchArguments = ["-freshLineup", "YES"]
+        app.launch()
+        openSports()
+        XCTAssertTrue(app.staticTexts["Nothing on right now"].firstMatch.waitForExistence(timeout: 20), "a game five hours in is still listed")
+        configure(server, ["sports_started": "20"])
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 25), "the game that started didn't show while Sports stayed open")
+        XCTAssertTrue(game.label.contains("LIVE"), "the game's row: \(game.label)")
+    }
+
+    /// Back from the background, Sports checks for games at once when its
+    /// list is older than the limit (10 s here). Regression: nothing
+    /// refreshed Live TV on coming back.
+    func testSportsCurrentAfterComingBack() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_started": "300"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "10"
+        app.launchArguments = ["-freshLineup", "YES"]
+        app.launch()
+        openSports()
+        XCTAssertTrue(app.staticTexts["Nothing on right now"].firstMatch.waitForExistence(timeout: 20), "a game five hours in is still listed")
+        XCUIDevice.shared.press(.home)
+        configure(server, ["sports_started": "20"])
+        sleep(12)
+        app.activate()
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game that started while away didn't show on coming back")
+        XCTAssertTrue(game.label.contains("LIVE"), "the game's row: \(game.label)")
+    }
+
+    /// Live TV → Sports.
+    private func openSports() {
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        if tab.waitForExistence(timeout: 10) { tab.tap() }
+        let sports = app.buttons["Sports"].firstMatch
+        if sports.waitForExistence(timeout: 20) { sports.tap() }
+    }
+
     /// Live TV → Sports → the game.
     private func openGame() {
         let tab = app.tabBars.buttons["Live TV"].firstMatch
@@ -317,6 +450,33 @@ final class LiveSportsTests: XCTestCase {
               let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               let address = json["serverURL"] as? String else { return nil }
         return URL(string: address)
+    }
+
+    /// The test server's clock, for `lineupRequests(since:)`.
+    private func markTime(_ server: URL) -> Double {
+        var t = 0.0
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: server.appending(path: "mock/mark")) { data, _, _ in
+            t = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Double] })?["t"] ?? 0
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 10)
+        return t
+    }
+
+    /// The lineup the app asked the provider for since `since`: "account",
+    /// "get_live_categories", "get_live_streams" or "get_live_streams:<cat>"
+    /// (one category); not the guide requests its rows make.
+    private func lineupRequests(_ server: URL, since: Double) -> [String] {
+        var items: [String] = []
+        let done = DispatchSemaphore(value: 0)
+        let url = server.appending(path: "mock/xtream_requests").appending(queryItems: [.init(name: "since", value: String(since))])
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            items = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?["items"] ?? []
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 10)
+        return items.filter { $0 == "account" || $0.hasPrefix("get_live_") }
     }
 
     /// Sets the test server's behaviour (scripts/mock_server.py, /mock/set).
