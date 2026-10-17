@@ -1110,11 +1110,11 @@ struct EmbyClient {
     /// `copy`: the server may copy the video and audio as they are (H.264,
     /// AAC) instead of converting them, which starts in about a second.
     func hlsURL(_ itemId: String, mediaSourceId: String, playSessionId: String?, start: Double?, bitrate: Int = 20_000_000,
-                copy: Bool = false) -> URL {
+                copy: Bool = false, audioStreamIndex: Int? = nil) -> URL {
         // Lower bitrates read better at lower resolutions.
         let maxWidth = bitrate >= 8_000_000 ? 1920 : bitrate >= 3_000_000 ? 1280 : 854
         var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/master.m3u8"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [
+        var items: [URLQueryItem] = [
             .init(name: "MediaSourceId", value: mediaSourceId), .init(name: "api_key", value: account.accessToken),
             .init(name: "DeviceId", value: deviceId),
             .init(name: "VideoCodec", value: "h264"), .init(name: "AudioCodec", value: "aac"),
@@ -1124,8 +1124,12 @@ struct EmbyClient {
             .init(name: "VideoBitrate", value: String(max(bitrate - 192_000, 500_000))), .init(name: "AudioBitrate", value: "192000"),
             .init(name: "MaxWidth", value: String(maxWidth)),
             .init(name: "StartTimeTicks", value: String(Int64((start ?? 0) * 1e7))),
-        ] + (playSessionId.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
-            + (copy ? [.init(name: "AllowVideoStreamCopy", value: "true"), .init(name: "AllowAudioStreamCopy", value: "true")] : [])
+        ]
+        if let playSessionId { items.append(.init(name: "PlaySessionId", value: playSessionId)) }
+        if copy { items += [.init(name: "AllowVideoStreamCopy", value: "true"), .init(name: "AllowAudioStreamCopy", value: "true")] }
+        // The audio playing (else the server takes the file's first).
+        if let audioStreamIndex { items.append(.init(name: "AudioStreamIndex", value: String(audioStreamIndex))) }
+        parts.queryItems = items
         return parts.url!
     }
 

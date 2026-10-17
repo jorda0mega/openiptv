@@ -554,6 +554,45 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=spa")
     }
 
+    /// Subtitles showing stay, in time, when a slow connection lowers the
+    /// film to the server's converted version (a new stream, with none of
+    /// them, its clock from 0 where it starts), and its audio is said in
+    /// the language it had. Regression: the converted version played on
+    /// with no subtitles ("audio=und subtitles=off"). Needs the French
+    /// film with a file of a line a second (OPENIPTV_MOCK_VIDEO=…/foreign.mkv,
+    /// OPENIPTV_MOCK_SUBTITLE_FILES="eng||…/seconds.srt", OPENIPTV_MOCK_RUNTIME=120;
+    /// TEST_RUNNER_LOWER_QUALITY=1).
+    func testSubtitlesStayAtLowerQuality() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["LOWER_QUALITY"] != nil, "needs the French film with a line a second")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
+        openFilm(["-forgetTrackChoices", "YES", "-forgetSubtitleTimings", "YES"])
+        let line = app.staticTexts["debug-subtext"].firstMatch
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        var lowered = false
+        for _ in 0..<40 where !lowered {
+            sleep(1)
+            lowered = quality.exists && quality.label.hasPrefix("converted")
+        }
+        XCTAssertTrue(lowered, "the quality wasn't lowered: \(quality.exists ? quality.label : "no readout")")
+        sleep(4)
+        // The line for the second the film is at, each second for five.
+        var seen: [String] = []
+        for _ in 0..<5 {
+            let at = position() ?? -1
+            let shown = line.label
+            seen.append("\(at): \(shown)")
+            let second = Double(shown.replacingOccurrences(of: "SECOND ", with: ""))
+            XCTAssertNotNil(second, "no subtitles at the lower quality: \(seen)")
+            if let second { XCTAssertEqual(second, at, accuracy: 1.5, "the subtitles are out of time at the lower quality: \(seen)") }
+            sleep(1)
+        }
+        shot("subtitles at the lower quality")
+        XCTAssertEqual(tracksPlaying(), "audio=fre subtitles=eng")
+    }
+
     /// The first subtitles picked show without stopping the picture, even
     /// from a slow server. Regression: the picture stopped for a moment the
     /// first time subtitles were picked (later switches were instant).

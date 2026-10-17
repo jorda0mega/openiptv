@@ -464,6 +464,7 @@ struct MoviePlayerView: View {
                         debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
                         #if os(iOS)
                         debugReadout(player?.subtitleShift ?? "", "debug-subshift")
+                        debugReadout(player?.subtitleLine ?? "", "debug-subtext")
                         #endif
                     }
                 }
@@ -966,9 +967,9 @@ struct MoviePlayerView: View {
     /// "From Beginning": the start, playing.
     private func restart() {
         if offset > 0, let bitrate = governor?.current,
-           let url = model.convertedURL(for: playback, bitrate: bitrate, start: 0) {
+           let url = model.convertedURL(for: playback, bitrate: bitrate, start: 0, audio: player?.audioStreamIndex) {
             offset = 0
-            player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
+            player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks, sameFilm: offset)
         } else {
             player?.seek(to: 0, exact: true)
         }
@@ -1070,6 +1071,16 @@ struct MoviePlayerView: View {
         #endif
         position = playback.startSeconds ?? 0
         #if DEBUG
+        // UI tests (OPENREEL_DEBUG_LOWER_AFTER=seconds): a converted version
+        // then, as for a slow connection.
+        if let after = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LOWER_AFTER"].flatMap(Double.init) {
+            Task {
+                try? await Task.sleep(for: .seconds(after))
+                let bitrate = QualityGovernor.ladder[3]
+                governor = QualityGovernor(original: playback.bitrate, current: bitrate)
+                apply(.converted(bitrate))
+            }
+        }
         // UI tests (OPENREEL_DEBUG_NOTE_AFTER=seconds): a quality note then.
         if let after = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NOTE_AFTER"].flatMap(Double.init) {
             Task {
@@ -1170,15 +1181,15 @@ struct MoviePlayerView: View {
         case let .converted(bitrate):
             revertTo = nil
             lastConverted = bitrate
-            guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at) else { return }
+            guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at, audio: player.audioStreamIndex) else { return }
             offset = at
-            player.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
+            player.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks, sameFilm: offset)
             note("Lower quality to keep playing smoothly")
         case .original:
             revertTo = lastConverted
             offset = 0
             player.load(playback.url, headers: playback.headers, start: at, file: true,
-                        readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks)
+                        readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks, sameFilm: 0)
             note("Back to full quality")
         }
     }
@@ -1306,11 +1317,12 @@ struct MoviePlayerView: View {
             #endif
         case let .failed(message):
             // Back to full quality didn't open: carry on at the lower one.
-            if started, let bitrate = revertTo, let url = model.convertedURL(for: playback, bitrate: bitrate, start: position) {
+            if started, let bitrate = revertTo,
+               let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
                 revertTo = nil
                 governor?.revert(to: bitrate)
                 offset = position
-                player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks)
+                player?.load(url, headers: playback.fallbackHeaders, file: false, tracks: playback.tracks, sameFilm: offset)
                 note("Staying at lower quality")
                 return
             }
@@ -1319,7 +1331,7 @@ struct MoviePlayerView: View {
             if started, governor?.current != nil {
                 governor = nil
                 offset = 0
-                player?.load(playback.url, headers: playback.headers, start: position, file: true, tracks: playback.tracks)
+                player?.load(playback.url, headers: playback.headers, start: position, file: true, tracks: playback.tracks, sameFilm: 0)
                 note("Couldn't lower the quality; playing the original")
                 return
             }
@@ -1330,7 +1342,7 @@ struct MoviePlayerView: View {
                 let converted = next.path().hasSuffix(".m3u8")
                 offset = converted ? (playback.startSeconds ?? 0) : 0
                 player?.load(next, headers: playback.fallbackHeaders, start: converted ? nil : playback.startSeconds, file: !converted,
-                              tracks: playback.tracks)
+                              tracks: playback.tracks, sameFilm: offset)
                 return
             }
             error = "Couldn't play: \(message)"

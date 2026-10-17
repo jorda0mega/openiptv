@@ -1465,10 +1465,11 @@ final class AppModel {
         }
     }
 
-    /// The same item converted by the server at `bitrate`, from `start`.
-    func convertedURL(for playback: EmbyPlayback, bitrate: Int, start: Double, copy: Bool = false) -> URL? {
+    /// The same item converted by the server at `bitrate`, from `start`,
+    /// with the audio track at `audio` (its place in the file).
+    func convertedURL(for playback: EmbyPlayback, bitrate: Int, start: Double, copy: Bool = false, audio: Int? = nil) -> URL? {
         emby?.hlsURL(playback.itemId, mediaSourceId: playback.mediaSourceId ?? playback.itemId,
-                     playSessionId: playback.playSessionId, start: start, bitrate: bitrate, copy: copy)
+                     playSessionId: playback.playSessionId, start: start, bitrate: bitrate, copy: copy, audioStreamIndex: audio)
     }
 
     /// Download speed (bits/s) last measured from this Emby server, to pick

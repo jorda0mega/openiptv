@@ -116,10 +116,44 @@ final class MPVPlayer: @unchecked Sendable {
     #endif
     /// The subtitle track showing (nil: none).
     private var shownSubtitle: Int?
+    /// Every subtitle file added to the film (the server's, those found for
+    /// it, copies of its own tracks; a rewritten file's copy in its place),
+    /// on the device, and its track now: added again when the film is
+    /// opened again at another quality, since a new stream has none of
+    /// them. Regression: lowered to the server's converted version on a
+    /// slow connection, the film went on with no subtitles.
+    private var carried: [(key: CarriedKey, local: URL, title: String, language: String)] = []
+    private var carriedIds: [CarriedKey: Int] = [:]
+    enum CarriedKey: Hashable {
+        case file(URL)
+        /// A copy of the film's own track at this place in the file.
+        case copy(Int)
+        /// The film's own track at this place (no copy: a picture one).
+        case own(Int)
+    }
+    /// What to show again once the next stream is open: the subtitles
+    /// showing, and each file's fit.
+    private var carryOver: (shown: CarriedKey?, fits: [CarriedKey: SubtitleSync.Fit])?
+    /// Where in the film the stream's clock starts: a converted version
+    /// starts at 0 where it was asked from, and the subtitles (in the
+    /// film's time) are moved back by as much.
+    private var clock: Double = 0
+    /// The stream is the film's own file (not a converted version).
+    private var playingFile = true
+    /// The audio playing before a converted version, whose one track says
+    /// no language: said for it.
+    private var carriedAudio: (language: String?, title: String?)?
+    /// The film's own audio track playing (its place in the file), for
+    /// asking the server for a converted version in the same language.
+    private var audioIndex: Int?
+    var audioStreamIndex: Int? { stateLock.withLock { audioIndex } }
     #if DEBUG
     /// "delay speed" applied to the subtitles showing (UI tests).
     private var shift = "0.00 1.0000"
     var subtitleShift: String { stateLock.withLock { shift } }
+    /// The subtitle line on screen (UI tests).
+    private var line = ""
+    var subtitleLine: String { stateLock.withLock { line } }
     #endif
     /// When the file was open (headers read), for the start-up breakdown.
     private(set) var openedAfter: Double?
@@ -285,6 +319,7 @@ final class MPVPlayer: @unchecked Sendable {
         mpv_observe_property(mpv, 0, "demuxer-cache-duration", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "cache-speed", MPV_FORMAT_INT64)
         mpv_observe_property(mpv, 0, "sid", MPV_FORMAT_STRING)
+        mpv_observe_property(mpv, 0, "aid", MPV_FORMAT_STRING)
         // A file's tracks are known, none picked yet: see handle(_:).
         mpv_hook_add(mpv, 0, "on_preloaded", 50)
         mpv_set_wakeup_callback(mpv, { context in
@@ -304,7 +339,7 @@ final class MPVPlayer: @unchecked Sendable {
     /// a one-connection provider may refuse); jumps stay within what's
     /// downloaded.
     func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, sequential: Bool = false,
-              readahead: Readahead = .live, tracks: TrackPlan? = nil) {
+              readahead: Readahead = .live, tracks: TrackPlan? = nil, sameFilm clock: Double? = nil) {
         // Files go through the in-app relay, which keeps one warm HTTP/2
         // connection to the server instead of a new one per seek.
         var url = url, headers = headers
@@ -333,6 +368,8 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_set_property_string(mpv, "hr-seek", start == nil ? "default" : "no")
             Self.apply(tracks, mpv)
             trackPlan = tracks
+            if let clock { carry(to: clock, file: file) }
+            stateLock.withLock { playingFile = file }
             command(["loadfile", url.absoluteString, "replace"])
         }
     }
@@ -751,6 +788,8 @@ final class MPVPlayer: @unchecked Sendable {
         }
         bySpeech[old] = nil
         fileInfo[old] = nil
+        carried.removeAll { $0.key == .file(old) }
+        carriedIds[.file(old)] = nil
         emit(.tracksChanged)
         addSubtitles([file], references: references, speech: stretches)
     }
@@ -806,6 +845,8 @@ final class MPVPlayer: @unchecked Sendable {
         command(["sub-add", local.path, showing ? "select" : "auto", info.title.isEmpty ? (info.language ?? "") : info.title, info.language ?? ""])
         guard let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external }).map(\.id).max(), id != old else { return }
         rewritten.insert(file)
+        if let n = carried.firstIndex(where: { $0.key == .file(file) }) { carried[n].local = local }
+        carriedIds[.file(file)] = id
         fileTracks[file] = id
         fits[old] = nil
         #if DEBUG
@@ -839,9 +880,12 @@ final class MPVPlayer: @unchecked Sendable {
     private func add(_ file: EmbyPlayback.SubtitleFile, at local: URL) {
         guard let mpv, addedFiles.insert(file.url).inserted else { return }
         fileInfo[file.url] = file
-        command(["sub-add", local.path, "auto", file.title.isEmpty ? (file.language ?? "") : file.title, file.language ?? ""])
+        let title = file.title.isEmpty ? (file.language ?? "") : file.title
+        command(["sub-add", local.path, "auto", title, file.language ?? ""])
         if let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external }).map(\.id).max() {
             fileTracks[file.url] = id
+            carried.append((.file(file.url), local, title, file.language ?? ""))
+            carriedIds[.file(file.url)] = id
             if let fit = pendingFits.removeValue(forKey: file.url) { fits[id] = fit }
         }
         // The menu hears of it once it's chosen or not.
@@ -862,6 +906,86 @@ final class MPVPlayer: @unchecked Sendable {
         if shownSubtitle == id { applyFit(for: id) }
     }
 
+    /// On the queue, before the same film opens again (another quality):
+    /// what shows now, to show again, and each file's fit; the old
+    /// stream's track numbers mean nothing in the new one.
+    private func carry(to clock: Double, file: Bool) {
+        guard let mpv else { return }
+        let list = Self.trackList(mpv)
+        var shown: CarriedKey?
+        if let id = shownSubtitle {
+            shown = carriedIds.first { $0.value == id }?.key
+                ?? copied[id].flatMap { original in list.first { $0.id == original }?.ffIndex }.map { .copy($0) }
+                ?? list.first { $0.id == id && !$0.external }?.ffIndex.map { .own($0) }
+        }
+        var carriedFits: [CarriedKey: SubtitleSync.Fit] = [:]
+        for (url, id) in fileTracks { if let fit = fits[id] { carriedFits[.file(url)] = fit } }
+        carryOver = (shown, carriedFits)
+        #if DEBUG
+        NSLog("%@", "PERF subtitles carry: showing \(shownSubtitle.map(String.init) ?? "none") as \(shown.map { "\($0)" } ?? "none"), ids \(carriedIds.values.sorted())")
+        #endif
+        // A converted version's one audio track says no language: the one
+        // playing now.
+        if !file, let audio = list.first(where: { $0.kind == .audio && $0.selected }) {
+            carriedAudio = carriedAudio ?? (audio.language, audio.title)
+        } else if file {
+            carriedAudio = nil
+        }
+        fileTracks = [:]
+        fits = [:]
+        copies = [:]
+        copied = [:]
+        carriedIds = [:]
+        #if DEBUG
+        sectionNotes = [:]
+        #endif
+        self.clock = clock
+    }
+
+    /// On the queue, once the film is open again: its subtitle files added
+    /// back (each in its fit) and the ones showing before shown again.
+    private func restoreCarried() {
+        guard let carry = carryOver, let mpv else { return }
+        carryOver = nil
+        let own = Self.trackList(mpv).filter { $0.kind == .subtitle && !$0.external }
+        for entry in carried {
+            // Subtitle numbers only: audio tracks are numbered apart.
+            let known = Set(Self.trackList(mpv).filter { $0.kind == .subtitle }.map(\.id))
+            command(["sub-add", entry.local.path, "auto", entry.title, entry.language])
+            guard let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external && !known.contains($0.id) }).map(\.id).max() else {
+                #if DEBUG
+                NSLog("%@", "PERF subtitles carry: \(entry.local.lastPathComponent) not added (there: \(FileManager.default.fileExists(atPath: entry.local.path)))")
+                #endif
+                continue
+            }
+            carriedIds[entry.key] = id
+            switch entry.key {
+            case let .file(url):
+                fileTracks[url] = id
+                if let fit = carry.fits[entry.key] { fits[id] = fit }
+            case let .copy(index):
+                if let original = own.first(where: { $0.ffIndex == index }) {
+                    copies[original.id] = id
+                    copied[id] = original.id
+                }
+            case .own:
+                break
+            }
+        }
+        let sid: Int? = switch carry.shown {
+        case let .own(index)?: own.first { $0.ffIndex == index }?.id
+        case let shown?: carriedIds[shown]
+        case nil: nil
+        }
+        #if DEBUG
+        NSLog("%@", "PERF subtitles carried \(carried.count) to the new stream (clock \(clock)), showing \(sid.map(String.init) ?? "none")")
+        #endif
+        mpv_set_property_string(mpv, "sid", sid.map(String.init) ?? "no")
+        // The same track as before: its fit for the new clock.
+        if sid == shownSubtitle { applyFit(for: sid) }
+        emit(.tracksChanged)
+    }
+
     /// The shift and stretch for the subtitles showing (none for the
     /// film's own tracks, always in time).
     private func applyFit(for id: Int?) {
@@ -875,7 +999,7 @@ final class MPVPlayer: @unchecked Sendable {
         // film's own subtitles after a file's).
         let delay: Double = fit?.delay ?? 0
         let speed: Double = fit?.speed ?? 1
-        mpv_set_property_string(mpv, "sub-delay", String(format: "%.3f", delay))
+        mpv_set_property_string(mpv, "sub-delay", String(format: "%.3f", delay - clock))
         mpv_set_property_string(mpv, "sub-speed", String(format: "%.6f", speed))
         #if DEBUG
         let note = id.flatMap { sectionNotes[$0] }
@@ -946,6 +1070,17 @@ final class MPVPlayer: @unchecked Sendable {
     /// The tracks as the menu lists them: the copies left out, a track
     /// marked chosen while its copy shows.
     private func shown(_ list: [Track]) -> [Track] {
+        var list = list
+        if let carriedAudio, !stateLock.withLock({ playingFile }) {
+            list = list.map { track in
+                guard track.kind == .audio, track.language == nil || track.language == "und" else { return track }
+                var said = Track(id: track.id, kind: .audio, title: track.title ?? carriedAudio.title, language: carriedAudio.language,
+                                 channels: track.channels, forced: track.forced, selected: track.selected)
+                said.codec = track.codec
+                said.ffIndex = track.ffIndex
+                return said
+            }
+        }
         // Subtitles only: audio tracks are numbered apart (audio 2 and
         // subtitles 2 are different tracks).
         let subtitles = list.filter { $0.kind == .subtitle }
@@ -981,10 +1116,13 @@ final class MPVPlayer: @unchecked Sendable {
         }
         addedFiles.insert(copy.url)
         command(["sub-add", local.path, "auto", original.title ?? "", original.language ?? ""])
-        let known = Set(list.map(\.id))
+        // Subtitle numbers only: audio tracks are numbered apart.
+        let known = Set(list.filter { $0.kind == .subtitle }.map(\.id))
         guard let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external && !known.contains($0.id) }).map(\.id).max() else { return }
         copies[original.id] = id
         copied[id] = original.id
+        carried.append((.copy(copy.streamIndex), local, original.title ?? "", original.language ?? ""))
+        carriedIds[.copy(copy.streamIndex)] = id
         #if DEBUG
         NSLog("%@", "PERF subtitles copy of track \(original.id) (\(original.language ?? "?")) is track \(id)")
         #endif
@@ -1130,6 +1268,7 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_hook_continue(mpv, hook.id)
         case MPV_EVENT_FILE_LOADED:
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
+            restoreCarried()
         case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:
             reportedStart = true
             startLock.withLock { startedFlag = true }
@@ -1175,6 +1314,15 @@ final class MPVPlayer: @unchecked Sendable {
                 guard now - lastTimeEmit >= 0.25 || abs(position - lastTimePosition) > 1.5 else { break }
                 lastTimeEmit = now
                 lastTimePosition = position
+                #if DEBUG
+                if let mpv, let text = mpv_get_property_string(mpv, "sub-text") {
+                    let shown = String(cString: text)
+                    mpv_free(text)
+                    stateLock.withLock { line = shown }
+                } else {
+                    stateLock.withLock { line = "" }
+                }
+                #endif
                 emit(.time(position: position, duration: duration))
             case "demuxer-cache-duration" where property.format == MPV_FORMAT_DOUBLE:
                 buffered = value.assumingMemoryBound(to: Double.self).pointee
@@ -1182,6 +1330,13 @@ final class MPVPlayer: @unchecked Sendable {
             case "cache-speed" where property.format == MPV_FORMAT_INT64:
                 downloadSpeed = Double(value.assumingMemoryBound(to: Int64.self).pointee)
                 reportNetwork()
+            case "aid" where property.format == MPV_FORMAT_STRING:
+                // The film's own audio track (not a converted version's).
+                let id = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.flatMap { Int(String(cString: $0)) }
+                if let mpv, stateLock.withLock({ playingFile }), let id,
+                   let index = Self.trackList(mpv).first(where: { $0.kind == .audio && $0.id == id })?.ffIndex {
+                    stateLock.withLock { audioIndex = index }
+                }
             case "sid" where property.format == MPV_FORMAT_STRING:
                 // Other subtitles showing: their shift (a file's), or none.
                 let id = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.flatMap { Int(String(cString: $0)) }
