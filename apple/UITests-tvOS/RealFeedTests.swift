@@ -26,12 +26,15 @@ final class RealFeedTests: XCTestCase {
     /// A live game on several channels, with the remote: it starts on one;
     /// Select opens Watch On, Right and Select play another.
     func testLiveGameWatchOn() throws {
-        app.launchArguments += ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launchArguments += ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-forgetWatchOnPicks", "YES"]
+        // A fresh lineup unless told to use the one kept from a run minutes
+        // before (REAL_FEED_KEPT_LINEUP): the provider refuses after about
+        // twelve loads in half an hour.
+        if ProcessInfo.processInfo.environment["REAL_FEED_KEPT_LINEUP"] == nil { app.launchArguments += ["-freshLineup", "YES"] }
         app.launch()
         // The real lineup takes a while. A wait that keeps the run loop
         // going: a 20 s sleep got the test runner stopped by the watchdog.
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "the lineup loads")], timeout: 20)
-        // The list opens on Sports: All Games.
         shot("launched")
         print("REAL focus at launch: \(focused())")
         // Into the page once it's there (the real lineup can take a minute).
@@ -39,7 +42,11 @@ final class RealFeedTests: XCTestCase {
             press(.down)
             if focused() == "Live TV" { _ = XCTWaiter.wait(for: [XCTestExpectation(description: "the lineup loads")], timeout: 5) }
         }
-        for _ in 0..<3 where !focused().contains("All Games") && !focused().contains("Top Games") { press(.down) }
+        // The page opens on the league picked last (here NFL, left by an
+        // earlier run). Left opens the list of sections and leagues, as a
+        // viewer would, on that league; All Games is just above it.
+        let allGames = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All Games'")).firstMatch
+        for _ in 0..<4 where !allGames.exists { press(.left) }
         shot("list")
         for _ in 0..<20 where !focused().contains("All Games") { press(focused().contains("Top Games") ? .down : .up) }
         XCTAssertTrue(focused().contains("All Games"), "no All Games in Sports: \(focused())")
@@ -62,6 +69,9 @@ final class RealFeedTests: XCTestCase {
                 break
             }
             press(.menu)
+            // Back on the card before moving on (a Right while focus is
+            // still coming back is lost, and the same game is tried again).
+            for _ in 0..<20 where !focused().contains(", ") { usleep(250_000) }
             press(.right)
         }
         let name = try XCTUnwrap(game, "no live game on more than one channel")
