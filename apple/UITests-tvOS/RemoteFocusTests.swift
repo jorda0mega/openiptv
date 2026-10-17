@@ -995,6 +995,39 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't play: \(liveCopy())")
     }
 
+    /// The provider refusing (429, too many requests) at a relaunch: Sports
+    /// says it couldn't update the games and how old its list is, instead
+    /// of "Nothing on right now"; once the provider answers again it asks
+    /// again (the wait shortened to 5 s) and the game's card shows.
+    /// Regression: a refused check was silent and counted as done.
+    func testAppleTVSportsSaysWhenItCouldNotUpdate() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_started": "300"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20", "xtream_status": "0"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "5"
+        app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-cacheFolder", "live-\(UUID().uuidString.prefix(8))"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Nothing on right now"].firstMatch.waitForExistence(timeout: 20), "a game five hours in is still listed")
+        app.terminate()
+
+        configure(server, ["xtream_status": "429", "sports_started": "20"])
+        sleep(6)
+        app.launch()
+        let notice = app.staticTexts["Couldn't update the games"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 20), "no word that the games couldn't be updated")
+        let detail = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Last updated' AND label CONTAINS 'too many requests'")).firstMatch
+        XCTAssertTrue(detail.exists, "the notice doesn't say how old the list is and why")
+        XCTAssertFalse(app.staticTexts["Nothing on right now"].firstMatch.exists, "\"Nothing on right now\" with the check refused")
+        shot("could not update")
+
+        configure(server, ["xtream_status": "0"])
+        let game = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game didn't show once the provider answered again")
+        XCTAssertFalse(notice.exists, "the notice stayed after a good check")
+    }
+
     private func liveCopy() -> String {
         app.staticTexts["debug-live-copy"].firstMatch.label
     }

@@ -47,7 +47,10 @@ SOCKETS = set()
 # "watched_elsewhere" ("m7": a film just played on another device),
 # "favorites_delay" (seconds before My List answers: a slow refresh),
 # "reference_delay" (seconds before one of the film's own subtitle tracks
-# answers: a real server reads the whole film to take it out).
+# answers: a real server reads the whole film to take it out),
+# "xtream_status" ("429": every player_api.php request past the login check
+# answers with that HTTP status and an empty body, a provider refusing; 0 or
+# unset: as normal).
 CONTROL = {}
 # A film's length (seconds; OPENIPTV_MOCK_RUNTIME): two hours unless the
 # test film is shorter and its length matters (stretches of its sound).
@@ -60,6 +63,12 @@ VIDEO_REQUESTS = []
 # Requests for a stretch of a film's sound, and those with the key in
 # their address (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0, 0]
+# Xtream API requests, (time, name): "account", "get_live_categories",
+# "get_live_streams", "get_live_streams:10" (the action, and the category
+# asked for); refused ones too. GET /mock/xtream_requests?since= (a time
+# from /mock/mark) lists them. Only action names and category ids, never a
+# login or an address.
+XTREAM_REQUESTS = []
 MOVIE_TICKS = int(float(os.environ.get("OPENIPTV_MOCK_RUNTIME", "7200")) * 10_000_000)
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -438,10 +447,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"items": [item for t, item in VIDEO_REQUESTS if t >= since]})
         if path == "/mock/audio_requests":
             return self.send({"count": AUDIO_REQUESTS[0], "keyed": AUDIO_REQUESTS[1]})
+        if path == "/mock/xtream_requests":
+            since = float(q.get("since", "0"))
+            return self.send({"items": [name for t, name in XTREAM_REQUESTS if t >= since]})
         if path == "/mock/set":
             if "reset" in q:
                 AUDIO_REQUESTS[0] = AUDIO_REQUESTS[1] = 0
                 VIDEO_REQUESTS.clear()
+                XTREAM_REQUESTS.clear()
                 PREFERENCES.clear()
                 DOWNLOADED.clear()
                 CONTROL.clear()
@@ -520,6 +533,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"user_info": {"auth": 0}})
         now = int(time.time())
         action = q.get("action")
+        XTREAM_REQUESTS.append((time.time(), (action or "account") + (":" + q["category_id"] if q.get("category_id") else "")))
+        status = int(CONTROL.get("xtream_status", 0))
+        if status:
+            return self.send(b"", status=status)
         if action is None:
             return self.send({
                 "user_info": {"auth": 1, "status": "Active", "exp_date": str(now + 86400 * 90),
