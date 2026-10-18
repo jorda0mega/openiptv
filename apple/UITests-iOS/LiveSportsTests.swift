@@ -456,14 +456,16 @@ final class LiveSportsTests: XCTestCase {
 
     /// The game's best channel sends nothing: while the player moves to the
     /// next one, a cue at the top says so ("Switching"), then names where it
-    /// went ("Now on ESPN Unlimited") for 4 s after it plays. Regression: the
-    /// player moved without a word ("it shouldn't be up to the user to
-    /// guess why they were switched").
+    /// went ("Now on ESPN Unlimited") for a while after it plays (4 s; 10 s
+    /// here, so the checks fit in it). Regression: the player moved without
+    /// a word ("it shouldn't be up to the user to guess why they were
+    /// switched").
     func testMoveSaysWhichChannelDidntPlay() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001", "slow_live": "2002"])
         addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none", "slow_live": "none"]) }
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "5"
+        app.launchEnvironment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"] = "10"
         app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
         app.launch()
         openGame()
@@ -474,9 +476,34 @@ final class LiveSportsTests: XCTestCase {
         let frame = switchCue.frame
         XCTAssertEqual(frame.midX, app.frame.midX, accuracy: 4, "the cue isn't centred: \(frame)")
         XCTAssertLessThan(frame.maxY, app.frame.height * 0.3, "the cue isn't at the top: \(frame)")
-        sleep(2)
+        sleep(3)
         XCTAssertTrue(switchCue.exists, "the cue went before it could be read")
-        XCTAssertTrue(switchCue.waitForNonExistence(timeout: 8), "the cue stayed")
+        XCTAssertTrue(switchCue.waitForNonExistence(timeout: 15), "the cue stayed")
+    }
+
+    /// No channel of the game plays: in Watch On every card says "Didn’t
+    /// play", none "Playing". Regression: the last one tried still said
+    /// "Playing", unmarked.
+    func testGameNotPlayingMarksEveryCard() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        let state = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(40)
+        while state.label != "failed", Date() < deadline { usleep(250_000) }
+        XCTAssertEqual(state.label, "failed", "still trying after every channel: \(liveCopy())")
+        showControls()
+        app.buttons["Watch On"].firstMatch.tap()
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.'"))
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 5), "Watch On listed nothing")
+        XCTAssertEqual(cards.count, 5, "not every channel showing the game")
+        for card in cards.allElementsBoundByIndex {
+            XCTAssertTrue(card.label.contains("Didn’t play") && !card.label.contains("Playing"), "a card of a game that played nowhere: \(card.label)")
+        }
     }
 
     /// A channel picked in Watch On that sends nothing: the cue names it and
@@ -569,11 +596,8 @@ final class LiveSportsTests: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
         app.launchArguments = ["-freshLineup", "YES", "-category", "6F9A1E52-0000-4000-8000-000000000001|1"]
         app.launch()
-        let tab = app.tabBars.buttons["Live TV"].firstMatch
-        if tab.waitForExistence(timeout: 10) { tab.tap() }
-        let five = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Channel 5'")).firstMatch
+        let five = channelFive()
         let six = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Channel 6'")).firstMatch
-        XCTAssertTrue(five.waitForExistence(timeout: 20), "no Channel 5 in the UK list")
         five.tap()
         let state = app.staticTexts["debug-live-state"].firstMatch
         let deadline = Date().addingTimeInterval(20)
@@ -592,6 +616,51 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertLessThan(brightest(shot, in: deadBadge(on: plain)), 150, "a mark on the logo of a channel that wasn't tried")
     }
 
+    /// A recording of a channel that didn't play (Start Over) says nothing
+    /// of the channel live: its row stays marked. Regression: the recording
+    /// playing cleared the mark.
+    func testRecordingDoesNotClearTheMark() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["dead_live": "5"])
+        addTeardownBlock { [self] in configure(server, ["dead_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-category", "6F9A1E52-0000-4000-8000-000000000001|1"]
+        app.launch()
+        let five = channelFive()
+        five.tap()
+        let state = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(20)
+        while state.label != "failed", Date() < deadline { usleep(250_000) }
+        XCTAssertEqual(state.label, "failed", "the channel that sends nothing didn't fail")
+        startOver()
+        XCTAssertTrue(started(), "the recording didn't play")
+        showControls()
+        app.buttons["Close player"].firstMatch.tap()
+        XCTAssertTrue(five.waitForExistence(timeout: 10), "the list went")
+        XCTAssertTrue(five.label.contains("Didn’t play"), "the recording cleared the live channel's mark: \(five.label)")
+    }
+
+    /// Start Over while the switch cue is up: the cue goes at once, and
+    /// doesn't come back with the recording. Channel 5 is listed twice here,
+    /// its HD copy (tried first) sending nothing, the other slow to answer,
+    /// so Start Over comes while the cue says "Switching". Regression: the
+    /// cue stayed, and spoke again when the recording played.
+    func testStartOverEndsTheCue() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["hd_copy": "5", "dead_live": "955", "slow_live": "5"])
+        addTeardownBlock { [self] in configure(server, ["hd_copy": "none", "dead_live": "none", "slow_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "5"
+        app.launchArguments = ["-freshLineup", "YES", "-category", "6F9A1E52-0000-4000-8000-000000000001|1"]
+        app.launch()
+        channelFive().tap()
+        XCTAssertTrue(waitForCue("Channel 5 HD didn’t play", "Switching"), "no cue after the HD copy didn't play: \(cueWords())")
+        startOver()
+        XCTAssertTrue(switchCue.waitForNonExistence(timeout: 2), "the cue stayed after Start Over: \(cueWords())")
+        XCTAssertTrue(started(), "the recording didn't play")
+        sleep(1)
+        XCTAssertFalse(switchCue.exists, "the cue came back with the recording: \(cueWords())")
+    }
+
     /// A picked feed listed in two slots, its slot sending nothing: the
     /// player moves to its other slot, not to Watch On's first channel, and
     /// keeps the pick for the league (the feed played).
@@ -600,32 +669,68 @@ final class LiveSportsTests: XCTestCase {
         configure(server, ["sports": "1", "sports_dupes": "1", "dead_live": "none"])
         addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_dupes": "0", "dead_live": "none"]) }
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchEnvironment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"] = "10"
         app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
         app.launch()
-        openGame()
-        XCTAssertTrue(started(), "the game didn't play: \(liveCopy())")
-        showControls()
-        app.buttons["Watch On"].firstMatch.tap()
-        let soccer = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.' AND label BEGINSWITH 'OneSoccer'")).firstMatch
-        XCTAssertTrue(soccer.waitForExistence(timeout: 5), "no OneSoccer in Watch On")
-        let dead = String(try XCTUnwrap(soccer.identifier.split(separator: "|").last))
-        let slots = ["2006": "Soccer04", "2007": "Soccer05"]
-        let deadName = try XCTUnwrap(slots[dead], "the OneSoccer card isn't one of its two slots: \(soccer.identifier)")
-        let twin = try XCTUnwrap(slots.first { $0.key != dead }?.value)
-        configure(server, ["dead_live": dead])
-        soccer.tap()
-        XCTAssertTrue(playing(deadName), "the channel picked didn't open: \(liveCopy())")
-        let readout = app.staticTexts["debug-live-copy"].firstMatch
-        let deadline = Date().addingTimeInterval(20)
-        while readout.label.hasPrefix(deadName), Date() < deadline { usleep(250_000) }
-        XCTAssertTrue(readout.label.hasPrefix(twin), "moved to \(liveCopy()), not the picked feed's other slot \(twin)")
-        XCTAssertTrue(started(), "the other slot didn't play")
+        let twin = try moveOffDeadOneSoccerSlot(server)
         XCTAssertTrue(waitForCue("OneSoccer didn’t play", "Now on another OneSoccer channel"), "the cue doesn't say where the player went: \(cueWords())")
 
         showControls()
         app.buttons["Close player"].firstMatch.tap()
         openGame()
         XCTAssertTrue(playing(twin), "the pick that played on its other slot wasn't kept: \(liveCopy())")
+    }
+
+    /// After that move, the feed's card (now "Playing") tapped stays on the
+    /// slot playing. Regression: it reopened the slot that didn't play.
+    func testPlayingCardAfterAMoveStaysPut() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "sports_dupes": "1", "dead_live": "none"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_dupes": "0", "dead_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        let twin = try moveOffDeadOneSoccerSlot(server)
+        XCTAssertTrue(switchCue.waitForNonExistence(timeout: 10), "the cue stayed")
+        showControls()
+        app.buttons["Watch On"].firstMatch.tap()
+        let soccer = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.' AND label BEGINSWITH 'OneSoccer'")).firstMatch
+        XCTAssertTrue(soccer.waitForExistence(timeout: 5), "no OneSoccer in Watch On")
+        XCTAssertTrue(soccer.label.contains("Playing"), "the feed playing on its other slot: \(soccer.label)")
+        soccer.tap()
+        let readout = app.staticTexts["debug-live-copy"].firstMatch
+        let deadline = Date().addingTimeInterval(5)
+        while readout.label.hasPrefix(twin), !switchCue.exists, Date() < deadline { usleep(250_000) }
+        XCTAssertTrue(readout.label.hasPrefix(twin), "the card playing reopened \(liveCopy())")
+        XCTAssertFalse(switchCue.exists, "a cue after tapping the card playing: \(cueWords())")
+    }
+
+    /// A game's feed that didn't play while another of its feeds plays:
+    /// that feed's channel, in its provider category, is marked.
+    /// Regression: a game's channel counted every feed of the game as its
+    /// copies, so it was never marked.
+    func testGameFeedThatDidntPlayIsMarkedInItsCategory() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "2001"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        XCTAssertTrue(playing("NFL 01"), "the game didn't open on the best channel: \(liveCopy())")
+        XCTAssertTrue(started(), "the next channel didn't play: \(liveCopy())")
+        showControls()
+        app.buttons["Close player"].firstMatch.tap()
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        app.buttons["Provider categories"].firstMatch.tap()
+        let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'NFL,'")).firstMatch
+        XCTAssertTrue(category.waitForExistence(timeout: 5),
+                      "no NFL category: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.prefix(20))")
+        category.tap()
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the NFL category doesn't list the game's channel")
+        XCTAssertTrue(row.label.contains("Didn’t play"), "the game's feed that didn't play isn't marked: \(row.label)")
     }
 
     /// A game on several channels shows how many on its tile (a white badge
@@ -655,6 +760,50 @@ final class LiveSportsTests: XCTestCase {
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.'"))
         XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 5), "Watch On listed nothing")
         XCTAssertEqual(cards.count, 5, "the badge and Watch On don't agree")
+    }
+
+    /// The game opened (OneSoccer listed in two slots), its OneSoccer card
+    /// picked with that slot sending nothing: the player moves to the other
+    /// slot, which plays. That slot's name.
+    private func moveOffDeadOneSoccerSlot(_ server: URL) throws -> String {
+        openGame()
+        XCTAssertTrue(started(), "the game didn't play: \(liveCopy())")
+        showControls()
+        app.buttons["Watch On"].firstMatch.tap()
+        let soccer = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.' AND label BEGINSWITH 'OneSoccer'")).firstMatch
+        XCTAssertTrue(soccer.waitForExistence(timeout: 5), "no OneSoccer in Watch On")
+        let dead = String(try XCTUnwrap(soccer.identifier.split(separator: "|").last))
+        let slots = ["2006": "Soccer04", "2007": "Soccer05"]
+        let deadName = try XCTUnwrap(slots[dead], "the OneSoccer card isn't one of its two slots: \(soccer.identifier)")
+        let twin = try XCTUnwrap(slots.first { $0.key != dead }?.value)
+        configure(server, ["dead_live": dead])
+        soccer.tap()
+        XCTAssertTrue(playing(deadName), "the channel picked didn't open: \(liveCopy())")
+        let readout = app.staticTexts["debug-live-copy"].firstMatch
+        let deadline = Date().addingTimeInterval(20)
+        while readout.label.hasPrefix(deadName), Date() < deadline { usleep(250_000) }
+        XCTAssertTrue(readout.label.hasPrefix(twin), "moved to \(liveCopy()), not the picked feed's other slot \(twin)")
+        XCTAssertTrue(started(), "the other slot didn't play")
+        return twin
+    }
+
+    /// Live TV's UK channels (the test server's lineup): Channel 5's row.
+    private func channelFive() -> XCUIElement {
+        let tab = app.tabBars.buttons["Live TV"].firstMatch
+        if tab.waitForExistence(timeout: 10) { tab.tap() }
+        let five = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Channel 5'")).firstMatch
+        XCTAssertTrue(five.waitForExistence(timeout: 20), "no Channel 5 in the UK list")
+        return five
+    }
+
+    /// The player's "…" menu, Start Over: what's on now from its start (a
+    /// recording).
+    private func startOver() {
+        showControls()
+        app.buttons["More"].firstMatch.tap()
+        let button = app.buttons["Start Over"].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "no Start Over in the player's menu")
+        button.tap()
     }
 
     /// The game opened, NFL playing, then its Spanish feed (dead) picked in
