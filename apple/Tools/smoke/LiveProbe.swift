@@ -71,8 +71,9 @@ enum LiveProbe {
             return line
         }
 
-        /// Played, then stopped before the cap: an end or a reset.
-        var endedEarly: Bool { status == 200 && bytes > 0 && !capped }
+        /// A stream that played, then stopped before the cap: an end or a
+        /// reset. A playlist or a sized answer ends by design.
+        var endedEarly: Bool { ext == .ts && framing != "length" && status == 200 && bytes > 0 && !capped }
     }
 
     struct Playlist {
