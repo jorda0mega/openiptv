@@ -1,9 +1,13 @@
 import Foundation
 
 struct LiveCategory: Codable, Hashable, Identifiable {
+    /// Unique across sources: "<source>|<provider id>".
     let id: String
     let name: String
     var channels: Int
+
+    /// The source it came from (the first part of its id).
+    var sourceId: UUID? { id.split(separator: "|").first.flatMap { UUID(uuidString: String($0)) } }
 }
 
 /// How to start a channel. Resolved to a URL only when it's played, because
