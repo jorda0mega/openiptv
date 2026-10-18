@@ -290,7 +290,8 @@ def main():
         clear = [line for line in logged if re.search(r"127\.0\.0\.1|localhost|/live/|u/p/|player_api|username|password|/iptv|http:", line)]
         read = log.returncode == 0 and logged
         print(f"{'the Mac log, lines in clear':<46} {'0 (of the lines the probe logged)':<56} "
-              f"{f'{len(clear)} of {len(logged)}' if read else 'unread':<56} {'pass' if read and not clear else 'FAIL'}")
+              f"{f'{len(clear)} of {len(logged)}' if read else 'unread: 0 lines, check /usr/bin/log and the log level':<56} "
+              f"{'pass' if read and not clear else 'FAIL'}")
         failed += not (read and not clear)
         print(f"\n{len(ROWS) + 1 - failed} of {len(ROWS) + 1} rows match")
         return 1 if failed else 0
