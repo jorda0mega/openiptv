@@ -1006,6 +1006,8 @@ final class RemoteFocusTests: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
             + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "5"
+        // The cue's 4 s, longer here: the checks after it plays fit in it.
+        app.launchEnvironment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"] = "10"
         app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
         app.launch()
         sleep(8)
@@ -1042,6 +1044,35 @@ final class RemoteFocusTests: XCTestCase {
         // picture at the card's top).
         let corner = CGRect(x: nfl.frame.minX + 320 - 30, y: nfl.frame.minY + 8, width: 22, height: 22)
         XCTAssertGreaterThan(brightest(picture, in: corner), 200, "no mark on the picture of the card that didn't play")
+    }
+
+    /// No channel of the game plays: in Watch On every card says "Didn’t
+    /// play", none "Playing". Regression: the last one tried still said
+    /// "Playing", unmarked.
+    func testAppleTVGameNotPlayingMarksEveryCard() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        sleep(8)
+        toGame()
+        XCTAssertTrue(focused().contains("Jaguars"), "the game isn't in Sports: \(focused())")
+        press(.select, "play the game")
+        let state = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(40)
+        while state.label != "failed", Date() < deadline { usleep(250_000) }
+        XCTAssertEqual(state.label, "failed", "still trying after every channel: \(liveCopy())")
+        let cards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'player.watchon.' AND identifier != 'player.watchon.tab'"))
+        for _ in 0..<2 where !cards.firstMatch.exists { press(.select, "watch on") }
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 3), "Select didn't open Watch On")
+        XCTAssertEqual(cards.count, 5, "not every channel showing the game")
+        for card in cards.allElementsBoundByIndex {
+            XCTAssertTrue(card.label.contains("Didn’t play") && !card.label.contains("Playing"), "a card of a game that played nowhere: \(card.label)")
+        }
     }
 
     /// A game on several channels shows how many on its card (a white

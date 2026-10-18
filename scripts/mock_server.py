@@ -582,6 +582,12 @@ class Handler(BaseHTTPRequestHandler):
                 for i in range(1, CHANNELS + 1)
             ] + [{"num": 900 + n, "name": name, "stream_id": str(900 + n), "stream_icon": "", "epg_channel_id": None,
                   "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0} for n, (name, cat) in enumerate(local)]
+              # /mock/set?hd_copy=5: Channel 5 listed again as "UK: Channel 5 HD"
+              # (stream 955, played first: the better picture), with its
+              # guide and recordings.
+              + [{"num": 950 + i, "name": f"UK: Channel {i} HD", "stream_id": str(950 + i), "stream_icon": f"http://logo/{i}.png",
+                  "epg_channel_id": f"ch{i}.uk", "category_id": "1", "tv_archive": 1, "tv_archive_duration": "7"}
+                 for i in ([int(CONTROL["hd_copy"])] if CONTROL.get("hd_copy", "").isdigit() else [])]
               + (sports_games(now) if CONTROL.get("sports") == "1" else []))
         if action == "get_simple_data_table":
             # A channel's schedule two days back to a day ahead; channels with
