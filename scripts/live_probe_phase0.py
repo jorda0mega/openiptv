@@ -78,6 +78,12 @@ ROWS = [
                     (o[0]["headers"], o[0]["status"], o[0]["ttfb"], o[0]["error"]) == ("no", "0", "-1", "timeout"))),
     ("live_status=403", {"live_status": 403}, {},
      lambda o, *_: ("status=403", one(o, "status", "bytes"), o[0]["status"] == "403")),
+    ("live_status=200 (an empty 200)", {"live_status": 200}, {},
+     lambda o, rest, _: ("status=200 bytes=0 framing=length error=none, with_data=0 ended_early=0",
+                         one(o, "status", "bytes", "framing", "error")
+                         + f" with_data={rest['summary'][0]['with_data']} ended_early={rest['summary'][0]['ended_early']}",
+                         (o[0]["status"], o[0]["bytes"], o[0]["framing"], o[0]["error"]) == ("200", "0", "length", "none")
+                         and (rest["summary"][0]["with_data"], rest["summary"][0]["ended_early"]) == ("0", "0"))),
     ("live_redirect=1", {"live_redirect": 1}, {},
      lambda o, *_: ("hops=1, redirect_ms >= 0", one(o, "hops", "redirect_ms", "cross_host", "status"),
                     o[0]["hops"] == "1" and int(o[0]["redirect_ms"]) >= 0 and o[0]["status"] == "200")),
@@ -119,9 +125,10 @@ ROWS = [
      lambda o, rest, _: ("max_conn=unlimited", f"max_conn={rest['account'][0].get('max_conn')}",
                          rest["account"][0].get("max_conn") == "unlimited")),
     ("none, .m3u8", {}, {"OPENIPTV_PROBE_EXT": "m3u8"},
-     lambda o, *_: ("segments=5 target=6.0, a segment read, rate_kbps=-1", one(o, "segments", "target", "seg_first_data", "rate_kbps"),
-                    o[0].get("segments") == "5" and o[0].get("target") == "6.0" and int(o[0].get("seg_first_data", -1)) >= 0
-                    and o[0]["rate_kbps"] == "-1")),
+     lambda o, rest, _: ("segments=5 target=6.0, a segment read, rate_kbps=-1, ended_early=0",
+                         one(o, "segments", "target", "seg_first_data", "rate_kbps") + f" ended_early={rest['summary'][0]['ended_early']}",
+                         o[0].get("segments") == "5" and o[0].get("target") == "6.0" and int(o[0].get("seg_first_data", -1)) >= 0
+                         and o[0]["rate_kbps"] == "-1" and rest["summary"][0]["ended_early"] == "0")),
     ("none, both user agents", {}, {"OPENIPTV_PROBE_UA": "both", "OPENIPTV_PROBE_MPV_UA": "mpv phase0"},
      lambda o, _, server: ("ua=mpv,app; server saw mpv,openreel",
                            f"ua={','.join(x['ua'] for x in o)}; server saw {','.join(i['ua'] for i in server['live'])}",
