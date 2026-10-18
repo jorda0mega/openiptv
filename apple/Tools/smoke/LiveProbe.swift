@@ -62,14 +62,13 @@ enum LiveProbe {
 
     /// Lines that could carry an address, host, login or free text are
     /// refused: any character outside letters, digits, space and `_=.>-`
-    /// (so no `/`, `:`, `@`), a letter on both sides of a dot (a host
-    /// name), three dotted numbers (an IP address or a version), or a word
-    /// over 32 characters.
+    /// (so no `/`, `:`, `@`), a dot anywhere but in a decimal number after
+    /// `=` (so no host name or IP address), or a word over 32 characters.
     static func safe(_ line: String) -> Bool {
         let alphabet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.>- ")
         guard line.unicodeScalars.allSatisfy(alphabet.contains) else { return false }
         return line.split(separator: " ").allSatisfy { word in
-            word.count <= 32 && word.range(of: "[A-Za-z][.][A-Za-z]|[0-9]+[.][0-9]+[.][0-9]", options: .regularExpression) == nil
+            word.count <= 32 && (!word.contains(".") || word.range(of: "^[a-z0-9_]+=-?[0-9]+[.][0-9]+$", options: .regularExpression) != nil)
         }
     }
 
@@ -453,6 +452,7 @@ enum LiveProbe {
     static func selfTest() -> Int32 {
         let leaks = ["PROBE x=http://10.0.0.1", "PROBE a/b", "PROBE user@example", "PROBE x://y", "PROBE host=provider.example",
                      "PROBE ip=192.168.1.20", "PROBE port=host:8080", "PROBE ::1", "PROBE v=61.7.100",
+                     "PROBE host=cdn1.example", "PROBE s2.host7.tv", "PROBE edge-3.example9", "PROBE x=1.example",
                      "PROBE tok=" + String(repeating: "a", count: 33), "PROBE name=Café", "PROBE tab\there", "PROBE newline\nhere"]
         var open = Open(tok: "2001", ext: .m3u8, ua: .app, round: 3)
         (open.status, open.hops, open.crossHost, open.ttfb, open.firstData, open.gapMax, open.stoppedAt) = (403, 1, true, 3012, -1, 5.04, 20.3)
