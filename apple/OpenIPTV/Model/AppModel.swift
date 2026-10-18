@@ -1848,9 +1848,10 @@ final class AppModel {
     /// one that failed keeps the channels it had, so one failing provider
     /// never empties another's list. Of the check, only an answer changes
     /// the page or the file: a failure never makes old games look current.
-    /// The guide is rebuilt only when every source answered: it holds only
-    /// the sources it's rebuilt from, so one that failed would lose its
-    /// programmes.
+    /// A guide that's due (or `force`) is rebuilt from the sources that
+    /// answered, so one provider that keeps failing never stops the guide
+    /// for the others; the one that failed has no programmes until a
+    /// rebuild it answers in.
     private func runLiveUpdate(for page: String?, force: Bool) async {
         let iptv = sources.iptv
         guard !iptv.isEmpty else {
@@ -1863,9 +1864,13 @@ final class AppModel {
         }
         liveChecks = liveChecks.filter { id, _ in iptv.contains { $0.id == id } }
         providers = providers.filter { id, _ in iptv.contains { $0.id == id } }
+        // A source removed before it ever answered leaves no rows to drop,
+        // only its id in the file.
+        var listed = iptv.map(\.id)
         if !restoredLineup {
             restoredLineup = true
-            if !Self.freshLineup, let saved = await Self.savedLineup(), saved.sources == iptv.map(\.id) {
+            if !Self.freshLineup, let saved = await Self.savedLineup(), Set(iptv.map(\.id)).isSubset(of: saved.sources) {
+                listed = saved.sources
                 await applyLineup(categories: saved.categories, channels: saved.channels)
                 // Playlists' stream addresses can hold a login, so they're
                 // saved blank and only the provider's current lineup can play
@@ -1881,8 +1886,9 @@ final class AppModel {
         }
         let keptCategories = categories.filter { category in iptv.contains { $0.id == category.sourceId } }
         let keptChannels = allChannels.filter { channel in iptv.contains { $0.id == channel.sourceId } }
-        if keptCategories.count < categories.count || keptChannels.count < allChannels.count {
-            await applyLineup(categories: keptCategories, channels: keptChannels)
+        let dropped = keptCategories.count < categories.count || keptChannels.count < allChannels.count
+        if dropped { await applyLineup(categories: keptCategories, channels: keptChannels) }
+        if dropped || listed != iptv.map(\.id) {
             await Self.saveLineup(sources: iptv.map(\.id), categories: keptCategories, channels: keptChannels,
                                   answered: liveChecks.compactMapValues(\.answeredAt))
         }
@@ -1940,14 +1946,13 @@ final class AppModel {
                 channels += previousChannels.filter { $0.sourceId == source.id }
             }
         }
-        let answers = results.values.filter { (try? $0.get()) != nil }.count
-        guard answers > 0 else { return }
+        guard results.values.contains(where: { (try? $0.get()) != nil }) else { return }
         await applyLineup(categories: cats, channels: channels)
         await Self.saveLineup(sources: iptv.map(\.id), categories: cats, channels: channels, answered: liveChecks.compactMapValues(\.answeredAt))
 
         let keep = Set(channels.compactMap(\.epgId))
         let stale = await guide.isStale()
-        if answers == results.count, !guideURLs.isEmpty, force || stale {
+        if !guideURLs.isEmpty, force || stale {
             guideState = .loading
             let guide = guide
             Task.detached {
