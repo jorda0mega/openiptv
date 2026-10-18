@@ -347,12 +347,15 @@ enum LiveProbe {
 
     // MARK: Run
 
-    /// `mpv`: what the app's player sends the stream server, libmpv's own
-    /// user agent (the app sets none), exact only from OPENIPTV_PROBE_MPV_UA;
-    /// else a guess. `app`: what the app sends its API calls (Flex.swift),
-    /// with the version run.sh compiles in.
+    /// `mpv`: what the app's player sends the stream server. The app sets no
+    /// user agent, so it is libmpv's default, its version string; this one
+    /// is in MPVKit 1.0.0's Libmpv (apple/mpvkit.lock), iPhone, Apple TV and
+    /// simulator slices alike. OPENIPTV_PROBE_MPV_UA replaces it. `app`: what
+    /// the app sends its API calls (Flex.swift), with the version run.sh
+    /// compiles in.
+    static let libmpvAgent = "mpv v0.41.0-dirty"
     static var agents: [Agent: String] = [:]
-    static func agent(_ ua: Agent) -> String { agents[ua] ?? "mpv" }
+    static func agent(_ ua: Agent) -> String { agents[ua] ?? libmpvAgent }
 
     static func login(_ env: [String: String]) async -> Login? {
         if let holder = env["OPENIPTV_SMOKE_FEED"].flatMap(URL.init(string:)) {
@@ -420,9 +423,6 @@ enum LiveProbe {
               let uas = ["mpv": [Agent.mpv], "app": [.app], "both": [.mpv, .app]][value("OPENIPTV_PROBE_UA") ?? "mpv"]
         else { say("PROBE config bad_ext_or_ua"); return 1 }
         let mpvAgent = value("OPENIPTV_PROBE_MPV_UA")
-        // Comparing user agents against a guessed one spends requests on an
-        // answer that can't be read.
-        guard mpvAgent != nil || uas.count == 1 else { say("PROBE config mpv_ua_unknown"); return 1 }
         // "<id>:<seconds>[,<id>:<seconds>…]"
         var sustained: [(String, Double)] = []
         for spec in (value("OPENIPTV_PROBE_SUSTAIN") ?? "").split(separator: ",") {
@@ -442,8 +442,8 @@ enum LiveProbe {
             pair = (String(parts[0]), String(parts[1]), delays.sorted())
         }
         guard let login = await login(env) else { say("PROBE config no_login"); return 1 }
-        agents = [.mpv: mpvAgent ?? "mpv", .app: "Openreel/\(appVersion)"]
-        say("PROBE start login=\(value("OPENIPTV_SMOKE_FEED") == nil ? "env" : "holder") mpv_ua=\(mpvAgent == nil ? "guess" : "given")"
+        agents = [.mpv: mpvAgent ?? libmpvAgent, .app: "Openreel/\(appVersion)"]
+        say("PROBE start login=\(value("OPENIPTV_SMOKE_FEED") == nil ? "env" : "holder") mpv_ua=\(mpvAgent == nil ? "vendored" : "given")"
             + " seconds=\(fixed(seconds, 1)) gap=\(fixed(gap, 1)) rounds=\(rounds) round_gap=\(fixed(roundGap, 1))"
             + " pause_every=\(pauseEvery) pause_seconds=\(fixed(pauseSeconds, 1))")
 
