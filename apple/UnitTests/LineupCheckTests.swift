@@ -44,18 +44,15 @@ final class LineupCheckTests: XCTestCase {
         XCTAssertEqual(LineupCheck().nextAsk(maxAge: maxAge), .distantPast)
     }
 
-    /// An ask the app stopped itself is no ask: nothing is recorded, the
-    /// source is due as before, and a failure it had before stays.
-    func testCancelledAskIsNotRecorded() {
+    /// A stopped request is a failure like any other: the lineup is as old
+    /// as before, and it waits the interval.
+    func testStoppedRequestWaitsTheInterval() {
         var check = LineupCheck(answeredAt: answered)
         check.record(.failure(.cancelled), at: answered + 600)
-        XCTAssertNil(check.askedAt)
-        XCTAssertNil(check.problem)
-        XCTAssertEqual(check.nextAsk(maxAge: maxAge), answered + maxAge)
-        check.record(.failure(.http(429)), at: answered + 1200)
-        check.record(.failure(.cancelled), at: answered + 1800)
-        XCTAssertEqual(check.askedAt, answered + 1200)
-        XCTAssertEqual(check.problem?.localizedDescription, "Your provider is busy right now (too many requests).")
+        XCTAssertEqual(check.answeredAt, answered)
+        XCTAssertEqual(check.askedAt, answered + 600)
+        XCTAssertEqual(check.problem?.localizedDescription, "The request was stopped.")
+        XCTAssertEqual(check.nextAsk(maxAge: maxAge), answered + 600 + maxAge)
     }
 
     /// The app stopping a request (a task cancelled, or URLSession's own

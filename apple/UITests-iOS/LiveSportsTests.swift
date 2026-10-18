@@ -324,6 +324,26 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(notice.exists, "the notice stayed after a good check")
     }
 
+    /// Sports' Channels list says a failed check too (the provider refusing,
+    /// 429, while it's open). Regression: only the games' lists said it.
+    func testSportsChannelsSaysWhenItCouldNotUpdate() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "xtream_status": "0"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "5"
+        app.launchArguments = ["-freshLineup", "YES"]
+        app.launch()
+        openSports()
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 20), "the game isn't in Sports")
+        app.buttons["Channels"].firstMatch.tap()
+        XCTAssertTrue(game.waitForNonExistence(timeout: 5), "the Channels filter still lists the games")
+
+        configure(server, ["xtream_status": "429"])
+        XCTAssertTrue(app.staticTexts["Couldn't update the games"].firstMatch.waitForExistence(timeout: 20),
+                      "Sports' Channels list doesn't say the games couldn't be updated")
+    }
+
     /// A refused check leaves the saved lineup's age as it was: relaunched
     /// once the provider answers again, the app sees a list older than the
     /// limit (30 s here) and asks at once. Had the refusal stamped the file
@@ -394,28 +414,37 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(game.label.contains("LIVE"), "the game's row: \(game.label)")
     }
 
-    /// The provider answering with no channels at all (HTTP 200, an empty
-    /// list): the games listed stay, and Sports says it couldn't update
-    /// them and why; once the provider sends its lineup again the notice
-    /// goes. Regression: the empty answer emptied Live TV and was saved as
-    /// the lineup just checked.
+    /// The provider answering with no channels, or no categories, at all
+    /// (HTTP 200, an empty list): the games listed stay, on screen and in
+    /// the saved lineup a relaunch shows, and Sports says it couldn't
+    /// update them and why; once the provider sends its lineup again the
+    /// notice goes. Regression: an empty answer emptied Live TV and was
+    /// saved as the lineup just checked; with no categories, the games went.
     func testEmptyAnswerKeepsTheGames() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1"])
         addTeardownBlock { [self] in configure(server, ["sports": "0", "xtream_empty": "0"]) }
         app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "5"
-        app.launchArguments = ["-freshLineup", "YES"]
+        app.launchArguments = ["-cacheFolder", "live-\(UUID().uuidString.prefix(8))"]
         app.launch()
         openSports()
         let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
         XCTAssertTrue(game.waitForExistence(timeout: 20), "the game isn't in Sports")
 
-        configure(server, ["xtream_empty": "1"])
         let notice = app.staticTexts["Couldn't update the games"].firstMatch
-        XCTAssertTrue(notice.waitForExistence(timeout: 20), "no word that the games couldn't be updated after an empty answer")
-        XCTAssertTrue(game.exists, "the game went with the provider's empty answer")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'sent no channels'")).firstMatch.exists,
-                      "the notice doesn't say why")
+        for (list, reason) in [("streams", "sent no channels"), ("categories", "sent no categories")] {
+            configure(server, ["xtream_empty": list])
+            let why = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", reason)).firstMatch
+            XCTAssertTrue(why.waitForExistence(timeout: 20), "no word that the games couldn't be updated, and why, after no \(list)")
+            XCTAssertTrue(notice.exists, "no notice after no \(list)")
+            XCTAssertTrue(game.exists, "the game went with the provider's answer of no \(list)")
+        }
+
+        app.terminate()
+        app.launch()
+        openSports()
+        XCTAssertTrue(game.waitForExistence(timeout: 20), "the relaunch lost the game: an empty answer was saved")
+        XCTAssertTrue(notice.waitForExistence(timeout: 20), "no word after the relaunch that the games couldn't be updated")
 
         configure(server, ["xtream_empty": "0"])
         XCTAssertTrue(notice.waitForNonExistence(timeout: 20), "the notice stayed after the provider sent its lineup again")

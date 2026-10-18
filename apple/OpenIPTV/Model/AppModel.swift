@@ -1715,7 +1715,7 @@ final class AppModel {
 
     func remove(_ source: IPTVSource) async {
         sources.remove(source)
-        await loadLive(force: true)
+        await loadLive()
     }
 
     func forgetEverything() async {
@@ -1786,9 +1786,9 @@ final class AppModel {
         }
     }
 
-    /// The lineup at launch, after adding or removing a source, and Apple
-    /// TV's Try Again (`force`: every source asked now). An update already
-    /// running is waited for first.
+    /// The lineup at launch, after adding (`force`: every source asked now)
+    /// or removing a source, and Apple TV's Try Again (`force`). An update
+    /// already running is waited for first.
     func loadLive(force: Bool = false) async {
         await updateLive(for: nil, force: force)
     }
@@ -1833,22 +1833,24 @@ final class AppModel {
         // The app leaving mid-check doesn't cut it off: suspended, it would
         // come back as the provider failing and wait the whole interval.
         // Out of background time it's stopped, which counts as no check.
-        let background = UIApplication.shared.beginBackgroundTask(withName: "Live TV lineup") { update.cancel() }
-        defer { UIApplication.shared.endBackgroundTask(background) }
+        let background = BackgroundTime("Live TV lineup") { update.cancel() }
+        defer { background.end() }
         #endif
         await update.value
         if liveUpdate == update { liveUpdate = nil }
     }
 
     /// The lineup saved on the device (names, logos, categories; never a
-    /// URL that could hold a login) shows at once. Then, when any source's
-    /// lineup is older than `page` allows, every source is asked, in
-    /// parallel (the guide is rebuilt from the sources asked, so one left
-    /// out would lose its programmes), and each that answered replaces its
-    /// channels; one that failed keeps the channels it had, so one failing
-    /// provider never empties another's list. Only an answer, or a source
-    /// removed, changes the page or the file: a failure never makes old
-    /// games look current.
+    /// URL that could hold a login) shows at once, and a source no longer
+    /// set up goes from the page and the file with no provider asked. Then,
+    /// when any source's lineup is older than `page` allows, every source
+    /// is asked, in parallel, and each that answered replaces its channels;
+    /// one that failed keeps the channels it had, so one failing provider
+    /// never empties another's list. Of the check, only an answer changes
+    /// the page or the file: a failure never makes old games look current.
+    /// The guide is rebuilt only when every source answered: it holds only
+    /// the sources it's rebuilt from, so one that failed would lose its
+    /// programmes.
     private func runLiveUpdate(for page: String?, force: Bool) async {
         let iptv = sources.iptv
         guard !iptv.isEmpty else {
@@ -1860,6 +1862,7 @@ final class AppModel {
             return
         }
         liveChecks = liveChecks.filter { id, _ in iptv.contains { $0.id == id } }
+        providers = providers.filter { id, _ in iptv.contains { $0.id == id } }
         if !restoredLineup {
             restoredLineup = true
             if !Self.freshLineup, let saved = await Self.savedLineup(), saved.sources == iptv.map(\.id) {
@@ -1876,12 +1879,18 @@ final class AppModel {
                 })
             }
         }
+        let keptCategories = categories.filter { category in iptv.contains { $0.id == category.sourceId } }
+        let keptChannels = allChannels.filter { channel in iptv.contains { $0.id == channel.sourceId } }
+        if keptCategories.count < categories.count || keptChannels.count < allChannels.count {
+            await applyLineup(categories: keptCategories, channels: keptChannels)
+            await Self.saveLineup(sources: iptv.map(\.id), categories: keptCategories, channels: keptChannels,
+                                  answered: liveChecks.compactMapValues(\.answeredAt))
+        }
         // The page's limit read now: an event list's needs the saved lineup in.
         let maxAge = liveMaxAge(page), now = Date()
         guard force || iptv.contains(where: { liveChecks[$0.id, default: LineupCheck()].nextAsk(maxAge: maxAge) <= now }) else { return }
         liveLoading = true
         defer { liveLoading = false }
-        providers = providers.filter { id, _ in iptv.contains { $0.id == id } }
         let made = Dictionary(uniqueKeysWithValues: iptv.map { ($0.id, Providers.make($0)) })
         var results: [UUID: Result<LiveLineup, SourceError>] = [:]
         await withTaskGroup(of: (UUID, Result<LiveLineup, SourceError>).self) { group in
@@ -1892,18 +1901,26 @@ final class AppModel {
             }
             for await (id, result) in group { results[id] = result }
         }
+        // Stopped out of background time (updateLive): no check at all, so
+        // nothing is recorded or changed, and the sources are due as before.
+        guard !Task.isCancelled else { return }
         let previousCategories = categories, previousChannels = allChannels
-        for case let (id, .success(lineup)) in results where lineup.channels.isEmpty && previousChannels.contains(where: { $0.sourceId == id }) {
-            // Nothing at all from a source that had channels: a failed
-            // check, which keeps them.
-            results[id] = .failure(.unexpected("The provider sent no channels."))
+        for case let (id, .success(lineup)) in results {
+            // Nothing from a source that had it: a failed check, which keeps
+            // what the source had.
+            if lineup.channels.isEmpty, previousChannels.contains(where: { $0.sourceId == id }) {
+                results[id] = .failure(.unexpected("The provider sent no channels."))
+            } else if lineup.categories.isEmpty, previousCategories.contains(where: { $0.sourceId == id }) {
+                results[id] = .failure(.unexpected("The provider sent no categories."))
+            }
         }
         let answered = Date()
         for (id, result) in results {
             liveChecks[id, default: LineupCheck()].record(result.map { _ in () }, at: answered)
             // A provider that loaded stays until another does: it knows the
             // account's stream format and holds a portal's session.
-            if case .success = result { providers[id] = made[id] } else if providers[id]?.source != made[id]?.source { providers[id] = made[id] }
+            let keepsProvider = (try? result.get()) == nil && providers[id]?.source == made[id]?.source
+            if !keepsProvider { providers[id] = made[id] }
         }
 
         let multiple = iptv.count > 1
@@ -1919,19 +1936,18 @@ final class AppModel {
                 channels += ownChannels
                 guideURLs += lineup.guideURLs
             } else {
-                cats += previousCategories.filter { $0.id.hasPrefix(source.id.uuidString + "|") }
+                cats += previousCategories.filter { $0.sourceId == source.id }
                 channels += previousChannels.filter { $0.sourceId == source.id }
             }
         }
-        let removed = previousChannels.contains { channel in !iptv.contains { $0.id == channel.sourceId } }
-            || previousCategories.contains { category in !iptv.contains { category.id.hasPrefix($0.id.uuidString + "|") } }
-        guard removed || results.values.contains(where: { (try? $0.get()) != nil }) else { return }
+        let answers = results.values.filter { (try? $0.get()) != nil }.count
+        guard answers > 0 else { return }
         await applyLineup(categories: cats, channels: channels)
         await Self.saveLineup(sources: iptv.map(\.id), categories: cats, channels: channels, answered: liveChecks.compactMapValues(\.answeredAt))
 
         let keep = Set(channels.compactMap(\.epgId))
         let stale = await guide.isStale()
-        if !guideURLs.isEmpty, force || stale {
+        if answers == results.count, !guideURLs.isEmpty, force || stale {
             guideState = .loading
             let guide = guide
             Task.detached {
@@ -2004,7 +2020,7 @@ final class AppModel {
         // The provider's own category names (with several providers they're
         // shown as "Provider · US | News"), so the same channel from each
         // provider becomes one entry that can fall back to the other.
-        let prefixes = Dictionary(sources.iptv.map { ($0.id.uuidString, $0.name + " · ") }, uniquingKeysWith: { a, _ in a })
+        let prefixes = Dictionary(sources.iptv.map { ($0.id, $0.name + " · ") }, uniquingKeysWith: { a, _ in a })
         let built = await Task.detached(priority: .userInitiated) {
             Lineup(categories: allCategories, channels: allListed, prefixes: prefixes, home: home)
         }.value
@@ -2053,10 +2069,10 @@ final class AppModel {
         let byId: [String: LiveChannel]
 
         nonisolated init(categories allCategories: [LiveCategory], channels allListed: [LiveChannel],
-                         prefixes: [String: String], home: String) {
+                         prefixes: [UUID: String], home: String) {
             let (cats, channels) = LiveOrganizer.withoutLogin(categories: allCategories, channels: allListed)
             let own = cats.map { category -> LiveCategory in
-                guard let source = category.id.split(separator: "|").first, let prefix = prefixes[String(source)],
+                guard let source = category.sourceId, let prefix = prefixes[source],
                       category.name.hasPrefix(prefix) else { return category }
                 return LiveCategory(id: category.id, name: String(category.name.dropFirst(prefix.count)), channels: category.channels)
             }
@@ -2582,6 +2598,29 @@ final class TitleState<Value> {
     var value: Value?
     init(_ value: Value?) { self.value = value }
 }
+
+#if canImport(UIKit)
+/// Time to finish a piece of work once the app leaves the front, given
+/// back once: when the work ends, or when iOS runs out of it, after
+/// `expired`. Given back late, iOS ends the app.
+@MainActor
+private final class BackgroundTime {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init(_ name: String, expired: @escaping @MainActor @Sendable () -> Void) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [self] in
+            expired()
+            end()
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
+}
+#endif
 
 // MARK: - My List
 
