@@ -1752,7 +1752,7 @@ final class AppModel {
     /// game.
     private static var gamesMaxAge: TimeInterval {
         #if DEBUG
-        // UI tests (OPENREEL_DEBUG_GAMES_MAX_AGE=seconds): a shorter wait.
+        // UI tests set a shorter wait.
         if let seconds = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_GAMES_MAX_AGE"].flatMap(Double.init) { return seconds }
         #endif
         return 15 * 60
@@ -1769,11 +1769,10 @@ final class AppModel {
         return Self.lineupMaxAge
     }
 
-    /// Keeps the lineup as current as `page` needs (Sports and event lists
-    /// 15 minutes, other pages an hour) for as long as the calling task
-    /// runs: a page's task, so it stops when the page goes or the app
-    /// leaves the front (View.keepsLiveCurrent). Sports also picks up what
-    /// other devices found not playing. Cancel the task to stop it.
+    /// Keeps the lineup as current as `page` needs for as long as the
+    /// calling task runs: a page's task, so it stops when the page goes or
+    /// the app leaves the front (View.keepsLiveCurrent). Sports also picks
+    /// up what other devices found not playing.
     func keepLiveCurrent(showing page: String?) async {
         while !Task.isCancelled {
             await updateLive(for: page)
@@ -1786,9 +1785,8 @@ final class AppModel {
         }
     }
 
-    /// The lineup at launch, after adding (`force`: every source asked now)
-    /// or removing a source, and Apple TV's Try Again (`force`). An update
-    /// already running is waited for first.
+    /// The lineup for no page in particular; `force` asks every source now.
+    /// An update already running is waited for first.
     func loadLive(force: Bool = false) async {
         await updateLive(for: nil, force: force)
     }
