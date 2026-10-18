@@ -200,6 +200,7 @@ def main():
             sys.exit(f"the test server did not start on port {args.port}")
         feed = holder(args.port)
         failed = 0
+        pids = []
         print(f"{'row':<46} {'known':<56} {'measured':<56} result")
         for name, switches, extra, check, *code in ROWS:
             get("/mock/set?reset=1")
@@ -215,8 +216,10 @@ def main():
                     env.update({"OPENIPTV_XTREAM_URL": base, "OPENIPTV_XTREAM_USER": "u", "OPENIPTV_XTREAM_PASS": "p"})
                 else:
                     env[k] = v
-            run = subprocess.run([probe], env=env, cwd=APPLE, capture_output=True, text=True, timeout=180)
-            lines = run.stdout.splitlines()
+            run = subprocess.Popen([probe], env=env, cwd=APPLE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            pids.append(run.pid)
+            stdout, stderr = run.communicate(timeout=180)
+            lines = stdout.splitlines()
             opens = [fields(line) for line in lines if line.startswith("PROBE open ")]
             rest = {}
             for line in lines:
@@ -230,9 +233,9 @@ def main():
             except (IndexError, KeyError, ValueError) as missing:
                 known, measured, passed = "", f"no line ({missing})", False
             withheld = [line for line in lines if leaks(line)]
-            if withheld or run.stderr or run.returncode != (code[0] if code else 0):
+            if withheld or stderr or run.returncode != (code[0] if code else 0):
                 passed = False
-                measured += f" [exit {run.returncode}, {len(withheld)} line(s) withheld, stderr {len(run.stderr)} chars]"
+                measured += f" [exit {run.returncode}, {len(withheld)} line(s) withheld, stderr {len(stderr)} chars]"
             failed += not passed
             print(f"{name:<46} {known:<56} {measured:<56} {'pass' if passed else 'FAIL'}", flush=True)
             for line in lines:
@@ -240,9 +243,10 @@ def main():
         # CFNetwork and the network stack log each open for this process;
         # they hide URLs (<private>) and addresses (a hash) but show the
         # port. Only counts are read: lines naming the test server's host,
-        # its login or the holder in clear must be none.
+        # its login or the holder in clear must be none. By process id: the
+        # log names a process after the first path it saw for the binary.
         log = subprocess.run(["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", "--start", began,
-                              "--predicate", f'process == "{os.path.basename(probe)}"'], capture_output=True, text=True)
+                              "--predicate", "processID IN {" + ", ".join(map(str, pids)) + "}"], capture_output=True, text=True)
         logged = [line for line in log.stdout.splitlines() if line[:4].isdigit()]
         clear = [line for line in logged if re.search(r"127\.0\.0\.1|localhost|/live/|u/p/|player_api|username|password|/iptv|http:", line)]
         read = log.returncode == 0 and logged
