@@ -65,6 +65,27 @@ CONNECTIONS = set()
 # a conversion's first segment), "convert_clock" (see converted_segment),
 # "resume_movies" ("1,2,3": those films in Continue Watching after the
 # rest, each stopped 5 minutes in).
+# Live channels (/live/u/p/<id>.<ext>), set and reset the same way:
+# "live_status" ("403": every live request answers that status, empty,
+# Connection: close; "live_status_ids" ("2003,2005") limits it to those
+# channels), "live_delay" (seconds before the answer: a server starting the
+# channel; overrides OPENIPTV_MOCK_LIVE_DELAY), "live_first_data_delay"
+# (the answer at once, its first byte that many seconds later),
+# "live_redirect" ("1": a .ts answers 302 to /stream/<id>.ts on this host,
+# served the same way; "live_redirect_delay" seconds before the 302;
+# "live_redirect_loop" ("1"): /stream/ redirects back, forever). With the
+# test film: "live_rate" (kbit/s the stream is sent at), "live_stall"
+# ("20:5,60:2": 20 s after the first byte, nothing for 5 s with the
+# connection open, then the backlog at once), "live_cut" (seconds after the
+# first byte the connection closes: the stream ends; with "live_cut_reset"
+# ("1") it is reset instead, an error). "live_max_connections" ("1": the
+# account's streams at once; past it a stream answers "live_limit_status",
+# 403 unless set, empty), "live_linger" (seconds a closed stream still
+# counts, as a panel takes to notice). The account answer's max_connections
+# is "xtream_max_connections", else live_max_connections, else 2; its
+# active_cons is "xtream_active_cons", else (with live_max_connections) the
+# streams counted, else 0; its allowed_output_formats is "xtream_formats"
+# ("m3u8", "ts", or "m3u8,ts" as unset).
 CONTROL = {}
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
@@ -92,6 +113,14 @@ AUDIO_REQUESTS = [0, 0]
 # from /mock/mark) lists them. Only action names and category ids, never a
 # login or an address.
 XTREAM_REQUESTS = []
+# Live channel requests, {"t", "id", "ext", "status", "ua"}: GET
+# /mock/live_requests?since= lists them. The user agent only as a word
+# ("mpv", "lavf", "openreel" or "other"), never the header itself.
+LIVE_REQUESTS = []
+# The live streams live_max_connections counts: an open one maps to None,
+# a closed one to the time its slot frees (live_linger).
+LIVE_HELD = {}
+LIVE_LOCK = threading.Lock()
 MOVIE_TICKS = int(float(os.environ.get("OPENIPTV_MOCK_RUNTIME", "7200")) * 10_000_000)
 # Stories long enough to be cut to two lines on a title's page.
 LONG_OVERVIEWS = {"a8": "Paul Atreides unites with Chani and the Fremen while on a path of revenge against the conspirators "
@@ -227,6 +256,47 @@ def subtitle_file(index):
 
 
 _STREAMS = None
+
+
+def user_agent_class(header):
+    agent = (header or "").lower()
+    if agent.startswith("openreel"):
+        return "openreel"
+    if "mpv" in agent:
+        return "mpv"
+    if agent.startswith("lavf"):
+        return "lavf"
+    return "other"
+
+
+def live_counted():
+    """Streams open, and closed ones still lingering. Under LIVE_LOCK."""
+    now = time.time()
+    for key in [k for k, frees in LIVE_HELD.items() if frees is not None and frees <= now]:
+        del LIVE_HELD[key]
+    return len(LIVE_HELD)
+
+
+def live_take():
+    """A slot for a new stream, or None when live_max_connections are in use."""
+    limit = int(CONTROL.get("live_max_connections", 0))
+    with LIVE_LOCK:
+        if limit and live_counted() >= limit:
+            return None
+        key = object()
+        LIVE_HELD[key] = None
+        return key
+
+
+def live_release(key):
+    with LIVE_LOCK:
+        # (A reset in between already forgot it.)
+        if key in LIVE_HELD:
+            LIVE_HELD[key] = time.time() + float(CONTROL.get("live_linger", 0))
+
+
+def live_stalls():
+    return sorted(tuple(float(x) for x in spec.split(":")) for spec in CONTROL.get("live_stall", "").split(",") if spec)
 
 
 def known_item(entry, played=False):
@@ -541,6 +611,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/mock/xtream_requests":
             since = float(q.get("since", "0"))
             return self.send({"items": [name for t, name in XTREAM_REQUESTS if t >= since]})
+        if path == "/mock/live_requests":
+            since = float(q.get("since", "0"))
+            return self.send({"items": [r for r in LIVE_REQUESTS if r["t"] >= since]})
         if path == "/mock/set":
             if "reset" in q:
                 AUDIO_REQUESTS[0] = AUDIO_REQUESTS[1] = 0
@@ -551,6 +624,9 @@ class Handler(BaseHTTPRequestHandler):
                 KEY_CHECKS.clear()
                 CANCELLED.clear()
                 XTREAM_REQUESTS.clear()
+                LIVE_REQUESTS.clear()
+                with LIVE_LOCK:
+                    LIVE_HELD.clear()
                 PREFERENCES.clear()
                 DOWNLOADED.clear()
                 CONTROL.clear()
@@ -586,27 +662,8 @@ class Handler(BaseHTTPRequestHandler):
             if recording:
                 return self.send_file(recording, "video/mp2t")
             return self.send(b"\x47" * 188 * 64, "video/mp2t")
-        if path.startswith("/live/u/p/"):
-            name = path.rsplit("/", 1)[1]
-            stream = name.split(".")[0]
-            if stream in CONTROL.get("slow_live", "").split(","):
-                time.sleep(4)
-            # /mock/set?dead_live=2003,2005: those channels answer and never
-            # send a picture (an event feed that's over).
-            if stream in CONTROL.get("dead_live", "").split(","):
-                self.send_response(200)
-                self.send_header("Content-Type", "video/mp2t")
-                self.end_headers()
-                time.sleep(120)
-                self.close_connection = True
-                return
-            if name.endswith(".ts") and os.environ.get("OPENIPTV_MOCK_VIDEO") and shutil.which("ffmpeg"):
-                return self.live_video()
-            if name.endswith(".m3u8"):
-                segs = "\n".join(f"#EXTINF:6.0,\n/seg/{i}.ts" for i in range(5))
-                return self.send(f"#EXTM3U\n#EXT-X-TARGETDURATION:6\n{segs}\n", "application/vnd.apple.mpegurl")
-            time.sleep(0.15)
-            return self.send(b"\x47" * 188 * 64, "video/mp2t")
+        if path.startswith(("/live/u/p/", "/stream/")):
+            return self.live(path)
         if path.startswith("/seg/"):
             time.sleep(0.05)
             return self.send(b"\x47" * 188 * 64, "video/mp2t")
@@ -625,10 +682,15 @@ class Handler(BaseHTTPRequestHandler):
         if empty and action == empty and not q.get("category_id"):
             return self.send([])
         if action is None:
+            active = CONTROL.get("xtream_active_cons")
+            if active is None:
+                with LIVE_LOCK:
+                    active = str(live_counted()) if CONTROL.get("live_max_connections") else "0"
             return self.send({
                 "user_info": {"auth": 1, "status": "Active", "exp_date": str(now + 86400 * 90),
-                              "max_connections": "2", "active_cons": "0",
-                              "allowed_output_formats": ["m3u8", "ts"]},
+                              "max_connections": CONTROL.get("xtream_max_connections") or CONTROL.get("live_max_connections") or "2",
+                              "active_cons": active,
+                              "allowed_output_formats": [f for f in CONTROL.get("xtream_formats", "m3u8,ts").split(",") if f]},
                 "server_info": {"timezone": "Europe/London", "timestamp_now": now, "time_now": wall(now)},
             })
         if LINEUP and action == "get_live_categories":
@@ -752,29 +814,124 @@ class Handler(BaseHTTPRequestHandler):
         parts.append("</tv>")
         self.send("\n".join(parts), "application/xml")
 
+    def live(self, path):
+        """A live channel, /live/u/p/<id>.<ext> (or /stream/<id>.ts behind
+        live_redirect), as the live_* switches shape it."""
+        name = path.rsplit("/", 1)[1]
+        channel, _, ext = name.partition(".")
+
+        def note(status):
+            LIVE_REQUESTS.append({"t": time.time(), "id": channel, "ext": ext, "status": status,
+                                  "ua": user_agent_class(self.headers.get("User-Agent"))})
+
+        loop = CONTROL.get("live_redirect_loop") == "1"
+        if ext == "ts" and (loop or (CONTROL.get("live_redirect") == "1" and path.startswith("/live/"))):
+            time.sleep(float(CONTROL.get("live_redirect_delay", 0)))
+            note(302)
+            self.send_response(302)
+            self.send_header("Location", f"/stream/{name}" if path.startswith("/live/") else f"/live/u/p/{name}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        status = int(CONTROL.get("live_status", 0))
+        if status and channel in (CONTROL.get("live_status_ids") or channel).split(","):
+            note(status)
+            return self.refuse(status)
+        slot = live_take()
+        if slot is None:
+            status = int(CONTROL.get("live_limit_status", 403))
+            note(status)
+            return self.refuse(status)
+        note(200)
+        try:
+            if channel in CONTROL.get("slow_live", "").split(","):
+                time.sleep(4)
+            # /mock/set?dead_live=2003,2005: those channels answer and never
+            # send a picture (an event feed that's over).
+            if channel in CONTROL.get("dead_live", "").split(","):
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp2t")
+                self.end_headers()
+                time.sleep(120)
+                self.close_connection = True
+                return
+            if ext == "ts" and os.environ.get("OPENIPTV_MOCK_VIDEO") and shutil.which("ffmpeg"):
+                return self.live_video()
+            if ext == "m3u8":
+                segs = "\n".join(f"#EXTINF:6.0,\n/seg/{i}.ts" for i in range(5))
+                return self.live_answer(f"#EXTM3U\n#EXT-X-TARGETDURATION:6\n{segs}\n".encode(), "application/vnd.apple.mpegurl", 0)
+            return self.live_answer(b"\x47" * 188 * 64, "video/mp2t", 0.15)
+        finally:
+            live_release(slot)
+
+    def refuse(self, status):
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+    def live_answer(self, body, ctype, delay):
+        time.sleep(float(CONTROL.get("live_delay", delay)))
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        time.sleep(float(CONTROL.get("live_first_data_delay", 0)))
+        self.wfile.write(body)
+
     def live_video(self):
         """A real live channel: the test video looped and sent at its own
         pace as MPEG-TS, endlessly, like a provider's stream."""
-        time.sleep(float(os.environ.get("OPENIPTV_MOCK_LIVE_DELAY", "0.3")))
+        time.sleep(float(CONTROL.get("live_delay", os.environ.get("OPENIPTV_MOCK_LIVE_DELAY", "0.3"))))
         self.send_response(200)
         self.send_header("Content-Type", "video/mp2t")
         self.send_header("Connection", "close")
         self.end_headers()
+        time.sleep(float(CONTROL.get("live_first_data_delay", 0)))
         ffmpeg = subprocess.Popen(
             ["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
              "-c", "copy", "-f", "mpegts", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            while True:
-                chunk = ffmpeg.stdout.read(65536)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
+            self.live_pump(ffmpeg.stdout)
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
             ffmpeg.kill()
             ffmpeg.wait()
         self.close_connection = True
+
+    def live_pump(self, source):
+        """Copies the stream to the client at live_rate, with live_stall's
+        pauses, until live_cut."""
+        rate = float(CONTROL.get("live_rate", 0)) * 125
+        stalls = live_stalls()
+        cut = float(CONTROL.get("live_cut", 0))
+        start = sent = None
+        while True:
+            chunk = source.read(65536)
+            if not chunk:
+                return
+            now = time.monotonic()
+            if start is None:
+                start, sent = now, 0
+            while stalls and now - start >= stalls[0][0]:
+                time.sleep(stalls.pop(0)[1])
+                now = time.monotonic()
+            if cut and now - start >= cut:
+                if CONTROL.get("live_cut_reset") == "1":
+                    # Closed with nothing left to linger on: a reset, not an end.
+                    self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                    self.rfile.close()
+                    self.connection.close()
+                return
+            # Small pieces keep a slow rate even.
+            for i in range(0, len(chunk), 16384 if rate else len(chunk)):
+                if rate:
+                    time.sleep(max(0.0, start + sent / rate - time.monotonic()))
+                piece = chunk[i:i + 16384] if rate else chunk
+                self.wfile.write(piece)
+                sent += len(piece)
 
     def send_file(self, file_path, ctype="video/x-matroska", kind=None):
         """A real video with Range support, like Emby's static stream, slowed
