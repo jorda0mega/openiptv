@@ -55,6 +55,10 @@ func check(_ source: IPTVSource) async {
     }
 }
 
+// `live-probe` (LiveProbe.swift) runs before the checks below: with a login
+// in the environment, they print the server's address.
+if value("OPENIPTV_SMOKE_MODE") == "live-probe" { exit(await LiveProbe.run(env)) }
+
 if let server = value("OPENIPTV_XTREAM_URL").flatMap({ XtreamProvider.parse($0.split(separator: " ").first.map(String.init) ?? $0) }),
    let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS") {
     await check(IPTVSource(name: "Xtream", kind: .xtream(server: server.server, username: user, password: pass)))
