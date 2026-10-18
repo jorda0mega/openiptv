@@ -80,15 +80,16 @@ CONNECTIONS = set()
 # stream ends; with "live_cut_reset" ("1") it is reset instead, an error),
 # "live_chunked" ("1": the stream in chunks, Transfer-Encoding: chunked, as
 # some panels send it; URLSession takes a reset of an unframed stream for
-# its end, but of a chunked one for an error). "live_max_connections" ("1":
-# the account's streams at once; past it a stream answers
-# "live_limit_status", 403 unless set, empty), "live_linger" (seconds a
-# closed stream still counts, as a panel takes to notice). The account
-# answer's max_connections is "xtream_max_connections", else
-# live_max_connections, else 2; its active_cons is "xtream_active_cons",
-# else (with live_max_connections) the streams counted, else 0; its
-# allowed_output_formats is "xtream_formats" ("m3u8", "ts", or "m3u8,ts" as
-# unset).
+# its end, but of a chunked one for an error), "live_burst" ("3": the first
+# 3 s of the film at once, then its own pace, as panels send their buffer
+# first). "live_max_connections" ("1": the account's streams at once; past
+# it a stream answers "live_limit_status", 403 unless set, empty),
+# "live_linger" (seconds a closed stream still counts, as a panel takes to
+# notice). The account answer's max_connections is "xtream_max_connections",
+# else live_max_connections, else 2; its active_cons is
+# "xtream_active_cons", else (with live_max_connections) the streams
+# counted, else 0; its allowed_output_formats is "xtream_formats" ("m3u8",
+# "ts", or "m3u8,ts" as unset).
 CONTROL = {}
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
@@ -854,6 +855,7 @@ class Handler(BaseHTTPRequestHandler):
             if channel in CONTROL.get("dead_live", "").split(","):
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp2t")
+                self.send_header("Connection", "close")
                 self.end_headers()
                 time.sleep(120)
                 self.close_connection = True
@@ -895,8 +897,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
         time.sleep(float(CONTROL.get("live_first_data_delay", 0)))
+        burst = ["-readrate_initial_burst", CONTROL["live_burst"]] if CONTROL.get("live_burst") else []
         ffmpeg = subprocess.Popen(
-            ["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
+            ["ffmpeg", "-v", "error", "-re", *burst, "-stream_loop", "-1", "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
              "-c", "copy", "-f", "mpegts", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
             if self.live_pump(ffmpeg.stdout, chunked) and chunked:
