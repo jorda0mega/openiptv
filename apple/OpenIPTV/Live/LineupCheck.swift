@@ -3,7 +3,7 @@ import Foundation
 /// One source's record of being asked for its lineup: when it last
 /// answered, when it was last asked, and why the last ask failed. Only an
 /// answer moves `answeredAt`, so a failed check can't make old games look
-/// current; `record` is the only writer.
+/// current.
 struct LineupCheck: Sendable {
     /// When the provider last returned its lineup; saved with the lineup
     /// and restored at launch.
@@ -18,7 +18,6 @@ struct LineupCheck: Sendable {
         self.answeredAt = answeredAt
     }
 
-    /// The end of an ask, at `now`.
     mutating func record(_ result: Result<Void, SourceError>, at now: Date) {
         askedAt = now
         switch result {
@@ -32,9 +31,9 @@ struct LineupCheck: Sendable {
 
     /// When to ask next, for a page that wants its lineup no older than
     /// `maxAge`. With no connection the provider was never reached, so
-    /// within a minute; anything it answered (a 429, a 5xx, a rejected
-    /// login, a timeout) waits the whole interval: a busy provider isn't
-    /// asked again and again.
+    /// within a minute; anything else (a 429, a 5xx, a rejected login, a
+    /// timeout) waits the whole interval: a busy provider isn't asked again
+    /// and again.
     func nextAsk(maxAge: TimeInterval) -> Date {
         guard let last = askedAt ?? answeredAt else { return .distantPast }
         if case .offline = problem { return last + min(maxAge, 60) }
@@ -42,8 +41,7 @@ struct LineupCheck: Sendable {
     }
 }
 
-/// What Sports says about how current its games are (iPhone's
-/// SportsContent and Apple TV's TVSports, from AppModel.gamesNotice).
+/// What Sports says about how current its games are.
 enum GamesNotice: Equatable {
     /// The games as listed, or "Nothing on right now".
     case current

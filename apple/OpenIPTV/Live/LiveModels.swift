@@ -6,7 +6,6 @@ struct LiveCategory: Codable, Hashable, Identifiable {
     let name: String
     var channels: Int
 
-    /// The source it came from (the first part of its id).
     var sourceId: UUID? { id.split(separator: "|").first.flatMap { UUID(uuidString: String($0)) } }
 }
 
