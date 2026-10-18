@@ -69,23 +69,26 @@ CONNECTIONS = set()
 # "live_status" ("403": every live request answers that status, empty,
 # Connection: close; "live_status_ids" ("2003,2005") limits it to those
 # channels), "live_delay" (seconds before the answer: a server starting the
-# channel; overrides OPENIPTV_MOCK_LIVE_DELAY), "live_first_data_delay"
-# (the answer at once, its first byte that many seconds later),
-# "live_redirect" ("1": a .ts answers 302 to /stream/<id>.ts on this host,
-# served the same way; "live_redirect_delay" seconds before the 302;
-# "live_redirect_loop" ("1"): /stream/ redirects back, forever). With the
-# test film: "live_rate" (kbit/s the stream is sent at), "live_stall"
-# ("20:5,60:2": 20 s after the first byte, nothing for 5 s with the
-# connection open, then the backlog at once), "live_cut" (seconds after the
-# first byte the connection closes: the stream ends; with "live_cut_reset"
-# ("1") it is reset instead, an error). "live_max_connections" ("1": the
-# account's streams at once; past it a stream answers "live_limit_status",
-# 403 unless set, empty), "live_linger" (seconds a closed stream still
-# counts, as a panel takes to notice). The account answer's max_connections
-# is "xtream_max_connections", else live_max_connections, else 2; its
-# active_cons is "xtream_active_cons", else (with live_max_connections) the
-# streams counted, else 0; its allowed_output_formats is "xtream_formats"
-# ("m3u8", "ts", or "m3u8,ts" as unset).
+# channel; overrides OPENIPTV_MOCK_LIVE_DELAY), "live_first_data_delay" (the
+# answer at once, its first byte that many seconds later), "live_redirect"
+# ("1": a .ts answers 302 to /stream/<id>.ts on this host, served the same
+# way; "live_redirect_delay" seconds before the 302; "live_redirect_loop"
+# ("1"): /stream/ redirects back, forever). With the test film: "live_rate"
+# (kbit/s the stream is sent at), "live_stall" ("20:5,60:2": 20 s after the
+# first byte, nothing for 5 s with the connection open, then the backlog at
+# once), "live_cut" (seconds after the first byte the connection closes: the
+# stream ends; with "live_cut_reset" ("1") it is reset instead, an error),
+# "live_chunked" ("1": the stream in chunks, Transfer-Encoding: chunked, as
+# some panels send it; URLSession takes a reset of an unframed stream for
+# its end, but of a chunked one for an error). "live_max_connections" ("1":
+# the account's streams at once; past it a stream answers
+# "live_limit_status", 403 unless set, empty), "live_linger" (seconds a
+# closed stream still counts, as a panel takes to notice). The account
+# answer's max_connections is "xtream_max_connections", else
+# live_max_connections, else 2; its active_cons is "xtream_active_cons",
+# else (with live_max_connections) the streams counted, else 0; its
+# allowed_output_formats is "xtream_formats" ("m3u8", "ts", or "m3u8,ts" as
+# unset).
 CONTROL = {}
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
@@ -887,13 +890,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "video/mp2t")
         self.send_header("Connection", "close")
+        chunked = CONTROL.get("live_chunked") == "1"
+        if chunked:
+            self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
         time.sleep(float(CONTROL.get("live_first_data_delay", 0)))
         ffmpeg = subprocess.Popen(
             ["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
              "-c", "copy", "-f", "mpegts", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            self.live_pump(ffmpeg.stdout)
+            if self.live_pump(ffmpeg.stdout, chunked) and chunked:
+                self.wfile.write(b"0\r\n\r\n")
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
@@ -901,9 +908,9 @@ class Handler(BaseHTTPRequestHandler):
             ffmpeg.wait()
         self.close_connection = True
 
-    def live_pump(self, source):
+    def live_pump(self, source, chunked):
         """Copies the stream to the client at live_rate, with live_stall's
-        pauses, until live_cut."""
+        pauses, until live_cut. False when it reset the connection."""
         rate = float(CONTROL.get("live_rate", 0)) * 125
         stalls = live_stalls()
         cut = float(CONTROL.get("live_cut", 0))
@@ -911,7 +918,7 @@ class Handler(BaseHTTPRequestHandler):
         while True:
             chunk = source.read(65536)
             if not chunk:
-                return
+                return True
             now = time.monotonic()
             if start is None:
                 start, sent = now, 0
@@ -924,13 +931,14 @@ class Handler(BaseHTTPRequestHandler):
                     self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
                     self.rfile.close()
                     self.connection.close()
-                return
+                    return False
+                return True
             # Small pieces keep a slow rate even.
             for i in range(0, len(chunk), 16384 if rate else len(chunk)):
                 if rate:
                     time.sleep(max(0.0, start + sent / rate - time.monotonic()))
                 piece = chunk[i:i + 16384] if rate else chunk
-                self.wfile.write(piece)
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece) if chunked else piece)
                 sent += len(piece)
 
     def send_file(self, file_path, ctype="video/x-matroska", kind=None):

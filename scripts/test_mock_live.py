@@ -78,6 +78,7 @@ class Open:
         self.status = int(lines[0].split()[1])
         self.headers = {k.lower(): v.strip() for k, _, v in (line.partition(":") for line in lines[1:])}
         self.arrivals = [(self.headers_at, len(body))] if body else []
+        self.tail = body[-8:]
         self.ended = "cap"
         self.sock.settimeout(0.25)
         while time.monotonic() - start < seconds:
@@ -92,6 +93,7 @@ class Open:
                 self.ended = "eof"
                 break
             self.arrivals.append((time.monotonic() - start, len(data)))
+            self.tail = (self.tail + data)[-8:]
         self.length = sum(n for _, n in self.arrivals)
 
     @property
@@ -223,6 +225,13 @@ class LiveSwitches(unittest.TestCase):
         ended = self.open("/live/u/p/1.ts", 6)
         self.assertEqual(ended.ended, "eof")
         self.assertAlmostEqual(ended.arrivals[-1][0] - ended.first_data, 2, delta=0.4)
+        self.mock.set(live_cut_reset=1)
+        self.assertEqual(self.open("/live/u/p/1.ts", 6).ended, "reset")
+
+    def test_chunked_sends_the_stream_in_chunks_ended_or_reset(self):
+        self.mock.set(live_chunked=1, live_cut=2)
+        ended = self.open("/live/u/p/1.ts", 6)
+        self.assertEqual((ended.headers["transfer-encoding"], ended.ended, ended.tail[-5:]), ("chunked", "eof", b"0\r\n\r\n"))
         self.mock.set(live_cut_reset=1)
         self.assertEqual(self.open("/live/u/p/1.ts", 6).ended, "reset")
 
