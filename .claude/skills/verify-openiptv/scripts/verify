@@ -1,0 +1,266 @@
+#!/bin/bash
+# Drives Openreel (OpenIPTV) on a private iPhone simulator against a private
+# test server. Usage and recipes: ../SKILL.md.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(git -C "$HERE" rev-parse --show-toplevel)
+SUFFIX=${VERIFY_ID:+-$VERIFY_ID}
+STATE=$REPO/.audit/verify/state$SUFFIX.env
+DD=/tmp/openiptv/dd-verify$SUFFIX
+AD_STATE=/tmp/openiptv/agent-device-verify$SUFFIX
+SESSION=openiptv-verify$SUFFIX
+SIM_NAME="Zapline Verify iPhone${VERIFY_ID:+ $VERIFY_ID}"
+TV_NAME="Zapline Verify Apple TV${VERIFY_ID:+ $VERIFY_ID}"
+MEDIA=${OPENREEL_MEDIA:-/tmp/openreel-media}
+BUNDLE=com.jorda0mega.openiptv
+PROJECT=$REPO/apple/OpenIPTV.xcodeproj
+APP=$DD/Build/Products/Debug-iphonesimulator/OpenIPTV.app
+# The real-feed holder's port (release/hold-real-feeds.sh), even while it is down.
+RESERVED_PORTS=" 8799 "
+
+die() { echo "verify: $*" >&2; exit 1; }
+load() { [ -f "$STATE" ] || die "nothing running (no $STATE). Run: verify up"; . "$STATE"; }
+save() { mkdir -p "$(dirname "$STATE")"; printf '%s=%q\n' "$@" >> "$STATE"; }
+mock_alive() { [ -n "${MOCK_PID:-}" ] && [[ "$(ps -p "$MOCK_PID" -o command= 2>/dev/null)" == *"mock_server.py $PORT" ]]; }
+server() { echo "http://127.0.0.1:$PORT"; }
+emby_json() { echo "{\"serverURL\":\"$(server)\",\"serverName\":\"Mock\",\"userId\":\"U1\",\"userName\":\"tester\",\"accessToken\":\"tok\"}"; }
+# The test server's own fake Xtream login (u/p), not a real one.
+iptv_json() { echo "{\"id\":\"6F9A1E52-0000-4000-8000-000000000001\",\"name\":\"Test\",\"kind\":{\"xtream\":{\"server\":\"$(server)\",\"username\":\"u\",\"password\":\"p\"}}}"; }
+revision() { { git -C "$REPO" rev-parse HEAD; git -C "$REPO" diff HEAD -- apple; git -C "$REPO" ls-files --others --exclude-standard apple; } | shasum | cut -c1-12; }
+free_gb() { df -g / | awk 'NR==2 {print $4}'; }
+
+find_simulator() {
+  xcrun simctl list devices -j | python3 -I -c '
+import json, sys
+name = sys.argv[1]
+for runtime, devices in json.load(sys.stdin)["devices"].items():
+    for d in devices:
+        if d["name"] == name and d["isAvailable"]:
+            print(d["udid"]); sys.exit()' "$1"
+}
+
+# simulator <name> <device type> <iOS|tvOS>: the UDID of the named simulator,
+# created on the newest runtime if missing, booted.
+simulator() {
+  local udid
+  udid=$(find_simulator "$1")
+  if [ -z "$udid" ]; then
+    read -r runtime kind < <(xcrun simctl list -j | python3 -I -c '
+import json, sys
+platform, device = sys.argv[1], sys.argv[2]
+data = json.load(sys.stdin)
+runtimes = [r for r in data["runtimes"] if r["isAvailable"] and r["platform"] == platform]
+runtime = max(runtimes, key=lambda r: [int(p) for p in r["version"].split(".")])
+print(runtime["identifier"], next(t["identifier"] for t in data["devicetypes"] if t["name"] == device))' "$3" "$2")
+    udid=$(xcrun simctl create "$1" "$kind" "$runtime")
+    echo "created simulator \"$1\" ($udid)" >&2
+  fi
+  xcrun simctl boot "$udid" 2>/dev/null || true
+  xcrun simctl bootstatus "$udid" -b >/dev/null
+  echo "$udid"
+}
+
+cmd_up() {
+  if [ -f "$STATE" ]; then
+    . "$STATE"
+    mock_alive && die "a run is already active ($STATE, test server pid $MOCK_PID). Run 'verify doctor' to reuse it, 'verify down' to end it, or set VERIFY_ID=<name> for a second one."
+    echo "stale state from an earlier run: cleaning it up first"
+    cmd_down
+  fi
+  # A build takes about 1 GB; a new simulator about 2 GB more on its first boot.
+  local need=4
+  [ -n "$(find_simulator "$SIM_NAME")" ] || need=6
+  [ "$(free_gb)" -ge "$need" ] || die "only $(free_gb) GB free on /; this needs $need GB. Nothing started. Free space first (remove only what you created)."
+  RUN=$REPO/.audit/verify/$(date +%Y%m%d-%H%M)
+  mkdir -p "$RUN"
+  save RUN "$RUN"
+
+  PORT=8790
+  while [[ "$RESERVED_PORTS" == *" $PORT "* ]] || lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; do PORT=$((PORT + 1)); done
+  local media=()
+  if [ -f "$MEDIA/test.mkv" ]; then
+    media=(OPENIPTV_MOCK_VIDEO="$MEDIA/test.mkv" OPENIPTV_MOCK_HLS="$MEDIA/hls" OPENIPTV_MOCK_BIF="$MEDIA/test.bif")
+  else
+    echo "warning: no test media in $MEDIA: lists and pages work, video does not. Rebuild it with 'verify media'."
+  fi
+  env ${media[@]+"${media[@]}"} OPENIPTV_MOCK_LOG=1 nohup python3 -u "$REPO/scripts/mock_server.py" "$PORT" > "$RUN/mock-server.log" 2>&1 &
+  MOCK_PID=$!
+  save PORT "$PORT" MOCK_PID "$MOCK_PID"
+  for _ in $(seq 1 30); do
+    curl -sf -o /dev/null "$(server)/emby/Users/U1/Items/a0?api_key=tok" && break
+    sleep 1
+  done
+  curl -sf -o /dev/null "$(server)/emby/Users/U1/Items/a0?api_key=tok" || die "the test server didn't start: see $RUN/mock-server.log"
+  echo "test server: $(server) (pid $MOCK_PID)"
+
+  UDID=$(simulator "$SIM_NAME" "iPhone 17 Pro" iOS)
+  save UDID "$UDID"
+  echo "simulator: $SIM_NAME ($UDID)"
+  cmd_build
+  cmd_relaunch
+  echo "ready. Evidence goes to $RUN"
+}
+
+cmd_build() {
+  load
+  echo "building into $DD (log: $RUN/build.log)"
+  local rev; rev=$(revision)
+  if ! xcodebuild build -project "$PROJECT" -scheme OpenIPTV -configuration Debug -destination "id=$UDID" \
+       -derivedDataPath "$DD" -quiet > "$RUN/build.log" 2>&1; then
+    grep -E "error:" "$RUN/build.log" | head -5
+    die "build failed: see $RUN/build.log"
+  fi
+  xcrun simctl install "$UDID" "$APP"
+  save BUILD_REV "$rev"
+  echo "built and installed revision $rev"
+}
+
+# Starts the app afresh, signed in to the test server, then attaches the
+# agent-device session to it. OPENREEL_DEBUG_* knobs set in the caller's
+# environment go to the app too, except the sign-in ones.
+cmd_relaunch() {
+  load
+  local args=(-freshLineup YES -forgetWatchOnPicks YES "$@") knobs=() name
+  for name in $(compgen -e | grep '^OPENREEL_DEBUG_' | grep -vE '^OPENREEL_DEBUG_(EMBY|IPTV)' || true); do
+    knobs+=("SIMCTL_CHILD_$name=${!name}")
+  done
+  env ${knobs[@]+"${knobs[@]}"} SIMCTL_CHILD_OPENREEL_DEBUG_EMBY="$(emby_json)" SIMCTL_CHILD_OPENREEL_DEBUG_IPTV="$(iptv_json)" \
+    xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE" "${args[@]}" >/dev/null
+  echo "app launched with ${args[*]} ${knobs[*]+${knobs[*]#SIMCTL_CHILD_}}"
+  ad open "$BUNDLE" >/dev/null
+  echo "agent-device session $SESSION attached"
+}
+
+ad() { load; agent-device "$@" --platform ios --udid "$UDID" --session "$SESSION" --state-dir "$AD_STATE"; }
+
+# mock k=v ... | mock reset: the test server's run-time switches.
+cmd_mock() {
+  load
+  [ $# -gt 0 ] || die "usage: verify mock k=v ... | verify mock reset"
+  local query
+  if [ "$1" = reset ]; then query=reset=1; else query=$(IFS='&'; echo "$*"); fi
+  curl -sf "$(server)/mock/set?$query"; echo
+}
+
+# url: the test server's address, to read back what the app stored there.
+cmd_url() { load; server; }
+
+# shot <name>: a screenshot and the accessibility snapshot, into the run's evidence folder.
+cmd_shot() {
+  load
+  [ $# -eq 1 ] || die "usage: verify shot <name>"
+  ad screenshot "$RUN/$1.png" >/dev/null
+  ad snapshot > "$RUN/$1.snapshot.txt"
+  echo "$RUN/$1.png"
+  echo "$RUN/$1.snapshot.txt"
+}
+
+cmd_doctor() {
+  load
+  local bad=0
+  ok() { echo "ok    $*"; }
+  fail() { echo "FAIL  $*"; bad=1; }
+  if mock_alive; then ok "test server pid $MOCK_PID runs mock_server.py on port $PORT"; else fail "test server pid ${MOCK_PID:-?} is not running: verify down, then verify up"; fi
+  if [ "$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null)" = "$MOCK_PID" ]; then ok "port $PORT belongs to it"; else fail "port $PORT is not held by pid $MOCK_PID"; fi
+  if curl -sf -o /dev/null "$(server)/emby/Users/U1/Items/a0?api_key=tok"; then ok "test server answers; switches: $(curl -sf "$(server)/mock/set")"; else fail "test server does not answer at $(server)"; fi
+  if [[ "$(xcrun simctl list devices)" == *"$SIM_NAME ($UDID) (Booted)"* ]]; then ok "simulator $SIM_NAME ($UDID) is booted"; else fail "simulator $SIM_NAME ($UDID) is not booted"; fi
+  if xcrun simctl get_app_container "$UDID" "$BUNDLE" >/dev/null 2>&1; then ok "app $BUNDLE installed"; else fail "app not installed: verify build"; fi
+  if [ "${BUILD_REV:-}" = "$(revision)" ]; then ok "build $BUILD_REV matches the checkout"; else fail "build ${BUILD_REV:-none} is older than the checkout ($(revision)): verify build && verify relaunch"; fi
+  if [[ "$(xcrun simctl spawn "$UDID" launchctl list 2>/dev/null)" == *"UIKitApplication:$BUNDLE["* ]]; then ok "app is running"; else fail "app is not running: verify relaunch"; fi
+  if [[ "$(ad session list 2>/dev/null)" == *"\"name\": \"$SESSION\""* ]]; then ok "agent-device session $SESSION is open"; else fail "no agent-device session: verify relaunch"; fi
+  [ -f "$MEDIA/test.mkv" ] && ok "test media in $MEDIA" || echo "warn  no test media in $MEDIA: video will not play (verify media)"
+  [ "$(free_gb)" -ge 2 ] && ok "$(free_gb) GB free on /" || echo "warn  only $(free_gb) GB free on /"
+  echo "evidence: $RUN"
+  return $bad
+}
+
+# media: rebuilds the test films (the nightly /tmp cleanup can delete them).
+cmd_media() {
+  [ ! -f "$MEDIA/test.mkv" ] || { echo "test media already in $MEDIA (other runs may be serving it: leave it)"; return 0; }
+  local tools; tools=$(mktemp -d /tmp/openiptv-media-tools.XXXX)
+  git -C "$REPO" show ci/apple-ui-tests:scripts/make_test_media.sh > "$tools/make_test_media.sh"
+  git -C "$REPO" show ci/apple-ui-tests:scripts/make_bif.py > "$tools/make_bif.py"
+  bash "$tools/make_test_media.sh" "$MEDIA"
+  rm -rf "$tools"
+  echo "restart the test server to serve it: verify down && verify up"
+}
+
+# uitest [--tv] <Class/test> ...: XCUITests from apple/UITests-iOS (or
+# UITests-tvOS) on this run's simulator and test server.
+cmd_uitest() {
+  load
+  local scheme=OpenIPTV target="OpenIPTV UITests" udid=$UDID dd=$DD
+  if [ "${1:-}" = --tv ]; then
+    shift
+    scheme="OpenIPTV TV" target="OpenIPTV TV UITests" dd=$DD-tv
+    udid=$(simulator "$TV_NAME" "Apple TV 4K (3rd generation)" tvOS)
+    save TV_UDID "$udid"
+  fi
+  [ $# -gt 0 ] || die "usage: verify uitest [--tv] <Class/test> ..."
+  # One UI-testing runner per simulator: agent-device's goes first.
+  agent-device daemon stop --state-dir "$AD_STATE" --clean >/dev/null 2>&1 || true
+  echo "agent-device session closed for the tests; 'verify relaunch' attaches it again"
+  local only=() t stamp out
+  for t in "$@"; do only+=("-only-testing:$target/$t"); done
+  stamp=$(date +%H%M%S); out=$RUN/uitest-$stamp.log
+  export TEST_RUNNER_DEBUG_EMBY; TEST_RUNNER_DEBUG_EMBY=$(emby_json)
+  if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -destination "id=$udid" -derivedDataPath "$dd" -quiet > "$out" 2>&1; then
+    grep -E "error:" "$out" | head -5
+    die "build failed: tests not run ($out)"
+  fi
+  for attempt in 1 2 3; do
+    xcodebuild test-without-building -project "$PROJECT" -scheme "$scheme" -destination "id=$udid" -derivedDataPath "$dd" \
+      -resultBundlePath "$RUN/uitest-$stamp-$attempt.xcresult" "${only[@]}" > "$out" 2>&1 || true
+    grep -q "Failed to get list of active applications" "$out" || break
+    echo "(simulator start-up error, attempt $attempt: rebooting it)"
+    rm -rf "$RUN/uitest-$stamp-$attempt.xcresult"
+    xcrun simctl shutdown "$udid" 2>/dev/null || true
+    xcrun simctl boot "$udid"; xcrun simctl bootstatus "$udid" -b >/dev/null
+  done
+  grep -E "Test Case .*(passed|failed|skipped)|error:|Executed .* tests?," "$out" | sed -E 's/^.*Test Case //' | head -120
+  if grep -q "\*\* TEST EXECUTE SUCCEEDED \*\*" "$out"; then
+    rm -rf "$RUN"/uitest-"$stamp"-*.xcresult
+    echo "passed. Log: $out"
+  else
+    echo "FAILED. Log: $out. Results (screenshots): $RUN/uitest-$stamp-$attempt.xcresult"
+    return 1
+  fi
+}
+
+# down [--purge]: ends what this run started. Keeps the evidence folder.
+# Keeps the simulators (shut down) and build folders for the next run, or
+# with --purge deletes them to give the disk back.
+cmd_down() {
+  if [ "${1:-}" = --purge ]; then
+    cmd_down
+    local name udid
+    for name in "$SIM_NAME" "$TV_NAME"; do
+      udid=$(find_simulator "$name")
+      [ -z "$udid" ] || { xcrun simctl delete "$udid"; echo "deleted simulator $name ($udid)"; }
+    done
+    rm -rf "$DD" "$DD-tv"
+    echo "removed $DD and $DD-tv"
+    return 0
+  fi
+  [ -f "$STATE" ] || { echo "nothing running"; return 0; }
+  . "$STATE"
+  if [ -n "${UDID:-}" ]; then
+    agent-device close --platform ios --udid "$UDID" --session "$SESSION" --state-dir "$AD_STATE" >/dev/null 2>&1 || true
+    agent-device daemon stop --state-dir "$AD_STATE" --clean >/dev/null 2>&1 || true
+    xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
+    xcrun simctl shutdown "$UDID" 2>/dev/null || true
+  fi
+  [ -n "${TV_UDID:-}" ] && { xcrun simctl shutdown "$TV_UDID" 2>/dev/null || true; }
+  if mock_alive; then kill "$MOCK_PID"; echo "stopped test server pid $MOCK_PID"; fi
+  rm -rf "$AD_STATE"
+  rm -f "$STATE"
+  echo "evidence kept in ${RUN:-?}:"
+  ls "${RUN:-/nonexistent}" 2>/dev/null | sed 's/^/  /'
+}
+
+case "${1:-}" in
+  up|build|relaunch|mock|url|shot|doctor|media|uitest|down) c=$1; shift; "cmd_$c" "$@" ;;
+  ad) shift; ad "$@" ;;
+  *) die "usage: verify up | doctor | ad <agent-device args> | shot <name> | mock k=v... | mock reset | url | relaunch [launch args] | build | uitest [--tv] <Class/test>... | media | down [--purge]" ;;
+esac
