@@ -51,6 +51,12 @@ def one(o, *keys):
     return " ".join(f"{k}={o[0].get(k)}" for k in keys)
 
 
+# libmpv's default user agent, its version string: `strings` on MPVKit
+# 1.0.0's Libmpv (apple/mpvkit.lock) finds this one.
+LIBMPV = "mpv v0.41.0-dirty"
+APP_VERSION = re.search(r'MARKETING_VERSION: "([^"]+)"', open(os.path.join(APPLE, "project.yml")).read()).group(1)
+
+
 def film_kb(seconds, kbps):
     return seconds * int(kbps) / 8 / 1.024
 
@@ -129,14 +135,14 @@ ROWS = [
                          one(o, "segments", "target", "seg_first_data", "rate_kbps") + f" ended_early={rest['summary'][0]['ended_early']}",
                          o[0].get("segments") == "5" and o[0].get("target") == "6.0" and int(o[0].get("seg_first_data", -1)) >= 0
                          and o[0]["rate_kbps"] == "-1" and rest["summary"][0]["ended_early"] == "0")),
-    ("none, both user agents", {}, {"OPENIPTV_PROBE_UA": "both", "OPENIPTV_PROBE_MPV_UA": "mpv phase0"},
-     lambda o, _, server: ("ua=mpv,app; server saw mpv,openreel",
-                           f"ua={','.join(x['ua'] for x in o)}; server saw {','.join(i['ua'] for i in server['live'])}",
-                           [x["ua"] for x in o] == ["mpv", "app"] and [i["ua"] for i in server["live"]] == ["mpv", "openreel"])),
-    ("none, both user agents, mpv's not given", {}, {"OPENIPTV_PROBE_UA": "both"},
-     lambda o, rest, server: ("refused, exit 1, no request",
-                              f"config={','.join(rest.get('config', [{}])[0])} requests={len(server['live'])}",
-                              "mpv_ua_unknown" in rest.get("config", [{}])[0] and not server["live"]), 1),
+    ("none, both user agents, exact (a local echo)", {}, {"OPENIPTV_PROBE_UA": "both", "OPENIPTV_SMOKE_FEED": "echo"},
+     lambda o, rest, server: (f"mpv_ua=vendored; {LIBMPV}, Openreel/{APP_VERSION}",
+                              f"mpv_ua={rest['start'][0]['mpv_ua']}; {', '.join(map(str, server['echo']))}",
+                              rest["start"][0]["mpv_ua"] == "vendored" and server["echo"] == [LIBMPV, f"Openreel/{APP_VERSION}"])),
+    ("none, both user agents, mpv's replaced", {}, {"OPENIPTV_PROBE_UA": "both", "OPENIPTV_PROBE_MPV_UA": "mpv phase0"},
+     lambda o, rest, server: ("mpv_ua=given; server saw mpv,openreel",
+                              f"mpv_ua={rest['start'][0]['mpv_ua']}; server saw {','.join(i['ua'] for i in server['live'])}",
+                              rest["start"][0]["mpv_ua"] == "given" and [i["ua"] for i in server["live"]] == ["mpv", "openreel"])),
     ("none, 3 ids, pause after 2 for 3 s", {},
      {"OPENIPTV_PROBE_IDS": "1,2,3", "OPENIPTV_PROBE_SECONDS": "1", "OPENIPTV_PROBE_GAP": "0.5",
       "OPENIPTV_PROBE_PAUSE_EVERY": "2", "OPENIPTV_PROBE_PAUSE_SECONDS": "3"},
@@ -178,6 +184,26 @@ def holder(port):
     return f"http://127.0.0.1:{server.server_port}/iptv"
 
 
+def echo():
+    """A server that keeps each request's user agent and refuses it: what
+    the probe sends, exactly."""
+    agents = []
+
+    class Echo(BaseHTTPRequestHandler):
+        def do_GET(self):
+            agents.append(self.headers.get("User-Agent"))
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Echo)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_port}", agents
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
@@ -209,6 +235,7 @@ def main():
         if mock.poll() is not None:
             sys.exit(f"the test server did not start on port {args.port}")
         feed = holder(args.port)
+        echoed, agents = echo()
         failed = 0
         pids = []
         print(f"{'row':<46} {'known':<56} {'measured':<56} result")
@@ -217,13 +244,15 @@ def main():
             if switches:
                 get("/mock/set?" + "&".join(f"{k}={v}" for k, v in switches.items()))
             since = get("/mock/mark")["t"]
+            agents.clear()
             env = {k: v for k, v in os.environ.items() if not k.startswith(("OPENIPTV_", "OPENREEL_"))}
             env.update({"OPENIPTV_SMOKE_MODE": "live-probe", "OPENIPTV_SMOKE_FEED": feed, "OPENIPTV_PROBE_IDS": "1",
                         "OPENIPTV_PROBE_ROUNDS": "1", "OPENIPTV_PROBE_SECONDS": "10", "OPENIPTV_PROBE_GAP": "1"})
             for k, v in extra.items():
-                if v is None:
+                # The login from the environment, for the test server or the echo.
+                if v in (None, "echo"):
                     env.pop(k)
-                    env.update({"OPENIPTV_XTREAM_URL": base, "OPENIPTV_XTREAM_USER": "u", "OPENIPTV_XTREAM_PASS": "p"})
+                    env.update({"OPENIPTV_XTREAM_URL": echoed if v else base, "OPENIPTV_XTREAM_USER": "u", "OPENIPTV_XTREAM_PASS": "p"})
                 else:
                     env[k] = v
             run = subprocess.Popen([probe], env=env, cwd=APPLE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -237,7 +266,7 @@ def main():
                 if kind not in ("open", "block"):
                     rest.setdefault(kind, []).append(fields(line) if kind != "config" else dict.fromkeys(line.split()[2:], ""))
             server = {"live": get(f"/mock/live_requests?since={since}")["items"],
-                      "xtream": get(f"/mock/xtream_requests?since={since}")["items"]}
+                      "xtream": get(f"/mock/xtream_requests?since={since}")["items"], "echo": list(agents)}
             try:
                 known, measured, passed = check(opens, rest, server)
             except (IndexError, KeyError, ValueError) as missing:
