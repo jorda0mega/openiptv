@@ -404,6 +404,8 @@ struct PlayerCard: Identifiable {
     let subtitle: String?
     let images: [CardImage]
     var loading = false
+    /// On its picture (a Watch On channel that didn't play).
+    var badge: TileBadge? = nil
     /// For VoiceOver only (an episode's name).
     var spoken: String? = nil
     /// Landscape: the line on the picture ("S1, E2 · 26m").
@@ -491,6 +493,7 @@ struct PlayerInfoPanelView: View {
             .frame(width: 86, height: 48)
             .overlay { if card.loading { ProgressView().tint(.white) } }
             .clipShape(.rect(cornerRadius: 7))
+            .tileBadge(card.badge)
     }
 
     private func pictureCard(_ card: PlayerCard) -> some View {
@@ -512,6 +515,7 @@ struct PlayerInfoPanelView: View {
             .overlay { if card.loading { ProgressView().tint(.white) } }
             .clipShape(.rect(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+            .tileBadge(card.badge)
     }
 
     /// "•••": the title's page.

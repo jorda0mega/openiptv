@@ -263,12 +263,15 @@ struct LiveView: View {
 /// placeholders until the details arrive, blanks when there are none), so
 /// the row never changes height as you scroll.
 struct ChannelRow: View {
+    @Environment(AppModel.self) private var model
+    let channel: LiveChannel
     let title: String
     let logo: URL?
     let slot: NowNextSlot
     var favorite = false
 
     init(channel: LiveChannel, slot: NowNextSlot, favorite: Bool = false) {
+        self.channel = channel
         title = LiveOrganizer.Name(channel.name).display
         logo = channel.logo
         self.slot = slot
@@ -276,6 +279,7 @@ struct ChannelRow: View {
     }
 
     init(entry: LiveOrganizer.Entry, slot: NowNextSlot, favorite: Bool = false) {
+        channel = entry.channels[0]
         title = entry.title
         logo = entry.logo
         self.slot = slot
@@ -285,8 +289,9 @@ struct ChannelRow: View {
     var body: some View {
         let info = slot.value
         let now = info?.now
+        let failed = model.didNotPlay(channel)
         HStack(spacing: 14) {
-            ChannelLogo(url: logo, name: title)
+            ChannelLogo(url: logo, name: title, badge: failed ? .didNotPlay : nil)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(now?.title ?? title).font(.body.weight(.semibold)).lineLimit(1)
@@ -297,12 +302,13 @@ struct ChannelRow: View {
                 }
                 // Re-render every 30 s so the bars move.
                 TimelineView(.periodic(from: .now, by: 30)) { context in
+                    let mark = failed ? "Didn’t play · " : ""
                     HStack(spacing: 8) {
                         if let now {
                             ProgressBar(value: now.progress(at: context.date)).frame(width: 36)
-                            Text("\(Self.left(now, at: context.date)) · \(title)").lineLimit(1)
+                            Text("\(mark)\(Self.left(now, at: context.date)) · \(title)").lineLimit(1)
                         } else {
-                            Text(info == nil ? "Programme · 24m left" : title).lineLimit(1)
+                            Text(info == nil ? "Programme · 24m left" : mark + title).lineLimit(1)
                         }
                     }
                     .font(.footnote)
@@ -328,20 +334,30 @@ struct ChannelRow: View {
 struct ChannelLogo: View {
     let url: URL?
     let name: String
+    var badge: TileBadge? = nil
+    var size = CGSize(width: 68, height: 48)
+    /// Shown without a logo: the name's first letters, unless given.
+    var initials: String? = nil
     @State private var image: UIImage?
 
     var body: some View {
         // Already decoded (scrolling back, or fetched ahead): shown at once.
         let shown = image ?? url.flatMap(ImagePipeline.shared.cached)
         ZStack {
-            RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.14))
+            RoundedRectangle(cornerRadius: size.height / 4).fill(Color(white: 0.14))
             if let image = shown {
-                Image(uiImage: image).resizable().scaledToFit().padding(8)
+                Image(uiImage: image).resizable().scaledToFit().padding(size.height / 6)
             } else {
-                Text(String(name.prefix(2)).uppercased()).font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                Text(initials ?? String(name.prefix(2)).uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .padding(.horizontal, 4)
             }
         }
-        .frame(width: 68, height: 48)
+        .frame(width: size.width, height: size.height)
+        .tileBadge(badge)
         .task(id: url) {
             guard let url, ImagePipeline.shared.cached(url) == nil else { return }
             image = try? await ImagePipeline.shared.image(for: url)
