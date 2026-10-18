@@ -13,7 +13,9 @@ import Foundation
 enum LiveProbe {
     enum Ext: String { case ts, m3u8 }
     enum Agent: String { case mpv, app }
-    enum Failure: String { case none, dns, refused, reset, timeout, tls, cancelled, redirect_loop, other }
+    /// `timeout`: no answer by the cap (or the 60 s request timeout).
+    /// `no_data`: an answer, then no body by the cap.
+    enum Failure: String { case none, dns, refused, reset, timeout, no_data, tls, cancelled, redirect_loop, other }
 
     struct Login {
         let server: URL
@@ -30,26 +32,42 @@ enum LiveProbe {
     /// One stream open, as printed.
     struct Open {
         var tok = "", ext = Ext.ts, ua = Agent.mpv, round = 0
-        var status = 0, hops = 0, crossHost = false
-        var dns = 0, connect = 0, tls = 0, ttfb = -1, firstData = -1
-        var rateKbps = 0, gapMax = 0.0, gaps1s = 0, stoppedAt = 0.0, bytes = 0
-        var ctype = "other", error = Failure.none
-        /// How the body is delimited: length, chunked or close (none: no
-        /// answer). URLSession takes a reset of a close-delimited body for
-        /// its end, so there `error=none` before the cap is an end or a reset.
+        /// URLSession hands over the status only with the first body byte:
+        /// an answer whose body hasn't started reads `status=0 headers=yes`.
+        var status = 0, headers = false
+        var hops = 0, redirectMs = -1, crossHost = false
+        /// Summed over the hops that opened a connection; `tcp` without the
+        /// TLS handshake. -1: none did, or not measured.
+        var dns = -1, tcp = -1, tls = -1
+        var ttfb = -1, firstData = -1
+        /// -1 when the read was too short: 1 s after the first byte for
+        /// `first_1s_kb`, 6 s for `rate_tail_kbps` (its last 5 s).
+        var rateKbps = -1, first1sKB = -1, rateTailKbps = -1
+        var gapMax = 0.0, gaps1s = 0, stoppedAt = 0.0, bytes = 0
+        var ctype = "other"
+        /// How the body is delimited: length, chunked or close (none: not
+        /// handed over). URLSession takes a reset of a close-delimited body
+        /// for its end, so there `error=none` before the cap is an end or a
+        /// reset.
         var framing = "none"
+        var error = Failure.none
+        var capped = false
         var playlist: Playlist?
 
         var line: String {
-            var line = "PROBE open tok=\(tok) ext=\(ext.rawValue) ua=\(ua.rawValue) round=\(round) status=\(status) hops=\(hops)"
-                + " cross_host=\(yes(crossHost)) dns=\(dns) connect=\(connect) tls=\(tls) ttfb=\(ttfb) first_data=\(firstData)"
-                + " rate_kbps=\(rateKbps) gap_max=\(fixed(gapMax, 2)) gaps_1s=\(gaps1s) stopped_at=\(fixed(stoppedAt, 1))"
-                + " bytes=\(bytes) ctype=\(ctype) framing=\(framing) error=\(error.rawValue)"
+            var line = "PROBE open tok=\(tok) ext=\(ext.rawValue) ua=\(ua.rawValue) round=\(round) status=\(status) headers=\(yes(headers))"
+                + " hops=\(hops) redirect_ms=\(redirectMs) cross_host=\(yes(crossHost)) dns=\(dns) tcp=\(tcp) tls=\(tls)"
+                + " ttfb=\(ttfb) first_data=\(firstData) rate_kbps=\(rateKbps) first_1s_kb=\(first1sKB) rate_tail_kbps=\(rateTailKbps)"
+                + " gap_max=\(fixed(gapMax, 2)) gaps_1s=\(gaps1s) stopped_at=\(fixed(stoppedAt, 1)) bytes=\(bytes)"
+                + " ctype=\(ctype) framing=\(framing) error=\(error.rawValue)"
             if let p = playlist {
                 line += " master=\(yes(p.master)) segments=\(p.segments) target=\(fixed(p.target, 1)) seg_first_data=\(p.segmentFirstData)"
             }
             return line
         }
+
+        /// Played, then stopped before the cap: an end or a reset.
+        var endedEarly: Bool { status == 200 && bytes > 0 && !capped }
     }
 
     struct Playlist {
@@ -101,6 +119,7 @@ enum LiveProbe {
         var response: HTTPURLResponse?
         var metrics: URLSessionTaskMetrics?
         var firstByte: Date?, lastByte: Date?
+        var arrivals: [(at: Date, bytes: Int)] = []
         var bytes = 0, gapMax = 0.0, gaps1s = 0
         var body = Data()
         var capped: Date?, finished: Date?
@@ -135,6 +154,7 @@ enum LiveProbe {
             if firstByte == nil { firstByte = now }
             gap(until: now)
             lastByte = now
+            arrivals.append((now, data.count))
             bytes += data.count
             if keepBody, body.count < 1 << 20 { body.append(data) }
         }
@@ -151,6 +171,7 @@ enum LiveProbe {
         }
     }
 
+    /// Provider requests made: stream opens, playlist segments, the account.
     static var requests = 0
 
     static func read(_ url: URL, agent: String, cap: Double, keepBody: Bool = false) async -> Reader {
@@ -192,8 +213,8 @@ enum LiveProbe {
         return reader
     }
 
-    static func failure(_ r: Reader) -> Failure {
-        if r.capped != nil { return r.response == nil ? .timeout : .none }
+    static func failure(_ r: Reader, headers: Bool) -> Failure {
+        if r.capped != nil { return !headers ? .timeout : r.bytes == 0 ? .no_data : .none }
         guard let error = r.error else { return .none }
         guard let code = (error as? URLError)?.code else { return .other }
         switch code {
@@ -209,45 +230,57 @@ enum LiveProbe {
         }
     }
 
-    static func ms(_ from: Date, _ to: Date?) -> Int { to.map { Int(($0.timeIntervalSince(from) * 1000).rounded()) } ?? -1 }
-    static func span(_ start: Date?, _ end: Date?) -> Int {
-        guard let start, let end else { return 0 }
-        return max(0, Int((end.timeIntervalSince(start) * 1000).rounded()))
+    static func ms(_ from: Date?, _ to: Date?) -> Int {
+        guard let from, let to else { return -1 }
+        return Int((to.timeIntervalSince(from) * 1000).rounded())
     }
 
     static func open(_ login: Login, id: String, ext: Ext, ua: Agent, round: Int, cap: Double) async -> Open {
         let r = await read(login.stream(id, ext), agent: agent(ua), cap: cap, keepBody: ext == .m3u8)
         let hops = r.metrics?.transactionMetrics ?? []
         let origin = hops.first?.fetchStartDate ?? r.started
+        let response = r.response ?? hops.last?.response as? HTTPURLResponse
         var o = Open(tok: id, ext: ext, ua: ua, round: round)
-        o.status = r.response?.statusCode ?? 0
+        o.status = response?.statusCode ?? 0
+        o.headers = response != nil || hops.last?.responseStartDate != nil
         o.hops = hops.isEmpty ? r.redirects : hops.count - 1
+        if hops.count > 1 { o.redirectMs = ms(hops[0].fetchStartDate, hops[0].responseStartDate) }
         let firstHost = hops.first?.request.url?.host() ?? login.server.host()
-        let lastHost = hops.last?.request.url?.host() ?? r.response?.url?.host()
+        let lastHost = hops.last?.request.url?.host() ?? response?.url?.host()
         o.crossHost = lastHost != nil && firstHost != lastHost
-        if let last = hops.last {
-            o.dns = span(last.domainLookupStartDate, last.domainLookupEndDate)
-            o.connect = span(last.connectStartDate, last.connectEndDate)
-            o.tls = span(last.secureConnectionStartDate, last.secureConnectionEndDate)
-            o.ttfb = ms(origin, last.responseStartDate)
-        }
+        let fresh = hops.filter { !$0.isReusedConnection }
+        func total(_ spans: [Int]) -> Int { spans.isEmpty ? -1 : spans.reduce(0, +) }
+        func span(_ start: Date?, _ end: Date?) -> Int? { start == nil || end == nil ? nil : max(0, ms(start, end)) }
+        o.dns = total(fresh.compactMap { span($0.domainLookupStartDate, $0.domainLookupEndDate) })
+        o.tls = total(fresh.compactMap { span($0.secureConnectionStartDate, $0.secureConnectionEndDate) })
+        o.tcp = total(fresh.compactMap { hop in
+            span(hop.connectStartDate, hop.connectEndDate).map { $0 - (span(hop.secureConnectionStartDate, hop.secureConnectionEndDate) ?? 0) }
+        })
+        o.ttfb = ms(origin, hops.last?.responseStartDate)
         o.firstData = ms(origin, r.firstByte)
-        if let first = r.firstByte, r.stopped.timeIntervalSince(first) > 0.05 {
-            o.rateKbps = Int(Double(r.bytes) * 8 / 1000 / r.stopped.timeIntervalSince(first))
+        if let first = r.firstByte {
+            let length = r.stopped.timeIntervalSince(first)
+            if length > 0.05 { o.rateKbps = Int(Double(r.bytes) * 8 / 1000 / length) }
+            if length >= 1 { o.first1sKB = r.arrivals.filter { $0.at <= first + 1 }.reduce(0) { $0 + $1.bytes } / 1024 }
+            if length >= 6 {
+                let tail = r.arrivals.filter { $0.at > r.stopped - 5 }.reduce(0) { $0 + $1.bytes }
+                o.rateTailKbps = Int(Double(tail) * 8 / 1000 / 5)
+            }
         }
         o.gapMax = r.gapMax
         o.gaps1s = r.gaps1s
         o.stoppedAt = r.stopped.timeIntervalSince(origin)
         o.bytes = r.bytes
-        let mime = r.response?.mimeType?.lowercased() ?? ""
+        o.capped = r.capped != nil
+        let mime = response?.mimeType?.lowercased() ?? ""
         o.ctype = mime == "video/mp2t" ? "mp2t" : mime.hasSuffix("mpegurl") ? "mpegurl" : "other"
-        if let response = r.response {
+        if let response {
             // URLSession hides Transfer-Encoding; chunks show as more bytes
             // on the wire than it hands over.
             let wire = hops.last.map { $0.countOfResponseBodyBytesReceived > $0.countOfResponseBodyBytesAfterDecoding } ?? false
             o.framing = response.value(forHTTPHeaderField: "Content-Length") != nil ? "length" : wire ? "chunked" : "close"
         }
-        o.error = failure(r)
+        o.error = failure(r, headers: o.headers)
         if ext == .m3u8, o.status == 200 {
             o.playlist = await playlist(r, agent: agent(ua), cap: cap)
         }
@@ -264,8 +297,8 @@ enum LiveProbe {
         p.master = lines.contains { $0.hasPrefix("#EXT-X-STREAM-INF") }
         let target = "#EXT-X-TARGETDURATION:"
         p.target = lines.first { $0.hasPrefix(target) }.flatMap { Double($0.dropFirst(target.count)) } ?? 0
-        let segments = lines.filter { !$0.isEmpty && !$0.hasPrefix("#") }
         guard !p.master else { return p }
+        let segments = lines.filter { !$0.isEmpty && !$0.hasPrefix("#") }
         p.segments = segments.count
         if let first = segments.first, let url = URL(string: first, relativeTo: r.response?.url) {
             let segment = await read(url.absoluteURL, agent: agent, cap: cap)
@@ -285,13 +318,17 @@ enum LiveProbe {
         let http = r.response?.statusCode ?? 0
         guard http == 200, let root = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
               let info = root["user_info"] as? [String: Any]
-        else { return "PROBE account http=\(http) error=\(failure(r).rawValue)" }
+        else {
+            let headers = r.response != nil || r.metrics?.transactionMetrics.last?.responseStartDate != nil
+            return "PROBE account http=\(http) error=\(failure(r, headers: headers).rawValue)"
+        }
         func number(_ any: Any?) -> Int? {
             if let n = any as? NSNumber { return n.intValue }
             return (any as? String).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
         }
         guard number(info["auth"]) == 1 else { return "PROBE account auth=no" }
-        let max = number(info["max_connections"]).map { $0 == 1 ? "one" : $0 > 1 ? "many" : "unknown" } ?? "unknown"
+        // Xtream panels say 0 for no limit.
+        let max = number(info["max_connections"]).map { $0 == 0 ? "unlimited" : $0 == 1 ? "one" : $0 > 1 ? "many" : "unknown" } ?? "unknown"
         let active = number(info["active_cons"]).map { $0 == 0 ? "0" : $0 > 0 ? ">0" : "unknown" } ?? "unknown"
         let formats = info["allowed_output_formats"] as? [String]
         let allows = { (format: String) in formats.map { yes($0.contains(format)) } ?? "unknown" }
@@ -341,8 +378,9 @@ enum LiveProbe {
         for key in keys {
             let group = groups[key]!
             let flowing = group.filter { $0.bytes > 0 }
-            let first = flowing.map(\.firstData), rate = flowing.map(\.rateKbps)
+            let first = flowing.map(\.firstData), rate = flowing.map(\.rateKbps).filter { $0 >= 0 }
             var line = "PROBE summary \(key) opens=\(group.count) with_data=\(flowing.count)"
+                + " ended_early=\(group.filter(\.endedEarly).count)"
                 + " first_data_med=\(median(first)) first_data_min=\(first.min() ?? -1) first_data_max=\(first.max() ?? -1)"
                 + " rate_kbps_med=\(median(rate)) rate_kbps_min=\(rate.min() ?? -1) rate_kbps_max=\(rate.max() ?? -1)"
             for (status, count) in Dictionary(grouping: group, by: \.status).mapValues(\.count).sorted(by: { $0.key < $1.key }) {
@@ -454,11 +492,13 @@ enum LiveProbe {
                      "PROBE host=cdn1.example", "PROBE s2.host7.tv", "PROBE edge-3.example9", "PROBE x=1.example",
                      "PROBE tok=" + String(repeating: "a", count: 33), "PROBE name=Café", "PROBE tab\there", "PROBE newline\nhere"]
         var open = Open(tok: "2001", ext: .m3u8, ua: .app, round: 3)
-        (open.status, open.hops, open.crossHost, open.ttfb, open.firstData, open.gapMax, open.stoppedAt) = (403, 1, true, 3012, -1, 5.04, 20.3)
+        (open.status, open.headers, open.hops, open.redirectMs, open.crossHost, open.ttfb, open.firstData) = (403, true, 1, 120, true, 3012, -1)
+        (open.gapMax, open.stoppedAt, open.error) = (5.04, 20.3, .no_data)
         open.playlist = Playlist(master: false, segments: 5, target: 6, segmentFirstData: 52)
-        let lines = [open.line, "PROBE account max_conn=one active=>0 ts=no m3u8=yes status=active expires_days=-3",
-                     "PROBE summary tok=123456789012 ext=ts ua=mpv opens=3 with_data=2 first_data_med=310 error_redirect_loop=1",
-                     "PROBE pair delay=1.0 a_status=200 b_status=403 b_first_data=-1", "PROBE done opens=3 requests=4 refused_lines=0"]
+        let lines = [open.line, "PROBE account max_conn=unlimited active=>0 ts=no m3u8=yes status=active expires_days=-3",
+                     "PROBE summary tok=123456789012 ext=ts ua=mpv opens=3 with_data=2 ended_early=1 first_data_med=310 error_redirect_loop=1",
+                     "PROBE pair delay=1.0 a_status=200 b_status=403 b_bytes=0 b_first_data=-1",
+                     "PROBE wait seconds=300.0 reason=pause after=10", "PROBE done opens=3 requests=4 refused_lines=0"]
         var wrong = leaks.filter(safe).count + lines.filter { !safe($0) }.count
         let before = refusedLines
         say("PROBE leak=a/b")
