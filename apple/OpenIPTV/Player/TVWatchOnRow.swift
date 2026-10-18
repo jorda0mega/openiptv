@@ -4,9 +4,11 @@ import SwiftUI
 /// Apple TV's Watch On: the channels showing the game in a row, as the
 /// player's Episodes row (TVMovieOverlay): its tab lit over them, each
 /// one's logo, service, and its feed, language and picture; "Playing" on
-/// the one playing, the remote's raised. The remote moves along it (see
-/// LivePlayerView), Select plays one.
+/// the one playing, "Didn’t play" on one that sent no picture lately, the
+/// remote's raised. The remote moves along it (see LivePlayerView), Select
+/// plays one.
 struct TVWatchOnRow: View {
+    @Environment(AppModel.self) private var model
     let choices: [AppModel.WatchChoice]
     let playing: String?
     let focused: Int
@@ -50,8 +52,7 @@ struct TVWatchOnRow: View {
 
     private func card(_ choice: AppModel.WatchChoice, on: Bool) -> some View {
         let label = choice.label
-        let isPlaying = choice.id == playing || choice.others.contains { $0.id == playing }
-        let status = [isPlaying ? "Playing" : nil, label.line.isEmpty ? nil : label.line].compactMap(\.self).joined(separator: " · ")
+        let shown = model.watchOnShown(choice, playing: playing)
         return VStack(alignment: .leading, spacing: 10) {
             CoverImage(images: choice.channel.logo.map { [CardImage(url: $0.absoluteString, contain: true)] } ?? [],
                        title: label.title)
@@ -59,11 +60,12 @@ struct TVWatchOnRow: View {
                 .background(Color(white: 0.14))
                 .clipShape(.rect(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(on ? 0.9 : 0.15), lineWidth: on ? 3 : 1))
+                .tileBadge(shown.didNotPlay ? .didNotPlay : nil)
                 // Without a logo it shows the service's name, read below.
                 .accessibilityHidden(true)
             Text(label.title).font(.system(size: 25, weight: .semibold)).lineLimit(1)
-            if !status.isEmpty {
-                Text(status).font(.system(size: 22)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+            if !shown.line.isEmpty {
+                Text(shown.line).font(.system(size: 22)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
             }
         }
         .foregroundStyle(.white)

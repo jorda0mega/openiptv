@@ -89,11 +89,13 @@ struct WatchOnMenuItems: View {
         let choices = model.gameChannels(for: channel)
         Section(choices.count > 1 ? "Watch On · \(choices.count) channels" : "Watch On") {
             ForEach(choices) { choice in
-                let label = choice.label
+                let line = model.watchOnShown(choice, playing: nil).line
                 Button { play(choice.channel) } label: {
-                    Text(label.title)
-                    if !label.line.isEmpty { Text(label.line) }
+                    Text(choice.label.title)
+                    if !line.isEmpty { Text(line) }
                 }
+                // A menu item exposes only its first line otherwise.
+                .accessibilityLabel([choice.label.title, line].filter { !$0.isEmpty }.joined(separator: ", "))
             }
         }
     }
@@ -233,12 +235,15 @@ struct EventRow: View {
         let event = entry.event
         let started = event?.start.map { $0 <= Date() } ?? false
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
-        // Different feeds showing it (the same feed on two channels once).
-        let channels = model.feedCount(entry)
+        // Different feeds showing it (the same feed on two channels once):
+        // Watch On lists them.
+        let badge = TileBadge.count(model.feedCount(entry))
         // Tried in the last half hour, and none of its channels played.
         let notPlaying = live && model.isNotPlaying(entry)
+        let line = [Self.when(event?.start, started: started), event?.league, event?.detail]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         HStack(spacing: 12) {
-            ChannelLogo(url: entry.logo, name: event?.league ?? entry.title)
+            ChannelLogo(url: entry.logo, name: event?.league ?? entry.title, badge: badge)
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.body.weight(.semibold)).lineLimit(2)
                 HStack(spacing: 6) {
@@ -257,10 +262,7 @@ struct EventRow: View {
                             .padding(.vertical, 2)
                             .background(.red, in: .capsule)
                     }
-                    // How many channels show it: Watch On lists them.
-                    Text([Self.when(event?.start, started: started), event?.league, event?.detail,
-                          channels > 1 ? "\(channels) channels" : nil]
-                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    Text(line)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -271,7 +273,10 @@ struct EventRow: View {
         .padding(.vertical, 4)
         .rowForeground()
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        // The count last, as it was when the line said it.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([entry.title, notPlaying ? "Not playing" : live ? "LIVE" : nil, line, badge?.spoken]
+            .compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     private static func when(_ start: Date?, started: Bool) -> String? {

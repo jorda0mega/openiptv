@@ -205,6 +205,7 @@ targets:
       - OpenIPTV/Player/QualityGovernor.swift
       - OpenIPTV/Player/RelayRoutes.swift
       - OpenIPTV/Live/WatchOn.swift
+      - OpenIPTV/Live/LiveFailures.swift
       - OpenIPTV/Live/GameTime.swift
       - OpenIPTV/Live/LineupCheck.swift
       - OpenIPTV/Model/Flex.swift

@@ -113,3 +113,67 @@ final class WatchOnTests: XCTestCase {
         XCTAssertEqual(WatchOn.label(.init(service: "NFL"), quality: nil).title, "NFL")
     }
 }
+
+/// After a channel that didn't play: which is tried next, and how the
+/// player names both.
+final class WatchOnMoveTests: XCTestCase {
+    private struct Copy: Identifiable, Equatable { let id: String }
+
+    private func next(after picked: String, tried: Set<String>) -> String? {
+        let feeds = [["nfl"], ["espn-es", "espn-es2"], ["dazn"]].map { $0.map(Copy.init) }
+        return WatchOn.next(after: picked, feeds: feeds, tried: tried)?.id
+    }
+
+    /// The picked feed's other slot first, then Watch On's order; nothing
+    /// once every channel was tried.
+    func testNextTriesThePickedFeedFirst() {
+        XCTAssertEqual(next(after: "espn-es", tried: ["espn-es"]), "espn-es2")
+        XCTAssertEqual(next(after: "espn-es", tried: ["espn-es", "espn-es2"]), "nfl")
+        XCTAssertEqual(next(after: "espn-es", tried: ["espn-es", "espn-es2", "nfl"]), "dazn")
+        XCTAssertEqual(next(after: "nfl", tried: ["nfl"]), "espn-es")
+        XCTAssertNil(next(after: "nfl", tried: ["nfl", "espn-es", "espn-es2", "dazn"]))
+    }
+
+    func testNames() {
+        XCTAssertEqual(WatchOn.name(.init(service: "NFL")), "NFL")
+        XCTAssertEqual(WatchOn.name(.init(service: "ESPN Unlimited", language: "es")), "ESPN Unlimited (Spanish)")
+        XCTAssertEqual(WatchOn.name(.init(service: "Football · Soccer", detail: "OneSoccer Feed")), "OneSoccer")
+        XCTAssertEqual(WatchOn.switchSentence(from: "ESPN Unlimited (Spanish)", to: nil), "ESPN Unlimited (Spanish) didn’t play. Switching.")
+        XCTAssertEqual(WatchOn.switchSentence(from: "ESPN Unlimited (Spanish)", to: "NFL"), "ESPN Unlimited (Spanish) didn’t play. Now on NFL.")
+        XCTAssertEqual(WatchOn.switchSentence(from: "OneSoccer", to: "OneSoccer"), "OneSoccer didn’t play. Now on another OneSoccer channel.")
+    }
+}
+
+/// Channels that sent no picture: how long they count, and when a channel
+/// or a feed didn't play.
+final class LiveFailuresTests: XCTestCase {
+    /// A failure counts until its check, unless it failed again since; a
+    /// play clears it at once.
+    func testExpiry() {
+        var failures = LiveFailures()
+        let first = failures.note("a", at: Date(timeIntervalSince1970: 0))
+        let again = failures.note("a", at: Date(timeIntervalSince1970: 300))
+        failures.expire("a", noted: first)
+        XCTAssertTrue(failures.contains("a"), "the first failure's check cleared a later failure")
+        failures.expire("a", noted: again)
+        XCTAssertFalse(failures.contains("a"), "the failure outlived its check")
+
+        _ = failures.note("b")
+        failures.played("b")
+        XCTAssertFalse(failures.contains("b"), "still failed after it played")
+        XCTAssertEqual(failures.ids, [])
+    }
+
+    /// A channel didn't play when every copy failed; a feed when every slot
+    /// failed and none is open.
+    func testEveryCopyFailed() {
+        var failures = LiveFailures()
+        _ = failures.note("hd")
+        XCTAssertTrue(failures.failed(["hd"]))
+        XCTAssertFalse(failures.failed(["hd", "sd"]), "a channel whose other copy didn't fail")
+        _ = failures.note("sd")
+        XCTAssertTrue(failures.failed(["hd", "sd"]))
+        XCTAssertFalse(failures.failed(["hd", "sd"], open: "sd"), "the one open is playing, not failed")
+        XCTAssertFalse(failures.failed([]))
+    }
+}

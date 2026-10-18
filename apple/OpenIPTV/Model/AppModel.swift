@@ -65,8 +65,9 @@ final class AppModel {
     /// search; and channels from abroad, listed after the rest.
     @ObservationIgnored private var guideChannels: [String: LiveChannel] = [:]
     @ObservationIgnored private var abroad: Set<String> = []
-    /// Channels that wouldn't start, and when: games try others first.
-    @ObservationIgnored private var liveFailures: [String: Date] = [:]
+    /// Channels that sent no picture lately: their cards and rows say so,
+    /// and games try others first.
+    private var liveFailures = LiveFailures()
     /// Games that played on none of their channels, and when: their rows say
     /// so for half an hour instead of LIVE.
     private(set) var gamesNotPlaying: [String: Date] = [:]
@@ -2199,6 +2200,13 @@ final class AppModel {
         var id: String { channel.id }
         /// Its name in the list and the line under it (see WatchOn.label).
         var label: (title: String, line: String) { WatchOn.label(feed, quality: quality) }
+        /// Every channel of this feed: the one listed, then its other slots.
+        var channels: [LiveChannel] { [channel] + others }
+
+        /// `id` is one of this feed's channels (the copy open, say).
+        func shows(_ id: String?) -> Bool {
+            channels.contains { $0.id == id }
+        }
     }
 
     /// Every channel showing this game, the one to play first at the top
@@ -2210,15 +2218,12 @@ final class AppModel {
         let copies = copies(of: channel).filter { seen.insert($0.id).inserted }
         guard copies.count > 1 else { return [] }
         let choices = copies.map { copy in
-            let feed = liveLibrary.feeds[copy.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
-            return WatchChoice(channel: current(copy), feed: feed, quality: WatchOn.quality(of: copy.name).label)
+            WatchChoice(channel: current(copy), feed: feed(of: copy), quality: WatchOn.quality(of: copy.name).label)
         }
         let byId = Dictionary(choices.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let options = choices.map { WatchOn.Option(id: $0.id, feed: $0.feed, quality: WatchOn.quality(of: $0.channel.name).score) }
-        let lately = Set(liveFailures.filter { Date().timeIntervalSince($0.value) < 600 }.keys)
-        let ranked = WatchOn.ranked(options, pick: watchPicks[event.league],
+        let ranked = WatchOn.ranked(choices.map { watchOption($0.channel) }, pick: watchPicks[event.league],
                                     preferred: WatchOn.preferredLanguage(league: event.league, title: title(of: channel)),
-                                    failed: lately)
+                                    failed: liveFailures.ids)
         // The same feed on several channels: one entry (the user saw
         // "Football · Soccer, OneSoccer Feed" twice).
         let grouped: [WatchChoice] = WatchOn.grouped(ranked).compactMap { group in
@@ -2229,16 +2234,21 @@ final class AppModel {
         return grouped.count > 1 ? grouped : []
     }
 
-    /// How many different feeds show this game (its channels, the same feed
-    /// on two counted once): what its row says, and when Watch On is there.
+    /// How many different feeds show this game: Watch On's own grouping of
+    /// its channels (what its badge says, and when Watch On is there).
     func feedCount(_ entry: LiveOrganizer.Entry) -> Int {
-        var keys = Set<String>()
-        for channel in entry.channels {
-            let feed = liveLibrary.feeds[channel.id]
-            keys.insert([feed?.service ?? channel.id, feed?.detail ?? "", feed?.language ?? "",
-                         String(WatchOn.quality(of: channel.name).score)].joined(separator: "|"))
-        }
-        return keys.count
+        var seen = Set<String>()
+        return WatchOn.grouped(entry.channels.filter { seen.insert($0.id).inserted }.map(watchOption)).count
+    }
+
+    /// A channel's feed; one with none of its own gets one nameless feed.
+    private func feed(of copy: LiveChannel) -> WatchOn.Feed {
+        liveLibrary.feeds[copy.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
+    }
+
+    /// A channel as Watch On ranks and groups it (and the count counts it).
+    private func watchOption(_ copy: LiveChannel) -> WatchOn.Option {
+        WatchOn.Option(id: copy.id, feed: feed(of: copy), quality: WatchOn.quality(of: copy.name).score)
     }
 
     /// Every channel showing this game, the one to play first at the top,
@@ -2247,9 +2257,8 @@ final class AppModel {
         guard event(of: channel) != nil else { return [] }
         let choices = watchChoices(for: channel)
         guard choices.isEmpty else { return choices }
-        let feed = liveLibrary.feeds[channel.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
         let others = copies(of: channel).filter { $0.id != channel.id }
-        return [WatchChoice(channel: current(channel), feed: feed, quality: WatchOn.quality(of: channel.name).label, others: others)]
+        return [WatchChoice(channel: current(channel), feed: feed(of: channel), quality: WatchOn.quality(of: channel.name).label, others: others)]
     }
 
     /// A channel picked in Watch On: first for this league's games from
@@ -2260,10 +2269,48 @@ final class AppModel {
         UserDefaults.standard.set(try? JSONEncoder().encode(picks), forKey: "watchOnPicks")
     }
 
-    /// A channel that wouldn't start: for the next ten minutes, games try
-    /// the others first.
+    /// A channel that sent no picture: marked, and tried last, until it
+    /// plays or for `failureMaxAge`.
     func noteLiveFailure(_ channel: LiveChannel) {
-        liveFailures[channel.id] = Date()
+        let noted = liveFailures.note(channel.id)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.failureMaxAge))
+            self?.liveFailures.expire(channel.id, noted: noted)
+        }
+    }
+
+    /// How long a channel that sent no picture stays marked and tried last.
+    /// UI tests: OPENREEL_DEBUG_LIVE_FAILURE_MAX_AGE.
+    private static var failureMaxAge: Double {
+        #if DEBUG
+        if let age = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LIVE_FAILURE_MAX_AGE"].flatMap(Double.init) { return age }
+        #endif
+        return 600
+    }
+
+    /// The channel didn't play: it and every copy of it sent no picture
+    /// lately on this device.
+    func didNotPlay(_ channel: LiveChannel) -> Bool {
+        liveFailures.contains(channel.id) && liveFailures.failed(copies(of: channel).map(\.id))
+    }
+
+    /// How a Watch On choice shows in every list (the player's cards, the
+    /// long press): the line under its name, and whether it's marked as not
+    /// played (every slot of its feed failed). "Playing" wins: a feed whose
+    /// other slot took over plays. `playing`: the copy open, nil outside the
+    /// player.
+    func watchOnShown(_ choice: WatchChoice, playing: String?) -> (line: String, didNotPlay: Bool) {
+        let failed = liveFailures.failed(choice.channels.map(\.id), open: playing)
+        let state = choice.shows(playing) ? "Playing" : failed ? "Didn’t play" : nil
+        let line = choice.label.line
+        return ([state, line.isEmpty ? nil : line].compactMap(\.self).joined(separator: " · "), failed)
+    }
+
+    /// A channel's name in the switch cue: "ESPN Unlimited (Spanish)" for a
+    /// game's; "TLC HD" for a copy of a channel.
+    func name(of copy: LiveChannel) -> String {
+        if liveLibrary.feeds[copy.id] != nil { return WatchOn.name(feed(of: copy)) }
+        return [title(of: copy), WatchOn.quality(of: copy.name).label].compactMap(\.self).joined(separator: " ")
     }
 
     /// A game that played on none of its channels (by any of them): so for
@@ -2312,10 +2359,12 @@ final class AppModel {
         entry.channels.contains { gamesNotPlaying[$0.id].map { Date().timeIntervalSince($0) < 1800 } ?? false }
     }
 
-    /// A game playing after all: its rows say LIVE again, on every device.
-    func noteGamePlaying(_ channel: LiveChannel) {
+    /// A copy that started: its mark goes, and its game's rows say LIVE
+    /// again, on every device.
+    func notePlaying(_ copy: LiveChannel) {
+        if liveFailures.contains(copy.id) { liveFailures.played(copy.id) }
         guard !gamesNotPlaying.isEmpty else { return }
-        let all = copies(of: channel).filter { gamesNotPlaying[$0.id] != nil }
+        let all = copies(of: copy).filter { gamesNotPlaying[$0.id] != nil }
         guard !all.isEmpty else { return }
         for copy in all { gamesNotPlaying[copy.id] = nil }
         let keys = all.compactMap(sharedKey)

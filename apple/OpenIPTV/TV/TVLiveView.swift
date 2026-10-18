@@ -441,6 +441,7 @@ struct TVChannelGrid: View {
 /// A channel: its logo on a dark tile (lifting under focus), then its name
 /// and what's on now with how far through it is.
 private struct TVChannelCard: View {
+    @Environment(AppModel.self) private var model
     let entry: LiveOrganizer.Entry
     let slot: NowNextSlot
     let favorite: Bool
@@ -448,6 +449,7 @@ private struct TVChannelCard: View {
 
     var body: some View {
         let now = slot.value?.now
+        let failed = model.didNotPlay(entry.channels[0])
         VStack(alignment: .leading, spacing: 12) {
             Button(action: action) {
                 ZStack {
@@ -461,14 +463,17 @@ private struct TVChannelCard: View {
                     if let now { ProgressBar(value: now.progress()).padding(14) }
                 }
                 .overlay(alignment: .topTrailing) {
-                    if favorite { Image(systemName: "star.fill").foregroundStyle(.yellow).padding(12) }
+                    // Beside the badge when there's one.
+                    if favorite { Image(systemName: "star.fill").foregroundStyle(.yellow).padding(12).padding(.trailing, failed ? 26 : 0) }
                 }
+                .tileBadge(failed ? .didNotPlay : nil)
             }
             .buttonStyle(.card)
-            .accessibilityLabel([entry.title, now?.title].compactMap(\.self).joined(separator: ", "))
+            .accessibilityLabel([entry.title, failed ? TileBadge.didNotPlay.spoken : nil, now?.title].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(1)
-                Text(now.map { "\($0.title) · until \($0.stop.clock)" } ?? (slot.value == nil ? " " : "No guide data"))
+                Text((failed ? "Didn’t play · " : "")
+                     + (now.map { "\($0.title) · until \($0.stop.clock)" } ?? (slot.value == nil ? " " : "No guide data")))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .accessibilityHidden(true)
@@ -491,7 +496,7 @@ private struct TVEventCard: View {
         // Tried in the last half hour, and none of its channels played.
         let notPlaying = live && model.isNotPlaying(entry)
         // Different feeds showing it (the same feed on two channels once).
-        let channels = model.feedCount(entry)
+        let badge = TileBadge.count(model.feedCount(entry))
         VStack(alignment: .leading, spacing: 12) {
             Button(action: action) {
                 ZStack(alignment: .topLeading) {
@@ -520,16 +525,16 @@ private struct TVEventCard: View {
                     }
                 }
                 .frame(height: 216)
+                .tileBadge(badge)
             }
             .buttonStyle(.card)
             // Press-and-hold: the channels showing it (Watch On).
             .contextMenu { WatchOnMenuItems(channel: entry.channels[0], play: play) }
             .accessibilityLabel([notPlaying ? "Not playing" : live ? "Live" : nil, entry.title, event?.league,
-                                 channels > 1 ? "\(channels) channels" : nil].compactMap(\.self).joined(separator: ", "))
+                                 badge?.spoken].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(2)
-                Text([Self.when(event?.start, started: started), event?.league,
-                      channels > 1 ? "\(channels) channels" : nil].compactMap(\.self).joined(separator: " · "))
+                Text([Self.when(event?.start, started: started), event?.league].compactMap(\.self).joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .accessibilityHidden(true)

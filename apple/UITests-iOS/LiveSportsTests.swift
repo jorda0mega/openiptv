@@ -196,12 +196,13 @@ final class LiveSportsTests: XCTestCase {
         game.press(forDuration: 1.2)
         // In the order they'd play: NFL, ESPN Unlimited and DAZN CA in
         // English, then ESPN Unlimited in Spanish and DAZN CA in French (the
-        // language is each item's second line).
-        let espn = app.buttons.matching(NSPredicate(format: "label == 'ESPN Unlimited'"))
+        // language is each item's second line, and after its name in the
+        // label).
+        let espn = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'ESPN Unlimited'"))
         XCTAssertTrue(espn.firstMatch.waitForExistence(timeout: 5),
                       "no channels on a long press: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.prefix(20))")
         XCTAssertEqual(espn.count, 2, "not both ESPN Unlimited feeds")
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == 'DAZN CA'")).count, 2, "not both DAZN CA feeds")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'DAZN CA'")).count, 2, "not both DAZN CA feeds")
         XCTAssertTrue(app.buttons["NFL"].firstMatch.exists, "no NFL channel")
         espn.element(boundBy: 1).tap()
         XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't play: \(liveCopy())")
@@ -508,8 +509,7 @@ final class LiveSportsTests: XCTestCase {
         game.press(forDuration: 1.2)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'ESPN Unlimited'")).firstMatch.waitForExistence(timeout: 5),
                       "no channels on a long press")
-        let marked = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Didn’t play' OR value CONTAINS 'Didn’t play'"))
-        XCTAssertTrue(marked.firstMatch.exists, "the long press doesn't say which channel didn't play")
+        XCTAssertTrue(app.buttons["ESPN Unlimited, Didn’t play · Spanish"].firstMatch.exists, "the long press doesn't say which channel didn't play")
     }
 
     /// The mark goes once that channel plays.
@@ -620,7 +620,7 @@ final class LiveSportsTests: XCTestCase {
         while readout.label.hasPrefix(deadName), Date() < deadline { usleep(250_000) }
         XCTAssertTrue(readout.label.hasPrefix(twin), "moved to \(liveCopy()), not the picked feed's other slot \(twin)")
         XCTAssertTrue(started(), "the other slot didn't play")
-        XCTAssertTrue(waitForCue("Now on OneSoccer"), "the cue doesn't say where the player went: \(cueWords())")
+        XCTAssertTrue(waitForCue("OneSoccer didn’t play", "Now on another OneSoccer channel"), "the cue doesn't say where the player went: \(cueWords())")
 
         showControls()
         app.buttons["Close player"].firstMatch.tap()
@@ -698,22 +698,33 @@ final class LiveSportsTests: XCTestCase {
         CGRect(x: tile.maxX - 9, y: tile.maxY - 9, width: 13, height: 13)
     }
 
-    /// A row's 68 × 48 logo tile (its grey, white 0.14), found in the
-    /// screenshot at the row's leading edge, in points.
+    /// A row's 68 × 48 logo tile (its grey, white 0.14) at the row's leading
+    /// edge, in points: its height from the long grey runs down it, its
+    /// width from the long runs across it (text edges make only short ones).
     private func tile(of row: XCUIElement, in shot: XCUIScreenshot) -> CGRect? {
         let area = CGRect(x: row.frame.minX, y: row.frame.minY, width: min(140, row.frame.width), height: row.frame.height)
         guard let found = pixels(shot, in: area) else { return nil }
         let (data, width, height, scale) = found
-        var minX = width, minY = height, maxX = -1, maxY = -1
-        for y in 0..<height {
-            for x in 0..<width {
-                let i = (y * width + x) * 4
-                let r = Int(data[i]), g = Int(data[i + 1]), b = Int(data[i + 2])
-                guard (28...46).contains(r), abs(r - g) < 5, abs(r - b) < 5 else { continue }
-                minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
-            }
+        func grey(_ x: Int, _ y: Int) -> Bool {
+            let i = (y * width + x) * 4
+            let r = Int(data[i]), g = Int(data[i + 1]), b = Int(data[i + 2])
+            return (28...46).contains(r) && abs(r - g) < 5 && abs(r - b) < 5
         }
-        guard maxX - minX > Int(40 * scale), maxY - minY > Int(30 * scale) else { return nil }
+        /// The longest grey run along a line of `count` pixels.
+        func longest(_ count: Int, _ isGrey: (Int) -> Bool) -> (start: Int, end: Int)? {
+            var best: (start: Int, end: Int)?, start: Int?
+            for i in 0...count {
+                if i < count, isGrey(i) { start = start ?? i; continue }
+                if let s = start, i - s > (best.map { $0.end - $0.start } ?? 0) { best = (s, i - 1) }
+                start = nil
+            }
+            return best
+        }
+        let down = (0..<width).compactMap { x in longest(height) { grey(x, $0) } }.filter { CGFloat($0.end - $0.start) > 30 * scale }
+        guard let minY = down.map(\.start).min(), let maxY = down.map(\.end).max() else { return nil }
+        // Within the tile's height: the row's separator is the same grey.
+        let across = (minY...maxY).compactMap { y in longest(width) { grey($0, y) } }.filter { CGFloat($0.end - $0.start) > 40 * scale }
+        guard let minX = across.map(\.start).min(), let maxX = across.map(\.end).max() else { return nil }
         return CGRect(x: area.minX + CGFloat(minX) / scale, y: area.minY + CGFloat(minY) / scale,
                       width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
     }
