@@ -10,6 +10,11 @@ import Foundation
 /// app's debug sign-in fetches it) or from OPENIPTV_XTREAM_URL, _USER and
 /// _PASS. Every line goes out through `say`: numbers, fixed words and the
 /// stream id only, never an address, host, header, login or error text.
+///
+/// The provider's rate rules are built in: OPENIPTV_PROBE_GAP (3 s) between
+/// opens, OPENIPTV_PROBE_ROUND_GAP (600 s) between rounds, and a pause of
+/// OPENIPTV_PROBE_PAUSE_SECONDS (300) before the requests would pass
+/// OPENIPTV_PROBE_PAUSE_EVERY (10) since the last long wait.
 enum LiveProbe {
     enum Ext: String { case ts, m3u8 }
     enum Agent: String { case mpv, app }
@@ -401,10 +406,13 @@ enum LiveProbe {
             let list = s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces)[...] }
             return list.allSatisfy(isId) ? list.map(String.init) : nil
         }
+        func number(_ key: String, _ fallback: Double) -> Double? { value(key).map { Double($0) } ?? fallback }
         guard let channels = ids((value("OPENIPTV_PROBE_IDS") ?? "")[...]) else { say("PROBE config bad_ids"); return 1 }
-        let rounds = Int(value("OPENIPTV_PROBE_ROUNDS") ?? "3") ?? 3
-        let seconds = Double(value("OPENIPTV_PROBE_SECONDS") ?? "10") ?? 10
-        let gap = Double(value("OPENIPTV_PROBE_GAP") ?? "3") ?? 3
+        guard let rounds = number("OPENIPTV_PROBE_ROUNDS", 3).flatMap({ Int(exactly: $0) }), let seconds = number("OPENIPTV_PROBE_SECONDS", 20),
+              let gap = number("OPENIPTV_PROBE_GAP", 3), let roundGap = number("OPENIPTV_PROBE_ROUND_GAP", 600),
+              let pauseEvery = number("OPENIPTV_PROBE_PAUSE_EVERY", 10).flatMap({ Int(exactly: $0) }), pauseEvery > 0,
+              let pauseSeconds = number("OPENIPTV_PROBE_PAUSE_SECONDS", 300)
+        else { say("PROBE config bad_number"); return 1 }
         guard let exts = ["ts": [Ext.ts], "m3u8": [.m3u8], "both": [.ts, .m3u8]][value("OPENIPTV_PROBE_EXT") ?? "ts"],
               let uas = ["mpv": [Agent.mpv], "app": [.app], "both": [.mpv, .app]][value("OPENIPTV_PROBE_UA") ?? "mpv"]
         else { say("PROBE config bad_ext_or_ua"); return 1 }
@@ -420,7 +428,7 @@ enum LiveProbe {
             sustained.append((String(parts[0]), length))
         }
         // "<idA>,<idB>,<delay s>[,<delay s>…]": B after each delay from A's
-        // close, until B plays.
+        // close, until B sends data.
         var pair: (a: String, b: String, delays: [Double])?
         if let spec = value("OPENIPTV_PROBE_PAIR") {
             let parts = spec.split(separator: ",")
@@ -432,20 +440,36 @@ enum LiveProbe {
         }
         guard let login = await login(env) else { say("PROBE config no_login"); return 1 }
         agents = [.mpv: mpvAgent ?? "mpv", .app: "Openreel/\(appVersion)"]
+        say("PROBE start login=\(value("OPENIPTV_SMOKE_FEED") == nil ? "env" : "holder") mpv_ua=\(mpvAgent == nil ? "guess" : "given")"
+            + " seconds=\(fixed(seconds, 1)) gap=\(fixed(gap, 1)) rounds=\(rounds) round_gap=\(fixed(roundGap, 1))"
+            + " pause_every=\(pauseEvery) pause_seconds=\(fixed(pauseSeconds, 1))")
 
-        var opened = false
-        func pace() async {
-            if opened { try? await Task.sleep(for: .seconds(gap)) }
-            opened = true
+        // Waits `wait` before the next `upcoming` requests, or the pause
+        // when they would pass `pauseEvery` since the last long wait.
+        var started = false
+        var sincePause = 0
+        func pace(_ upcoming: Int, wait: Double, reason: String? = nil) async {
+            defer { started = true }
+            guard started else { return }
+            var seconds = wait
+            if requests - sincePause + upcoming > pauseEvery, wait < pauseSeconds {
+                seconds = pauseSeconds
+                say("PROBE wait seconds=\(fixed(seconds, 1)) reason=pause after=\(requests - sincePause)")
+            } else if let reason {
+                say("PROBE wait seconds=\(fixed(seconds, 1)) reason=\(reason)")
+            }
+            try? await Task.sleep(for: .seconds(seconds))
+            if seconds >= pauseSeconds { sincePause = requests }
         }
         var opens: [Open] = []
         if !channels.isEmpty {
             say("PROBE block rounds")
             for round in 1...max(1, rounds) {
-                for id in channels {
-                    for ext in exts {
-                        for ua in uas {
-                            await pace()
+                for (n, id) in channels.enumerated() {
+                    for (m, ext) in exts.enumerated() {
+                        for (k, ua) in uas.enumerated() {
+                            let next = round > 1 && n == 0 && m == 0 && k == 0
+                            await pace(ext == .m3u8 ? 2 : 1, wait: next ? roundGap : gap, reason: next ? "round" : nil)
                             let o = await open(login, id: id, ext: ext, ua: ua, round: round, cap: seconds)
                             say(o.line)
                             opens.append(o)
@@ -456,12 +480,12 @@ enum LiveProbe {
         }
         if !sustained.isEmpty { say("PROBE block sustain") }
         for (id, length) in sustained {
-            await pace()
-            say(await open(login, id: id, ext: exts[0], ua: uas[0], round: 0, cap: length).line)
+            await pace(1, wait: gap)
+            say(await open(login, id: id, ext: .ts, ua: uas[0], round: 0, cap: length).line)
         }
         if let pair {
             say("PROBE block pair")
-            await pace()
+            await pace(1 + pair.delays.count, wait: gap)
             let a = await open(login, id: pair.a, ext: .ts, ua: uas[0], round: 0, cap: 10)
             say(a.line)
             let closed = Date()
@@ -469,12 +493,12 @@ enum LiveProbe {
                 try? await Task.sleep(for: .seconds(max(0, delay - Date().timeIntervalSince(closed))))
                 let b = await open(login, id: pair.b, ext: .ts, ua: uas[0], round: 0, cap: seconds)
                 say(b.line)
-                say("PROBE pair delay=\(fixed(delay, 1)) a_status=\(a.status) b_status=\(b.status) b_first_data=\(b.firstData)")
-                if b.status == 200 { break }
+                say("PROBE pair delay=\(fixed(delay, 1)) a_status=\(a.status) b_status=\(b.status) b_bytes=\(b.bytes) b_first_data=\(b.firstData)")
+                if b.bytes > 0 { break }
             }
         }
         if value("OPENIPTV_PROBE_ACCOUNT") == "1" {
-            await pace()
+            await pace(1, wait: gap)
             say(await account(login))
         }
         summary(opens)
