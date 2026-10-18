@@ -302,17 +302,12 @@ enum LiveProbe {
 
     // MARK: Run
 
+    /// `mpv`: what the app's player sends the stream server, libmpv's own
+    /// user agent (the app sets none), exact only from OPENIPTV_PROBE_MPV_UA;
+    /// else a guess. `app`: what the app sends its API calls (Flex.swift),
+    /// with the version run.sh compiles in.
     static var agents: [Agent: String] = [:]
-    static func agent(_ ua: Agent) -> String { agents[ua] ?? "libmpv" }
-
-    /// The app's own user agent: "Openreel/" and the app's version, read
-    /// from project.yml (run.sh runs this from apple/).
-    static func appAgent() -> String {
-        let project = (try? String(contentsOfFile: "project.yml", encoding: .utf8)) ?? ""
-        let version = project.range(of: #"MARKETING_VERSION: "[^"]+""#, options: .regularExpression)
-            .map { project[$0].dropFirst(20).dropLast() } ?? "0"
-        return "Openreel/\(version)"
-    }
+    static func agent(_ ua: Agent) -> String { agents[ua] ?? "mpv" }
 
     static func login(_ env: [String: String]) async -> Login? {
         if let holder = env["OPENIPTV_SMOKE_FEED"].flatMap(URL.init(string:)) {
@@ -375,6 +370,10 @@ enum LiveProbe {
         guard let exts = ["ts": [Ext.ts], "m3u8": [.m3u8], "both": [.ts, .m3u8]][value("OPENIPTV_PROBE_EXT") ?? "ts"],
               let uas = ["mpv": [Agent.mpv], "app": [.app], "both": [.mpv, .app]][value("OPENIPTV_PROBE_UA") ?? "mpv"]
         else { say("PROBE config bad_ext_or_ua"); return 1 }
+        let mpvAgent = value("OPENIPTV_PROBE_MPV_UA")
+        // Comparing user agents against a guessed one spends requests on an
+        // answer that can't be read.
+        guard mpvAgent != nil || uas.count == 1 else { say("PROBE config mpv_ua_unknown"); return 1 }
         // "<id>:<seconds>[,<id>:<seconds>…]"
         var sustained: [(String, Double)] = []
         for spec in (value("OPENIPTV_PROBE_SUSTAIN") ?? "").split(separator: ",") {
@@ -394,7 +393,7 @@ enum LiveProbe {
             pair = (String(parts[0]), String(parts[1]), delays.sorted())
         }
         guard let login = await login(env) else { say("PROBE config no_login"); return 1 }
-        agents = [.mpv: value("OPENIPTV_PROBE_MPV_UA") ?? "libmpv", .app: appAgent()]
+        agents = [.mpv: mpvAgent ?? "mpv", .app: "Openreel/\(appVersion)"]
 
         var opened = false
         func pace() async {
