@@ -512,6 +512,10 @@ class Handler(BaseHTTPRequestHandler):
             name = path.rsplit("/", 1)[1]
             # /mock/set?dead_live=2003,2005: those channels answer and never
             # send a picture (an event feed that's over).
+            # /mock/set?slow_live=2002: those channels take 4 s to answer (a
+            # slow provider), so a test sees the player between two channels.
+            if name.split(".")[0] in CONTROL.get("slow_live", "").split(","):
+                time.sleep(4)
             if name.split(".")[0] in CONTROL.get("dead_live", "").split(","):
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp2t")
