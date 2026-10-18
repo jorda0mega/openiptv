@@ -73,14 +73,6 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
         return LiveLineup(categories: categories, channels: channels, guideURLs: [xmltv.url!])
     }
 
-    /// One category's channels: event and PPV channels are renamed for each
-    /// game, and one category is a sliver of the whole lineup.
-    func channels(inCategory categoryId: String) async throws -> [LiveChannel]? {
-        let raw = String(categoryId.split(separator: "|", maxSplits: 1).last ?? "")
-        let data = try await HTTP.data(api([.init(name: "action", value: "get_live_streams"), .init(name: "category_id", value: raw)]))
-        return JSONDecoder().lenientList(RawChannel.self, from: data).compactMap { channel($0, hidden: []) }
-    }
-
     private func channel(_ raw: RawChannel, hidden: Set<String>) -> LiveChannel? {
         guard let id = raw.stream_id,
               !AccountInfoFilter.looksLikeAccountInfo(raw.name),

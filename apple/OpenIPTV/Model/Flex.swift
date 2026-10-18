@@ -62,6 +62,9 @@ enum SourceError: LocalizedError {
     case http(Int)
     /// No connection: the request never reached the server.
     case offline
+    /// The app itself stopped the request (its task cancelled): nothing
+    /// the server did.
+    case cancelled
     case network(String)
     case unexpected(String)
 
@@ -71,6 +74,7 @@ enum SourceError: LocalizedError {
         case .http(429): "Your provider is busy right now (too many requests)."
         case let .http(code): "The server answered with an error (HTTP \(code))."
         case .offline: "No internet connection."
+        case .cancelled: "The request was stopped."
         case let .network(message): message
         case let .unexpected(message): message
         }
@@ -79,9 +83,11 @@ enum SourceError: LocalizedError {
     /// Wraps any error without leaking the URL it may contain.
     static func wrap(_ error: Error) -> SourceError {
         if let error = error as? SourceError { return error }
+        if error is CancellationError { return .cancelled }
         if let error = error as? URLError {
             switch error.code {
             case .notConnectedToInternet: return .offline
+            case .cancelled: return .cancelled
             case .timedOut: return .network("The server took too long to answer.")
             case .cannotFindHost, .dnsLookupFailed: return .network("That server address couldn't be found.")
             case .cannotConnectToHost: return .network("Couldn't connect to the server.")
