@@ -167,7 +167,7 @@ class LiveSwitches(unittest.TestCase):
     def test_dead_live_answers_and_sends_nothing(self):
         self.mock.set(dead_live="2003")
         dead = self.open("/live/u/p/2003.ts", 1.5)
-        self.assertEqual((dead.status, dead.length, dead.ended), (200, 0, "cap"))
+        self.assertEqual((dead.status, dead.length, dead.ended, dead.headers["connection"]), (200, 0, "cap", "close"))
 
     def test_status_refuses_every_live_request_or_only_the_listed_ones(self):
         self.mock.set(live_status=403)
@@ -211,6 +211,15 @@ class LiveSwitches(unittest.TestCase):
         self.mock.set(live_rate=1000)
         slow = self.open("/live/u/p/1.ts", 5)
         self.assertAlmostEqual(slow.kbps(skip=0.5), 1000, delta=120)
+
+    def test_burst_sends_the_start_at_once_then_the_film_at_its_pace(self):
+        steady = self.open("/live/u/p/1.ts", 4)
+        self.mock.set(live_burst=3)
+        burst = self.open("/live/u/p/1.ts", 4)
+        def first_second(o):
+            return sum(n for t, n in o.arrivals if t <= o.first_data + 1)
+        self.assertGreater(first_second(burst), 2.5 * first_second(steady))
+        self.assertAlmostEqual(burst.kbps(skip=2.5), steady.kbps(skip=2.5), delta=0.25 * steady.kbps(skip=2.5))
 
     def test_stall_pauses_the_stream_with_the_connection_open(self):
         self.mock.set(live_stall="1.5:2")
