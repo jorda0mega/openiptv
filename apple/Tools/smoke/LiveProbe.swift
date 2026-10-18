@@ -18,8 +18,8 @@ import Foundation
 enum LiveProbe {
     enum Ext: String { case ts, m3u8 }
     enum Agent: String { case mpv, app }
-    /// `timeout`: no answer by the cap (or the 60 s request timeout).
-    /// `no_data`: an answer, then no body by the cap.
+    /// `timeout`: no answer by the cap. `no_data`: an answer, then no body
+    /// by the cap.
     enum Failure: String { case none, dns, refused, reset, timeout, no_data, tls, cancelled, redirect_loop, other }
 
     struct Login {
@@ -188,7 +188,9 @@ enum LiveProbe {
         config.httpCookieAcceptPolicy = .never
         config.httpCookieStorage = nil
         config.urlCredentialStorage = nil
-        config.timeoutIntervalForRequest = 60
+        // Past the cap, so the cap ends every read: URLSession's idle timer
+        // would end a dead feed or a long stall at 60 s.
+        config.timeoutIntervalForRequest = cap + 5
         config.httpMaximumConnectionsPerHost = 1
         let reader = Reader(keepBody: keepBody)
         let session = URLSession(configuration: config, delegate: reader, delegateQueue: reader.queue)
