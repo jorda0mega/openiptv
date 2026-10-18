@@ -134,6 +134,7 @@ struct SportsContent: View {
                 .listRowBackground(Color.clear)
         }
         if chosen == Self.channels {
+            GamesNoticeView(notice: model.gamesNotice, nothingListed: false)
             EntrySections(sections: shelf.sections.filter { $0.id != "events" }, playing: $playing)
         } else {
             let shown = events.filter { entry in

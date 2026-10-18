@@ -50,7 +50,9 @@ SOCKETS = set()
 # answers: a real server reads the whole film to take it out),
 # "xtream_status" ("429": every player_api.php request past the login check
 # answers with that HTTP status and an empty body, a provider refusing; 0 or
-# unset: as normal).
+# unset: as normal), "xtream_empty" ("1": get_live_streams for the whole
+# lineup answers an empty list, HTTP 200, a provider that sent nothing;
+# other requests as normal).
 CONTROL = {}
 # A film's length (seconds; OPENIPTV_MOCK_RUNTIME): two hours unless the
 # test film is shorter and its length matters (stretches of its sound).
@@ -537,6 +539,8 @@ class Handler(BaseHTTPRequestHandler):
         status = int(CONTROL.get("xtream_status", 0))
         if status:
             return self.send(b"", status=status)
+        if action == "get_live_streams" and not q.get("category_id") and CONTROL.get("xtream_empty") == "1":
+            return self.send([])
         if action is None:
             return self.send({
                 "user_info": {"auth": 1, "status": "Active", "exp_date": str(now + 86400 * 90),

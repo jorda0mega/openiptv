@@ -645,6 +645,7 @@ struct TVSports: View {
         let chosen = filter
 
         if chosen == "Channels" {
+            GamesNoticeView(notice: model.gamesNotice, nothingListed: false).padding(.leading, 90)
             ForEach(shelf.sections.filter { $0.id != "events" }) { section in
                 TVChannelGrid(title: section.title, entries: section.entries, playing: $playing)
             }
@@ -666,10 +667,10 @@ struct TVSports: View {
                 ("Earlier Today", shown.filter { GameTime.state(start: $0.event?.start, league: $0.event?.league ?? "", title: $0.title, now: now) == .over }),
                 ("More Events", shown.filter { $0.event?.start == nil }),
             ]
+            GamesNoticeView(notice: model.gamesNotice, nothingListed: shown.isEmpty).padding(.leading, 90)
             ForEach(groups.filter { !$0.1.isEmpty }, id: \.0) { group in
                 TVChannelGrid(title: group.0, entries: group.1, playing: $playing)
             }
-            GamesNoticeView(notice: model.gamesNotice, nothingListed: shown.isEmpty).padding(.leading, 90)
         }
     }
 }

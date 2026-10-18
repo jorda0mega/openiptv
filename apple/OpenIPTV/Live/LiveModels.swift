@@ -118,9 +118,6 @@ struct LiveLineup {
 protocol LiveProvider: Sendable {
     var source: IPTVSource { get }
     func load() async throws -> LiveLineup
-    /// One category's channels as they are now, when the provider can send
-    /// just one (nil when it can't).
-    func channels(inCategory categoryId: String) async throws -> [LiveChannel]?
     /// Quick per-channel now/next straight from the provider, if it has one.
     func shortEPG(for channel: LiveChannel) async -> [Programme]
     func playable(_ channel: LiveChannel) async throws -> PlayableStream
@@ -133,7 +130,6 @@ protocol LiveProvider: Sendable {
 
 extension LiveProvider {
     func shortEPG(for channel: LiveChannel) async -> [Programme] { [] }
-    func channels(inCategory categoryId: String) async throws -> [LiveChannel]? { nil }
     func schedule(for channel: LiveChannel) async -> [Programme] { [] }
     func catchup(_ channel: LiveChannel, programme: Programme) async throws -> PlayableStream? { nil }
 }

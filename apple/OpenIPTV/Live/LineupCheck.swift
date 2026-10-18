@@ -18,8 +18,11 @@ struct LineupCheck: Sendable {
         self.answeredAt = answeredAt
     }
 
-    /// The end of an ask, at `now`.
+    /// The end of an ask, at `now`. An ask the app stopped itself (out of
+    /// background time) is no ask: nothing changes, and the source is due
+    /// as before.
     mutating func record(_ result: Result<Void, SourceError>, at now: Date) {
+        if case .failure(.cancelled) = result { return }
         askedAt = now
         switch result {
         case .success:

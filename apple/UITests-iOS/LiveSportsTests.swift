@@ -283,12 +283,12 @@ final class LiveSportsTests: XCTestCase {
         if tab.waitForExistence(timeout: 10) { tab.tap() }
         let sports = app.buttons["Sports"].firstMatch
         XCTAssertTrue(sports.waitForExistence(timeout: 20), "no Sports tab: the lineup didn't load")
-        let mark = markTime(server)
+        let mark = try markTime(server)
         sports.tap()
         let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
         XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
         sleep(3)
-        XCTAssertEqual(lineupRequests(server, since: mark), [], "Sports asked the provider again for a lineup minutes old")
+        XCTAssertEqual(try lineupRequests(server, since: mark), [], "Sports asked the provider again for a lineup minutes old")
     }
 
     /// The provider refusing (429, too many requests) at a relaunch: Sports
@@ -394,6 +394,34 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(game.label.contains("LIVE"), "the game's row: \(game.label)")
     }
 
+    /// The provider answering with no channels at all (HTTP 200, an empty
+    /// list): the games listed stay, and Sports says it couldn't update
+    /// them and why; once the provider sends its lineup again the notice
+    /// goes. Regression: the empty answer emptied Live TV and was saved as
+    /// the lineup just checked.
+    func testEmptyAnswerKeepsTheGames() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["sports": "1"])
+        addTeardownBlock { [self] in configure(server, ["sports": "0", "xtream_empty": "0"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_GAMES_MAX_AGE"] = "5"
+        app.launchArguments = ["-freshLineup", "YES"]
+        app.launch()
+        openSports()
+        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(game.waitForExistence(timeout: 20), "the game isn't in Sports")
+
+        configure(server, ["xtream_empty": "1"])
+        let notice = app.staticTexts["Couldn't update the games"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 20), "no word that the games couldn't be updated after an empty answer")
+        XCTAssertTrue(game.exists, "the game went with the provider's empty answer")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'sent no channels'")).firstMatch.exists,
+                      "the notice doesn't say why")
+
+        configure(server, ["xtream_empty": "0"])
+        XCTAssertTrue(notice.waitForNonExistence(timeout: 20), "the notice stayed after the provider sent its lineup again")
+        XCTAssertTrue(game.exists, "the game went once the lineup came back")
+    }
+
     /// Live TV → Sports.
     private func openSports() {
         let tab = app.tabBars.buttons["Live TV"].firstMatch
@@ -453,30 +481,36 @@ final class LiveSportsTests: XCTestCase {
     }
 
     /// The test server's clock, for `lineupRequests(since:)`.
-    private func markTime(_ server: URL) -> Double {
-        var t = 0.0
-        let done = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: server.appending(path: "mock/mark")) { data, _, _ in
-            t = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Double] })?["t"] ?? 0
-            done.signal()
-        }.resume()
-        _ = done.wait(timeout: .now() + 10)
-        return t
+    private func markTime(_ server: URL) throws -> Double {
+        let clock: [String: Double] = try answer(server.appending(path: "mock/mark"))
+        return try XCTUnwrap(clock["t"], "the test server's clock has no time")
     }
 
     /// The lineup the app asked the provider for since `since`: "account",
     /// "get_live_categories", "get_live_streams" or "get_live_streams:<cat>"
     /// (one category); not the guide requests its rows make.
-    private func lineupRequests(_ server: URL, since: Double) -> [String] {
-        var items: [String] = []
-        let done = DispatchSemaphore(value: 0)
+    private func lineupRequests(_ server: URL, since: Double) throws -> [String] {
         let url = server.appending(path: "mock/xtream_requests").appending(queryItems: [.init(name: "since", value: String(since))])
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            items = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?["items"] ?? []
+        let requests: [String: [String]] = try answer(url)
+        let items = try XCTUnwrap(requests["items"], "the test server's request list has no items")
+        return items.filter { $0 == "account" || $0.hasPrefix("get_live_") }
+    }
+
+    /// The test server's JSON answer to `url`. No answer in 10 s, another
+    /// status, or other JSON fails the test: a count that couldn't be read
+    /// never passes as none.
+    private func answer<Answer>(_ url: URL) throws -> Answer {
+        var data: Data?
+        var status: Int?
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: url) { body, response, _ in
+            data = body
+            status = (response as? HTTPURLResponse)?.statusCode
             done.signal()
         }.resume()
         _ = done.wait(timeout: .now() + 10)
-        return items.filter { $0 == "account" || $0.hasPrefix("get_live_") }
+        let body = try XCTUnwrap(status == 200 ? data : nil, "the test server's answer to \(url.path): status \(status.map(String.init) ?? "none")")
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? Answer, "the test server's answer to \(url.path) isn't the JSON expected")
     }
 
     /// Sets the test server's behaviour (scripts/mock_server.py, /mock/set).
