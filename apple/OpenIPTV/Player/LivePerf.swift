@@ -271,11 +271,12 @@ enum LivePerf {
         private func end(_ reason: End) {
             guard let current = copy else { return }
             copy = nil
-            let watched = current.frameAt.map { CFAbsoluteTimeGetCurrent() - $0 } ?? -1
+            let now = CFAbsoluteTimeGetCurrent()
+            let stalled = current.stalled + (current.stallBegan.map { now - $0 } ?? 0)
             let logged = player?.livePerf.failure ?? .none
             if logged != .none { failure = logged }
-            say(.end, ["tok": .token(current.token), "reason": .word(reason), "watched": .decimal(watched, places: 1),
-                       "stalls": .count(current.stalls), "stalled": .decimal(current.stalled, places: 1), "class": .word(logged)])
+            say(.end, ["tok": .token(current.token), "reason": .word(reason), "watched": .decimal(current.frameAt.map { now - $0 } ?? -1, places: 1),
+                       "stalls": .count(current.stalls), "stalled": .decimal(stalled, places: 1), "class": .word(logged)])
         }
     }
 }
