@@ -1,13 +1,11 @@
 import SwiftUI
 
 /// The badge on a channel's or a game's tile: how many channels show a
-/// game, or that a channel didn't play. One tile has one badge (where: see
-/// tileBadge).
+/// game, or that a channel didn't play. One tile has one badge.
 enum TileBadge {
     case channels(Int)
     case didNotPlay
 
-    /// A game's: its count when more than one channel shows it.
     static func count(_ channels: Int) -> TileBadge? {
         channels > 1 ? .channels(channels) : nil
     }
@@ -26,12 +24,18 @@ enum TileBadge {
 struct TileBadgeView: View {
     let badge: TileBadge
 
-    /// Its height: 17 points on iPhone, 30 on Apple TV (seen from the sofa).
+    /// Taller on Apple TV, seen from the sofa.
     #if os(tvOS)
     static let size: CGFloat = 30
+    static let cardInset: CGFloat = 8
     #else
     static let size: CGFloat = 17
     #endif
+    static let outset: CGFloat = 6
+    static let ringWidth: CGFloat = 2
+    /// How far the badge and its ring stick out. A scroll view cuts them
+    /// without this much room.
+    static let overhang: CGFloat = outset + ringWidth
     /// The TV glyph and the count, from the height: 11 points on iPhone, 19
     /// on Apple TV.
     private let glyph = (TileBadgeView.size * 0.64).rounded()
@@ -64,36 +68,29 @@ struct TileBadgeView: View {
 }
 
 extension View {
-    /// The badge on this tile: its bottom-trailing corner, 6 points out,
-    /// ringed in `ring` (what's behind the tile) so it reads as on top. On
-    /// an Apple TV card (`onCard`), inside the top-trailing corner, 8 points
-    /// in, ringed dark against the tile: the card's focus clips what sticks
-    /// out and lifts the card under it.
-    @ViewBuilder func tileBadge(_ badge: TileBadge?, ring: Color = .black, onCard: Bool = true) -> some View {
-        #if os(tvOS)
-        if onCard {
-            overlay(alignment: .topTrailing) {
-                if let badge {
-                    TileBadgeView(badge: badge)
-                        .background(Capsule().inset(by: -2).fill(.black.opacity(0.5)))
-                        .padding(8)
-                }
-            }
-        } else {
-            sticksOut(badge, ring: ring)
-        }
-        #else
-        sticksOut(badge, ring: ring)
-        #endif
-    }
-
-    private func sticksOut(_ badge: TileBadge?, ring: Color) -> some View {
+    /// The bottom-trailing corner, outside the tile, ringed in `ring`
+    /// (what's behind it) so it reads as on top.
+    @ViewBuilder func tileBadge(_ badge: TileBadge?, ring: Color = .black) -> some View {
         overlay(alignment: .bottomTrailing) {
             if let badge {
                 TileBadgeView(badge: badge)
-                    .background(Capsule().inset(by: -2).fill(ring))
-                    .offset(x: 6, y: 6)
+                    .background(Capsule().inset(by: -TileBadgeView.ringWidth).fill(ring))
+                    .offset(x: TileBadgeView.outset, y: TileBadgeView.outset)
             }
         }
     }
+
+    #if os(tvOS)
+    /// The top-trailing corner, inside the card. Focus clips a badge that
+    /// sticks out, and lifts the card under it.
+    @ViewBuilder func cardBadge(_ badge: TileBadge?) -> some View {
+        overlay(alignment: .topTrailing) {
+            if let badge {
+                TileBadgeView(badge: badge)
+                    .background(Capsule().inset(by: -TileBadgeView.ringWidth).fill(.black.opacity(0.5)))
+                    .padding(TileBadgeView.cardInset)
+            }
+        }
+    }
+    #endif
 }

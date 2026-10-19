@@ -452,7 +452,7 @@ struct PlayerInfoPanelView: View {
                         }
                         // Room for a badge sticking out of a picture's corner:
                         // the scroll view cuts what's outside its content.
-                        .padding(.bottom, panel.cards.contains { $0.badge != nil } ? 8 : 0)
+                        .padding(.bottom, panel.cards.contains { $0.badge != nil } ? TileBadgeView.overhang : 0)
                     }
                     .scrollIndicators(.hidden)
                 } else {

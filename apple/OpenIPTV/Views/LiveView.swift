@@ -361,7 +361,11 @@ struct ChannelLogo: View {
             }
         }
         .frame(width: size.width, height: size.height)
+        #if os(tvOS)
+        .cardBadge(badge)
+        #else
         .tileBadge(badge)
+        #endif
         .task(id: url) {
             guard let url, ImagePipeline.shared.cached(url) == nil else { return }
             image = try? await ImagePipeline.shared.image(for: url)
