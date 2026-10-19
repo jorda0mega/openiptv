@@ -40,6 +40,10 @@ struct SwitchCue: View {
         .font(.system(size: font, weight: .semibold))
         .foregroundStyle(.white)
         .lineLimit(1)
+        // A long name ("Now on ESPN Unlimited (Spanish)") shrinks a little,
+        // then loses its middle.
+        .minimumScaleFactor(0.75)
+        .truncationMode(.middle)
         .padding(inset)
         .background(fill.opacity(0.9), in: .capsule)
         .accessibilityElement(children: .ignore)

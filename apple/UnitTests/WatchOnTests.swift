@@ -165,7 +165,7 @@ final class LiveFailuresTests: XCTestCase {
     }
 
     /// A channel didn't play when every copy failed; a feed when every slot
-    /// failed and none is open.
+    /// failed and none is playing (one open that failed isn't).
     func testEveryCopyFailed() {
         var failures = LiveFailures()
         _ = failures.note("hd")
@@ -173,7 +173,7 @@ final class LiveFailuresTests: XCTestCase {
         XCTAssertFalse(failures.failed(["hd", "sd"]), "a channel whose other copy didn't fail")
         _ = failures.note("sd")
         XCTAssertTrue(failures.failed(["hd", "sd"]))
-        XCTAssertFalse(failures.failed(["hd", "sd"], open: "sd"), "the one open is playing, not failed")
+        XCTAssertFalse(failures.failed(["hd", "sd"], playing: "sd"), "the one playing isn't failed")
         XCTAssertFalse(failures.failed([]))
     }
 }

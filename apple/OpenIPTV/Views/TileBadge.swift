@@ -16,33 +16,37 @@ enum TileBadge {
     var spoken: String {
         switch self {
         case let .channels(count): "\(count) channels"
-        case .didNotPlay: "Didn’t play"
+        case .didNotPlay: LiveFailures.didNotPlay
         }
     }
 }
 
 /// A white capsule with a TV and the count, or a grey circle with a
-/// crossed-out TV. 17 points tall on iPhone, 22 on Apple TV.
+/// crossed-out TV.
 struct TileBadgeView: View {
     let badge: TileBadge
 
+    /// Its height: 17 points on iPhone, 30 on Apple TV (seen from the sofa).
     #if os(tvOS)
-    private let height: CGFloat = 22, glyph: CGFloat = 14
+    static let size: CGFloat = 30
     #else
-    private let height: CGFloat = 17, glyph: CGFloat = 11
+    static let size: CGFloat = 17
     #endif
+    /// The TV glyph and the count, from the height: 11 points on iPhone, 19
+    /// on Apple TV.
+    private let glyph = (TileBadgeView.size * 0.64).rounded()
+    private let number = (TileBadgeView.size * 0.62).rounded()
 
     var body: some View {
         switch badge {
         case let .channels(count):
             HStack(spacing: 2) {
-                Image(systemName: "tv")
-                Text("\(count)")
+                Image(systemName: "tv").font(.system(size: glyph, weight: .heavy))
+                Text("\(count)").font(.system(size: number, weight: .heavy))
             }
-            .font(.system(size: glyph, weight: .heavy))
             .foregroundStyle(.black)
-            .padding(.horizontal, height * 0.3)
-            .frame(minWidth: height, minHeight: height)
+            .padding(.horizontal, Self.size * 0.3)
+            .frame(minWidth: Self.size, minHeight: Self.size)
             .background(.white, in: .capsule)
             .fixedSize()
             .accessibilityElement(children: .ignore)
@@ -51,7 +55,7 @@ struct TileBadgeView: View {
             Image(systemName: "tv.slash")
                 .font(.system(size: glyph, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: height, height: height)
+                .frame(width: Self.size, height: Self.size)
                 .background(Color(red: 0x48 / 255, green: 0x48 / 255, blue: 0x4A / 255), in: .circle)
                 // The words beside it say it ("Didn’t play").
                 .accessibilityHidden(true)

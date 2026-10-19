@@ -450,6 +450,9 @@ private struct TVChannelCard: View {
     var body: some View {
         let now = slot.value?.now
         let failed = model.didNotPlay(entry.channels[0])
+        let line = [failed ? LiveFailures.didNotPlay : nil,
+                    now.map { "\($0.title) · until \($0.stop.clock)" } ?? (slot.value == nil ? nil : "No guide data")]
+            .compactMap(\.self).joined(separator: " · ")
         VStack(alignment: .leading, spacing: 12) {
             Button(action: action) {
                 ZStack {
@@ -464,16 +467,18 @@ private struct TVChannelCard: View {
                 }
                 .overlay(alignment: .topTrailing) {
                     // Beside the badge when there's one.
-                    if favorite { Image(systemName: "star.fill").foregroundStyle(.yellow).padding(12).padding(.trailing, failed ? 26 : 0) }
+                    if favorite {
+                        Image(systemName: "star.fill").foregroundStyle(.yellow).padding(12).padding(.trailing, failed ? TileBadgeView.size + 4 : 0)
+                    }
                 }
                 .tileBadge(failed ? .didNotPlay : nil)
             }
             .buttonStyle(.card)
-            .accessibilityLabel([entry.title, failed ? TileBadge.didNotPlay.spoken : nil, now?.title].compactMap(\.self).joined(separator: ", "))
+            .accessibilityLabel([entry.title, failed ? LiveFailures.didNotPlay : nil, now?.title].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(1)
-                Text((failed ? "Didn’t play · " : "")
-                     + (now.map { "\($0.title) · until \($0.stop.clock)" } ?? (slot.value == nil ? " " : "No guide data")))
+                // A blank line while the guide loads keeps the card's height.
+                Text(line.isEmpty ? " " : line)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .accessibilityHidden(true)

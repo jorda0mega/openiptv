@@ -90,6 +90,9 @@ struct LivePlayerView: View {
     }
 
     private var channel: LiveChannel { model.current(channels[index]) }
+    /// The copy playing (or starting): none once it failed, so every list
+    /// shows it as not played.
+    private var playingID: String? { error == nil ? playingCopy?.id : nil }
     /// "TLC" rather than "US: TLC HD".
     private var displayName: String { model.title(of: channel) }
 
@@ -176,7 +179,7 @@ struct LivePlayerView: View {
         let event = recording == nil ? model.event(of: channel) : nil
         #if os(tvOS)
         if showWatchOn {
-            TVWatchOnRow(choices: choices, playing: playingCopy?.id, focused: watchOnIndex)
+            TVWatchOnRow(choices: choices, playing: playingID, focused: watchOnIndex)
                 .transition(.opacity.combined(with: .offset(y: 40)))
         } else {
             chrome(info: info, event: event)
@@ -324,6 +327,7 @@ struct LivePlayerView: View {
     private func switchCue(_ picked: LiveChannel, _ open: LiveChannel) -> some View {
         SwitchCue(from: picked, fromName: model.name(of: picked),
                   to: started ? open : nil, toName: started ? model.name(of: open) : nil)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             #if os(tvOS)
             .padding(.top, 50)
@@ -345,11 +349,12 @@ struct LivePlayerView: View {
         #if os(iOS)
         guard showWatchOn else { return nil }
         return PlayerInfoPanel(title: "Watch On", meta: "", cards: choices.map { choice in
-            let shown = model.watchOnShown(choice, playing: playingCopy?.id)
+            let shown = model.watchOnShown(choice, playing: playingID)
             return PlayerCard(id: choice.id, title: choice.label.title, subtitle: shown.line.isEmpty ? nil : shown.line,
                               images: choice.channel.logo.map { [CardImage(url: $0.absoluteString, contain: true)] } ?? [],
-                              loading: choice.shows(playingCopy?.id) && !started && error == nil,
-                              badge: shown.didNotPlay ? .didNotPlay : nil) { watch(on: choice) }
+                              loading: choice.shows(playingID) && !started,
+                              badge: shown.didNotPlay ? .didNotPlay : nil,
+                              line: shown.line.isEmpty ? nil : shown.line) { watch(on: choice) }
         }, focus: choices.first { $0.shows(playingCopy?.id) }?.id)
         #else
         return nil
@@ -386,14 +391,14 @@ struct LivePlayerView: View {
     private func watch(on choice: AppModel.WatchChoice) {
         let league = model.event(of: channel)?.league
         withAnimation(.snappy(duration: 0.3 * PlayerMotion.scale)) { showWatchOn = false }
-        guard choice.id != playingCopy?.id else {
+        guard !choice.shows(playingID) else {
             if started, let league { model.pickWatchChoice(choice, league: league) }
             return showControls()
         }
         pendingPick = league.map { (choice, $0) }
         reset()
         recording = nil
-        begin(choice.channel)
+        attempt = Attempt(choice.channel)
         open(choice.channel)
         showControls()
     }
@@ -519,7 +524,7 @@ struct LivePlayerView: View {
         pendingPick = nil
         choices = model.watchChoices(for: channel)
         let first = copy ?? choices.first?.channel ?? channel
-        begin(first)
+        attempt = Attempt(first)
         model.noteChannel(channel.id)
         open(first, after: delay)
         showAround()
@@ -556,13 +561,6 @@ struct LivePlayerView: View {
                 if !fallBack() { fail(SourceError.wrap(error).localizedDescription) }
             }
         }
-    }
-
-    /// A new go at playing `picked`: nothing else tried, and an earlier
-    /// switch cue goes at once.
-    private func begin(_ picked: LiveChannel) {
-        cueTask?.cancel()
-        attempt = Attempt(picked)
     }
 
     /// The next copy, if one hasn't been tried (the picked feed's other
@@ -614,7 +612,11 @@ struct LivePlayerView: View {
         if let recording { watch(recording) } else { play() }
     }
 
+    /// Before anything opens: a switch cue from what played before goes at
+    /// once.
     private func reset() {
+        cueTask?.cancel()
+        attempt?.cue = false
         if paused { player?.setPaused(false) }
         timing = "Starting…"
         started = false
@@ -633,7 +635,8 @@ struct LivePlayerView: View {
             started = true
             buffering = false
             startWatch?.cancel()
-            model.notePlaying(playingCopy ?? channel)
+            // A recording playing says nothing of the live channel.
+            if recording == nil { model.notePlaying(playingCopy ?? channel) }
             // Its feed played, on the slot picked or its other one.
             if let pendingPick, pendingPick.choice.shows(playingCopy?.id) {
                 model.pickWatchChoice(pendingPick.choice, league: pendingPick.league)
@@ -641,8 +644,9 @@ struct LivePlayerView: View {
             pendingPick = nil
             if let attempt, attempt.cue, let playingCopy {
                 announce(WatchOn.switchSentence(from: model.name(of: attempt.picked), to: model.name(of: playingCopy)))
+                cueTask?.cancel()
                 cueTask = Task {
-                    try? await Task.sleep(for: .seconds(4))
+                    try? await Task.sleep(for: .seconds(Self.cueSeconds))
                     guard !Task.isCancelled else { return }
                     withAnimation(.easeOut(duration: 0.4)) { self.attempt?.cue = false }
                 }
@@ -756,6 +760,15 @@ struct LivePlayerView: View {
         if let limit = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LIVE_START_LIMIT"].flatMap(Double.init) { return limit }
         #endif
         return 15
+    }
+
+    /// How long the switch cue stays once the channel moved to plays. UI
+    /// tests: OPENREEL_DEBUG_SWITCH_CUE_SECONDS.
+    private static var cueSeconds: Double {
+        #if DEBUG
+        if let seconds = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"].flatMap(Double.init) { return seconds }
+        #endif
+        return 4
     }
 
     /// A game or channel that sent no picture on any of its channels.

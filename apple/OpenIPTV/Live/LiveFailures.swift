@@ -4,6 +4,10 @@ import Foundation
 /// counts as failed until it plays, or until the check its failure
 /// schedules (AppModel.failureMaxAge later) finds it not failed again since.
 struct LiveFailures {
+    /// What a channel that failed says on screen: on its row, its Watch On
+    /// card, its long-press item, and to VoiceOver.
+    static let didNotPlay = "Didn’t play"
+
     private var noted: [String: Date] = [:]
 
     /// Every channel failed now (games try them last).
@@ -28,8 +32,8 @@ struct LiveFailures {
     }
 
     /// Every one of `ids` (a channel's copies, a feed's slots) failed, and
-    /// none is the one open: one copy that plays, and the channel plays.
-    func failed(_ ids: [String], open: String? = nil) -> Bool {
-        !ids.isEmpty && !ids.contains { $0 == open } && ids.allSatisfy(contains)
+    /// none is the one playing: one copy that plays, and the channel plays.
+    func failed(_ ids: [String], playing: String? = nil) -> Bool {
+        !ids.isEmpty && !ids.contains { $0 == playing } && ids.allSatisfy(contains)
     }
 }

@@ -2288,20 +2288,32 @@ final class AppModel {
         return 600
     }
 
-    /// The channel didn't play: it and every copy of it sent no picture
+    /// The channel didn't play: it and every slot of it sent no picture
     /// lately on this device.
     func didNotPlay(_ channel: LiveChannel) -> Bool {
-        liveFailures.contains(channel.id) && liveFailures.failed(copies(of: channel).map(\.id))
+        // Most rows: nothing failed, nothing to group.
+        liveFailures.contains(channel.id) && liveFailures.failed(slots(of: channel))
+    }
+
+    /// The channel and the same listed again: a game's feed in its other
+    /// slots (as Watch On groups them, not the game's other feeds), any
+    /// other channel's copies.
+    private func slots(of channel: LiveChannel) -> [String] {
+        let copies = copies(of: channel)
+        guard event(of: channel) != nil else { return copies.map(\.id) }
+        var seen = Set<String>()
+        let feeds = WatchOn.grouped(copies.filter { seen.insert($0.id).inserted }.map(watchOption)).map { [$0.option] + $0.others }
+        return feeds.first { $0.contains { $0.id == channel.id } }?.map(\.id) ?? [channel.id]
     }
 
     /// How a Watch On choice shows in every list (the player's cards, the
     /// long press): the line under its name, and whether it's marked as not
     /// played (every slot of its feed failed). "Playing" wins: a feed whose
     /// other slot took over plays. `playing`: the copy open, nil outside the
-    /// player.
+    /// player, or once it failed.
     func watchOnShown(_ choice: WatchChoice, playing: String?) -> (line: String, didNotPlay: Bool) {
-        let failed = liveFailures.failed(choice.channels.map(\.id), open: playing)
-        let state = choice.shows(playing) ? "Playing" : failed ? "Didn’t play" : nil
+        let failed = liveFailures.failed(choice.channels.map(\.id), playing: playing)
+        let state = choice.shows(playing) ? "Playing" : failed ? LiveFailures.didNotPlay : nil
         let line = choice.label.line
         return ([state, line.isEmpty ? nil : line].compactMap(\.self).joined(separator: " · "), failed)
     }
