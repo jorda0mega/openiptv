@@ -111,6 +111,35 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertGreaterThan(min(a, b, c), 200, "the chosen scope's pill isn't white: \(a), \(b), \(c)")
     }
 
+    /// A filter tap moves the pill first: it starts sliding in the tap's own
+    /// frame, without dropping frames, and the results change after it
+    /// starts. Regression: the results changed first and the pill waited 2–3
+    /// frames for them, then skipped 5–8 of its frames. A UI test only sees
+    /// where the pill ends, so run this under scripts/frame-audit/record.sh:
+    /// it writes where the pills and the results are for
+    /// scripts/frame-audit/filter_pill.py, which checks the film frame by
+    /// frame (it fails on the old pill).
+    func testFilterPillMovesFirst() throws {
+        openSearch("movie")
+        sleep(4)
+        let all = app.buttons["scope-All"].firstMatch
+        let header = app.otherElements["search-header"].firstMatch
+        XCTAssertTrue(all.exists, "no scope bar")
+        XCTAssertNotNil(results()["More for Movie 0"], "no results for “movie”")
+        let geometry: [String: Any] = [
+            "width": app.frame.width, "height": app.frame.height,
+            "pills": [all.frame.minY, all.frame.maxY], "results": header.frame.maxY,
+        ]
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: geometry).write(to: shots.appending(path: "filter-geometry.json"))
+        for name in ["Movies", "Shows", "Live TV", "All", "Movies", "All"] {
+            let filter = app.buttons["scope-\(name)"].firstMatch
+            filter.tap()
+            sleep(1)
+            XCTAssertTrue(filter.isSelected, "\(name) isn't the chosen filter after its tap")
+        }
+    }
+
     /// One bar at the bottom while searching, as in the Apple TV app: the
     /// search field in the tab bar (with a Home button), not a field of our
     /// own stacked over the whole tab bar.

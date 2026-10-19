@@ -26,7 +26,11 @@ struct SearchView: View {
         ""
         #endif
     }()
+    /// The filter chosen: the pill moves to it in the tap's own frame.
     @State private var scope: Scope = .all
+    /// The filter the results show, a frame after the pill starts moving, so
+    /// rebuilding the list doesn't hold up the pill's first frame.
+    @State private var shownScope: Scope = .all
     @State private var path = NavigationPath()
 
     /// What the results show: everything, or one kind. Episodes come under
@@ -37,7 +41,6 @@ struct SearchView: View {
     }
     #if os(iOS)
     @FocusState private var fieldFocused: Bool
-    @Namespace private var scopeUnderline
     #endif
     /// The device's own title matches, in their order: what the server
     /// adds later goes after them, never between.
@@ -110,9 +113,10 @@ struct SearchView: View {
         return corpus.search(query).ranked.sorted().map { corpus.items[$0] }
     }
 
-    /// Whether a filter has anything for what's typed (empty ones are dimmed).
-    private func hasResults(_ scope: Scope) -> Bool {
-        scope == .all || !isEmpty(scope)
+    /// Filters with nothing for what's typed (dimmed in the bar).
+    private var emptyScopes: Set<Scope> {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        return Set(Scope.allCases.filter { $0 != .all && isEmpty($0) })
     }
 
     private func isEmpty(_ scope: Scope) -> Bool {
@@ -201,7 +205,7 @@ struct SearchView: View {
     /// come later (the server's) go below, so what's listed never moves
     /// down when they arrive.
     @ViewBuilder private var results: some View {
-        if scope == .all, !completions.isEmpty {
+        if shownScope == .all, !completions.isEmpty {
             // One row of suggestions, the same height however many there
             // are, so the results under it don't move as they change.
             ScrollView(.horizontal) {
@@ -228,13 +232,13 @@ struct SearchView: View {
         }
         // One section whatever the filter, so a title shown before
         // and after a filter tap keeps its row instead of a new one.
-        let shown = scope == .movies ? movies : scope == .shows ? shows : scope == .all ? moviesAndShows : []
+        let shown = shownScope == .movies ? movies : shownScope == .shows ? shows : shownScope == .all ? moviesAndShows : []
         if !shown.isEmpty {
-            Section(scope == .movies ? "Movies" : scope == .shows ? "Shows" : "Movies & Shows") {
+            Section(shownScope == .movies ? "Movies" : shownScope == .shows ? "Shows" : "Movies & Shows") {
                 ForEach(shown) { card in result(card, wide: false) }
             }
         }
-        if scope == .all || scope == .live, !onTV.isEmpty {
+        if shownScope == .all || shownScope == .live, !onTV.isEmpty {
             Section("On TV") {
                 let tuned = onTV.map(\.channel)
                 ForEach(Array(onTV.enumerated()), id: \.element.id) { index, hit in
@@ -247,7 +251,7 @@ struct SearchView: View {
                 }
             }
         }
-        if scope == .all || scope == .live, !channels.isEmpty {
+        if shownScope == .all || shownScope == .live, !channels.isEmpty {
             Section("Channels") {
                 ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
                     Button {
@@ -267,7 +271,7 @@ struct SearchView: View {
                 }
             }
         }
-        if scope == .all || scope == .shows, !episodes.isEmpty {
+        if shownScope == .all || shownScope == .shows, !episodes.isEmpty {
             Section("Episodes") {
                 ForEach(episodes) { card in result(card, wide: true) }
             }
@@ -359,7 +363,7 @@ struct SearchView: View {
                 .padding(.top, 6)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("search-title")
-            scopeBar
+            ScopeBar(scope: $scope, shownScope: $shownScope, dimmed: emptyScopes)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
@@ -376,42 +380,98 @@ struct SearchView: View {
         .accessibilityIdentifier("search-header")
     }
 
-    /// All · Movies · Shows · Live TV, the chosen one underlined.
-    private var scopeBar: some View {
-        HStack(spacing: 8) {
-            ForEach(Scope.allCases) { option in
-                let selected = option == scope
-                // No animation for the results: they change at once; only
-                // the pill slides (below).
-                Button { scope = option } label: {
-                    // The chosen one in a white pill with black words, as
-                    // everywhere in the app (the player's pills); the others
-                    // plain.
-                    Text(option.rawValue)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(selected ? .black : .white)
-                        // Dimmed when it has nothing for what's typed.
-                        .opacity(query.trimmingCharacters(in: .whitespaces).isEmpty || hasResults(option) || selected ? 1 : 0.4)
-                        .padding(.horizontal, 14)
-                        .frame(height: 32)
-                        .background {
-                            if selected {
-                                Capsule().fill(.white).matchedGeometryEffect(id: "scope", in: scopeUnderline)
-                            }
-                        }
-                        .contentShape(Capsule())
+    /// All · Movies · Shows · Live TV, the chosen one in a white pill with
+    /// black words, as everywhere in the app (the player's pills). One pill,
+    /// slid to the chosen filter.
+    private struct ScopeBar: View {
+        @Binding var scope: Scope
+        @Binding var shownScope: Scope
+        let dimmed: Set<Scope>
+
+        var body: some View {
+            HStack(spacing: 8) {
+                ForEach(Scope.allCases) { option in
+                    let selected = option == scope
+                    Button { scope = option } label: {
+                        Text(option.rawValue)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(selected ? .black : .white)
+                            .opacity(dimmed.contains(option) && !selected ? 0.4 : 1)
+                            .padding(.horizontal, 14)
+                            .frame(height: 32)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .anchorPreference(key: PillFrames.self, value: .bounds) { [option: $0] }
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("scope-\(option.rawValue)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .accessibilityIdentifier("scope-\(option.rawValue)")
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .backgroundPreferenceValue(PillFrames.self) { frames in
+                GeometryReader { proxy in
+                    if let frame = frames[scope].map({ proxy[$0] }) { Pill(frame: frame) }
+                }
+            }
+            .animation(.snappy(duration: 0.25), value: scope)
+            .onChange(of: scope) { _, chosen in
+                NextFrame.run { withTransaction(\.disablesAnimations, true) { shownScope = chosen } }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
         }
-        .animation(.snappy(duration: 0.25), value: scope)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
     }
 
+    /// The white pill, slid by Core Animation rather than redrawn by SwiftUI
+    /// each frame: it keeps moving while the results are rebuilt on the main
+    /// thread.
+    private struct Pill: UIViewRepresentable {
+        let frame: CGRect
+
+        func makeUIView(context: Context) -> UIView {
+            let bar = UIView()
+            bar.isUserInteractionEnabled = false
+            let capsule = UIView(frame: frame)
+            capsule.backgroundColor = .white
+            capsule.layer.cornerRadius = frame.height / 2
+            bar.addSubview(capsule)
+            return bar
+        }
+
+        func updateUIView(_ bar: UIView, context: Context) {
+            guard let capsule = bar.subviews.first, capsule.frame != frame else { return }
+            let move = {
+                capsule.frame = frame
+                capsule.layer.cornerRadius = frame.height / 2
+            }
+            guard context.transaction.animation != nil, !context.transaction.disablesAnimations else { return move() }
+            UIView.animate(springDuration: 0.25, bounce: 0.15, options: [.beginFromCurrentState, .allowUserInteraction],
+                           animations: move)
+        }
+    }
+
+    /// Runs work at the next screen refresh: a hop on the main queue can
+    /// still land in the frame being made now.
+    private final class NextFrame: NSObject {
+        private let work: () -> Void
+        private init(_ work: @escaping () -> Void) { self.work = work }
+
+        static func run(_ work: @escaping () -> Void) {
+            CADisplayLink(target: NextFrame(work), selector: #selector(fire)).add(to: .main, forMode: .common)
+        }
+
+        @objc private func fire(_ link: CADisplayLink) {
+            link.invalidate()
+            work()
+        }
+    }
+
+    private struct PillFrames: PreferenceKey {
+        static let defaultValue: [Scope: Anchor<CGRect>] = [:]
+        static func reduce(value: inout [Scope: Anchor<CGRect>], nextValue: () -> [Scope: Anchor<CGRect>]) {
+            value.merge(nextValue()) { $1 }
+        }
+    }
     #endif
 
     #if os(iOS)
@@ -476,15 +536,15 @@ struct SearchView: View {
         } else if finishedEmpty.contains(.all), isEmpty(.all) {
             // Only once the search (the server's part too) has finished.
             ContentUnavailableView.search(text: q)
-        } else if scope != .all, finishedEmpty.contains(scope), isEmpty(scope) {
-            let what = switch scope {
+        } else if shownScope != .all, finishedEmpty.contains(shownScope), isEmpty(shownScope) {
+            let what = switch shownScope {
             case .movies: "movies"
             case .shows: "shows or episodes"
             default: "channels"
             }
             ContentUnavailableView("No \(what)", systemImage: "line.3.horizontal.decrease",
                                    description: Text("No \(what) match “\(q)”. Try All."))
-        } else if isEmpty(scope) {
+        } else if isEmpty(shownScope) {
             // Nothing yet, the server's part still on its way: said so
             // (over the list, so nothing moves), after a moment, so a quick
             // answer never flashes it.
