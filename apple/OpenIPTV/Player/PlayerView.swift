@@ -1158,7 +1158,7 @@ struct MoviePlayerView: View {
             // Streamed and cut off at 4 MB: a server that ignores the range
             // would otherwise send (and this would hold) the whole film.
             let begun = Date()
-            guard let (bytes, response) = try? await HTTP.ahead.bytes(for: request),
+            guard let (bytes, response) = try? await HTTP.ahead.bytes(for: request, delegate: HTTP.keyOutOfRedirects),
                   (response as? HTTPURLResponse)?.statusCode == 206 else { continue }
             var count = 0
             do {

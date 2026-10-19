@@ -965,8 +965,6 @@ struct EmbyClient {
         #if DEBUG
         if audio.isEmpty { NSLog("%@", "PERF tracks planned without the server's track list") }
         #endif
-        // Some servers only honour the token as a header; send it both ways
-        // for Emby's own stream addresses (not for remote files).
         let auth = ["X-Emby-Token: \(account.accessToken)"]
         if playback.method != "remote file" { playback.headers += auth }
         playback.fallbackHeaders = auth
@@ -1061,7 +1059,7 @@ struct EmbyClient {
                 if pair.count == 2 { request.setValue(pair[1], forHTTPHeaderField: pair[0]) }
             }
             do {
-                let (data, response) = try await HTTP.session.data(for: request)
+                let (data, response) = try await HTTP.session.data(for: request, delegate: HTTP.keyOutOfRedirects)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 let type = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? "?"
                 var text = "\(label): HTTP \(status)"
@@ -1092,10 +1090,8 @@ struct EmbyClient {
         // A file extension helps the player pick the demuxer straight away.
         let ext = container.flatMap { $0.split(separator: ",").first.map { ".\($0)" } } ?? ""
         var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/stream\(ext)"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [
-            .init(name: "Static", value: "true"), .init(name: "MediaSourceId", value: mediaSourceId),
-            .init(name: "api_key", value: account.accessToken),
-        ] + (playSessionId.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
+        parts.queryItems = [.init(name: "Static", value: "true"), .init(name: "MediaSourceId", value: mediaSourceId)]
+            + (playSessionId.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
         return parts.url!
     }
 
@@ -1110,8 +1106,7 @@ struct EmbyClient {
         let maxWidth = bitrate >= 8_000_000 ? 1920 : bitrate >= 3_000_000 ? 1280 : 854
         var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/master.m3u8"), resolvingAgainstBaseURL: false)!
         var items: [URLQueryItem] = [
-            .init(name: "MediaSourceId", value: mediaSourceId), .init(name: "api_key", value: account.accessToken),
-            .init(name: "DeviceId", value: deviceId),
+            .init(name: "MediaSourceId", value: mediaSourceId), .init(name: "DeviceId", value: deviceId),
             .init(name: "VideoCodec", value: "h264"), .init(name: "AudioCodec", value: "aac"),
             .init(name: "TranscodingMaxAudioChannels", value: "2"), .init(name: "SegmentContainer", value: "ts"),
             .init(name: "MinSegments", value: "1"), .init(name: "BreakOnNonKeyFrames", value: "True"),

@@ -48,9 +48,11 @@ final class EmbyLive {
               var parts = URLComponents(url: account.serverURL.appending(path: "embywebsocket"), resolvingAgainstBaseURL: false)
         else { return }
         parts.scheme = parts.scheme == "https" ? "wss" : "ws"
-        parts.queryItems = [.init(name: "api_key", value: account.accessToken), .init(name: "deviceId", value: deviceId)]
+        parts.queryItems = [.init(name: "deviceId", value: deviceId)]
         guard let url = parts.url else { return }
-        let socket = HTTP.session.webSocketTask(with: url)
+        var request = URLRequest(url: url)
+        request.setValue(account.accessToken, forHTTPHeaderField: "X-Emby-Token")
+        let socket = HTTP.session.webSocketTask(with: request)
         self.socket = socket
         socket.resume()
         listen(socket)

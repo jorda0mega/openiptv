@@ -87,13 +87,9 @@ final class StreamRelay: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard let port else { return nil }
-        let pairs = headers.compactMap { header -> (String, String)? in
-            let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            return pair.count == 2 ? (pair[0], pair[1]) : nil
-        }
         // A new address each time (see RelayRoutes).
         let token = UUID().uuidString.lowercased()
-        routes.add((url, pairs), token: token)
+        routes.add(Self.route(url, headers), token: token)
         // Keep the file extension: it helps the player pick the demuxer.
         let ext = url.pathExtension.isEmpty ? "" : "." + url.pathExtension
         return URL(string: "http://127.0.0.1:\(port)/\(token)\(ext)")
@@ -214,8 +210,22 @@ final class StreamRelay: @unchecked Sendable {
     /// A file's address without the server's session for one request.
     private static func cacheKey(_ url: URL) -> String {
         guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.absoluteString }
-        parts.queryItems = parts.queryItems?.filter { $0.name.caseInsensitiveCompare("PlaySessionId") != .orderedSame }
+        parts.queryItems = parts.queryItems?.filter { !["playsessionid", "api_key"].contains($0.name.lowercased()) }
         return parts.string ?? url.absoluteString
+    }
+
+    /// The Emby key goes in a header: the system logs the address of a
+    /// request that fails or is stopped.
+    private static func route(_ url: URL, _ headers: [String]) -> (url: URL, headers: [(String, String)]) {
+        let request = HTTP.keyInHeader(url)
+        var pairs = headers.compactMap { header -> (String, String)? in
+            let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            return pair.count == 2 ? (pair[0], pair[1]) : nil
+        }
+        if let key = request.value(forHTTPHeaderField: "X-Emby-Token"), !pairs.contains(where: { $0.0 == "X-Emby-Token" }) {
+            pairs.append(("X-Emby-Token", key))
+        }
+        return (request.url ?? url, pairs)
     }
 
     /// Kept bytes to the player, a megabyte at a time, each once the last
@@ -287,12 +297,9 @@ final class StreamRelay: @unchecked Sendable {
             return true
         }
         guard allowed else { return }
-        let route = (url: url, headers: headers.compactMap { header -> (String, String)? in
-            let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            return pair.count == 2 ? (pair[0], pair[1]) : nil
-        })
+        let route = Self.route(url, headers)
         queue.async { [weak self] in
-            guard let self, let cache = self.cache(for: url) else { return }
+            guard let self, let cache = self.cache(for: route.url) else { return }
             #if DEBUG
             let started = CFAbsoluteTimeGetCurrent()
             #endif
@@ -346,6 +353,7 @@ final class StreamRelay: @unchecked Sendable {
             then(data, total ?? cache.total)
         }
         made = task
+        task.delegate = HTTP.keyOutOfRedirects
         if let key {
             task.priority = URLSessionTask.lowPriority
             lock.withLock { ahead[key, default: []].append(task) }
@@ -432,10 +440,12 @@ final class StreamRelay: @unchecked Sendable {
         request.timeoutInterval = 30
         for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("bytes=\(from)-\(from + count - 1)", forHTTPHeaderField: "Range")
-        HTTP.session.dataTask(with: request) { data, response, _ in
+        let task = HTTP.session.dataTask(with: request) { data, response, _ in
             let ok = (response as? HTTPURLResponse)?.statusCode == 206 && data?.count == Int(count)
             then(ok ? data : nil)
-        }.resume()
+        }
+        task.delegate = HTTP.keyOutOfRedirects
+        task.resume()
     }
 
     private func fail(_ connection: NWConnection, _ status: Int) {
@@ -470,6 +480,11 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
         finished = true
         lock.unlock()
         task.cancel()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(HTTP.keyInHeader(request))
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
