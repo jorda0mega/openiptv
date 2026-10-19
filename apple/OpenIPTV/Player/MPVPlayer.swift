@@ -79,6 +79,8 @@ final class MPVPlayer: @unchecked Sendable {
     #if DEBUG
     private var playlistKeys = ""
     var hlsKeys: String { stateLock.withLock { playlistKeys } }
+    private var perf = LivePerf.Opening()
+    var livePerf: LivePerf.Opening { stateLock.withLock { perf } }
     #endif
 
     private var mpv: OpaquePointer?
@@ -290,6 +292,10 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     private func setUp(wid: Int64, options: [(String, String)], hardwareDecoding: Bool) {
+        #if DEBUG
+        let began = CFAbsoluteTimeGetCurrent()
+        defer { perfSetUp(since: began) }
+        #endif
         guard let mpv = mpv_create() else { return }
         self.mpv = mpv
         var wid = wid
@@ -377,6 +383,9 @@ final class MPVPlayer: @unchecked Sendable {
         #endif
         queue.async { [self] in
             guard let mpv, !stateLock.withLock({ closed }) else { return }
+            #if DEBUG
+            let asked = CFAbsoluteTimeGetCurrent()
+            #endif
             if !file { _ = Self.closing.wait(timeout: .now() + 2) }
             apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
@@ -384,6 +393,7 @@ final class MPVPlayer: @unchecked Sendable {
             awaitingSubtitleLine = (subtitleSwitchCount, loadStarted)
             stateLock.withLock { startTiming = (loadStarted, "", startTiming.preroll) }
             if file { StreamRelay.shared.beginStartReads() }
+            perfLoad(waited: loadStarted - asked)
             #endif
             reportsWindow = !file
             openedAfter = nil
@@ -1345,6 +1355,9 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_hook_continue(mpv, hook.id)
         case MPV_EVENT_FILE_LOADED:
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
+            #if DEBUG
+            stateLock.withLock { perf.opened = Int(((openedAfter ?? 0) * 1000).rounded()) }
+            #endif
             restoreCarried()
             #if DEBUG
             noteTracks()
@@ -1385,6 +1398,12 @@ final class MPVPlayer: @unchecked Sendable {
             } else if end.reason == MPV_END_FILE_REASON_EOF {
                 emit(.ended)
             }
+        #if DEBUG
+        case MPV_EVENT_LOG_MESSAGE:
+            guard let data = event.data else { return }
+            let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
+            if let failure = LivePerf.Failure(logged: String(cString: message.text)) { stateLock.withLock { perf.failure = failure } }
+        #endif
         case MPV_EVENT_PROPERTY_CHANGE:
             guard let data = event.data else { return }
             let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
@@ -1420,6 +1439,9 @@ final class MPVPlayer: @unchecked Sendable {
                 let shown = subtitlesHidden ? "" : text
                 stateLock.withLock { line = shown }
                 if !shown.isEmpty { noteFirstLine() }
+            case "frame-drop-count" where property.format == MPV_FORMAT_INT64:
+                let drops = Int(value.assumingMemoryBound(to: Int64.self).pointee)
+                stateLock.withLock { perf.drops = drops }
             #endif
             case "aid" where property.format == MPV_FORMAT_STRING:
                 // The film's own audio track (not a converted version's).
@@ -1502,6 +1524,27 @@ final class MPVPlayer: @unchecked Sendable {
 
     private static func size(_ file: URL) -> Int {
         (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    }
+
+    private func perfSetUp(since began: CFAbsoluteTime) {
+        guard let mpv else { return }
+        mpv_request_log_messages(mpv, "warn")
+        mpv_observe_property(mpv, 0, "frame-drop-count", MPV_FORMAT_INT64)
+        stateLock.withLock { perf.setup = Int(((CFAbsoluteTimeGetCurrent() - began) * 1000).rounded()) }
+    }
+
+    private func perfLoad(waited: Double) {
+        stateLock.withLock {
+            perf = LivePerf.Opening(setup: perf.setup, closeWait: Int((waited * 1000).rounded()), loadfile: loadStarted)
+        }
+    }
+
+    func sayLiveConfig() {
+        queue.async { [self] in if let mpv { LivePerf.sayConfig(mpv) } }
+    }
+
+    func sayLiveCodec() {
+        queue.async { [self] in if let mpv { LivePerf.sayCodec(mpv) } }
     }
     #endif
 
