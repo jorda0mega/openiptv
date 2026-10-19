@@ -976,6 +976,56 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(playing("ESPN UNLTD 016"), "the league's pick didn't play first: \(liveCopy())")
     }
 
+    /// Many accounts allow one stream at a time: live TV paused when the
+    /// Apple TV goes to the Home screen lets it go, and opens live again on
+    /// return.
+    func testAppleTVPausedAwayFreesTheAccount() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["live_max_connections": "1", "live_linger": "0"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchArguments = ["-tvTab", "live", "-freshLineup", "YES"]
+        app.launch()
+        sleep(8)
+        press(.down, "into the page")
+        press(.select, "play channel")
+        XCTAssertTrue(started(), "the channel didn't play: \(liveCopy())")
+        remote.press(.playPause)
+        sleep(2)
+        XCTAssertEqual(activeConnections(server), "1", "the paused stream isn't open")
+        remote.press(.home)
+        XCTAssertTrue(activeConnections(server, become: "0", within: 8), "live TV paused at the Home screen still holds the connection")
+        app.activate()
+        XCTAssertTrue(activeConnections(server, become: "1", within: 15), "live TV didn't open again on return")
+        XCTAssertTrue(started(), "live TV didn't play on return")
+    }
+
+    /// The account's streams open now, as the test server's account answer
+    /// counts them.
+    private func activeConnections(_ server: URL) -> String? {
+        let url = server.appending(path: "player_api.php").appending(queryItems: [.init(name: "username", value: "u"), .init(name: "password", value: "p")])
+        var data: Data?
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: url) { body, _, _ in
+            data = body
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 10)
+        let account = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return (account?["user_info"] as? [String: Any])?["active_cons"] as? String
+    }
+
+    private func activeConnections(_ server: URL, become wanted: String, within seconds: Double) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if activeConnections(server) == wanted { return true }
+            usleep(500_000)
+        }
+        return false
+    }
+
     /// Down from the tab bar to the game's card: the Live TV list opens
     /// on Sports, its NFL opens the league's games.
     private func toGame() {
