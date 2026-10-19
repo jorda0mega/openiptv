@@ -275,7 +275,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
                                                 failedToStartPictureInPictureWithError error: Error) {
         #if DEBUG
-        NSLog("%@", "PERF pip failed \(error.localizedDescription)")
+        NSLog("%@", "PERF pip failed \((error as NSError).code)")
         #endif
         MainActor.assumeIsolated { if phase == .starting { fail() } }
     }

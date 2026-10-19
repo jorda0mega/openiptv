@@ -47,7 +47,7 @@ enum SpeechHeard {
     /// read (64 kb/s), then the request ends.
     private static func fetch(_ url: URL) async -> URL? {
         let wanted = Int(seconds * 64_000 / 8)
-        guard let (bytes, response) = try? await HTTP.patient.bytes(for: HTTP.keyInHeader(url)),
+        guard let (bytes, response) = try? await HTTP.patient.bytes(for: HTTP.keyInHeader(url), delegate: HTTP.keyOutOfRedirects),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         defer { bytes.task.cancel() }
         var data = Data()

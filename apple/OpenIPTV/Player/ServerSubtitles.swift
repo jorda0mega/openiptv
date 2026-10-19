@@ -1,9 +1,6 @@
 import CryptoKit
 import Foundation
 
-/// A subtitle track the server serves, known by where it lives on the
-/// server and its version, never by its address: the address carries the
-/// key, so it is never logged, hashed into a name or kept.
 struct ServerSubtitle: Hashable, Sendable {
     enum Kind: Hashable, Sendable {
         /// The server may replace it at the same address.
@@ -17,6 +14,7 @@ struct ServerSubtitle: Hashable, Sendable {
     }
 
     let address: URL
+    let token: String
     let kind: Kind
     let version: String
 
@@ -24,6 +22,12 @@ struct ServerSubtitle: Hashable, Sendable {
 
     static func == (a: ServerSubtitle, b: ServerSubtitle) -> Bool { a.place == b.place }
     func hash(into hasher: inout Hasher) { hasher.combine(place) }
+}
+
+extension ServerSubtitle: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    var description: String { "server subtitle" }
+    var debugDescription: String { description }
+    var customMirror: Mirror { Mirror(self, children: ["kind": kind]) }
 }
 
 extension Lane {
@@ -70,6 +74,12 @@ enum ServerSubtitles {
         Task.detached(priority: .background) { prune(launchedAt: launched) }
     }
 
+    nonisolated static func request(for subtitle: ServerSubtitle) -> URLRequest {
+        var request = URLRequest(url: subtitle.address)
+        request.setValue(subtitle.token, forHTTPHeaderField: "X-Emby-Token")
+        return request
+    }
+
     nonisolated static func file(for subtitle: ServerSubtitle, in folder: URL = folder) -> URL {
         let name = SHA256.hash(data: Data(subtitle.place.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
         let format = subtitle.address.pathExtension.isEmpty ? "srt" : subtitle.address.pathExtension
@@ -114,7 +124,7 @@ enum ServerSubtitles {
 
     private nonisolated static func download(_ subtitle: ServerSubtitle, on session: URLSession) async throws -> URL {
         do {
-            let (data, response) = try await session.data(for: HTTP.keyInHeader(subtitle.address))
+            let (data, response) = try await session.data(for: request(for: subtitle), delegate: HTTP.keyOutOfRedirects)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw SourceError.http(code) }
             guard !data.isEmpty else { throw SourceError.unexpected("The server's answer was empty.") }
