@@ -34,6 +34,9 @@ def fields(line):
 
 
 def leaks(line):
+    # live-pick's ids line for the shell is the probe's one exception.
+    if re.fullmatch(r"OPENIPTV_PROBE_IDS=(?:\d{1,12}(?:,\d{1,12}){0,19})?", line):
+        return False
     return bool(re.search(r"[^A-Za-z0-9_=.> -]", line) or any(
         len(word) > 32 or ("." in word and not re.fullmatch(r"[a-z0-9_]+=-?\d+\.\d+", word)) for word in line.split()))
 
@@ -55,6 +58,21 @@ def one(o, *keys):
 # 1.0.0's Libmpv (apple/mpvkit.lock) finds this one.
 LIBMPV = "mpv v0.41.0-dirty"
 APP_VERSION = re.search(r'MARKETING_VERSION: "([^"]+)"', open(os.path.join(APPLE, "project.yml")).read()).group(1)
+
+
+def pick(name, switches, extra, counts, ids):
+    """A live-pick row: its counts and ids, from exactly 2 lines, after
+    exactly the 2 list requests and no stream."""
+    def check(_, rest, server):
+        lines = rest["lines"]
+        line = next((x for x in lines if x.startswith("PICK live=")), "")
+        got = " ".join(line.split()[1:])
+        listed = next((x.split("=", 1)[1] for x in lines if x.startswith("OPENIPTV_PROBE_IDS=")), None)
+        asked = server["xtream"]
+        return (f"{counts}; {ids}; 2 list requests", f"{got}; {listed}; {'+'.join(asked)}",
+                got == counts and listed == ids and len(lines) == 2 and not server["live"]
+                and asked == ["get_live_categories", "get_live_streams"])
+    return (name, switches, {"OPENIPTV_SMOKE_MODE": "live-pick", "OPENIPTV_PICK_HOME": "US", **extra}, check)
 
 
 def film_kb(seconds, kbps):
@@ -161,6 +179,16 @@ ROWS = [
     ("none, login from the environment", {}, {"OPENIPTV_SMOKE_FEED": None},
      lambda o, *_: ("status=200, data", one(o, "status", "bytes", "ctype"),
                     o[0]["status"] == "200" and int(o[0]["bytes"]) > 0 and o[0]["ctype"] == "mp2t")),
+    # Twins first (Lakers in two services, Bills in two slots), then single
+    # games in start order to 6; ESPN's FHD and SD; TLC's and CNN's best. The
+    # account filter drops QVC's 4 copies and Account Info's ESPN first.
+    pick("live-pick, pick=1", {"pick": 1}, {},
+         "live=6 twins=2 always=4 requests=2", "3011,3031,3001,3002,3022,3023,3041,3043,3063,3051"),
+    pick("live-pick, pick=1 sports=1 sports_dupes=1", {"pick": 1, "sports": 1, "sports_dupes": 1}, {},
+         "live=6 twins=3 always=4 requests=2", "3011,3031,3001,3002,2001,2002,3041,3043,3063,3051"),
+    pick("live-pick, pick=1, OPENIPTV_PICK_ALWAYS=CNN", {"pick": 1}, {"OPENIPTV_PICK_ALWAYS": "CNN"},
+         "live=6 twins=2 always=4 requests=2", "3011,3031,3001,3002,3022,3023,3051,3052,3041,3063"),
+    pick("live-pick, no games, no ESPN", {}, {}, "live=0 twins=0 always=2 requests=2", "1,2"),
 ]
 
 
@@ -260,7 +288,7 @@ def main():
             stdout, stderr = run.communicate(timeout=180)
             lines = stdout.splitlines()
             opens = [fields(line) for line in lines if line.startswith("PROBE open ")]
-            rest = {}
+            rest = {"lines": lines}
             for line in lines:
                 kind = line.split()[1] if len(line.split()) > 1 else ""
                 if kind not in ("open", "block"):
