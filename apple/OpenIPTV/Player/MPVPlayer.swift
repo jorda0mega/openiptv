@@ -683,7 +683,7 @@ final class MPVPlayer: @unchecked Sendable {
         // Asked for at once, beside the files: the server may take
         // minutes to give the film's own.
         let asked = stateLock.withLock { () -> (files: Task<[SubtitleSync.Reference], Never>, own: Task<[SubtitleSync.Reference], Never>) in
-            let urls = references.map(\.url)
+            let urls = references.map(\.subtitle.address)
             if let asked = self.references, asked.urls == urls { return (asked.files, asked.own) }
             let others = references.filter { !$0.own }, own = references.filter(\.own)
             let filesTask = Task.detached(priority: .utility) { await Self.fetchReferences(others) }
@@ -694,7 +694,7 @@ final class MPVPlayer: @unchecked Sendable {
         Task.detached(priority: .utility) { [weak self] in
             var fetched: [(EmbyPlayback.SubtitleFile, String)] = []
             for file in files {
-                guard let local = await Self.fetch(file) else { continue }
+                guard let local = await Self.local(file.source) else { continue }
                 let text = try? String(contentsOf: local, encoding: .utf8)
                 if let text { fetched.append((file, text)) }
                 // In time from the first line when it played before.
@@ -854,8 +854,7 @@ final class MPVPlayer: @unchecked Sendable {
             store(SubtitleSync.Fit(delay: section.delay, speed: section.speed, score: match.score), for: file)
             return
         }
-        let folder = FileManager.default.temporaryDirectory.appending(path: "subtitles")
-        let local = folder.appending(path: "\(UUID().uuidString).\(text.contains("[Events]") ? "ass" : "srt")")
+        let local = ServerSubtitles.perPlay.appending(path: "\(UUID().uuidString).\(text.contains("[Events]") ? "ass" : "srt")")
         guard (try? SubtitleSync.retimed(text, by: match).write(to: local, atomically: true, encoding: .utf8)) != nil,
               let mpv, let old = fileTracks[file], let info = fileInfo[file] else { return }
         let showing = shownSubtitle == old
@@ -1025,18 +1024,12 @@ final class MPVPlayer: @unchecked Sendable {
         fitBySpeechIfShown()
     }
 
-    /// A subtitle file from the server, on the device for this playback
-    /// (fetched each time: a server replaces its files, and the same
-    /// address then holds another).
-    /// References' text, in order: the film's own however long the server
-    /// takes to start answering, files as quickly as subtitle files.
     private static func fetchReferences(_ references: [EmbyPlayback.SubtitleReference]) async -> [SubtitleSync.Reference] {
         await withTaskGroup(of: (Int, SubtitleSync.Reference?).self) { group in
             for (i, reference) in references.enumerated() {
                 group.addTask {
-                    guard let local = await fetch(.init(url: reference.url, language: nil, title: ""), patient: reference.own) else { return (i, nil) }
-                    defer { try? FileManager.default.removeItem(at: local) }
-                    guard let text = try? String(contentsOf: local, encoding: .utf8) else { return (i, nil) }
+                    guard let local = await ServerSubtitles.local(reference.subtitle),
+                          let text = try? String(contentsOf: local, encoding: .utf8) else { return (i, nil) }
                     return (i, SubtitleSync.Reference(cues: SubtitleSync.cues(text), own: reference.own))
                 }
             }
@@ -1046,16 +1039,15 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    private static func fetch(_ file: EmbyPlayback.SubtitleFile, patient: Bool = false) async -> URL? {
-        let folder = FileManager.default.temporaryDirectory.appending(path: "subtitles")
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let local = folder.appending(path: "\(UUID().uuidString).\(file.url.pathExtension.isEmpty ? "srt" : file.url.pathExtension)")
-        // Found by the providers: on the device already.
-        if file.url.isFileURL { return (try? FileManager.default.copyItem(at: file.url, to: local)) != nil ? local : nil }
-        guard let (data, response) = try? await (patient ? HTTP.patient : HTTP.session).data(for: HTTP.keyInHeader(file.url)),
-              (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty,
-              (try? data.write(to: local)) != nil else { return nil }
-        return local
+    private static func local(_ source: EmbyPlayback.SubtitleSource) async -> URL? {
+        switch source {
+        case let .server(subtitle):
+            return await ServerSubtitles.local(subtitle)
+        case let .device(file):
+            try? FileManager.default.createDirectory(at: ServerSubtitles.perPlay, withIntermediateDirectories: true)
+            let local = ServerSubtitles.perPlay.appending(path: "\(UUID().uuidString).\(file.pathExtension.isEmpty ? "srt" : file.pathExtension)")
+            return (try? FileManager.default.copyItem(at: file, to: local)) != nil ? local : nil
+        }
     }
 
     /// Fills the screen with the picture (cropping its edges) or fits it.
@@ -1117,21 +1109,21 @@ final class MPVPlayer: @unchecked Sendable {
         guard !wanted.isEmpty else { return }
         Task.detached(priority: .utility) { [weak self] in
             for copy in wanted {
-                guard let local = await Self.fetch(.init(url: copy.url, language: nil, title: "")) else { continue }
+                guard let local = await ServerSubtitles.local(copy.subtitle) else { continue }
                 self?.queue.async { [weak self] in self?.addCopy(copy, at: local, tries: 10) }
             }
         }
     }
 
     private func addCopy(_ copy: EmbyPlayback.SubtitleCopy, at local: URL, tries: Int) {
-        guard let mpv, !addedFiles.contains(copy.url) else { return }
+        guard let mpv, !addedFiles.contains(copy.subtitle.address) else { return }
         let list = Self.trackList(mpv)
         guard let original = list.first(where: { $0.kind == .subtitle && !$0.external && $0.ffIndex == copy.streamIndex }) else {
             // The file isn't open yet (a player opened ahead): again shortly.
             if tries > 0 { queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.addCopy(copy, at: local, tries: tries - 1) } }
             return
         }
-        addedFiles.insert(copy.url)
+        addedFiles.insert(copy.subtitle.address)
         command(["sub-add", local.path, "auto", original.title ?? "", original.language ?? ""])
         // Subtitle numbers only: audio tracks are numbered apart.
         let known = Set(list.filter { $0.kind == .subtitle }.map(\.id))
@@ -1796,5 +1788,13 @@ extension MPVPlayer {
             let source = "#include <metal_stdlib>\nusing namespace metal;\nfragment half4 warm() { return half4(0.0h); }"
             _ = try? MTLCreateSystemDefaultDevice()?.makeLibrary(source: source, options: nil)
         }
+    }
+}
+
+extension NetworkStatus {
+    /// How a file should be buffered: generously (in memory) when the
+    /// connection is unmetered, otherwise a couple of minutes.
+    var fileReadahead: MPVPlayer.Readahead {
+        unmetered ? .generous : .modest
     }
 }

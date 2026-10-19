@@ -13,6 +13,7 @@
 		02F218C7FAB20DC50F729108 /* Libavutil.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */; };
 		04AE6345E43EBEAD9501E04E /* HomeFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72303AAC600EF3DE6075EF7A /* HomeFeed.swift */; };
 		05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00376995EF16ADF89BDF9B03 /* PlayerView.swift */; };
+		06356A2DCC7D4C7FC93A994C /* ServerSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */; };
 		07533D7519AC4A6D0FA838C3 /* libexpat.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A9E566E295D6785A720DEA83 /* libexpat.tbd */; };
 		08CAD4E635F64EFAA0A4416E /* IMDbRatings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C136886855C91760BFF6EF /* IMDbRatings.swift */; };
 		08E75A7643668D7A58668D53 /* ShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63408BC25C1847C3DC54CDDE /* ShowView.swift */; };
@@ -117,6 +118,7 @@
 		5E075ACFCF2BDA408958FA86 /* Gzip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1500ACB77AA629F7F047BF /* Gzip.swift */; };
 		5F01E1907CEC93ADB72EB792 /* TVTitlePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21CB2421CE9A188C91DE446 /* TVTitlePages.swift */; };
 		5F82F737A3D8F30EA5D8D9F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B695C9975B1FB89D1266C09E /* Assets.xcassets */; };
+		604AE8CBEF82AC9823484563 /* ServerSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */; };
 		60B2D8D9A75B0585552C69E7 /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */; };
 		614E357F852A9FBCB2C5EB3C /* TrackChoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD17B24F165233943D636F8 /* TrackChoice.swift */; };
 		6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
@@ -207,6 +209,7 @@
 		AF2338072AD40D7D33061F81 /* TileBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE93F836A970124A83C81EB8 /* TileBadge.swift */; };
 		AFEC41C115AFEAB03DBA357E /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E6BB902BA3158069CE35BE75 /* QuartzCore.framework */; };
 		B140B57F1529B03DB79CE0CC /* RelayRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D98E8646EA291A2E9297C377 /* RelayRoutes.swift */; };
+		B2E9B1F3029FECF5D2301286 /* ServerSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */; };
 		B31D69DB93CBF4D7A6828F6E /* Libplacebo.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 17EBB6B2E9C237BA7C90687B /* Libplacebo.xcframework */; };
 		B35FD0BFD8B8A2A35824C552 /* WatchOn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC398B1A86F920C4D5309FE /* WatchOn.swift */; };
 		B48DB7B4EA35EAD96E9169ED /* QualityGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */; };
@@ -243,6 +246,7 @@
 		CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
 		D01B9761AC76010F22918EFD /* Libuavs3d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */; };
 		D0671E9DBF8597F479B8E4F9 /* SwitchCue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B64DA342DD63265ECD7969F /* SwitchCue.swift */; };
+		D100BAFC37A38921D2726122 /* Shelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03687A5122C40ADC0462D4BE /* Shelf.swift */; };
 		D1687C4DEC91CFE4F95E3ED7 /* TVPlayerOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */; };
 		D23BC078C762E09CCD49BD29 /* nettle.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57788799C7CF36103C03E61C /* nettle.xcframework */; };
 		D2A1BED86DD0C13F86E2EF6D /* WatchOn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC398B1A86F920C4D5309FE /* WatchOn.swift */; };
@@ -254,13 +258,16 @@
 		DB9631F047A88625F86A6031 /* Libssl.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00EF07025216C13B1F3C7908 /* Libssl.xcframework */; };
 		DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */; };
 		DC9AC16AE071981D3F442D2D /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
+		DD78F2883EE29FF7CB1FCD11 /* NetworkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */; };
 		DD7ABAA9E4BA1C5B1B8D7A7A /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */; };
+		DDFE22D43D4F700998F86D57 /* Shelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03687A5122C40ADC0462D4BE /* Shelf.swift */; };
 		DFBF0025963040E56BCDE3FC /* Signposts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1EBDEA2DAED98E26A044D2 /* Signposts.swift */; };
 		E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036E1882E4281173C09E8777 /* TabStrip.swift */; };
 		E1DC94CF4B233A2762C4FDC5 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
 		E40A99A7F0AB7CF0C2BEC24E /* EmbyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 305D39F34D3489D37AA89297 /* EmbyModels.swift */; };
 		E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C786F389C51A2833D4205BE /* TitleHero.swift */; };
 		E46D2D4F358B026B53225FC1 /* LiveFailures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBBDDA77B65B86BB26D8D65 /* LiveFailures.swift */; };
+		E5362F0D86095D2F863749C7 /* Shelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03687A5122C40ADC0462D4BE /* Shelf.swift */; };
 		E837BD64EFB5556EF182B830 /* TVWatchOnRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8109F8BC5559C9CA077C2CBE /* TVWatchOnRow.swift */; };
 		E91D24856162ECE33110314A /* LineupCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034F3CF9DB71DCA6F534D85D /* LineupCheckTests.swift */; };
 		EA8F7A63FFC991764504B776 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
@@ -316,6 +323,7 @@
 		00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavcodec.xcframework; path = Vendor/Libavcodec.xcframework; sourceTree = "<group>"; };
 		0103F884D3FCDC978ACBF582 /* EmbyLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyLive.swift; sourceTree = "<group>"; };
 		034F3CF9DB71DCA6F534D85D /* LineupCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineupCheckTests.swift; sourceTree = "<group>"; };
+		03687A5122C40ADC0462D4BE /* Shelf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shelf.swift; sourceTree = "<group>"; };
 		036E1882E4281173C09E8777 /* TabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStrip.swift; sourceTree = "<group>"; };
 		04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePipeline.swift; sourceTree = "<group>"; };
 		050F50A01718229F1DF48EE0 /* SearchStabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchStabilityTests.swift; sourceTree = "<group>"; };
@@ -343,6 +351,7 @@
 		22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		25632E2613497E37F388902A /* PlayerChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerChrome.swift; sourceTree = "<group>"; };
+		29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSubtitles.swift; sourceTree = "<group>"; };
 		2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundSubtitles.swift; sourceTree = "<group>"; };
 		305D39F34D3489D37AA89297 /* EmbyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyModels.swift; sourceTree = "<group>"; };
 		312496694F477570E1827C77 /* SearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchIndex.swift; sourceTree = "<group>"; };
@@ -595,6 +604,7 @@
 				D98E8646EA291A2E9297C377 /* RelayRoutes.swift */,
 				3861EB3474E6D114873728AE /* RemoteSwipe.swift */,
 				0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */,
+				29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */,
 				0888A0AF0DE6B28F24365AE1 /* SpeechHeard.swift */,
 				857825645808317F48AB50AA /* StreamRelay.swift */,
 				677CFF11775CD0F4EBE9ED9A /* SubtitleLanguage.swift */,
@@ -753,6 +763,7 @@
 				04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */,
 				22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */,
 				6624BB656CA61632353DBA8C /* Preferences.swift */,
+				03687A5122C40ADC0462D4BE /* Shelf.swift */,
 				320EE0FE4DDEEB903360A4AF /* Sources.swift */,
 			);
 			path = Model;
@@ -1112,15 +1123,18 @@
 				40ED2C42BE6F50D41D3A415F /* LineupCheck.swift in Sources */,
 				E91D24856162ECE33110314A /* LineupCheckTests.swift in Sources */,
 				F410FED3E8B163D9C58B0739 /* LiveFailures.swift in Sources */,
+				DD78F2883EE29FF7CB1FCD11 /* NetworkStatus.swift in Sources */,
 				2979896C40B2FB3C7AA811C0 /* QualityGovernor.swift in Sources */,
 				EDEA774CC2788DF4A6444F57 /* QualityGovernorTests.swift in Sources */,
 				269CC1336FC00D95B1765984 /* RelayRoutes.swift in Sources */,
 				F2694E1C04B4CFD07036B428 /* RelayRoutesTests.swift in Sources */,
 				16434D81F4E19A43C2ADD7C5 /* RemoteSwipe.swift in Sources */,
 				76DF5AB929E63EC63FD2D25C /* RemoteSwipeTests.swift in Sources */,
+				604AE8CBEF82AC9823484563 /* ServerSubtitles.swift in Sources */,
 				BD984E7A7EB425452DFE299E /* ServerSubtitlesTests.swift in Sources */,
 				844139032D9669A972329A3E /* SharedGuideRule.swift in Sources */,
 				40DD71CACCF8EE67AC1688FD /* SharedGuideRuleTests.swift in Sources */,
+				DDFE22D43D4F700998F86D57 /* Shelf.swift in Sources */,
 				66C2EE2B8B590797D866BCCE /* ShelfTests.swift in Sources */,
 				0C705B3715316BFEBA0F5359 /* SpeechSyncTests.swift in Sources */,
 				EE664F875BBAF8BE86A1D571 /* SubtitleLanguage.swift in Sources */,
@@ -1190,8 +1204,10 @@
 				6A41782159CEB6B853714738 /* Scrubber.swift in Sources */,
 				668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */,
 				21673D3FCC00E6AAD2482428 /* SearchView.swift in Sources */,
+				06356A2DCC7D4C7FC93A994C /* ServerSubtitles.swift in Sources */,
 				9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */,
 				2CE8B3B6B70783B8B17F561D /* SharedGuideRule.swift in Sources */,
+				E5362F0D86095D2F863749C7 /* Shelf.swift in Sources */,
 				08E75A7643668D7A58668D53 /* ShowView.swift in Sources */,
 				DFBF0025963040E56BCDE3FC /* Signposts.swift in Sources */,
 				A4C285B27BC4A5193F7D2399 /* SmartSearch.swift in Sources */,
@@ -1285,8 +1301,10 @@
 				60B2D8D9A75B0585552C69E7 /* Scrubber.swift in Sources */,
 				CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */,
 				4B7140CB6E5B116E80716522 /* SearchView.swift in Sources */,
+				B2E9B1F3029FECF5D2301286 /* ServerSubtitles.swift in Sources */,
 				CBB6BCA84516D445B5F74E8A /* SettingsView.swift in Sources */,
 				1273ABF188482A875F821B01 /* SharedGuideRule.swift in Sources */,
+				D100BAFC37A38921D2726122 /* Shelf.swift in Sources */,
 				41A98F0B32F251A20091582A /* ShowView.swift in Sources */,
 				543405E7B500CEF0E0F6971B /* Signposts.swift in Sources */,
 				426EC9528B558FD75C996C29 /* SmartSearch.swift in Sources */,

@@ -39,6 +39,6 @@ struct FoundSubtitles: Codable {
     func subtitleFiles(in folder: URL) -> [EmbyPlayback.SubtitleFile] {
         files.filter { picked == nil || $0.name == picked }
             .filter { FileManager.default.fileExists(atPath: folder.appending(path: $0.name).path) }
-            .map { .init(url: folder.appending(path: $0.name), language: $0.language, title: "") }
+            .map { .init(source: .device(folder.appending(path: $0.name)), language: $0.language, title: "") }
     }
 }

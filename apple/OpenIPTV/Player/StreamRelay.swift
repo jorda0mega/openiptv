@@ -195,8 +195,6 @@ final class StreamRelay: @unchecked Sendable {
         return to >= from ? (from, to) : nil
     }
 
-    /// The cache for this file (made the first time; the oldest of more
-    /// than two goes, with its bytes).
     private func cache(for url: URL) -> ByteCache? {
         let key = Self.cacheKey(url)
         lock.lock()

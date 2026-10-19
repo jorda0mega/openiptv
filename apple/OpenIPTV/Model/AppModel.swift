@@ -154,6 +154,8 @@ final class AppModel {
         // Watching the connection from the start (speculative work waits
         // until it's known to be unmetered).
         _ = NetworkStatus.shared
+        MemoryWarnings.watch()
+        ServerSubtitles.atLaunch()
         // Title pages not visited in a month.
         AppCache.prune(startingWith: ["show-", "movie-"], olderThan: 30)
         Task.detached(priority: .background) { AppCache.removeStaleDownloads() }
@@ -1400,7 +1402,7 @@ final class AppModel {
             let found: [EmbyClient.RemoteSubtitle]
             do { found = try await emby.searchSubtitles(playback.itemId, mediaSourceId: playback.mediaSourceId, language: code) } catch {
                 #if DEBUG
-                NSLog("%@", "PERF subtitles search failed: \(error)")
+                NSLog("%@", "PERF subtitles search failed")
                 #endif
                 // Asked again next time.
                 return []
@@ -1702,6 +1704,7 @@ final class AppModel {
         prepared = [:]
         previews = []
         previewLoads = [:]
+        ServerSubtitles.forgetAll()
         habits = Habits()
         AppCache.remove("habits.json")
         AppCache.remove("home.v4.json")
@@ -1726,6 +1729,7 @@ final class AppModel {
         await guide.clear()
         AppCache.remove(Self.lineupFile)
         library.clear()
+        ServerSubtitles.forgetAll()
         serverSearchCache = [:]
         channelCorpus = SearchCorpus(name: \.name)
         rows = []

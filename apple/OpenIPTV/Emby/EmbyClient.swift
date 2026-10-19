@@ -977,53 +977,50 @@ struct EmbyClient {
     /// (text ones; the server serves each as SRT or ASS).
     private func subtitleFiles(_ itemId: String, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SubtitleFile] {
         (source.MediaStreams ?? []).compactMap { stream in
-            guard stream.Type == "Subtitle", stream.IsExternal == true, let index = stream.Index,
-                  let language = stream.Language, ["en", "es"].contains(TrackChoice.normalized(language) ?? "") else { return nil }
-            let format = ["ass", "ssa"].contains(stream.Codec?.lowercased() ?? "") ? "ass" : "srt"
-            var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)"),
-                                      resolvingAgainstBaseURL: false)!
-            parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
-            guard let url = parts.url else { return nil }
+            guard stream.Type == "Subtitle", stream.IsExternal == true, let language = stream.Language,
+                  ["en", "es"].contains(TrackChoice.normalized(language) ?? ""),
+                  let subtitle = subtitle(itemId, source, stream, format: ["ass", "ssa"].contains(stream.Codec?.lowercased() ?? "") ? "ass" : "srt")
+            else { return nil }
             let kind = [stream.IsForced == true ? "Forced" : nil, stream.IsHearingImpaired == true ? "SDH" : nil, stream.Title]
-            return EmbyPlayback.SubtitleFile(url: url, language: language, title: kind.compactMap(\.self).joined(separator: " "))
+            return EmbyPlayback.SubtitleFile(source: .server(subtitle), language: language, title: kind.compactMap(\.self).joined(separator: " "))
         }
     }
 
     /// The film's own text subtitles in English or Spanish (not forced
     /// ones, which show by themselves), as files from the server.
     private func subtitleCopies(_ itemId: String, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SubtitleCopy] {
-        let text: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
-        return (source.MediaStreams ?? []).compactMap { stream in
+        (source.MediaStreams ?? []).compactMap { stream in
             guard stream.Type == "Subtitle", stream.IsExternal != true, stream.IsForced != true, let index = stream.Index,
-                  let codec = stream.Codec?.lowercased(), text.contains(codec),
+                  let codec = stream.Codec?.lowercased(), Self.textSubtitles.contains(codec),
                   ["en", "es"].contains(stream.Language.flatMap(TrackChoice.normalized) ?? "") else { return nil }
-            let format = ["ass", "ssa"].contains(codec) ? "ass" : "srt"
-            var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)"),
-                                      resolvingAgainstBaseURL: false)!
-            parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
-            return parts.url.map { EmbyPlayback.SubtitleCopy(streamIndex: index, url: $0) }
+            return subtitle(itemId, source, stream, format: ["ass", "ssa"].contains(codec) ? "ass" : "srt").map { .init(streamIndex: index, subtitle: $0) }
         }
     }
 
-    /// One of the film's own text subtitle tracks (any language, a full
-    /// one before forced lines), as SRT from the server.
     /// The film's own text track (one, not forced: the server reads the
     /// whole film to extract it), then its other text files in any
-    /// language, at most eight in all.
+    /// language, at most eight in all, as SRT from the server.
     private func subtitleReferences(_ itemId: String, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SubtitleReference] {
-        let text: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
-        let tracks = (source.MediaStreams ?? []).filter { $0.Type == "Subtitle" && text.contains($0.Codec?.lowercased() ?? "") }
+        let tracks = (source.MediaStreams ?? []).filter { $0.Type == "Subtitle" && Self.textSubtitles.contains($0.Codec?.lowercased() ?? "") }
         let own = tracks.filter { $0.IsExternal != true }
-        let ownIndex = (own.first { $0.IsForced != true } ?? own.first)?.Index
-        let files = tracks.filter { $0.IsExternal == true && $0.IsForced != true }.compactMap(\.Index)
-        func url(_ index: Int) -> URL? {
-            var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.srt"),
-                                      resolvingAgainstBaseURL: false)!
-            parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
-            return parts.url
-        }
-        let references = (ownIndex.map { [($0, true)] } ?? []) + files.map { ($0, false) }
-        return references.prefix(8).compactMap { index, own in url(index).map { .init(url: $0, own: own) } }
+        let files = tracks.filter { $0.IsExternal == true && $0.IsForced != true }
+        let references = ((own.first { $0.IsForced != true } ?? own.first).map { [$0] } ?? []) + files
+        return references.prefix(8).compactMap { subtitle(itemId, source, $0, format: "srt") }.map { .init(subtitle: $0) }
+    }
+
+    private static let textSubtitles: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
+
+    private func subtitle(_ itemId: String, _ source: PlaybackInfo.Source, _ stream: PlaybackInfo.Stream, format: String) -> ServerSubtitle? {
+        guard let index = stream.Index,
+              var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)"),
+                                        resolvingAgainstBaseURL: false) else { return nil }
+        parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
+        guard let url = parts.url else { return nil }
+        let beside = stream.IsExternal == true
+        let version = beside
+            ? [stream.Codec, stream.Language, stream.Title, stream.IsForced.map(String.init), stream.IsHearingImpaired.map(String.init)]
+            : [source.Size.map(String.init), source.Container, stream.Codec]
+        return ServerSubtitle(address: url, kind: beside ? .beside : .inFile, version: version.map { $0 ?? "" }.joined(separator: "|"))
     }
 
     /// Sixteen one-minute stretches evenly across the film (from 2% to 92%:
@@ -1139,6 +1136,7 @@ struct EmbyClient {
             let `Protocol`: String?
             let Path: String?
             let Container: String?
+            let Size: Int64?
             let Bitrate: Int?
             let SupportsDirectPlay: Bool?
             let SupportsDirectStream: Bool?
