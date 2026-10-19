@@ -89,7 +89,7 @@ struct WatchOnMenuItems: View {
         let choices = model.gameChannels(for: channel)
         Section(choices.count > 1 ? "Watch On · \(choices.count) channels" : "Watch On") {
             ForEach(choices) { choice in
-                let line = model.watchOnShown(choice, playing: nil).line
+                let line = model.watchOnShown(choice, playingCopy: nil).line
                 Button { play(choice.channel) } label: {
                     Text(choice.label.title)
                     if !line.isEmpty { Text(line) }

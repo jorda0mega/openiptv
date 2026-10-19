@@ -512,8 +512,10 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(spanish.label.contains("Didn’t play · Spanish"), "the card doesn't say it didn't play: \(spanish.label)")
         XCTAssertTrue(nfl.label.contains("Playing") && !nfl.label.contains("Didn’t"), "the card playing: \(nfl.label)")
         let shot = XCUIScreen.main.screenshot()
-        XCTAssertGreaterThan(brightest(shot, in: cardBadge(spanish)), 200, "no mark on the picture of the card that didn't play")
-        XCTAssertLessThan(brightest(shot, in: cardBadge(nfl)), 150, "a mark on the picture of the card playing")
+        XCTAssertGreaterThan(brightest(shot, in: badge(on: picture(of: spanish)).insetBy(dx: 2, dy: 2)), 200,
+                             "no mark on the picture of the card that didn't play")
+        XCTAssertLessThan(brightest(shot, in: badge(on: picture(of: nfl)).insetBy(dx: 2, dy: 2)), 150,
+                          "a mark on the picture of the card playing")
 
         app.buttons["Close player"].firstMatch.tap()
         let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
@@ -592,8 +594,10 @@ final class LiveSportsTests: XCTestCase {
         let shot = XCUIScreen.main.screenshot()
         let marked = try XCTUnwrap(tile(of: five, in: shot), "no logo tile on the row")
         let plain = try XCTUnwrap(tile(of: six, in: shot), "no logo tile on the next row")
-        XCTAssertGreaterThan(brightest(shot, in: deadBadge(on: marked)), 200, "no mark on the logo of the channel that didn't play")
-        XCTAssertLessThan(brightest(shot, in: deadBadge(on: plain)), 150, "a mark on the logo of a channel that wasn't tried")
+        XCTAssertGreaterThan(brightest(shot, in: badge(on: marked).insetBy(dx: 2, dy: 2)), 200,
+                             "no mark on the logo of the channel that didn't play")
+        XCTAssertLessThan(brightest(shot, in: badge(on: plain).insetBy(dx: 2, dy: 2)), 150,
+                          "a mark on the logo of a channel that wasn't tried")
     }
 
     func testRecordingDoesNotClearTheMark() throws {
@@ -709,8 +713,10 @@ final class LiveSportsTests: XCTestCase {
         sleep(1)
         let shot = XCUIScreen.main.screenshot()
         let logo = try XCTUnwrap(tile(of: game, in: shot), "no logo tile on the game's row")
-        let badge = CGRect(x: logo.maxX - 20, y: logo.maxY - 9, width: 24, height: 13)
-        XCTAssertGreaterThan(luminance(shot, in: badge), 120, "no count badge on the game's tile (mean \(Int(luminance(shot, in: badge))))")
+        let corner = badge(on: logo).insetBy(dx: 2, dy: 2)
+        let countCapsule = CGRect(x: corner.maxX - 24, y: corner.minY, width: 24, height: corner.height)
+        XCTAssertGreaterThan(luminance(shot, in: countCapsule), 120,
+                             "no count badge on the game's tile (mean \(Int(luminance(shot, in: countCapsule))))")
 
         game.tap()
         XCTAssertTrue(started(), "the game didn't play: \(liveCopy())")
@@ -786,12 +792,14 @@ final class LiveSportsTests: XCTestCase {
         return false
     }
 
-    private func cardBadge(_ card: XCUIElement) -> CGRect {
-        CGRect(x: card.frame.minX + 77, y: card.frame.minY + 49, width: 13, height: 13)
+    private func picture(of watchOnCard: XCUIElement) -> CGRect {
+        let size = CGSize(width: 86, height: 48), rowPadding: CGFloat = 10
+        return CGRect(origin: CGPoint(x: watchOnCard.frame.minX, y: watchOnCard.frame.minY + rowPadding), size: size)
     }
 
-    private func deadBadge(on tile: CGRect) -> CGRect {
-        CGRect(x: tile.maxX - 9, y: tile.maxY - 9, width: 13, height: 13)
+    private func badge(on picture: CGRect) -> CGRect {
+        let size: CGFloat = 17, outset: CGFloat = 6
+        return CGRect(x: picture.maxX + outset - size, y: picture.maxY + outset - size, width: size, height: size)
     }
 
     private func tile(of row: XCUIElement, in shot: XCUIScreenshot) -> CGRect? {

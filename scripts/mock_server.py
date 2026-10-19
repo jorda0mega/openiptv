@@ -510,11 +510,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b"\x47" * 188 * 64, "video/mp2t")
         if path.startswith("/live/u/p/"):
             name = path.rsplit("/", 1)[1]
-            # /mock/set?dead_live=2003,2005: those channels answer and never
-            # send a picture (an event feed that's over).
             stream = name.split(".")[0]
             if stream in CONTROL.get("slow_live", "").split(","):
                 time.sleep(4)
+            # /mock/set?dead_live=2003,2005: those channels answer and never
+            # send a picture (an event feed that's over).
             if stream in CONTROL.get("dead_live", "").split(","):
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp2t")

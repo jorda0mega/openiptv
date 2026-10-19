@@ -51,7 +51,7 @@ struct TVWatchOnRow: View {
 
     private func card(_ choice: AppModel.WatchChoice, on: Bool) -> some View {
         let label = choice.label
-        let shown = model.watchOnShown(choice, playing: playing)
+        let shown = model.watchOnShown(choice, playingCopy: playing)
         return VStack(alignment: .leading, spacing: 10) {
             CoverImage(images: choice.channel.logo.map { [CardImage(url: $0.absoluteString, contain: true)] } ?? [],
                        title: label.title)

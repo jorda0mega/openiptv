@@ -319,11 +319,7 @@ struct LivePlayerView: View {
                   to: started ? open : nil, toName: started ? model.name(of: open) : nil)
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            #if os(tvOS)
-            .padding(.top, 50)
-            #else
-            .padding(.top, 72)
-            #endif
+            .padding(.top, SwitchCue.topClearance)
             .allowsHitTesting(false)
             .transition(.opacity)
     }
@@ -337,7 +333,7 @@ struct LivePlayerView: View {
         #if os(iOS)
         guard showWatchOn else { return nil }
         return PlayerInfoPanel(title: "Watch On", meta: "", cards: choices.map { choice in
-            let shown = model.watchOnShown(choice, playing: playingID)
+            let shown = model.watchOnShown(choice, playingCopy: playingID)
             return PlayerCard(id: choice.id, title: choice.label.title, subtitle: shown.line.isEmpty ? nil : shown.line,
                               images: choice.channel.logo.map { [CardImage(url: $0.absoluteString, contain: true)] } ?? [],
                               loading: choice.shows(playingID) && !started,
