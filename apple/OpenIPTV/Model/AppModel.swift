@@ -2082,6 +2082,10 @@ final class AppModel {
         liveLibrary.copies[channel.id] ?? [channel]
     }
 
+    func liveOrder(of channel: LiveChannel) -> [LiveChannel] {
+        liveFailures.failedLast(copies(of: channel))
+    }
+
     /// "TLC" for "US: TLC HD"; a game's title for its channel.
     func title(of channel: LiveChannel) -> String {
         liveLibrary.titles[channel.id] ?? LiveOrganizer.Name(channel.name).display

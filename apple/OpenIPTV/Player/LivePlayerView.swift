@@ -526,7 +526,7 @@ struct LivePlayerView: View {
         recording = nil
         pendingPick = nil
         choices = model.watchChoices(for: channel)
-        let first = copy ?? choices.first?.channel ?? channel
+        let first = copy ?? choices.first?.channel ?? model.liveOrder(of: channel).first ?? channel
         attempt = Attempt(first)
         model.noteChannel(channel.id)
         open(first, after: delay)
@@ -596,7 +596,7 @@ struct LivePlayerView: View {
     }
 
     private var feeds: [[LiveChannel]] {
-        choices.isEmpty ? [model.copies(of: channel)] : choices.map(\.channels)
+        choices.isEmpty ? [model.liveOrder(of: channel)] : choices.map(\.channels)
     }
 
     private func announce(_ sentence: String) {
