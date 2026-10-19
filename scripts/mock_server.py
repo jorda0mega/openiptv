@@ -377,9 +377,11 @@ SPORTS_CATEGORIES = [("10", "NFL"), ("11", "ESPN Unlimited"), ("12", "DAZN CA"),
 
 def sports_games(now):
     # "sports_started": "300": the game started that many minutes ago (20;
-    # negative: it starts in that many). Stamped in Eastern time, as real
+    # negative: it starts in that many); "sports_kickoff": "1792440000": it
+    # starts then (seconds since 1970). Stamped in Eastern time, as real
     # providers stamp event channels.
-    start = datetime.fromtimestamp(now - 60 * int(CONTROL.get("sports_started", 20)), EASTERN).strftime("%Y-%m-%d %H:%M:%S")
+    kickoff = float(CONTROL["sports_kickoff"]) if "sports_kickoff" in CONTROL else now - 60 * int(CONTROL.get("sports_started", 20))
+    start = datetime.fromtimestamp(kickoff, EASTERN).strftime("%Y-%m-%d %H:%M:%S")
     games = [("NFL 01: Eagles vs. Jaguars", "10"),
              ("ESPN UNLTD 015: Football: Eagles vs. Jaguars", "11"),
              ("ESPN UNLTD 016: Football: Eagles vs. Jaguars (Eagles vs. Jaguars (ESP))", "11"),
