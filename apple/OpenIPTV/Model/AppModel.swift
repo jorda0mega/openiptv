@@ -1208,6 +1208,9 @@ final class AppModel {
             guard !Task.isCancelled, warming == itemId else { return }
             warming = nil
             guard let playback, warm == nil else { return }
+            #if DEBUG
+            searchSignposter.emitEvent("warm up player")
+            #endif
             let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding)
             player.prepareOffscreen()
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
