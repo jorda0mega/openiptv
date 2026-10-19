@@ -56,6 +56,10 @@ struct SearchView: View {
     @State private var extrasQuery = ""
     @State private var channels: [LiveChannel] = []
     @State private var onTV: [AppModel.GuideHit] = []
+    /// What's on TV that came while the list was scrolled down: listed when
+    /// it's back at the top, so it doesn't push down the rows being read.
+    @State private var heldOnTV: [AppModel.GuideHit]?
+    @State private var atTop = true
     @State private var completions: [String] = []
     @State private var serverCards: [Card] = []
     @State private var serverQuery = ""
@@ -69,6 +73,10 @@ struct SearchView: View {
     @State private var channelMatch: SearchCorpus<LiveChannel>.Match?
     @State private var loadingCard: String?
     @State private var playError: String?
+    #if DEBUG
+    /// UI tests: how long the last search took to list the device's results.
+    @State private var debugLocalMs = ""
+    #endif
 
     private var thumbWidth: Int { Int(Layout.searchThumbWide * displayScale) }
 
@@ -166,7 +174,17 @@ struct SearchView: View {
                 }
             }
             .listStyle(.plain)
+            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top <= 1 } action: { _, top in
+                atTop = top
+                if top, let held = heldOnTV { listOnTV(held) }
+            }
             .overlay { emptyState }
+            #if DEBUG
+            .background {
+                Text(debugLocalMs).frame(width: 1, height: 1).opacity(0.02)
+                    .accessibilityLabel(debugLocalMs).accessibilityIdentifier("debug-search-local-ms")
+            }
+            #endif
             // The name pages opened from here go back to.
             .navigationTitle("Search")
             // A header of our own instead of the navigation bar's (on this
@@ -674,7 +692,18 @@ struct SearchView: View {
         let previousLibrary = libraryMatch, previousChannels = channelMatch
         // What's on TV, looked up beside the titles and channels.
         let area = prefs.area
-        let guideSearch = Task { await model.searchGuide(q, area: area) }
+        let guide = GuideAnswer()
+        let guideSearch = Task {
+            #if DEBUG
+            // UI tests: the guide's part late (OPENREEL_DEBUG_GUIDE_DELAY, seconds).
+            if let delay = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_GUIDE_DELAY"].flatMap(Double.init) {
+                try? await Task.sleep(for: .seconds(delay))
+            }
+            #endif
+            let hits = await model.searchGuide(q, area: area)
+            guide.hits = hits
+            return hits
+        }
         let work = Task.detached(priority: .userInitiated) { () -> LocalResults? in
             let (lm, hits) = SmartSearch.local(parsed, corpus: libraryCorpus, previous: previousLibrary)
             guard !Task.isCancelled else { return nil }
@@ -698,10 +727,9 @@ struct SearchView: View {
         let typos = found.typoLibrary.map { SearchHit(entry: $0, pending: []) }
         let local = Local(titles: cards(hits + typos),
                           channels: (Array(cm.ranked.prefix(60)) + found.typoChannels).map { channelCorpus.items[$0] })
-        // Shown with the rest when it's ready by then (it usually is), so
-        // its section doesn't come a moment later and push the channels down.
-        let early = await Self.value(of: guideSearch, within: 0.1)
-        guard !Task.isCancelled else { return }
+        // Shown with the rest when the guide has answered by then; the rest
+        // doesn't wait for it.
+        let early = guide.hits
         let asksServer = trimmed.count >= 2 && model.sources.emby != nil
         let showsNow = !local.titles.isEmpty || !local.channels.isEmpty || early?.isEmpty == false || !asksServer
         if showsNow {
@@ -713,6 +741,7 @@ struct SearchView: View {
         }
         #if DEBUG
         mark("local")
+        debugLocalMs = String(format: "%.0f", Date().timeIntervalSince(began) * 1000)
         #endif
 
         // Results settled: treat the top title as intent and get it ready,
@@ -771,7 +800,10 @@ struct SearchView: View {
         let again = query == shownQuery
         library = again ? Self.keepingOrder(library, local.titles) : local.titles
         channels = again ? Self.keepingOrder(channels, local.channels) : local.channels
-        if let hits { onTV = hits }
+        // Until the guide answers for new text, its last hits that still
+        // fit, so its section doesn't jump at each letter.
+        onTV = hits ?? (again ? onTV : AppModel.guideHits(onTV, fitting: query))
+        heldOnTV = nil
         shownQuery = query
         publishTitles()
     }
@@ -791,6 +823,7 @@ struct SearchView: View {
         serverCards = []
         channels = []
         onTV = []
+        heldOnTV = nil
         completions = []
         libraryMatch = nil
         channelMatch = nil
@@ -799,22 +832,20 @@ struct SearchView: View {
         publishTitles()
     }
 
-    /// The task's value if it's ready within `seconds`, else nil (it goes
-    /// on). A task group can't do this: it waits for every child.
-    private static func value<T: Sendable>(of task: Task<T, Never>, within seconds: Double) async -> T? {
-        let first = AsyncStream<T?> { done in
-            Task { done.yield(await task.value) }
-            Task { try? await Task.sleep(for: .seconds(seconds)); done.yield(nil) }
-        }
-        for await value in first { return value }
-        return nil
+    @MainActor private final class GuideAnswer {
+        var hits: [AppModel.GuideHit]?
     }
 
     /// What's on: the guide and today's games, by name.
     private func showOnTV(_ search: Task<[AppModel.GuideHit], Never>) async {
         let hits = await search.value
         guard !Task.isCancelled else { return }
+        if atTop { listOnTV(hits) } else { heldOnTV = hits }
+    }
+
+    private func listOnTV(_ hits: [AppModel.GuideHit]) {
         onTV = hits
+        heldOnTV = nil
         resultsChanged()
     }
 
