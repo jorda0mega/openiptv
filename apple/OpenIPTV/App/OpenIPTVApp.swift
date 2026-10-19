@@ -44,6 +44,7 @@ struct RootView: View {
     @State private var shown: PlayerItem?
     #if os(iOS)
     @State private var tab = RootTab.home
+    @State private var searchActivation = TabSearchActivation.searchTabSelection
     #endif
 
     var body: some View {
@@ -64,7 +65,7 @@ struct RootView: View {
                         LiveView(playing: $playing).tint(nil)
                     }
                     Tab(value: RootTab.search, role: .search) {
-                        SearchView(playing: $playing).tint(nil)
+                        SearchView(playing: $playing, activation: $searchActivation).tint(nil)
                     }
                 }
                 // The chosen tab white (the bar at the bottom on iPhone, at
@@ -72,6 +73,7 @@ struct RootView: View {
                 // system's blue looked out of place.
                 .tint(.white)
                 .tabBarMinimizeBehavior(.onScrollDown)
+                .tabViewSearchActivation(searchActivation)
                 // "Go to Show" in the player: Home opens the show's page,
                 // unless that page is already under the player.
                 .onChange(of: model.showRequest) { _, request in

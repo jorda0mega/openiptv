@@ -17,6 +17,11 @@ struct SearchView: View {
     @Environment(Preferences.self) private var prefs
     @Environment(\.displayScale) private var displayScale
     @Binding var playing: PlayerItem?
+    #if os(iOS)
+    /// Opening the Search tab brings up the keyboard while nothing is typed;
+    /// with text, the results are what you came back to.
+    @Binding var activation: TabSearchActivation
+    #endif
 
     /// Debug builds: `-debugSearch "text"` at launch starts with a search.
     @State private var query: String = {
@@ -184,7 +189,7 @@ struct SearchView: View {
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
             .scrollDismissesKeyboard(.immediately)
-            .onAppear { if query.isEmpty { fieldFocused = true } }
+            .onChange(of: query.isEmpty, initial: true) { _, empty in activation = empty ? .searchTabSelection : .automatic }
             #endif
             // Re-run when the text changes or an index finishes loading.
             .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") {
