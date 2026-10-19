@@ -450,6 +450,9 @@ struct PlayerInfoPanelView: View {
                                 .id(card.id)
                             }
                         }
+                        // Room for a badge sticking out of a picture's corner:
+                        // the scroll view cuts what's outside its content.
+                        .padding(.bottom, panel.cards.contains { $0.badge != nil } ? 8 : 0)
                     }
                     .scrollIndicators(.hidden)
                 } else {
@@ -504,7 +507,8 @@ struct PlayerInfoPanelView: View {
             }
             .overlay(alignment: .bottomLeading) {
                 HStack(spacing: 5) {
-                    Image(systemName: "play.fill").font(.system(size: 9, weight: .semibold))
+                    // Not beside "Didn’t play".
+                    if card.badge == nil { Image(systemName: "play.fill").font(.system(size: 9, weight: .semibold)) }
                     Text(card.line ?? "").font(.footnote).lineLimit(1)
                 }
                 .foregroundStyle(.white.opacity(0.85))

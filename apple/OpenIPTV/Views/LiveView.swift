@@ -302,13 +302,17 @@ struct ChannelRow: View {
                 }
                 // Re-render every 30 s so the bars move.
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    let mark = failed ? "Didn’t play · " : ""
+                    let mark = failed ? "\(LiveFailures.didNotPlay) · " : ""
                     HStack(spacing: 8) {
                         if let now {
                             ProgressBar(value: now.progress(at: context.date)).frame(width: 36)
                             Text("\(mark)\(Self.left(now, at: context.date)) · \(title)").lineLimit(1)
+                        } else if info == nil {
+                            // The guide still loading: its placeholder, the mark readable.
+                            if failed { Text(LiveFailures.didNotPlay).unredacted() }
+                            Text("Programme · 24m left").lineLimit(1)
                         } else {
-                            Text(info == nil ? "Programme · 24m left" : mark + title).lineLimit(1)
+                            Text(mark + title).lineLimit(1)
                         }
                     }
                     .font(.footnote)

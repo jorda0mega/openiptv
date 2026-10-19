@@ -464,7 +464,8 @@ final class LiveSportsTests: XCTestCase {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001", "slow_live": "2002"])
         addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none", "slow_live": "none"]) }
-        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "5"
+        // The next channel answers in 4 s (slow_live), well inside the limit.
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "8"
         app.launchEnvironment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"] = "10"
         app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
         app.launch()

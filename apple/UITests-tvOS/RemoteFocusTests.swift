@@ -1005,7 +1005,8 @@ final class RemoteFocusTests: XCTestCase {
         addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none", "slow_live": "none"]) }
         app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
             + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
-        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "5"
+        // The next channel answers in 4 s (slow_live), well inside the limit.
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "8"
         // The cue's 4 s, longer here: the checks after it plays fit in it.
         app.launchEnvironment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"] = "10"
         app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
