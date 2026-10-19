@@ -1452,7 +1452,7 @@ final class AppModel {
         Task(priority: .utility) {
             do { try await emby.downloadSubtitle(itemId, mediaSourceId: mediaSourceId, id: file.id) } catch {
                 #if DEBUG
-                NSLog("%@", "PERF subtitles not saved on the server: \(error)")
+                NSLog("%@", "PERF subtitles not saved on the server")
                 #endif
             }
         }

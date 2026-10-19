@@ -903,7 +903,7 @@ struct EmbyClient {
         if let prefetchedInfo { info = prefetchedInfo } else {
             do { info = try await playbackInfo(item.id, startSeconds: resume) } catch {
                 #if DEBUG
-                NSLog("%@", "PERF playback info failed for \(item.id): \(error)")
+                NSLog("%@", "PERF playback info failed for \(item.id)")
                 #endif
                 info = nil
             }
@@ -1011,16 +1011,14 @@ struct EmbyClient {
     private static let textSubtitles: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
 
     private func subtitle(_ itemId: String, _ source: PlaybackInfo.Source, _ stream: PlaybackInfo.Stream, format: String) -> ServerSubtitle? {
-        guard let index = stream.Index,
-              var parts = URLComponents(url: Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)"),
-                                        resolvingAgainstBaseURL: false) else { return nil }
-        parts.queryItems = [.init(name: "api_key", value: account.accessToken)]
-        guard let url = parts.url else { return nil }
+        guard let index = stream.Index else { return nil }
+        let url = Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)")
         let beside = stream.IsExternal == true
         let version = beside
             ? [stream.Codec, stream.Language, stream.Title, stream.IsForced.map(String.init), stream.IsHearingImpaired.map(String.init)]
             : [source.Size.map(String.init), source.Container, stream.Codec]
-        return ServerSubtitle(address: url, kind: beside ? .beside : .inFile, version: version.map { $0 ?? "" }.joined(separator: "|"))
+        return ServerSubtitle(address: url, token: account.accessToken, kind: beside ? .beside : .inFile,
+                              version: version.map { $0 ?? "" }.joined(separator: "|"))
     }
 
     /// Sixteen one-minute stretches evenly across the film (from 2% to 92%:

@@ -156,13 +156,29 @@ enum HTTP {
     /// failed, key and all (speech stretches are stopped once a minute is
     /// read). Players still get addresses with the key.
     static func keyInHeader(_ url: URL) -> URLRequest {
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let key = parts.queryItems?.first(where: { $0.name == "api_key" })?.value else { return URLRequest(url: url) }
+        keyInHeader(URLRequest(url: url))
+    }
+
+    static func keyInHeader(_ request: URLRequest) -> URLRequest {
+        guard let url = request.url, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let key = parts.queryItems?.first(where: { $0.name == "api_key" })?.value else { return request }
         parts.queryItems = parts.queryItems?.filter { $0.name != "api_key" }
         if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
-        var request = URLRequest(url: parts.url ?? url)
-        request.setValue(key, forHTTPHeaderField: "X-Emby-Token")
-        return request
+        var moved = request
+        moved.url = parts.url ?? url
+        moved.setValue(key, forHTTPHeaderField: "X-Emby-Token")
+        return moved
+    }
+
+    /// The address a server redirects to is the server's choice, and the
+    /// system logs the address of a request that fails.
+    static let keyOutOfRedirects = KeyOutOfRedirects()
+
+    final class KeyOutOfRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? {
+            HTTP.keyInHeader(request)
+        }
     }
 
     static func data(_ request: URLRequest) async throws -> Data {

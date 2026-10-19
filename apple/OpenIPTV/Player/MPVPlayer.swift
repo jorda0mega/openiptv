@@ -1695,7 +1695,7 @@ private final class FrameTap: @unchecked Sendable {
                     brightest = max(brightest, bytes[pixel], bytes[pixel + 1], bytes[pixel + 2])
                 }
             }
-            NSLog("%@", "PERF pip frame \(count) render=\(rendered) status=\(renderer.status.rawValue) brightest=\(brightest) error=\(renderer.error?.localizedDescription ?? "none")")
+            NSLog("%@", "PERF pip frame \(count) render=\(rendered) status=\(renderer.status.rawValue) brightest=\(brightest) error=\((renderer.error as NSError?)?.code ?? 0)")
         }
         #endif
     }
