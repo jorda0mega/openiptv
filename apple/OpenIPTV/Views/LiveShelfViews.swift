@@ -213,8 +213,7 @@ struct EventRow: View {
         let event = entry.event
         let started = event?.start.map { $0 <= Date() } ?? false
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
-        let badge = TileBadge.count(model.feedCount(entry))
-        // Tried in the last half hour, and none of its channels played.
+        let badge = model.gameBadge(entry)
         let notPlaying = live && model.isNotPlaying(entry)
         let line = [Self.when(event?.start, started: started), event?.league, event?.detail]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -250,7 +249,7 @@ struct EventRow: View {
         .rowForeground()
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([entry.title, notPlaying ? "Not playing" : live ? "LIVE" : nil, line, badge?.spoken]
+        .accessibilityLabel([entry.title, notPlaying ? "Not playing" : live ? "LIVE" : nil, line, notPlaying ? nil : badge?.spoken]
             .compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", "))
     }
 

@@ -3,6 +3,7 @@ import SwiftUI
 enum TileBadge {
     case channels(Int)
     case didNotPlay
+    case notPlaying
 
     static func count(_ channels: Int) -> TileBadge? {
         channels > 1 ? .channels(channels) : nil
@@ -12,6 +13,7 @@ enum TileBadge {
         switch self {
         case let .channels(count): "\(count) channels"
         case .didNotPlay: LiveFailures.didNotPlay
+        case .notPlaying: "Not playing"
         }
     }
 }
@@ -45,7 +47,7 @@ struct TileBadgeView: View {
             .fixedSize()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(badge.spoken)
-        case .didNotPlay:
+        case .didNotPlay, .notPlaying:
             Image(systemName: "tv.slash")
                 .font(.system(size: glyph, weight: .bold))
                 .foregroundStyle(.white)

@@ -142,27 +142,64 @@ final class WatchOnMoveTests: XCTestCase {
 }
 
 final class LiveFailuresTests: XCTestCase {
-    func testExpiry() {
-        var failures = LiveFailures()
-        let first = failures.note("a", at: Date(timeIntervalSince1970: 0))
-        let again = failures.note("a", at: Date(timeIntervalSince1970: 300))
-        failures.expire(first)
-        XCTAssertTrue(failures.contains("a"), "the first failure's check cleared a later failure")
-        failures.expire(again)
-        XCTAssertFalse(failures.contains("a"), "the failure outlived its check")
+    private func at(_ seconds: Double) -> Date { Date(timeIntervalSince1970: seconds) }
 
-        _ = failures.note("b")
-        failures.played("b")
-        XCTAssertFalse(failures.contains("b"), "still failed after it played")
-        XCTAssertEqual(failures.ids, [])
+    func testChannelMarkLastsTenMinutes() {
+        var failures = LiveFailures()
+        failures.note("a", at: at(0))
+        XCTAssertTrue(failures.contains("a", at: at(599)))
+        XCTAssertFalse(failures.contains("a", at: at(600)), "the mark outlived 10 min")
+        failures.note("a", at: at(300))
+        XCTAssertTrue(failures.contains("a", at: at(600)), "a later failure ended with the first")
+        XCTAssertEqual(failures.played("a")?.noted, at(300))
+        XCTAssertFalse(failures.contains("a", at: at(301)), "still failed after it played")
+        XCTAssertEqual(failures.ids(at: at(301)), [])
+    }
+
+    func testGameMarkLastsFifteenMinutes() {
+        var failures = LiveFailures()
+        failures.noteGame(["a", "b"], at: at(0))
+        XCTAssertTrue(failures.gameNotPlaying(["b", "c"], at: at(899)))
+        XCTAssertFalse(failures.gameNotPlaying(["a"], at: at(900)), "the game's mark outlived 15 min")
+        failures.noteGame(["a"], at: at(-600))
+        XCTAssertTrue(failures.gameNotPlaying(["a"], at: at(899)), "an older finding from another device shortened the mark")
+        XCTAssertEqual(Set(failures.gamePlayed(["a", "c"]).keys), ["a"])
+        XCTAssertFalse(failures.gameNotPlaying(["a"], at: at(1)))
+    }
+
+    func testMarkBeforeKickoffEndsAtKickoff() {
+        var failures = LiveFailures()
+        failures.note("soon", at: at(0), kickoff: at(120))
+        failures.note("later", at: at(0), kickoff: at(3600))
+        failures.note("on", at: at(0), kickoff: at(-60))
+        failures.noteGame(["game"], at: at(0), kickoff: at(120))
+        XCTAssertTrue(failures.contains("soon", at: at(119)))
+        XCTAssertFalse(failures.contains("soon", at: at(120)), "a try before kickoff outlived it")
+        XCTAssertFalse(failures.gameNotPlaying(["game"], at: at(120)), "a game tried before kickoff stayed Not playing")
+        XCTAssertFalse(failures.contains("later", at: at(600)), "a try an hour early outlived its 10 min")
+        XCTAssertTrue(failures.contains("on", at: at(599)), "a try during the game ended at its kickoff")
+        XCTAssertEqual(failures.played("soon")?.beforeKickoff, true)
+        XCTAssertEqual(failures.played("on")?.beforeKickoff, false)
+    }
+
+    func testEndedMarksGo() {
+        var failures = LiveFailures()
+        XCTAssertNil(failures.nextEnd)
+        failures.note("a", at: at(0))
+        failures.noteGame(["g"], at: at(0), kickoff: at(60))
+        XCTAssertEqual(failures.nextEnd, at(60))
+        failures.dropEnded(at: at(60))
+        XCTAssertEqual(failures.nextEnd, at(600))
+        failures.dropEnded(at: at(600))
+        XCTAssertNil(failures.nextEnd)
     }
 
     func testEveryCopyFailed() {
         var failures = LiveFailures()
-        _ = failures.note("hd")
+        failures.note("hd")
         XCTAssertTrue(failures.failed(["hd"]))
         XCTAssertFalse(failures.failed(["hd", "sd"]), "a channel whose other copy didn't fail")
-        _ = failures.note("sd")
+        failures.note("sd")
         XCTAssertTrue(failures.failed(["hd", "sd"]))
         XCTAssertFalse(failures.failed(["hd", "sd"], playingCopy: "sd"), "the one playing isn't failed")
         XCTAssertFalse(failures.failed([]))
@@ -173,10 +210,10 @@ final class LiveFailuresTests: XCTestCase {
         let copies = ["fhd", "hd", "sd", "lbw"].map(Copy.init)
         var failures = LiveFailures()
         XCTAssertEqual(failures.failedLast(copies), copies, "the order changed with nothing failed")
-        _ = failures.note("fhd")
-        _ = failures.note("sd")
+        failures.note("fhd")
+        failures.note("sd")
         XCTAssertEqual(failures.failedLast(copies).map(\.id), ["hd", "lbw", "fhd", "sd"])
-        failures.played("fhd")
+        _ = failures.played("fhd")
         XCTAssertEqual(failures.failedLast(copies).map(\.id), ["fhd", "hd", "lbw", "sd"])
     }
 }
