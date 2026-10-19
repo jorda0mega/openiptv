@@ -128,6 +128,7 @@
 		6328311B5BE89E76E100A955 /* SubtitleLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677CFF11775CD0F4EBE9ED9A /* SubtitleLanguage.swift */; };
 		65E5DDEBE26E74B78CA34AB4 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DE7D9201148434BE2E8348A /* CoreVideo.framework */; };
 		668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
+		66C2EE2B8B590797D866BCCE /* ShelfTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C15A59472615C7C403A33300 /* ShelfTests.swift */; };
 		673D68C5F8210AE42681D0F7 /* PreviewThumbnails.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D5A050F91C28695C55089A /* PreviewThumbnails.swift */; };
 		673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
 		675F87B1E11CC35003D7F57C /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
@@ -218,6 +219,7 @@
 		B845A3EB0B884AD2D73E3AEB /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */; };
 		B8640E66EFE6670F23CE9788 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */; };
 		BD094BC015A36CC339757823 /* PlayerOrientation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */; };
+		BD984E7A7EB425452DFE299E /* ServerSubtitlesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EB55E37980C6BFCE31C9AC7 /* ServerSubtitlesTests.swift */; };
 		BE03B6B036990782A2E60BB6 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E6BB902BA3158069CE35BE75 /* QuartzCore.framework */; };
 		BEA7D82FFF28D87DD9B16601 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D277F32EC509804119BFFFC4 /* VideoToolbox.framework */; };
 		C036D2EDCB7EF78F0B7CE4F6 /* SubtitleSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19E63A90D228DEEB8FCA703 /* SubtitleSync.swift */; };
@@ -325,6 +327,7 @@
 		0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVPlayerOverlay.swift; sourceTree = "<group>"; };
 		0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scrubber.swift; sourceTree = "<group>"; };
 		0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK.xcframework; path = Vendor/MoltenVK.xcframework; sourceTree = "<group>"; };
+		0EB55E37980C6BFCE31C9AC7 /* ServerSubtitlesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSubtitlesTests.swift; sourceTree = "<group>"; };
 		12195947E258462DA892954B /* RealFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealFeedTests.swift; sourceTree = "<group>"; };
 		12232F30722138C0CC3DF129 /* RemoteSwipeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSwipeTests.swift; sourceTree = "<group>"; };
 		12D689360F95FEEBC85A1443 /* libxml2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libxml2.tbd; path = usr/lib/libxml2.tbd; sourceTree = SDKROOT; };
@@ -422,6 +425,7 @@
 		BE28D75F6B91327826DBEE9B /* GameTimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameTimeTests.swift; sourceTree = "<group>"; };
 		BE93F836A970124A83C81EB8 /* TileBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TileBadge.swift; sourceTree = "<group>"; };
 		BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
+		C15A59472615C7C403A33300 /* ShelfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfTests.swift; sourceTree = "<group>"; };
 		C26407BD93F001EDE4CBAEDF /* Libavdevice.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libavdevice.xcframework; path = Vendor/Libavdevice.xcframework; sourceTree = "<group>"; };
 		C39CC6E721AE47481BDE08E3 /* SubtitleLanguageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleLanguageTests.swift; sourceTree = "<group>"; };
 		C55BBD8ED2863316936CA1F3 /* LineupCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineupCheck.swift; sourceTree = "<group>"; };
@@ -727,7 +731,9 @@
 				73F945F999C40400846D4CCB /* QualityGovernorTests.swift */,
 				80EBE0612A764A40EB50A84D /* RelayRoutesTests.swift */,
 				12232F30722138C0CC3DF129 /* RemoteSwipeTests.swift */,
+				0EB55E37980C6BFCE31C9AC7 /* ServerSubtitlesTests.swift */,
 				A0618E144206850C96F3ABBC /* SharedGuideRuleTests.swift */,
+				C15A59472615C7C403A33300 /* ShelfTests.swift */,
 				BAAB46FC21C500C49B19CD78 /* SpeechSyncTests.swift */,
 				C39CC6E721AE47481BDE08E3 /* SubtitleLanguageTests.swift */,
 				9922065F8332549C3628D7E7 /* SubtitleSectionTests.swift */,
@@ -1112,8 +1118,10 @@
 				F2694E1C04B4CFD07036B428 /* RelayRoutesTests.swift in Sources */,
 				16434D81F4E19A43C2ADD7C5 /* RemoteSwipe.swift in Sources */,
 				76DF5AB929E63EC63FD2D25C /* RemoteSwipeTests.swift in Sources */,
+				BD984E7A7EB425452DFE299E /* ServerSubtitlesTests.swift in Sources */,
 				844139032D9669A972329A3E /* SharedGuideRule.swift in Sources */,
 				40DD71CACCF8EE67AC1688FD /* SharedGuideRuleTests.swift in Sources */,
+				66C2EE2B8B590797D866BCCE /* ShelfTests.swift in Sources */,
 				0C705B3715316BFEBA0F5359 /* SpeechSyncTests.swift in Sources */,
 				EE664F875BBAF8BE86A1D571 /* SubtitleLanguage.swift in Sources */,
 				ADF986DECA213CF34888F23A /* SubtitleLanguageTests.swift in Sources */,

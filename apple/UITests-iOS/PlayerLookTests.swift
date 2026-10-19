@@ -37,9 +37,9 @@ final class PlayerLookTests: XCTestCase {
         print("SHOT \(note) → \(name)")
     }
 
-    /// The film "Animals" from Search, playing.
-    private func openFilm(_ arguments: [String] = []) {
-        app.launchArguments = ["-debugSearch", "animals"] + arguments
+    /// The film "Animals" (or the one with this title) from Search, playing.
+    private func openFilm(_ arguments: [String] = [], titled title: String? = nil) {
+        app.launchArguments = ["-debugSearch", title?.lowercased() ?? "animals"] + arguments
         app.launch()
         sleep(4)
         // iPhone: the tab bar at the bottom; iPad: the one at the top.
@@ -48,7 +48,8 @@ final class PlayerLookTests: XCTestCase {
         sleep(3)
         // The film, not the show "Animals." (first on a fresh simulator,
         // before IMDb's ratings have come to rank them).
-        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals' AND NOT label BEGINSWITH 'Animals.'")).firstMatch
+        let result = app.buttons.matching(title.map { NSPredicate(format: "label BEGINSWITH %@", $0) }
+            ?? NSPredicate(format: "label BEGINSWITH 'Animals' AND NOT label BEGINSWITH 'Animals.'")).firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 8), "no search result")
         result.tap()
         sleep(2)
@@ -646,6 +647,111 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng")
         let after = Int(readout.label) ?? -1
         XCTAssertEqual(after, before, "picking subtitles went back into the film to read it again")
+    }
+
+    /// Picks the film's own English subtitles: how many times the player
+    /// read back into the film for them (none when their copy is here).
+    private func readsBackPickingEnglish() throws -> Int {
+        let readout = app.staticTexts["debug-reads-back"].firstMatch
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "no reads-back readout")
+        let before = Int(readout.label) ?? -1
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let off = app.buttons["Off"].firstMatch
+        XCTAssertTrue(off.waitForExistence(timeout: 3), "no subtitles menu")
+        let below = app.buttons.allElementsBoundByIndex.filter { $0.frame.minY > off.frame.minY }
+        shot("subtitles menu")
+        let english = below.first { $0.label == "English" }
+        try XCTUnwrap(english, "no English subtitles").tap()
+        sleep(3)
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng")
+        return (Int(readout.label) ?? -1) - before
+    }
+
+    /// The server's copy of the film's own English track comes even when
+    /// the server takes 25 s to take each track out (a real one reads the
+    /// whole film: Asterix the Gaul took over a minute), so picking English
+    /// reads nothing back. Regression: the copy gave up after 20 s. Needs
+    /// the multi-track test file (TEST_RUNNER_MULTI_TRACK=1).
+    func testCopyOfTheFilmsTrackWaitsForASlowServer() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["reference_delay": "25"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"])
+        // The Spanish copy, then the English one.
+        sleep(55)
+        XCTAssertEqual(try readsBackPickingEnglish(), 0, "picking English read back into the film: its copy never came")
+    }
+
+    /// A copy the server failed to give is asked for again (after 15 s and
+    /// 60 s; 1 s and 2 s with -quickSubtitleRetries), so picking English
+    /// reads nothing back. Regression: one failure, and the film played on
+    /// without it. Needs the multi-track test file.
+    func testCopyOfTheFilmsTrackIsAskedAgainAfterAFailure() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["subtitle_fail": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES", "-quickSubtitleRetries", "YES"])
+        sleep(5)
+        let english = subtitleRequests(server).filter { $0 == "\(app.staticTexts["debug-item"].firstMatch.label):4" }
+        XCTAssertEqual(english.count, 2, "the English copy wasn't asked for again: \(subtitleRequests(server))")
+        XCTAssertEqual(try readsBackPickingEnglish(), 0, "picking English read back into the film: its copy never came")
+    }
+
+    /// Each subtitle track is asked for once per play, though the film's
+    /// own track is both a copy and the reference a file beside the film is
+    /// put in time with (the server reads the whole film for each ask).
+    /// Regression: both at once. Needs the multi-track US film with the
+    /// English SDH file beside it (TEST_RUNNER_SUBTITLE_FILES=1,
+    /// TEST_RUNNER_MULTI_TRACK=1).
+    func testEachSubtitleTrackIsAskedForOnce() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_FILES"] != nil
+                          && ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track film with a file beside it")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"])
+        sleep(5)
+        let asked = subtitleRequests(server)
+        XCTAssertFalse(asked.isEmpty, "no subtitles were asked for")
+        XCTAssertEqual(asked.count, Set(asked).count, "a track was asked for more than once: \(asked.sorted())")
+    }
+
+    /// A film played again, after the app was closed, asks the server for
+    /// none of its subtitles: the files beside it and the copies of its own
+    /// tracks are kept on the device. Regression: every play fetched them
+    /// all again (the copies, each a read of the whole film). Same needs as
+    /// testEachSubtitleTrackIsAskedForOnce.
+    func testSecondPlayAsksForNoSubtitles() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_FILES"] != nil
+                          && ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track film with a file beside it")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        // One film of that name: three are named Animals, and their order
+        // changes once IMDb's ratings have come.
+        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"], titled: "Oppenheimer")
+        sleep(5)
+        let film = app.staticTexts["debug-item"].firstMatch.label
+        XCTAssertFalse(subtitleRequests(server).filter { $0.hasPrefix("\(film):") }.isEmpty, "the first play asked for no subtitles")
+        app.terminate()
+        let mark = markTime(server)
+        openFilm(["-forgetTrackChoices", "YES"], titled: "Oppenheimer")
+        sleep(5)
+        XCTAssertEqual(app.staticTexts["debug-item"].firstMatch.label, film, "the second play is another film")
+        XCTAssertEqual(subtitleRequests(server, since: mark).filter { $0.hasPrefix("\(film):") }, [], "the second play asked for subtitles again")
+        XCTAssertEqual(try readsBackPickingEnglish(), 0, "picking English read back into the film: the kept copy wasn't added")
+        controlsUp()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let sdh = app.buttons["English SDH"].firstMatch
+        XCTAssertTrue(sdh.waitForExistence(timeout: 3), "the kept file isn't in the menu")
+        sdh.tap()
+        sleep(2)
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=eng+sdh")
     }
 
     /// A film in two copies, one French-only and one in English: the
@@ -1409,9 +1515,18 @@ final class PlayerLookTests: XCTestCase {
     }
 
     private func videoRequests(_ server: URL, since: Double) -> [String] {
+        listed(server, "mock/video_requests", since: since)
+    }
+
+    /// "item:index" for each request for a subtitle track.
+    private func subtitleRequests(_ server: URL, since: Double = 0) -> [String] {
+        listed(server, "mock/subtitle_requests", since: since)
+    }
+
+    private func listed(_ server: URL, _ path: String, since: Double) -> [String] {
         var items: [String] = []
-        let done = expectation(description: "video requests")
-        let url = server.appending(path: "mock/video_requests").appending(queryItems: [.init(name: "since", value: String(since))])
+        let done = expectation(description: path)
+        let url = server.appending(path: path).appending(queryItems: [.init(name: "since", value: String(since))])
         URLSession.shared.dataTask(with: url) { data, _, _ in
             items = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?["items"] ?? []
             done.fulfill()
