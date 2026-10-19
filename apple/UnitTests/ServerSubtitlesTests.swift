@@ -15,7 +15,7 @@ final class ServerSubtitlesTests: XCTestCase {
     }
 
     private func track(key: String = "secretkey", host: String = "emby.example", version: String = "800|mkv|subrip") -> ServerSubtitle {
-        ServerSubtitle(address: URL(string: "http://\(host):8096/emby/Videos/i1/ms-i1/Subtitles/3/Stream.srt?api_key=\(key)")!,
+        ServerSubtitle(address: URL(string: "http://\(host):8096/emby/Videos/i1/ms-i1/Subtitles/3/Stream.srt")!, token: key,
                        kind: .inFile, version: version)
     }
 
@@ -32,6 +32,31 @@ final class ServerSubtitlesTests: XCTestCase {
         XCTAssertEqual(track(key: "one").hashValue, track(key: "two").hashValue)
         XCTAssertNotEqual(track(), track(version: "900|mkv|subrip"))
         XCTAssertNotEqual(track(), track(host: "other.example"))
+    }
+
+    func testRequestSendsTheKeyOnlyInAHeader() throws {
+        let request = ServerSubtitles.request(for: track())
+        let address = try XCTUnwrap(request.url)
+        XCTAssertFalse(address.absoluteString.contains("secretkey"))
+        XCTAssertNil(URLComponents(url: address, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Emby-Token"), "secretkey")
+    }
+
+    func testARedirectKeepsTheKeyOutOfTheAddress() {
+        var redirect = URLRequest(url: URL(string: "http://emby.example/emby/Videos/i1/ms-i1/Subtitles/3/Stream.srt?redirected=1&api_key=secretkey")!)
+        redirect.setValue("bytes=0-", forHTTPHeaderField: "Range")
+        let moved = HTTP.keyInHeader(redirect)
+        XCTAssertEqual(moved.url?.absoluteString, "http://emby.example/emby/Videos/i1/ms-i1/Subtitles/3/Stream.srt?redirected=1")
+        XCTAssertEqual(moved.value(forHTTPHeaderField: "X-Emby-Token"), "secretkey")
+        XCTAssertEqual(moved.value(forHTTPHeaderField: "Range"), "bytes=0-")
+    }
+
+    func testATrackIsNeverPrintedWithItsKey() {
+        var dumped = ""
+        dump(track(), to: &dumped)
+        for printed in ["\(track())", String(reflecting: track()), dumped] {
+            XCTAssertFalse(printed.contains("secretkey"), "printed with its key")
+        }
     }
 
     func testFileNameHoldsNoAddressOrKey() {

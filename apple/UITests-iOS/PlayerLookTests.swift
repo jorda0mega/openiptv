@@ -721,6 +721,25 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(asked.count, Set(asked).count, "a track was asked for more than once: \(asked.sorted())")
     }
 
+    /// No subtitle request carries the Emby key in its address, even when
+    /// the server redirects it to an address with the key: the key goes in
+    /// a header (the system logs the address of a request that fails).
+    /// Regression: a real run found the key in that log, from a subtitle
+    /// copy's request. Same needs as testEachSubtitleTrackIsAskedForOnce.
+    func testSubtitleRequestsKeepTheKeyOutOfTheirAddress() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_FILES"] != nil
+                          && ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track film with a file beside it")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["subtitle_redirect": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"])
+        sleep(5)
+        XCTAssertFalse(subtitleRequests(server).isEmpty, "no subtitles were asked for")
+        XCTAssertEqual(subtitleRequests(server, "keyed"), [], "subtitles were asked for with the key in the address")
+        XCTAssertEqual(subtitleRequests(server, "headerless"), [], "subtitles were asked for without the key in a header")
+    }
+
     /// A film played again, after the app was closed, asks the server for
     /// none of its subtitles: the files beside it and the copies of its own
     /// tracks are kept on the device. Regression: every play fetched them
@@ -1518,17 +1537,19 @@ final class PlayerLookTests: XCTestCase {
         listed(server, "mock/video_requests", since: since)
     }
 
-    /// "item:index" for each request for a subtitle track.
-    private func subtitleRequests(_ server: URL, since: Double = 0) -> [String] {
-        listed(server, "mock/subtitle_requests", since: since)
+    /// "item:index" for each request for a subtitle track ("items"), or for
+    /// those with the key in their address ("keyed") or without it in a
+    /// header ("headerless").
+    private func subtitleRequests(_ server: URL, since: Double = 0, _ field: String = "items") -> [String] {
+        listed(server, "mock/subtitle_requests", since: since, field)
     }
 
-    private func listed(_ server: URL, _ path: String, since: Double) -> [String] {
+    private func listed(_ server: URL, _ path: String, since: Double, _ field: String = "items") -> [String] {
         var items: [String] = []
         let done = expectation(description: path)
         let url = server.appending(path: path).appending(queryItems: [.init(name: "since", value: String(since))])
         URLSession.shared.dataTask(with: url) { data, _, _ in
-            items = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?["items"] ?? []
+            items = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?[field] ?? []
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 10)
