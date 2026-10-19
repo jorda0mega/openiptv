@@ -1,49 +1,19 @@
 #if DEBUG
 import CryptoKit
 import Foundation
-import Libavutil
 import Libmpv
 import Network
 
 protocol LivePerfWord: RawRepresentable<String> {}
+
+extension StreamFailure: LivePerfWord {}
 
 /// `PERF live` lines: numbers and fixed words only, never a URL, host,
 /// name or mpv's own text (stream URLs carry the login).
 enum LivePerf {
     enum Line: String { case open, fail, stall, net, end, path, codec, mpv }
 
-    enum Failure: String, LivePerfWord {
-        case none, http_401, http_403, http_404, http_429, http_5xx, http_other
-        case refused, reset, timeout, dns, tls, redirect_loop, probe_failed, decode
-        case no_data, no_frame, eof_before_frame, unknown
-
-        private static let patterns: [(String, Failure)] = [
-            ("Connection refused", .refused),
-            ("Connection reset", .reset),
-            ("timed out", .timeout),
-            ("Failed to resolve hostname|nodename nor servname", .dns),
-            ("TLS|SSL|certificate", .tls),
-            ("Too many redirects|Redirect loop", .redirect_loop),
-            ("Invalid data found|could not find codec parameters", .probe_failed),
-            ("Failed to initialize a decoder|Could not open codec", .decode),
-        ]
-
-        init?(logged text: String) {
-            if let status = text.firstMatch(of: #/(?:HTTP error|Server returned) ([1-5][0-9X]{2})/#)?.1 {
-                self = switch status {
-                case "401": .http_401
-                case "403": .http_403
-                case "404": .http_404
-                case "429": .http_429
-                case _ where status.hasPrefix("5"): .http_5xx
-                default: .http_other
-                }
-                return
-            }
-            guard let match = Self.patterns.first(where: { text.range(of: $0.0, options: .regularExpression) != nil }) else { return nil }
-            self = match.1
-        }
-    }
+    enum NoFailure: String, LivePerfWord { case none }
 
     enum Phase: String, LivePerfWord { case open, play }
     enum End: String, LivePerfWord { case eof, error, closed }
@@ -73,6 +43,7 @@ enum LivePerf {
         case token(Token)
 
         static func ms(_ seconds: Double?) -> Value { .count(seconds.map { Int(($0 * 1000).rounded()) } ?? -1) }
+        static func failure(_ failure: StreamFailure?) -> Value { failure.map { .word($0) } ?? .word(NoFailure.none) }
         static func flag(_ on: Bool) -> Value { .count(on ? 1 : 0) }
 
         var text: String {
@@ -100,28 +71,6 @@ enum LivePerf {
         return line.split(separator: " ").allSatisfy { word in
             word.count <= 32 && (!word.contains(".") || word.wholeMatch(of: #/[A-Za-z0-9_]+=-?[0-9]+\.[0-9]+/#) != nil)
         }
-    }
-
-    private static let ffmpegLock = NSLock()
-    nonisolated(unsafe) private static var lastFFmpegFailure: (failure: Failure, at: CFAbsoluteTime)?
-
-    /// libmpv hands ffmpeg's lines (the HTTP status among them) only to the
-    /// first player made in the app, often a film warming up, and puts
-    /// ffmpeg's own printer back when that player closes: they are read here
-    /// instead, for the class alone, after every player opens or closes.
-    static func listenToFFmpeg() {
-        av_log_set_callback { _, level, format, arguments in
-            guard level & 0xff <= AV_LOG_WARNING, let format, let arguments else { return }
-            var text = [CChar](repeating: 0, count: 512)
-            vsnprintf(&text, text.count, format, arguments)
-            guard let failure = text.withUnsafeBufferPointer({ LivePerf.Failure(logged: String(cString: $0.baseAddress!)) }) else { return }
-            LivePerf.ffmpegLock.withLock { LivePerf.lastFFmpegFailure = (failure, CFAbsoluteTimeGetCurrent()) }
-        }
-    }
-
-    static func ffmpegFailure(since time: CFAbsoluteTime?) -> Failure? {
-        guard let time, let last = ffmpegLock.withLock({ lastFFmpegFailure }), last.at >= time else { return nil }
-        return last.failure
     }
 
     static func sayPath(_ path: NWPath) {
@@ -165,7 +114,7 @@ enum LivePerf {
         var closeWait = -1
         var loadfile: CFAbsoluteTime?
         var opened = -1
-        var failure = Failure.none
+        var failure: StreamFailure?
         var warnings = 0
         var drops = 0
     }
@@ -173,7 +122,7 @@ enum LivePerf {
     /// One live screen's opens, stalls and ends, told by its events.
     @MainActor @Observable
     final class Watch {
-        private(set) var failure = Failure.none
+        private(set) var failure: StreamFailure?
         @ObservationIgnored weak var player: MPVPlayer?
         @ObservationIgnored private var beganAt = CFAbsoluteTimeGetCurrent()
         @ObservationIgnored private var copy: Copy?
@@ -293,20 +242,20 @@ enum LivePerf {
                         "closewait": .count(opening.closeWait), "opened": .count(opening.opened), "frame": .ms(frame), "tap": .ms(tap)])
         }
 
-        private func fail(_ current: Copy, _ opening: Opening, _ now: CFAbsoluteTime, or otherwise: Failure) {
+        private func fail(_ current: Copy, _ opening: Opening, _ now: CFAbsoluteTime, or otherwise: StreamFailure) {
             let phase: Phase = current.frameAt == nil ? .open : .play
-            failure = opening.failure == .none ? otherwise : opening.failure
+            failure = opening.failure ?? otherwise
             if phase == .open { sayOpen(current, opening, frame: nil, tap: nil) }
             let since = phase == .open ? opening.loadfile : current.frameAt
-            say(.fail, ["tok": .token(current.token), "copy": .count(current.n), "class": .word(failure), "phase": .word(phase),
+            say(.fail, ["tok": .token(current.token), "copy": .count(current.n), "class": .failure(failure), "phase": .word(phase),
                         "at": .ms(since.map { now - $0 }), "warnings": .count(opening.warnings)])
         }
 
         private func end(_ current: Copy, _ opening: Opening, _ now: CFAbsoluteTime, _ reason: End) {
             let stalled = current.stalled + (current.stallBegan.map { now - $0 } ?? 0)
-            if opening.failure != .none { failure = opening.failure }
+            if let failure = opening.failure { self.failure = failure }
             say(.end, ["tok": .token(current.token), "reason": .word(reason), "watched": .decimal(current.frameAt.map { now - $0 } ?? -1, places: 1),
-                       "stalls": .count(current.stalls), "stalled": .decimal(stalled, places: 1), "class": .word(opening.failure),
+                       "stalls": .count(current.stalls), "stalled": .decimal(stalled, places: 1), "class": .failure(opening.failure),
                        "warnings": .count(opening.warnings)])
         }
     }

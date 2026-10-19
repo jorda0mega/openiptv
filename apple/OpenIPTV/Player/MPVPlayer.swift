@@ -30,7 +30,8 @@ final class MPVPlayer: @unchecked Sendable {
         /// First frame is on screen; seconds since `load`.
         case started(Double)
         case buffering(Bool)
-        case failed(String)
+        /// libmpv's error, and its class when a warning said.
+        case failed(String, StreamFailure?)
         case time(position: Double, duration: Double?)
         case paused(Bool)
         /// Seconds buffered ahead and the current download speed (bytes/s),
@@ -45,7 +46,7 @@ final class MPVPlayer: @unchecked Sendable {
         /// rewind into, in the stream's own seconds, and whether the server
         /// also lets it jump outside that stretch.
         case window(start: Double, end: Double, seekable: Bool)
-        case ended
+        case ended(StreamFailure?)
         /// Tracks were added (the server's subtitle files, once fetched).
         case tracksChanged
     }
@@ -61,13 +62,14 @@ final class MPVPlayer: @unchecked Sendable {
                 return (tracksUnheard, failureUnheard)
             }
             if tracks { Task { @MainActor in handler(.tracksChanged) } }
-            if let failure { Task { @MainActor in handler(.failed(failure)) } }
+            if let failure { Task { @MainActor in handler(.failed(failure.message, failure.class)) } }
         }
     }
     /// A `.tracksChanged` went out with no one listening.
     private var tracksUnheard = false
     /// A `.failed` that went out with no one listening.
-    private var failureUnheard: String?
+    private var failureUnheard: (message: String, class: StreamFailure?)?
+    private var logged: (failure: StreamFailure, at: CFAbsoluteTime)?
     /// Players still closing their connection. A live stream waits for them
     /// (up to 2 s) before opening its own: many IPTV accounts allow one
     /// connection, and a second while the first is closing gets refused.
@@ -85,7 +87,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var perf = LivePerf.Opening()
     var livePerf: LivePerf.Opening {
         var opening = stateLock.withLock { perf }
-        if let failure = LivePerf.ffmpegFailure(since: opening.loadfile) { opening.failure = failure }
+        if let loadfile = opening.loadfile, let failure = FFmpegLog.failure(since: loadfile) { opening.failure = failure }
         return opening
     }
     #endif
@@ -339,6 +341,8 @@ final class MPVPlayer: @unchecked Sendable {
         }
         #endif
         mpv_initialize(mpv)
+        mpv_request_log_messages(mpv, "warn")
+        FFmpegLog.listen()
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "duration", MPV_FORMAT_DOUBLE)
@@ -1305,9 +1309,7 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_set_wakeup_callback(mpv, nil, nil)
             mpv_terminate_destroy(mpv)
             self.mpv = nil
-            #if DEBUG
-            LivePerf.listenToFFmpeg()
-            #endif
+            FFmpegLog.listen()
         }
     }
 
@@ -1406,22 +1408,28 @@ final class MPVPlayer: @unchecked Sendable {
         case MPV_EVENT_END_FILE:
             guard let data = event.data else { return }
             let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
+            let since = loadStarted
+            // libmpv hands over the warnings that led to an end after the end
+            // itself: the class is read once they're in.
             if end.reason == MPV_END_FILE_REASON_ERROR {
                 startLock.withLock { failedFlag = true }
-                emit(.failed(String(cString: mpv_error_string(end.error))))
+                let message = String(cString: mpv_error_string(end.error))
+                queue.async { [self] in emit(.failed(message, failure(since: since))) }
             } else if end.reason == MPV_END_FILE_REASON_EOF {
-                emit(.ended)
+                queue.async { [self] in emit(.ended(failure(since: since))) }
             }
-        #if DEBUG
         case MPV_EVENT_LOG_MESSAGE:
             guard let data = event.data else { return }
             let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
-            let failure = LivePerf.Failure(logged: String(cString: message.text))
+            let failure = StreamFailure(logged: String(cString: message.text))
+            let now = CFAbsoluteTimeGetCurrent()
             stateLock.withLock {
+                if let failure { logged = (failure, now) }
+                #if DEBUG
                 perf.warnings += 1
                 if let failure { perf.failure = failure }
+                #endif
             }
-        #endif
         case MPV_EVENT_PROPERTY_CHANGE:
             guard let data = event.data else { return }
             let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
@@ -1486,6 +1494,10 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    private func failure(since time: CFAbsoluteTime) -> StreamFailure? {
+        FFmpegLog.failure(since: time) ?? stateLock.withLock { logged.flatMap { $0.at >= time ? $0.failure : nil } }
+    }
+
     #if DEBUG
     private static var noHiddenSubtitles: Bool { UserDefaults.standard.bool(forKey: "noHiddenSubtitles") }
     #else
@@ -1546,8 +1558,6 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func perfSetUp(since began: CFAbsoluteTime) {
         guard let mpv else { return }
-        mpv_request_log_messages(mpv, "warn")
-        LivePerf.listenToFFmpeg()
         mpv_observe_property(mpv, 0, "frame-drop-count", MPV_FORMAT_INT64)
         stateLock.withLock { perf.setup = Int(((CFAbsoluteTimeGetCurrent() - began) * 1000).rounded()) }
     }
@@ -1632,7 +1642,7 @@ final class MPVPlayer: @unchecked Sendable {
         let handler = onEvent
         if handler == nil {
             if case .tracksChanged = event { stateLock.withLock { tracksUnheard = true } }
-            if case .failed(let reason) = event { stateLock.withLock { failureUnheard = reason } }
+            if case let .failed(message, failure) = event { stateLock.withLock { failureUnheard = (message, failure) } }
         }
         Task { @MainActor in handler?(event) }
     }
