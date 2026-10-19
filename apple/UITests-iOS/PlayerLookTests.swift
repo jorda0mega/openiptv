@@ -740,6 +740,52 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(subtitleRequests(server, "headerless"), [], "subtitles were asked for without the key in a header")
     }
 
+    /// No request for a film's stream (through the relay, and those cut off
+    /// when the film closes), nor the server's websocket, has the Emby key
+    /// in its address: each sends it in a header (the system logs the
+    /// address of a request that fails or is stopped). Regression: each
+    /// address had it, and a real run found the key in that log.
+    func testFilmRequestsKeepTheKeyOutOfTheirAddress() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        // Slow answers: a request is still under way when the film closes.
+        configure(server, ["video_delay": "2"])
+        defer { configure(server, ["reset": "1"]) }
+        openFilm()
+        controlsUp()
+        app.buttons["Close player"].firstMatch.tap()
+        sleep(3)
+        XCTAssertTrue(keyChecks(server, "items").contains { $0.hasPrefix("stream:") }, "no film was streamed")
+        XCTAssertTrue(keyChecks(server, "items").contains("websocket"), "the server's websocket wasn't opened")
+        XCTAssertTrue(keyChecks(server, "cancelled").contains { $0.hasPrefix("stream:") }, "no stream was cut off")
+        XCTAssertEqual(keyChecks(server, "keyed"), [], "asked with the key in the address")
+        XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
+    }
+
+    /// While a converted version plays, the connection is tested every 20 s
+    /// by reading 4 MiB of the original, then stopping: that request, and
+    /// the converted stream's own, send the Emby key in a header, not in
+    /// the address. Regression: in the address.
+    func testSpeedCheckKeepsTheKeyOutOfItsAddress() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "5"
+        openFilm()
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        var lowered = false
+        for _ in 0..<40 where !lowered {
+            sleep(1)
+            lowered = quality.exists && quality.label.hasPrefix("converted")
+        }
+        XCTAssertTrue(lowered, "the quality wasn't lowered: \(quality.exists ? quality.label : "no readout")")
+        for _ in 0..<40 where !keyChecks(server, "items").contains(where: { $0.hasPrefix("speed:") }) { sleep(1) }
+        XCTAssertTrue(keyChecks(server, "items").contains { $0.hasPrefix("speed:") }, "the connection wasn't tested")
+        XCTAssertTrue(keyChecks(server, "items").contains { $0.hasPrefix("hls:") }, "no converted version was asked for")
+        XCTAssertEqual(keyChecks(server, "keyed"), [], "asked with the key in the address")
+        XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
+    }
+
     /// A film played again, after the app was closed, asks the server for
     /// none of its subtitles: the files beside it and the copies of its own
     /// tracks are kept on the device. Regression: every play fetched them
@@ -1542,6 +1588,14 @@ final class PlayerLookTests: XCTestCase {
     /// header ("headerless").
     private func subtitleRequests(_ server: URL, since: Double = 0, _ field: String = "items") -> [String] {
         listed(server, "mock/subtitle_requests", since: since, field)
+    }
+
+    /// The requests that need the Emby key ("stream:item", "speed:item",
+    /// "hls:item", "websocket"): all ("items"), those with the key in their
+    /// address ("keyed") or without it in a header ("headerless"), and those
+    /// the app hung up on mid-answer ("cancelled").
+    private func keyChecks(_ server: URL, _ field: String) -> [String] {
+        listed(server, "mock/key_checks", since: 0, field)
     }
 
     private func listed(_ server: URL, _ path: String, since: Double, _ field: String = "items") -> [String] {
