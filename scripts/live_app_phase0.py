@@ -9,7 +9,7 @@ answer against the app's `PERF live` lines (.audit/live-perf/fable-plan.md
 Starts the test server on the port with the test film (OPENIPTV_MOCK_VIDEO,
 else /tmp/openreel-media/test.mkv), builds for testing with --build, runs
 LivePerfProbeTests on the booted iPhone simulator, and reads the app's
-lines from the Mac's log by the app's process ids, with a `PERF live`
+lines from the simulator's log by the app's process ids, with a `PERF live`
 filter. Each test plays its own channel, so a line's `tok` names its row.
 Local only: nothing here reaches a provider. Exits 1 if a row misses its
 known value, a line breaks the probe's rule (shown as [withheld]), or the
@@ -86,9 +86,9 @@ def check_cut(lines):
 
 
 def check_reset(lines):
-    said = [fields(l) for l in lines if kind(l, "end") or kind(l, "fail")]
-    classes = [x["class"] for x in said]
-    return "class=reset (fail or end)", f"classes={classes}", "reset" in classes
+    e = [fields(l) for l in lines if kind(l, "end")]
+    return "end reason=eof watched ~5 class=none", " ".join(f"reason={x['reason']} watched={x['watched']} class={x['class']}" for x in e[:2]), \
+        bool(e) and e[0]["reason"] == "eof" and near(e[0]["watched"], 5, 1.5) and e[0]["class"] == "none"
 
 
 def check_dead(lines):
@@ -119,9 +119,9 @@ def app_pids(phone, seen, stop):
         stop.wait(0.5)
 
 
-def log_show(began, predicate, style):
-    return subprocess.run(["/usr/bin/log", "show", "--style", style, "--info", "--debug", "--start", began,
-                           "--predicate", predicate], capture_output=True, text=True)
+def log_show(phone, began, predicate, style):
+    return subprocess.run(["xcrun", "simctl", "spawn", phone, "log", "show", "--style", style, "--info", "--debug",
+                           "--start", began, "--predicate", predicate], capture_output=True, text=True)
 
 
 def main():
@@ -184,7 +184,7 @@ def main():
 
     time.sleep(3)
     by_pid = "processID IN {" + ", ".join(map(str, pids)) + "}"
-    shown = log_show(began, by_pid + ' AND eventMessage BEGINSWITH "PERF live"', "ndjson")
+    shown = log_show(args.phone, began, by_pid + ' AND eventMessage BEGINSWITH "PERF live"', "ndjson")
     entries = [json.loads(row) for row in shown.stdout.splitlines() if row.startswith("{")]
     lines = [(e["processID"], e["eventMessage"]) for e in entries if e.get("eventMessage", "").startswith("PERF live ")]
     print(f"\n{len(lines)} PERF live lines from {len(pids)} app launches\n")
@@ -219,12 +219,23 @@ def main():
     print(f"user agents the test server saw (last test): {agents}")
 
     withheld = [l for _, l in lines if leaks(l)]
-    every = log_show(began, by_pid, "compact")
-    logged = [row for row in every.stdout.splitlines() if row[:4].isdigit()]
+    if withheld:
+        print(f"withheld lines by kind: { {w: sum(l.split()[2] == w for l in withheld) for w in {l.split()[2] for l in withheld}} }")
+    every = log_show(args.phone, began, by_pid, "ndjson")
+    logged = [json.loads(row) for row in every.stdout.splitlines() if row.startswith("{")]
+    logged = [e for e in logged if "eventMessage" in e]
     words = [rf"127\.0\.0\.1:{args.port}", rf"localhost:{args.port}", "/live/", "u/p/", "username", "password", "player_api"]
-    clear = {word: sum(bool(re.search(word, row)) for row in logged) for word in words}
+    clear = {word: sum(bool(re.search(word, e["eventMessage"])) for e in logged) for word in words}
+    senders = {}
+    for e in logged:
+        if any(re.search(word, e["eventMessage"]) for word in words):
+            where = (os.path.basename(e.get("senderImagePath", "")), e.get("subsystem", ""), e.get("category", ""))
+            senders[where] = senders.get(where, 0) + 1
+    for where, count in sorted(senders.items(), key=lambda item: -item[1]):
+        print(f"    in clear from {where[0]} {where[1]} {where[2]}: {count}")
     read = every.returncode == 0 and bool(logged)
-    print(f"\nthe app's log, {len(logged)} lines; in clear: {clear}" if read else "\nthe app's log: unread")
+    print(f"\nthe app's log, {len(logged)} lines; in clear: {clear}" if read
+          else f"\nthe app's log: unread (exit {every.returncode}, {len(every.stderr)} chars on stderr)")
     print(f"PERF lines withheld by the rule: {len(withheld)}")
     clean = read and not withheld and not any(clear.values())
     print(f"\n{len(ROWS) - failed} of {len(ROWS)} rows match; log checks {'pass' if clean else 'FAIL'}")
