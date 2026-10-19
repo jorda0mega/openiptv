@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// Full-screen live TV. Everything since tuning in is kept (on disk), so
@@ -12,6 +13,7 @@ struct LivePlayerView: View {
     @Environment(Preferences.self) private var prefs
     @Environment(\.dismiss) private var dismiss
     @Environment(\.closePlayer) private var closePlayer
+    @Environment(\.scenePhase) private var scenePhase
 
     let channels: [LiveChannel]
     @State var index: Int
@@ -27,6 +29,7 @@ struct LivePlayerView: View {
     /// When another stream was let go: a provider allowing one stream at a
     /// time can still count it for a moment and refuse the next.
     @State private var switchedAt = Date.distantPast
+    @State private var closedAway = false
     /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
     @State private var buffering = false
@@ -154,6 +157,10 @@ struct LivePlayerView: View {
         .onExitCommand { showWatchOn ? closeWatchOn() : close() }
         #endif
         .persistentSystemOverlays(.hidden)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { closeIfPausedAway() }
+            if phase == .active, closedAway { play(copy: playingCopy) }
+        }
         .task { start() }
         .onAppear {
             PlaybackActivity.began()
@@ -688,6 +695,25 @@ struct LivePlayerView: View {
         showControls()
     }
 
+    /// Many accounts allow one stream at a time: live TV paused in the
+    /// background lets it go, unless AirPlay plays it, and opens live again
+    /// on return.
+    private func closeIfPausedAway() {
+        guard paused, started, error == nil, recording == nil, !closedAway, !airPlaying else { return }
+        closedAway = true
+        startWatch?.cancel()
+        loadTask?.cancel()
+        #if DEBUG
+        perf.closed()
+        #endif
+        let background = UIApplication.shared.beginBackgroundTask()
+        player?.stop { UIApplication.shared.endBackgroundTask(background) }
+    }
+
+    private var airPlaying: Bool {
+        AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
+    }
+
     private func retry() {
         if let recording { watch(recording) } else { play() }
     }
@@ -699,6 +725,7 @@ struct LivePlayerView: View {
         timing = "Starting…"
         started = false
         reopening = false
+        closedAway = false
         buffering = false
         error = nil
         position = nil

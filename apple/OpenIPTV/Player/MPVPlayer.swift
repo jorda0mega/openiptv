@@ -1279,6 +1279,19 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    /// Closes the stream and its connection; the player stays for the next
+    /// `load`. libmpv lets the connection go after `stop` returns, so
+    /// `closed` runs a second later.
+    func stop(closed: @escaping @MainActor @Sendable () -> Void) {
+        queue.async { [self] in
+            command(["stop"])
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                closed()
+            }
+        }
+    }
+
     /// Stops playback and frees libmpv; the network connection closes with
     /// it. Returns at once: closing a connection mid-download can take a
     /// moment, and the screen mustn't wait for it.
