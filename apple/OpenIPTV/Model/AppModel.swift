@@ -2127,8 +2127,7 @@ final class AppModel {
     /// Sports. On now first, then by start; channels from abroad after
     /// local ones; local stations only for your area.
     func searchGuide(_ query: String, area: LocalArea?, limit: Int = 40) async -> [GuideHit] {
-        let words = GuideStore.fold(query).split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
-            .filter { $0.count >= 2 || $0.allSatisfy(\.isNumber) }
+        let words = Self.guideWords(query)
         guard !words.isEmpty else { return [] }
         let now = Int64(Date().timeIntervalSince1970)
         var hits: [GuideHit] = []
@@ -2161,6 +2160,22 @@ final class AppModel {
             let sx = x.start ?? .max, sy = y.start ?? .max
             return sx != sy ? sx < sy : a.offset < b.offset
         }.prefix(limit).map(\.element)
+    }
+
+    private nonisolated static func guideWords(_ query: String) -> [String] {
+        GuideStore.fold(query).split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+            .filter { $0.count >= 2 || $0.allSatisfy(\.isNumber) }
+    }
+
+    /// Hits found for earlier text that the new text's words still find, in
+    /// the programme's title, its channel or its league.
+    nonisolated static func guideHits(_ hits: [GuideHit], fitting query: String) -> [GuideHit] {
+        let words = guideWords(query)
+        guard !words.isEmpty else { return [] }
+        return hits.filter { hit in
+            let text = GuideStore.fold("\(hit.title) \(hit.channelTitle) \(hit.channel.name) \(hit.league ?? "")")
+            return words.allSatisfy(text.contains)
+        }
     }
 
     /// The country Live TV is arranged for: the device's region.

@@ -140,6 +140,44 @@ final class SearchStabilityTests: XCTestCase {
         }
     }
 
+    /// What's on TV doesn't hold up the rest, and doesn't push it down: with
+    /// the guide's answer late, the channels for "channel 1" are listed at
+    /// once; when the answer comes with the list scrolled down, the rows
+    /// being read stay put, and "On TV" (above the channels) is listed once
+    /// the list is back at the top. Regression: the results waited up to
+    /// 100 ms for the guide, and a late answer pushed the rows down.
+    func testGuideNeitherHoldsUpNorPushesResults() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchEnvironment["OPENREEL_DEBUG_GUIDE_DELAY"] = "8"
+        openSearch("channel")
+        sleep(2)
+        let field = app.searchFields.firstMatch
+        field.tap()
+        field.typeText(" 1\n")
+        sleep(1)
+        let took = app.staticTexts["debug-search-local-ms"].firstMatch.label
+        XCTAssertLessThan(Int(took) ?? .max, 90, "the results took \(took) ms: they waited for the guide")
+        XCTAssertGreaterThanOrEqual(channelRows().count, 5, "the channels waited for the guide")
+        XCTAssertFalse(app.staticTexts["On TV"].exists, "On TV before the guide answered")
+        let top = channelRows()
+        drag(from: 0.7, to: 0.4)
+        sleep(1)
+        let scrolled = channelRows()
+        shot("guide scrolled")
+        XCTAssertFalse(scrolled.isEmpty, "no channels on screen after scrolling")
+        XCTAssertNotEqual(scrolled, top, "the list didn't scroll")
+        XCTAssertFalse(app.staticTexts["On TV"].exists, "On TV before the guide answered")
+        sleep(6)
+        shot("guide answered")
+        XCTAssertEqual(differences(scrolled, channelRows()), [], "the guide's answer moved the rows being read")
+        drag(from: 0.3, to: 0.8)
+        sleep(1)
+        shot("guide at top")
+        XCTAssertTrue(app.staticTexts["On TV"].exists, "On TV isn't listed back at the top")
+    }
+
     /// Opening Search with nothing typed brings up the keyboard at once, in
     /// the search field. Regression: no keyboard until the next touch (6 s
     /// and more).
@@ -219,6 +257,21 @@ final class SearchStabilityTests: XCTestCase {
     /// button is labelled with the title alone, like other buttons).
     private func results() -> [String: CGRect] {
         frames { $0.elementType == .button && $0.label.hasPrefix("More for ") }
+    }
+
+    /// The channel rows listed, by channel, with their frames: "CH, Show
+    /// 17-4, 10m left · Channel 17" (the guide's rows say when, not what's
+    /// left).
+    private func channelRows() -> [String: CGRect] {
+        let rows = frames { $0.elementType == .button && $0.label.contains(" left · Channel ") }
+        return Dictionary(rows.map { (String($0.key.split(separator: "·").last ?? ""), $0.value) }) { first, _ in first }
+    }
+
+    private func testServer() -> URL? {
+        guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
+              let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let address = json["serverURL"] as? String else { return nil }
+        return URL(string: address)
     }
 
     /// The header's parts: the title, the filters, and the whole.
