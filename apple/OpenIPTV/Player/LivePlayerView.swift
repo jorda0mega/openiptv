@@ -64,6 +64,9 @@ struct LivePlayerView: View {
     /// A channel picked in Watch On, kept for its league once it plays (a
     /// feed that never starts isn't tried first next time).
     @State private var pendingPick: (choice: AppModel.WatchChoice, league: String)?
+    #if DEBUG
+    @State private var perf = LivePerf.Watch()
+    #endif
 
     /// The provider often lists a channel several times; if one won't start, the next is tried.
     struct Attempt {
@@ -114,8 +117,9 @@ struct LivePlayerView: View {
             if controlsVisible { controls.transition(.opacity) }
             if let attempt, attempt.cue, let playingCopy { switchCue(attempt.picked, playingCopy) }
             #if DEBUG
-            debugReadout(playingCopy?.name ?? "", "debug-live-copy")
+            debugReadout(playingCopy.map { "\($0.name) tok=\(LivePerf.Token($0).text)" } ?? "", "debug-live-copy")
             debugReadout(error != nil ? "failed" : started ? "playing" : "starting", "debug-live-state")
+            debugReadout(perf.failure.rawValue, "debug-live-fail")
             #endif
         }
         #if os(iOS)
@@ -156,6 +160,9 @@ struct LivePlayerView: View {
             loadTask?.cancel()
             startWatch?.cancel()
             cueTask?.cancel()
+            #if DEBUG
+            perf.closed()
+            #endif
             player?.shutdown()
             player = nil
         }
@@ -498,6 +505,11 @@ struct LivePlayerView: View {
         let player = makePlayer(prefs: prefs)
         player.onEvent = { event in handle(event) }
         self.player = player
+        #if DEBUG
+        perf.player = player
+        player.sayLiveConfig()
+        NetworkStatus.shared.sayLivePath()
+        #endif
         play(copy: startCopy)
         if let startCopy, let choice = choices.first(where: { $0.id == startCopy.id }), let league = model.event(of: channel)?.league {
             pendingPick = (choice, league)
@@ -507,6 +519,9 @@ struct LivePlayerView: View {
     /// Live, after `delay` seconds (zapping quickly). A game: on the
     /// channel that comes first in Watch On, unless `copy` says which.
     private func play(after delay: Double = 0, copy: LiveChannel? = nil) {
+        #if DEBUG
+        perf.began()
+        #endif
         reset()
         recording = nil
         pendingPick = nil
@@ -525,10 +540,16 @@ struct LivePlayerView: View {
     /// was over (the slot still there) spun forever.
     private func open(_ copy: LiveChannel, after delay: Double = 0) {
         playingCopy = copy
+        #if DEBUG
+        perf.opening(copy, n: attempt?.tried.count ?? 1, of: feeds.map(\.count).reduce(0, +), delay: delay)
+        #endif
         startWatch?.cancel()
         startWatch = Task {
             try? await Task.sleep(for: .seconds(delay + Self.startLimit))
             guard !Task.isCancelled, !started, error == nil, recording == nil, playingCopy?.id == copy.id else { return }
+            #if DEBUG
+            perf.timedOut()
+            #endif
             if !fallBack() {
                 if model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
                 fail(notPlaying)
@@ -541,8 +562,14 @@ struct LivePlayerView: View {
                 guard !Task.isCancelled else { return }
             }
             do {
+                #if DEBUG
+                let asked = CFAbsoluteTimeGetCurrent()
+                #endif
                 let stream = try await model.playable(copy)
                 guard !Task.isCancelled else { return }
+                #if DEBUG
+                perf.addressed(in: CFAbsoluteTimeGetCurrent() - asked)
+                #endif
                 player?.load(stream.url, headers: stream.headers)
             } catch {
                 guard !Task.isCancelled else { return }
@@ -554,7 +581,6 @@ struct LivePlayerView: View {
     private func fallBack() -> Bool {
         guard recording == nil, !started, var attempt else { return false }
         if let playingCopy { model.noteLiveFailure(playingCopy) }
-        let feeds = choices.isEmpty ? [model.copies(of: channel)] : choices.map(\.channels)
         guard let next = WatchOn.next(after: attempt.picked.id, feeds: feeds, tried: attempt.tried) else { return false }
         attempt.tried.insert(next.id)
         if !attempt.cue { announce(WatchOn.switchSentence(from: model.name(of: attempt.picked), to: nil)) }
@@ -562,6 +588,10 @@ struct LivePlayerView: View {
         self.attempt = attempt
         open(next)
         return true
+    }
+
+    private var feeds: [[LiveChannel]] {
+        choices.isEmpty ? [model.copies(of: channel)] : choices.map(\.channels)
     }
 
     private func announce(_ sentence: String) {
@@ -576,6 +606,9 @@ struct LivePlayerView: View {
 
     /// A recorded programme from its start.
     private func watch(_ programme: Programme) {
+        #if DEBUG
+        perf.closed()
+        #endif
         reset()
         recording = programme
         let channel = channel
@@ -635,6 +668,7 @@ struct LivePlayerView: View {
             ScreenAwake.set(awakeID, playing: !paused)
             #if DEBUG
             NSLog("%@", String(format: "PERF live start %.3f", seconds))
+            perf.started(frame: seconds)
             #endif
             // Development builds with the stats on.
             if prefs.performanceStats {
@@ -644,6 +678,9 @@ struct LivePlayerView: View {
             if controlsVisible { showControls() }
         case let .buffering(isBuffering):
             buffering = isBuffering
+            #if DEBUG
+            perf.buffering(isBuffering)
+            #endif
         case let .paused(isPaused):
             paused = isPaused
             if started { ScreenAwake.set(awakeID, playing: !isPaused) }
@@ -655,11 +692,21 @@ struct LivePlayerView: View {
             window = Window(start: start, end: end, seekable: seekable)
             track()
         case let .failed(message):
+            #if DEBUG
+            perf.failed()
+            #endif
             if !fallBack() { fail("Couldn't play: \(message)") }
         case .ended:
+            #if DEBUG
+            perf.ended()
+            #endif
             // A recording finished, or the provider closed the stream (a long
             // pause can outlast what it holds): carry on live.
             if started { play(copy: recording == nil ? playingCopy : nil) } else if !fallBack() { fail("The channel stopped before it started.") }
+        #if DEBUG
+        case let .network(buffer, bytesPerSecond):
+            perf.network(buffer: buffer, bytesPerSecond: bytesPerSecond, gap: liveGap)
+        #endif
         default:
             break
         }

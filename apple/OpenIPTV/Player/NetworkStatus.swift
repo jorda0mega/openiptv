@@ -17,6 +17,9 @@ final class NetworkStatus: @unchecked Sendable {
     private var known = false
     private var networkValue = Conditions.Network.unknown
     private var freeDiskRead: (bytes: Int64, at: ContinuousClock.Instant)?
+    #if DEBUG && canImport(Libmpv)
+    private var path: NWPath?
+    #endif
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
@@ -25,10 +28,22 @@ final class NetworkStatus: @unchecked Sendable {
             unmeteredValue = path.status == .satisfied && !path.isExpensive && !path.isConstrained
             known = true
             networkValue = path.status != .satisfied ? .unknown : path.isConstrained ? .constrained : path.isExpensive ? .expensive : .unmetered
+            #if DEBUG && canImport(Libmpv)
+            self.path = path
+            #endif
             lock.unlock()
+            #if DEBUG && canImport(Libmpv)
+            LivePerf.sayPath(path)
+            #endif
         }
         monitor.start(queue: DispatchQueue(label: "openiptv.network-status"))
     }
+
+    #if DEBUG && canImport(Libmpv)
+    func sayLivePath() {
+        if let path = lock.withLock({ path }) { LivePerf.sayPath(path) }
+    }
+    #endif
 
     var unmetered: Bool {
         lock.lock()
