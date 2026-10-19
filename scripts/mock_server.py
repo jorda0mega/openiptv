@@ -48,6 +48,8 @@ SOCKETS = set()
 # "favorites_delay" (seconds before My List answers: a slow refresh),
 # "reference_delay" (seconds before one of the film's own subtitle tracks
 # answers: a real server reads the whole film to take it out),
+# "subtitle_fail" ("1": the first request for each subtitle track of an
+# item answers 503, a server that gave up taking it out),
 # "xtream_status" ("429": every player_api.php request past the login check
 # answers with that HTTP status and an empty body, a provider refusing; 0 or
 # unset: as normal), "xtream_empty" ("streams" or "categories": that list
@@ -63,6 +65,11 @@ PREFERENCES = {}
 # Requests for a film's file, (time, item id): GET /mock/video_requests?since=
 # (a time from GET /mock/mark) lists the items asked for since.
 VIDEO_REQUESTS = []
+# Requests for a subtitle track, (time, "item:index"), and for PlaybackInfo,
+# (time, item id): GET /mock/subtitle_requests?since= and
+# /mock/playbackinfo_requests?since= list them.
+SUBTITLE_REQUESTS = []
+PLAYBACKINFO_REQUESTS = []
 # Requests for a stretch of a film's sound, and those with the key in
 # their address (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0, 0]
@@ -417,6 +424,7 @@ class Handler(BaseHTTPRequestHandler):
             print(f"{time.time():.2f} POST {self.path.split('?')[0]}", flush=True)
         if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == "tok":
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
+            PLAYBACKINFO_REQUESTS.append((time.time(), item))
             width = 3840 if item.startswith("k") else 1920
             streams = file_streams()
             # "copy_audio": "a8:fre": that copy's sound in that language only;
@@ -450,6 +458,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"items": [item for t, item in VIDEO_REQUESTS if t >= since]})
         if path == "/mock/audio_requests":
             return self.send({"count": AUDIO_REQUESTS[0], "keyed": AUDIO_REQUESTS[1]})
+        if path == "/mock/subtitle_requests":
+            since = float(q.get("since", "0"))
+            return self.send({"items": [track for t, track in SUBTITLE_REQUESTS if t >= since]})
+        if path == "/mock/playbackinfo_requests":
+            since = float(q.get("since", "0"))
+            return self.send({"items": [item for t, item in PLAYBACKINFO_REQUESTS if t >= since]})
         if path == "/mock/xtream_requests":
             since = float(q.get("since", "0"))
             return self.send({"items": [name for t, name in XTREAM_REQUESTS if t >= since]})
@@ -457,6 +471,8 @@ class Handler(BaseHTTPRequestHandler):
             if "reset" in q:
                 AUDIO_REQUESTS[0] = AUDIO_REQUESTS[1] = 0
                 VIDEO_REQUESTS.clear()
+                SUBTITLE_REQUESTS.clear()
+                PLAYBACKINFO_REQUESTS.clear()
                 XTREAM_REQUESTS.clear()
                 PREFERENCES.clear()
                 DOWNLOADED.clear()
@@ -877,6 +893,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/Videos/") and "/Subtitles/" in path:
             # /Videos/{id}/{source}/Subtitles/{index}/Stream.srt
             index = int(path.split("/Subtitles/", 1)[1].split("/", 1)[0])
+            track = f"{path.split('/')[2]}:{index}"
+            SUBTITLE_REQUESTS.append((time.time(), track))
+            if sum(1 for _, asked in SUBTITLE_REQUESTS if asked == track) <= int(CONTROL.get("subtitle_fail", 0)):
+                return self.send({"error": "unavailable"}, status=503)
             file = subtitle_file(index)
             if file and os.path.exists(file):
                 with open(file, "rb") as f:
