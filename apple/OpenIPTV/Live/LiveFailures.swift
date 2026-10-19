@@ -27,6 +27,10 @@ struct LiveFailures {
         if noted[expiry.id] == expiry.noted { noted[expiry.id] = nil }
     }
 
+    func failedLast<Copy: Identifiable>(_ copies: [Copy]) -> [Copy] where Copy.ID == String {
+        copies.filter { !contains($0.id) } + copies.filter { contains($0.id) }
+    }
+
     func failed(_ ids: [String], playingCopy: String? = nil) -> Bool {
         !ids.isEmpty && !ids.contains { $0 == playingCopy } && ids.allSatisfy(contains)
     }

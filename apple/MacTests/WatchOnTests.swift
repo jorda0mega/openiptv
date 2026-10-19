@@ -167,4 +167,16 @@ final class LiveFailuresTests: XCTestCase {
         XCTAssertFalse(failures.failed(["hd", "sd"], playingCopy: "sd"), "the one playing isn't failed")
         XCTAssertFalse(failures.failed([]))
     }
+
+    func testFailedCopiesGoLast() {
+        struct Copy: Identifiable, Equatable { let id: String }
+        let copies = ["fhd", "hd", "sd", "lbw"].map(Copy.init)
+        var failures = LiveFailures()
+        XCTAssertEqual(failures.failedLast(copies), copies, "the order changed with nothing failed")
+        _ = failures.note("fhd")
+        _ = failures.note("sd")
+        XCTAssertEqual(failures.failedLast(copies).map(\.id), ["hd", "lbw", "fhd", "sd"])
+        failures.played("fhd")
+        XCTAssertEqual(failures.failedLast(copies).map(\.id), ["fhd", "hd", "lbw", "sd"])
+    }
 }
