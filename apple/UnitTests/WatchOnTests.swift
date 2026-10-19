@@ -145,9 +145,9 @@ final class LiveFailuresTests: XCTestCase {
         var failures = LiveFailures()
         let first = failures.note("a", at: Date(timeIntervalSince1970: 0))
         let again = failures.note("a", at: Date(timeIntervalSince1970: 300))
-        failures.expire("a", noted: first)
+        failures.expire(first)
         XCTAssertTrue(failures.contains("a"), "the first failure's check cleared a later failure")
-        failures.expire("a", noted: again)
+        failures.expire(again)
         XCTAssertFalse(failures.contains("a"), "the failure outlived its check")
 
         _ = failures.note("b")
@@ -163,7 +163,7 @@ final class LiveFailuresTests: XCTestCase {
         XCTAssertFalse(failures.failed(["hd", "sd"]), "a channel whose other copy didn't fail")
         _ = failures.note("sd")
         XCTAssertTrue(failures.failed(["hd", "sd"]))
-        XCTAssertFalse(failures.failed(["hd", "sd"], playing: "sd"), "the one playing isn't failed")
+        XCTAssertFalse(failures.failed(["hd", "sd"], playingCopy: "sd"), "the one playing isn't failed")
         XCTAssertFalse(failures.failed([]))
     }
 }

@@ -7,9 +7,11 @@ struct SwitchCue: View {
     let toName: String?
 
     #if os(tvOS)
+    static let topClearance: CGFloat = 50
     private let tile = CGSize(width: 69, height: 48), font: CGFloat = 29, spacing: CGFloat = 14
     private let inset = EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 22)
     #else
+    static let topClearance: CGFloat = 72
     private let tile = CGSize(width: 46, height: 32), font: CGFloat = 15, spacing: CGFloat = 8
     private let inset = EdgeInsets(top: 6, leading: 7, bottom: 6, trailing: 14)
     #endif

@@ -446,6 +446,7 @@ private struct TVChannelCard: View {
     let slot: NowNextSlot
     let favorite: Bool
     let action: () -> Void
+    private static let placeholderLine = " "
 
     var body: some View {
         let now = slot.value?.now
@@ -476,7 +477,7 @@ private struct TVChannelCard: View {
             .accessibilityLabel([entry.title, failed ? LiveFailures.didNotPlay : nil, now?.title].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(1)
-                Text(line.isEmpty ? " " : line)
+                Text(line.isEmpty ? Self.placeholderLine : line)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .accessibilityHidden(true)

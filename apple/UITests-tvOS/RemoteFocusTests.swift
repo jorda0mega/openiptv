@@ -1035,7 +1035,8 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(espn.label.contains("Playing") && !espn.label.contains("Didn’t"), "the card playing: \(espn.label)")
         sleep(1)
         let picture = XCUIScreen.main.screenshot()
-        let corner = CGRect(x: nfl.frame.minX + 320 - 30, y: nfl.frame.minY + 8, width: 22, height: 22)
+        let pictureWidth: CGFloat = 320
+        let corner = badgeCorner(right: nfl.frame.minX + pictureWidth, top: nfl.frame.minY)
         XCTAssertGreaterThan(brightest(picture, in: corner), 200, "no mark on the picture of the card that didn't play")
     }
 
@@ -1081,7 +1082,7 @@ final class RemoteFocusTests: XCTestCase {
         let card = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
         XCTAssertTrue(card.exists, "the game's card went")
         let picture = XCUIScreen.main.screenshot()
-        let corner = CGRect(x: card.frame.maxX - 8 - 30, y: card.frame.minY + 8, width: 30, height: 22)
+        let corner = badgeCorner(right: card.frame.maxX, top: card.frame.minY, width: 30)
         XCTAssertGreaterThan(brightest(picture, in: corner), 200, "no count badge on the game's card")
         XCTAssertGreaterThan(luminance(picture, in: corner), 120, "no count badge on the game's card")
     }
@@ -1111,7 +1112,7 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(card.exists, "the channel's card went")
         press(.right, "off the card")
         let picture = XCUIScreen.main.screenshot()
-        let corner = CGRect(x: card.frame.maxX - 8 - 22, y: card.frame.minY + 8, width: 22, height: 22)
+        let corner = badgeCorner(right: card.frame.maxX, top: card.frame.minY)
         XCTAssertGreaterThan(brightest(picture, in: corner), 200, "no mark on the card of the channel that didn't play")
     }
 
@@ -1146,6 +1147,11 @@ final class RemoteFocusTests: XCTestCase {
         let game = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
         XCTAssertTrue(game.waitForExistence(timeout: 15), "the game didn't show once the provider answered again")
         XCTAssertFalse(notice.exists, "the notice stayed after a good check")
+    }
+
+    private func badgeCorner(right: CGFloat, top: CGFloat, width: CGFloat = 22) -> CGRect {
+        let cardInset: CGFloat = 8, height: CGFloat = 22
+        return CGRect(x: right - cardInset - width, y: top + cardInset, width: width, height: height)
     }
 
     private func liveCopy() -> String {

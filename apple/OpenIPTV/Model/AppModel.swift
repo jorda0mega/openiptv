@@ -2237,8 +2237,10 @@ final class AppModel {
         groups(of: entry.channels).count
     }
 
+    private static let unnamedFeed = WatchOn.Feed(service: LiveOrganizer.serviceName(""))
+
     private func feed(of copy: LiveChannel) -> WatchOn.Feed {
-        liveLibrary.feeds[copy.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
+        liveLibrary.feeds[copy.id] ?? Self.unnamedFeed
     }
 
     private func groups(of channels: [LiveChannel]) -> [(option: WatchOn.Option, others: [WatchOn.Option])] {
@@ -2269,10 +2271,10 @@ final class AppModel {
     }
 
     func noteLiveFailure(_ channel: LiveChannel) {
-        let noted = liveFailures.note(channel.id)
+        let expiry = liveFailures.note(channel.id)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.failureMaxAge))
-            self?.liveFailures.expire(channel.id, noted: noted)
+            self?.liveFailures.expire(expiry)
         }
     }
 
@@ -2284,19 +2286,20 @@ final class AppModel {
     }
 
     func didNotPlay(_ channel: LiveChannel) -> Bool {
-        liveFailures.contains(channel.id) && liveFailures.failed(slots(of: channel))
+        guard liveFailures.contains(channel.id) else { return false }
+        return liveFailures.failed(feedSlots(of: channel))
     }
 
-    private func slots(of channel: LiveChannel) -> [String] {
+    private func feedSlots(of channel: LiveChannel) -> [String] {
         let copies = copies(of: channel)
         guard event(of: channel) != nil else { return copies.map(\.id) }
         let feeds = groups(of: copies).map { [$0.option] + $0.others }
         return feeds.first { $0.contains { $0.id == channel.id } }?.map(\.id) ?? [channel.id]
     }
 
-    func watchOnShown(_ choice: WatchChoice, playing: String?) -> (line: String, didNotPlay: Bool) {
-        let failed = liveFailures.failed(choice.channels.map(\.id), playing: playing)
-        let state = choice.shows(playing) ? "Playing" : failed ? LiveFailures.didNotPlay : nil
+    func watchOnShown(_ choice: WatchChoice, playingCopy: String?) -> (line: String, didNotPlay: Bool) {
+        let failed = liveFailures.failed(choice.channels.map(\.id), playingCopy: playingCopy)
+        let state = choice.shows(playingCopy) ? "Playing" : failed ? LiveFailures.didNotPlay : nil
         let line = choice.label.line
         return ([state, line.isEmpty ? nil : line].compactMap(\.self).joined(separator: " · "), failed)
     }
