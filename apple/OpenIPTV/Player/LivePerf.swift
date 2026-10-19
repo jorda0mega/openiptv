@@ -73,6 +73,15 @@ enum LivePerf {
         }
     }
 
+    enum Mark: String { case channel, game }
+
+    static func sayMarkCleared(_ kind: Mark, _ mark: LiveFailures.Mark, now: Date = Date()) {
+        let age = Int(now.timeIntervalSince(mark.noted).rounded())
+        let text = "PERF mark cleared kind=\(kind.rawValue) age=\(age) before_kickoff=\(mark.beforeKickoff ? 1 : 0)"
+        guard safe(text) else { return assertionFailure("PERF mark line refused") }
+        NSLog("%@", text)
+    }
+
     static func sayPath(_ path: NWPath) {
         let via: Via = path.status != .satisfied ? .offline
             : path.usesInterfaceType(.wifi) ? .wifi

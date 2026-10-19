@@ -497,10 +497,8 @@ private struct TVEventCard: View {
         let event = entry.event
         let started = event?.start.map { $0 <= Date() } ?? false
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
-        // Tried in the last half hour, and none of its channels played.
         let notPlaying = live && model.isNotPlaying(entry)
-        // Different feeds showing it (the same feed on two channels once).
-        let badge = TileBadge.count(model.feedCount(entry))
+        let badge = model.gameBadge(entry)
         VStack(alignment: .leading, spacing: 12) {
             Button(action: action) {
                 ZStack(alignment: .topLeading) {
@@ -535,7 +533,7 @@ private struct TVEventCard: View {
             // Press-and-hold: the channels showing it (Watch On).
             .contextMenu { WatchOnMenuItems(channel: entry.channels[0], play: play) }
             .accessibilityLabel([notPlaying ? "Not playing" : live ? "Live" : nil, entry.title, event?.league,
-                                 badge?.spoken].compactMap(\.self).joined(separator: ", "))
+                                 notPlaying ? nil : badge?.spoken].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(2)
                 Text([Self.when(event?.start, started: started), event?.league].compactMap(\.self).joined(separator: " · "))
