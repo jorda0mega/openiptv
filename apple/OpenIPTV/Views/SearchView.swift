@@ -1,4 +1,11 @@
 import SwiftUI
+#if DEBUG
+import os
+
+/// Debug builds: Instruments' Points of Interest marks for search, so a
+/// trace shows each search run, each change to the results, and why it ran.
+let searchSignposter = OSSignposter(subsystem: "com.jorda0mega.openiptv", category: .pointsOfInterest)
+#endif
 
 /// One search for everything. Movies, shows and channels come from indexes
 /// on the device and update on every keystroke, with completions on top;
@@ -87,6 +94,9 @@ struct SearchView: View {
             return true
         }
         let all = library + added
+        #if DEBUG
+        searchSignposter.emitEvent("search results", "titles=\(all.count) episodes=\(server.count)")
+        #endif
         titles = Titles(all: all, movies: all.filter { $0.kind != "Series" }, shows: all.filter { $0.kind == "Series" },
                         episodes: server.filter { $0.kind == "Episode" })
         resultsChanged()
@@ -173,7 +183,12 @@ struct SearchView: View {
             .onAppear { if query.isEmpty { fieldFocused = true } }
             #endif
             // Re-run when the text changes or an index finishes loading.
-            .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") { await search() }
+            .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") {
+                #if DEBUG
+                searchSignposter.emitEvent("search rerun", "letters=\(query.count) library=\(model.library.count) channels=\(model.channelCorpus.items.count)")
+                #endif
+                await search()
+            }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -580,8 +595,13 @@ struct SearchView: View {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return clearResults() }
         #if DEBUG
+        let interval = searchSignposter.beginInterval("search", id: searchSignposter.makeSignpostID(), "letters=\(q.count)")
+        defer { searchSignposter.endInterval("search", interval) }
         let began = Date()
-        func mark(_ stage: String) { NSLog("%@", String(format: "PERF search %@ %.0f ms (%@)", stage, Date().timeIntervalSince(began) * 1000, "\(q.count) letters")) }
+        func mark(_ stage: String) {
+            searchSignposter.emitEvent("search stage", "\(stage, privacy: .public)")
+            NSLog("%@", String(format: "PERF search %@ %.0f ms (%@)", stage, Date().timeIntervalSince(began) * 1000, "\(q.count) letters"))
+        }
         #endif
         let parsed = SearchQuery(q)
         let libraryCorpus = model.library.corpus
