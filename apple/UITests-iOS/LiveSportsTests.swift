@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 
 /// iPhone: a game listed by several services (the test server's
@@ -682,6 +683,171 @@ final class LiveSportsTests: XCTestCase {
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.'"))
         XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 5), "Watch On listed nothing")
         XCTAssertEqual(cards.count, 5, "the badge and Watch On don't agree")
+    }
+
+    func testCountLeavesOutAFeedThatDidntPlay() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["sports": "1", "dead_live": "2001"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        XCTAssertTrue(playing("NFL 01"), "the game didn't open on the best channel: \(liveCopy())")
+        let readout = app.staticTexts["debug-live-copy"].firstMatch
+        let deadline = Date().addingTimeInterval(20)
+        while readout.label.hasPrefix("NFL 01"), Date() < deadline { usleep(250_000) }
+        XCTAssertTrue(started(), "the next channel didn't play: \(liveCopy())")
+        closePlayer()
+        let game = gameRow()
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        XCTAssertTrue(game.label.contains("4 channels"), "the count still has the feed that didn't play: \(game.label)")
+    }
+
+    func testNoFeedPlayedCrossesOutTheTile() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        XCTAssertTrue(failed(within: 40), "still trying after every channel: \(liveCopy())")
+        closePlayer()
+        let game = gameRow()
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        XCTAssertTrue(game.label.contains("Not playing"), "no word that nothing played: \(game.label)")
+        XCTAssertFalse(game.label.contains("channels"), "a channel count on a game that played nowhere: \(game.label)")
+    }
+
+    /// Tried before kickoff: "not on yet", so the marks go at kickoff.
+    func testMarkBeforeKickoffEndsAtKickoff() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        let kickoff = ((try markTime(server) + 100) / 60).rounded(.up) * 60
+        configure(server, ["sports": "1", "sports_kickoff": String(Int(kickoff)), "dead_live": "2001,2002,2003,2004,2005"])
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        XCTAssertTrue(failed(within: 40), "still trying after every channel: \(liveCopy())")
+        closePlayer()
+        configure(server, ["dead_live": "none"])
+        let game = gameRow()
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        XCTAssertFalse(game.label.contains("LIVE"), "on before its kickoff: \(game.label)")
+        let wait = kickoff + 5 - (try markTime(server))
+        XCTAssertGreaterThan(wait, 5, "the tries outlasted the kickoff")
+        sleep(UInt32(wait))
+        openSports()
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        XCTAssertTrue(game.label.contains("LIVE"), "not live at its kickoff: \(game.label)")
+        XCTAssertFalse(game.label.contains("Not playing"), "a try before kickoff outlived it: \(game.label)")
+        XCTAssertTrue(game.label.contains("5 channels"), "channels tried before kickoff still left out: \(game.label)")
+
+        // Another device: the server's record only.
+        app.terminate()
+        app.launch()
+        openSports()
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        sleep(5)
+        XCTAssertFalse(game.label.contains("Not playing"), "the server's mark from before kickoff outlived it: \(game.label)")
+    }
+
+    /// Another device found the game playing nowhere: shown for 15 min.
+    func testSharedMarkLastsFifteenMinutes() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["sports": "1", "dead_live": "none"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        let game = gameRow()
+
+        try markNotPlaying(server, minutesAgo: 14)
+        app.launch()
+        openSports()
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        let shown = Date().addingTimeInterval(10)
+        while !game.label.contains("Not playing"), Date() < shown { usleep(250_000) }
+        XCTAssertTrue(game.label.contains("Not playing"), "another device's finding 14 min ago isn't shown: \(game.label)")
+        app.terminate()
+
+        try markNotPlaying(server, minutesAgo: 16)
+        app.launch()
+        openSports()
+        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
+        sleep(5)
+        XCTAssertFalse(game.label.contains("Not playing"), "another device's finding 16 min ago is still shown: \(game.label)")
+        XCTAssertTrue(game.label.contains("LIVE"), "the game isn't live: \(game.label)")
+    }
+
+    func testGameNotPlayingStillOpensAndPlayingClearsIt() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        openGame()
+        XCTAssertTrue(failed(within: 40), "still trying after every channel: \(liveCopy())")
+        closePlayer()
+        let game = gameRow()
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        XCTAssertTrue(game.label.contains("Not playing"), "no word that nothing played: \(game.label)")
+
+        configure(server, ["dead_live": "none"])
+        game.tap()
+        XCTAssertTrue(started(), "a game marked as not playing didn't play: \(liveCopy())")
+        closePlayer()
+        XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
+        XCTAssertTrue(game.label.contains("LIVE") && !game.label.contains("Not playing"), "playing didn't clear the mark: \(game.label)")
+        XCTAssertFalse(game.label.contains("5 channels"), "the feeds that didn't play are counted: \(game.label)")
+    }
+
+    private func gameRow() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+    }
+
+    private func failed(within seconds: Double) -> Bool {
+        let state = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(seconds)
+        while state.label != "failed", Date() < deadline { usleep(250_000) }
+        return state.label == "failed"
+    }
+
+    private func closePlayer() {
+        showControls()
+        app.buttons["Close player"].firstMatch.tap()
+    }
+
+    /// The server's record that every channel of the test game played
+    /// nowhere, `minutesAgo` by the test server's clock (keys as
+    /// AppModel.sharedKey makes them).
+    private func markNotPlaying(_ server: URL, minutesAgo: Double) throws {
+        let at = Int(try markTime(server) - minutesAgo * 60)
+        let place = try XCTUnwrap(server.host(), "the test server has no host")
+        let record = Dictionary(uniqueKeysWithValues: (2001...2005).map { id in
+            (SHA256.hash(data: Data("\(place)|\(id)".utf8)).prefix(10).map { String(format: "%02x", $0) }.joined(), String(at))
+        })
+        var parts = URLComponents(url: server.appending(path: "DisplayPreferences/zapline-notplaying"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "userId", value: "U1"), .init(name: "client", value: "zapline")]
+        var request = URLRequest(url: parts.url!)
+        request.httpMethod = "POST"
+        request.setValue("tok", forHTTPHeaderField: "X-Emby-Token")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["CustomPrefs": record])
+        var status: Int?
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            status = (response as? HTTPURLResponse)?.statusCode
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 10)
+        XCTAssertEqual(status, 204, "the test server didn't keep the record")
     }
 
     private func moveOffDeadOneSoccerSlot(_ server: URL) throws -> String {

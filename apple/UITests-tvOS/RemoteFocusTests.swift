@@ -1165,6 +1165,56 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertGreaterThan(luminance(picture, in: corner), 120, "no count badge on the game's card")
     }
 
+    func testAppleTVCountLeavesOutAFeedThatDidntPlay() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["sports": "1", "dead_live": "2001"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        sleep(8)
+        toGame()
+        XCTAssertTrue(focused().contains("Jaguars"), "the game isn't in Sports: \(focused())")
+        press(.select, "play the game")
+        XCTAssertTrue(playing("NFL 01"), "the game didn't open on the best channel: \(liveCopy())")
+        let readout = app.staticTexts["debug-live-copy"].firstMatch
+        let deadline = Date().addingTimeInterval(20)
+        while readout.label.hasPrefix("NFL 01"), Date() < deadline { usleep(250_000) }
+        XCTAssertTrue(started(), "the next channel didn't play: \(liveCopy())")
+        press(.menu, "leave")
+        let card = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "the game's card went")
+        XCTAssertTrue(card.label.contains("4 channels"), "the count still has the feed that didn't play: \(card.label)")
+    }
+
+    func testAppleTVNoFeedPlayedCrossesOutTheCard() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
+        app.launch()
+        sleep(8)
+        toGame()
+        XCTAssertTrue(focused().contains("Jaguars"), "the game isn't in Sports: \(focused())")
+        press(.select, "play the game")
+        let state = app.staticTexts["debug-live-state"].firstMatch
+        let deadline = Date().addingTimeInterval(40)
+        while state.label != "failed", Date() < deadline { usleep(250_000) }
+        XCTAssertEqual(state.label, "failed", "still trying after every channel: \(liveCopy())")
+        press(.menu, "leave")
+        let card = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "the game's card went")
+        XCTAssertTrue(card.label.contains("Not playing"), "no word that nothing played: \(card.label)")
+        XCTAssertFalse(card.label.contains("channels"), "a channel count on a game that played nowhere: \(card.label)")
+    }
+
     func testAppleTVChannelThatDidntPlayIsMarked() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["dead_live": "none"])
