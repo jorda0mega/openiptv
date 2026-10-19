@@ -22,6 +22,8 @@ struct LivePlayerView: View {
     @State private var player: MPVPlayer?
     @State private var timing = "Starting…"
     @State private var started = false
+    @State private var reopening = false
+    @State private var cuts = LiveCuts()
     /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
     @State private var buffering = false
@@ -87,6 +89,7 @@ struct LivePlayerView: View {
     }
 
     private var channel: LiveChannel { model.current(channels[index]) }
+    private var loading: Bool { (buffering || !started || reopening) && error == nil }
     private var playingID: String? { error == nil ? playingCopy?.id : nil }
     /// "TLC" rather than "US: TLC HD".
     private var displayName: String { model.title(of: channel) }
@@ -111,7 +114,7 @@ struct LivePlayerView: View {
             }
             if !controlsVisible { picture.ignoresSafeArea() }
             // With the controls up, their play button turns into the spinner.
-            if (buffering || !started), error == nil, !controlsVisible {
+            if loading, !controlsVisible {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
@@ -195,7 +198,7 @@ struct LivePlayerView: View {
     private func chrome(info: NowNext?, event: LiveOrganizer.Event?) -> some View {
         PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
                             note: note, paused: paused, canGoForward: !(recording == nil && atLive),
-                            busy: (buffering || !started) && error == nil, ready: started,
+                            busy: loading, ready: started,
                             pills: livePills, selectedPill: showWatchOn ? "Watch On" : nil,
                             panel: watchOnPanel,
                             close: { close() }, back: { skip(-10) },
@@ -562,6 +565,7 @@ struct LivePlayerView: View {
                 player?.load(stream.url, headers: stream.headers)
             } catch {
                 guard !Task.isCancelled else { return }
+                if started { return reconnect() }
                 if !fallBack() { fail(SourceError.wrap(error).localizedDescription) }
             }
         }
@@ -572,14 +576,33 @@ struct LivePlayerView: View {
         let limit = startLimit
         startWatch = Task {
             try? await Task.sleep(for: .seconds(delay + limit))
-            guard !Task.isCancelled, !started, error == nil, recording == nil, playingCopy?.id == copy.id else { return }
+            guard !Task.isCancelled, !started || reopening, error == nil, recording == nil, playingCopy?.id == copy.id else { return }
             #if DEBUG
             perf.timedOut()
             #endif
+            if started { return reconnect() }
             if !fallBack() {
                 if model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
                 fail(notPlaying)
             }
+        }
+    }
+
+    private func reconnect() {
+        guard let copy = playingCopy else { return }
+        switch cuts.cut(copy.id) {
+        case let .reopen(after: wait):
+            reopening = true
+            if paused { player?.setPaused(false) }
+            window = nil
+            position = nil
+            following = true
+            liveGap = 0
+            scrubbing = nil
+            open(copy, after: wait)
+        case .giveUp:
+            reset()
+            if !fallBack() { fail(notPlaying) }
         }
     }
 
@@ -641,6 +664,7 @@ struct LivePlayerView: View {
         if paused { player?.setPaused(false) }
         timing = "Starting…"
         started = false
+        reopening = false
         buffering = false
         error = nil
         position = nil
@@ -653,11 +677,13 @@ struct LivePlayerView: View {
     private func handle(_ event: MPVPlayer.Event) {
         switch event {
         case .opening:
-            if let playingCopy, !started, error == nil, recording == nil { watchStart(of: playingCopy) }
+            if let playingCopy, !started || reopening, error == nil, recording == nil { watchStart(of: playingCopy) }
         case let .started(seconds):
             started = true
+            reopening = false
             buffering = false
             startWatch?.cancel()
+            if let playingCopy { cuts.played(playingCopy.id) }
             if recording == nil { model.notePlaying(playingCopy ?? channel) }
             if let pendingPick, pendingPick.choice.shows(playingCopy?.id) {
                 model.pickWatchChoice(pendingPick.choice, league: pendingPick.league)
@@ -701,14 +727,16 @@ struct LivePlayerView: View {
             #if DEBUG
             perf.failed()
             #endif
+            if started, recording == nil { return reconnect() }
             if !fallBack() { fail("Couldn't play: \(message)") }
         case .ended:
             #if DEBUG
             perf.ended()
             #endif
-            // A recording finished, or the provider closed the stream (a long
-            // pause can outlast what it holds): carry on live.
-            if started { play(copy: recording == nil ? playingCopy : nil) } else if !fallBack() { fail("The channel stopped before it started.") }
+            // The provider closes a stream it stops holding (a long pause, a
+            // cut, a reset libmpv reads as an end).
+            if started, recording == nil { return reconnect() }
+            if started { play() } else if !fallBack() { fail("The channel stopped before it started.") }
         #if DEBUG
         case let .network(buffer, bytesPerSecond):
             perf.network(buffer: buffer, bytesPerSecond: bytesPerSecond, gap: liveGap)
@@ -747,7 +775,7 @@ struct LivePlayerView: View {
     }
 
     private func togglePause() {
-        guard started else { return }
+        guard started, !reopening else { return }
         if !paused, recording == nil { following = false }
         player?.togglePause()
         showControls()
