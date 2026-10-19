@@ -169,7 +169,8 @@ final class LiveRecoveryTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(activeConnections(server, become: "0", within: 8), "live TV paused in the background still holds the connection")
         app.activate()
-        XCTAssertTrue(waitForState("playing", within: 20), "live TV didn't open again on return")
+        XCTAssertTrue(activeConnections(server, become: "1", within: 15), "live TV didn't open again on return")
+        XCTAssertTrue(waitForState("playing", within: 15), "live TV didn't play on return")
         XCTAssertTrue(liveCopy().hasSuffix("tok=4"), "came back on \(liveCopy())")
     }
 
