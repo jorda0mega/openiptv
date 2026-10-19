@@ -24,6 +24,9 @@ final class MPVMetalLayer: CAMetalLayer {
 /// instance is reused across channel changes so zapping only swaps streams.
 final class MPVPlayer: @unchecked Sendable {
     enum Event {
+        /// The stream is asked for (`loadfile`), after any wait for a
+        /// closing player.
+        case opening
         /// First frame is on screen; seconds since `load`.
         case started(Double)
         case buffering(Bool)
@@ -424,6 +427,7 @@ final class MPVPlayer: @unchecked Sendable {
             trackPlan = tracks
             if let clock { carry(to: clock, file: file) }
             stateLock.withLock { playingFile = file }
+            emit(.opening)
             command(["loadfile", url.absoluteString, "replace"])
         }
     }

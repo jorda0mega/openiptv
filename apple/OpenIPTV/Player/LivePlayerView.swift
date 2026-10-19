@@ -543,18 +543,7 @@ struct LivePlayerView: View {
         #if DEBUG
         perf.opening(copy, n: attempt?.tried.count ?? 1, of: feeds.map(\.count).reduce(0, +), delay: delay)
         #endif
-        startWatch?.cancel()
-        startWatch = Task {
-            try? await Task.sleep(for: .seconds(delay + Self.startLimit))
-            guard !Task.isCancelled, !started, error == nil, recording == nil, playingCopy?.id == copy.id else { return }
-            #if DEBUG
-            perf.timedOut()
-            #endif
-            if !fallBack() {
-                if model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
-                fail(notPlaying)
-            }
-        }
+        watchStart(of: copy, after: delay)
         loadTask?.cancel()
         loadTask = Task {
             if delay > 0 {
@@ -574,6 +563,22 @@ struct LivePlayerView: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 if !fallBack() { fail(SourceError.wrap(error).localizedDescription) }
+            }
+        }
+    }
+
+    private func watchStart(of copy: LiveChannel, after delay: Double = 0) {
+        startWatch?.cancel()
+        let limit = startLimit
+        startWatch = Task {
+            try? await Task.sleep(for: .seconds(delay + limit))
+            guard !Task.isCancelled, !started, error == nil, recording == nil, playingCopy?.id == copy.id else { return }
+            #if DEBUG
+            perf.timedOut()
+            #endif
+            if !fallBack() {
+                if model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
+                fail(notPlaying)
             }
         }
     }
@@ -647,6 +652,8 @@ struct LivePlayerView: View {
 
     private func handle(_ event: MPVPlayer.Event) {
         switch event {
+        case .opening:
+            if let playingCopy, !started, error == nil, recording == nil { watchStart(of: playingCopy) }
         case let .started(seconds):
             started = true
             buffering = false
@@ -778,13 +785,15 @@ struct LivePlayerView: View {
         showControls()
     }
 
-    /// Seconds a channel has to send its first picture (a provider's slow
-    /// one takes five or six). UI tests: OPENREEL_DEBUG_LIVE_START_LIMIT.
-    private static var startLimit: Double {
+    /// Seconds a copy has to send its first picture once it's asked for. The
+    /// provider starts a game's channel on demand: up to 17 s, where a
+    /// channel always on sends within 5 s. UI tests:
+    /// OPENREEL_DEBUG_LIVE_START_LIMIT.
+    private var startLimit: Double {
         #if DEBUG
         if let limit = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LIVE_START_LIMIT"].flatMap(Double.init) { return limit }
         #endif
-        return 15
+        return model.event(of: channel) == nil ? 15 : 25
     }
 
     private static var cueSeconds: Double {

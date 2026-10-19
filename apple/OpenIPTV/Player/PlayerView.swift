@@ -1428,7 +1428,7 @@ struct MoviePlayerView: View {
                 await readTracks()
                 #endif
             }
-        case .window:
+        case .opening, .window:
             break
         }
     }
