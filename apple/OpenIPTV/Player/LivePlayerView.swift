@@ -667,7 +667,6 @@ struct LivePlayerView: View {
             }
             ScreenAwake.set(awakeID, playing: !paused)
             #if DEBUG
-            NSLog("%@", String(format: "PERF live start %.3f", seconds))
             perf.started(frame: seconds)
             #endif
             // Development builds with the stats on.

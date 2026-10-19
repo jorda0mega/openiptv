@@ -80,7 +80,11 @@ final class MPVPlayer: @unchecked Sendable {
     private var playlistKeys = ""
     var hlsKeys: String { stateLock.withLock { playlistKeys } }
     private var perf = LivePerf.Opening()
-    var livePerf: LivePerf.Opening { stateLock.withLock { perf } }
+    var livePerf: LivePerf.Opening {
+        var opening = stateLock.withLock { perf }
+        if let failure = LivePerf.ffmpegFailure(since: opening.loadfile) { opening.failure = failure }
+        return opening
+    }
     #endif
 
     private var mpv: OpaquePointer?
@@ -387,13 +391,16 @@ final class MPVPlayer: @unchecked Sendable {
             let asked = CFAbsoluteTimeGetCurrent()
             #endif
             if !file { _ = Self.closing.wait(timeout: .now() + 2) }
+            #if DEBUG
+            let waited = CFAbsoluteTimeGetCurrent() - asked
+            #endif
             apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
             #if DEBUG
             awaitingSubtitleLine = (subtitleSwitchCount, loadStarted)
             stateLock.withLock { startTiming = (loadStarted, "", startTiming.preroll) }
             if file { StreamRelay.shared.beginStartReads() }
-            perfLoad(waited: loadStarted - asked)
+            perfLoad(waited: waited)
             #endif
             reportsWindow = !file
             openedAfter = nil
@@ -1294,6 +1301,9 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_set_wakeup_callback(mpv, nil, nil)
             mpv_terminate_destroy(mpv)
             self.mpv = nil
+            #if DEBUG
+            LivePerf.listenToFFmpeg()
+            #endif
         }
     }
 
@@ -1402,7 +1412,11 @@ final class MPVPlayer: @unchecked Sendable {
         case MPV_EVENT_LOG_MESSAGE:
             guard let data = event.data else { return }
             let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
-            if let failure = LivePerf.Failure(logged: String(cString: message.text)) { stateLock.withLock { perf.failure = failure } }
+            let failure = LivePerf.Failure(logged: String(cString: message.text))
+            stateLock.withLock {
+                perf.warnings += 1
+                if let failure { perf.failure = failure }
+            }
         #endif
         case MPV_EVENT_PROPERTY_CHANGE:
             guard let data = event.data else { return }
@@ -1529,6 +1543,7 @@ final class MPVPlayer: @unchecked Sendable {
     private func perfSetUp(since began: CFAbsoluteTime) {
         guard let mpv else { return }
         mpv_request_log_messages(mpv, "warn")
+        LivePerf.listenToFFmpeg()
         mpv_observe_property(mpv, 0, "frame-drop-count", MPV_FORMAT_INT64)
         stateLock.withLock { perf.setup = Int(((CFAbsoluteTimeGetCurrent() - began) * 1000).rounded()) }
     }
@@ -1536,6 +1551,13 @@ final class MPVPlayer: @unchecked Sendable {
     private func perfLoad(waited: Double) {
         stateLock.withLock {
             perf = LivePerf.Opening(setup: perf.setup, closeWait: Int((waited * 1000).rounded()), loadfile: loadStarted)
+        }
+    }
+
+    func withLivePerf(_ use: @escaping @MainActor (LivePerf.Opening) -> Void) {
+        queue.async { [self] in
+            let opening = livePerf
+            Task { @MainActor in use(opening) }
         }
     }
 

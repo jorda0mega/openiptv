@@ -1,6 +1,7 @@
 #if DEBUG
 import CryptoKit
 import Foundation
+import Libavutil
 import Libmpv
 import Network
 
@@ -101,6 +102,28 @@ enum LivePerf {
         }
     }
 
+    private static let ffmpegLock = NSLock()
+    nonisolated(unsafe) private static var lastFFmpegFailure: (failure: Failure, at: CFAbsoluteTime)?
+
+    /// libmpv hands ffmpeg's lines (the HTTP status among them) only to the
+    /// first player made in the app, often a film warming up, and puts
+    /// ffmpeg's own printer back when that player closes: they are read here
+    /// instead, for the class alone, after every player opens or closes.
+    static func listenToFFmpeg() {
+        av_log_set_callback { _, level, format, arguments in
+            guard level & 0xff <= AV_LOG_WARNING, let format, let arguments else { return }
+            var text = [CChar](repeating: 0, count: 512)
+            vsnprintf(&text, text.count, format, arguments)
+            guard let failure = text.withUnsafeBufferPointer({ LivePerf.Failure(logged: String(cString: $0.baseAddress!)) }) else { return }
+            LivePerf.ffmpegLock.withLock { LivePerf.lastFFmpegFailure = (failure, CFAbsoluteTimeGetCurrent()) }
+        }
+    }
+
+    static func ffmpegFailure(since time: CFAbsoluteTime?) -> Failure? {
+        guard let time, let last = ffmpegLock.withLock({ lastFFmpegFailure }), last.at >= time else { return nil }
+        return last.failure
+    }
+
     static func sayPath(_ path: NWPath) {
         let via: Via = path.status != .satisfied ? .offline
             : path.usesInterfaceType(.wifi) ? .wifi
@@ -143,6 +166,7 @@ enum LivePerf {
         var loadfile: CFAbsoluteTime?
         var opened = -1
         var failure = Failure.none
+        var warnings = 0
         var drops = 0
     }
 
@@ -188,34 +212,36 @@ enum LivePerf {
             let now = CFAbsoluteTimeGetCurrent()
             copy?.frameAt = now
             copy?.lastNet = now
-            sayOpen(current, frame: seconds, tap: now - beganAt)
+            sayOpen(current, player?.livePerf ?? Opening(), frame: seconds, tap: now - beganAt)
         }
 
         func failed() {
-            guard let current = copy else { return }
-            fail(current, player?.livePerf.failure ?? .none, or: .unknown)
-            if current.frameAt != nil { end(.error) }
+            finish { current, opening, now in
+                self.fail(current, opening, now, or: .unknown)
+                if current.frameAt != nil { self.end(current, opening, now, .error) }
+            }
         }
 
         func ended() {
-            guard let current = copy else { return }
-            if current.frameAt == nil {
-                fail(current, player?.livePerf.failure ?? .none, or: .eof_before_frame)
-            } else {
-                end(.eof)
+            finish { current, opening, now in
+                if current.frameAt == nil {
+                    self.fail(current, opening, now, or: .eof_before_frame)
+                } else {
+                    self.end(current, opening, now, .eof)
+                }
             }
         }
 
         func timedOut() {
-            guard let current = copy, current.frameAt == nil else { return }
-            let opening = player?.livePerf
-            fail(current, opening?.failure ?? .none, or: (opening?.opened ?? -1) < 0 ? .no_data : .no_frame)
+            guard copy?.frameAt == nil else { return }
+            finish { current, opening, now in self.fail(current, opening, now, or: opening.opened < 0 ? .no_data : .no_frame) }
         }
 
         func closed() {
-            guard let current = copy else { return }
-            if current.frameAt == nil { sayOpen(current, frame: nil, tap: nil) }
-            end(.closed)
+            finish { current, opening, now in
+                if current.frameAt == nil { self.sayOpen(current, opening, frame: nil, tap: nil) }
+                self.end(current, opening, now, .closed)
+            }
         }
 
         func buffering(_ on: Bool) {
@@ -251,32 +277,37 @@ enum LivePerf {
             copy = current
         }
 
-        private func sayOpen(_ current: Copy, frame: Double?, tap: Double?) {
-            let opening = player?.livePerf ?? Opening()
+        /// libmpv hands over its warnings after the end of the file, so the
+        /// lines are written once the player's queue has read them.
+        private func finish(_ write: @escaping @MainActor (Copy, Opening, CFAbsoluteTime) -> Void) {
+            guard let current = copy else { return }
+            copy = nil
+            let now = CFAbsoluteTimeGetCurrent()
+            guard let player else { return write(current, Opening(), now) }
+            player.withLivePerf { write(current, $0, now) }
+        }
+
+        private func sayOpen(_ current: Copy, _ opening: Opening, frame: Double?, tap: Double?) {
             say(.open, ["tok": .token(current.token), "copy": .count(current.n), "of": .count(current.of),
                         "setup": .count(opening.setup), "address": .ms(current.address), "delay": .ms(current.delay),
                         "closewait": .count(opening.closeWait), "opened": .count(opening.opened), "frame": .ms(frame), "tap": .ms(tap)])
         }
 
-        private func fail(_ current: Copy, _ logged: Failure, or otherwise: Failure) {
+        private func fail(_ current: Copy, _ opening: Opening, _ now: CFAbsoluteTime, or otherwise: Failure) {
             let phase: Phase = current.frameAt == nil ? .open : .play
-            failure = logged == .none ? otherwise : logged
-            if phase == .open { sayOpen(current, frame: nil, tap: nil) }
-            let since = phase == .open ? player?.livePerf.loadfile : current.frameAt
+            failure = opening.failure == .none ? otherwise : opening.failure
+            if phase == .open { sayOpen(current, opening, frame: nil, tap: nil) }
+            let since = phase == .open ? opening.loadfile : current.frameAt
             say(.fail, ["tok": .token(current.token), "copy": .count(current.n), "class": .word(failure), "phase": .word(phase),
-                        "at": .ms(since.map { CFAbsoluteTimeGetCurrent() - $0 })])
-            if phase == .open { copy = nil }
+                        "at": .ms(since.map { now - $0 }), "warnings": .count(opening.warnings)])
         }
 
-        private func end(_ reason: End) {
-            guard let current = copy else { return }
-            copy = nil
-            let now = CFAbsoluteTimeGetCurrent()
+        private func end(_ current: Copy, _ opening: Opening, _ now: CFAbsoluteTime, _ reason: End) {
             let stalled = current.stalled + (current.stallBegan.map { now - $0 } ?? 0)
-            let logged = player?.livePerf.failure ?? .none
-            if logged != .none { failure = logged }
+            if opening.failure != .none { failure = opening.failure }
             say(.end, ["tok": .token(current.token), "reason": .word(reason), "watched": .decimal(current.frameAt.map { now - $0 } ?? -1, places: 1),
-                       "stalls": .count(current.stalls), "stalled": .decimal(stalled, places: 1), "class": .word(logged)])
+                       "stalls": .count(current.stalls), "stalled": .decimal(stalled, places: 1), "class": .word(opening.failure),
+                       "warnings": .count(opening.warnings)])
         }
     }
 }
