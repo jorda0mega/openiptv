@@ -60,7 +60,7 @@ struct TVWatchOnRow: View {
                 .background(Color(white: 0.14))
                 .clipShape(.rect(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(on ? 0.9 : 0.15), lineWidth: on ? 3 : 1))
-                .tileBadge(shown.didNotPlay ? .didNotPlay : nil)
+                .cardBadge(shown.didNotPlay ? .didNotPlay : nil)
                 // Without a logo it shows the service's name, read below.
                 .accessibilityHidden(true)
             Text(label.title).font(.system(size: 25, weight: .semibold)).lineLimit(1)

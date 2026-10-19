@@ -2200,10 +2200,8 @@ final class AppModel {
         var id: String { channel.id }
         /// Its name in the list and the line under it (see WatchOn.label).
         var label: (title: String, line: String) { WatchOn.label(feed, quality: quality) }
-        /// Every channel of this feed: the one listed, then its other slots.
         var channels: [LiveChannel] { [channel] + others }
 
-        /// `id` is one of this feed's channels (the copy open, say).
         func shows(_ id: String?) -> Bool {
             channels.contains { $0.id == id }
         }
@@ -2221,7 +2219,10 @@ final class AppModel {
             WatchChoice(channel: current(copy), feed: feed(of: copy), quality: WatchOn.quality(of: copy.name).label)
         }
         let byId = Dictionary(choices.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let ranked = WatchOn.ranked(choices.map { watchOption($0.channel) }, pick: watchPicks[event.league],
+        let options = choices.map { choice in
+            WatchOn.Option(id: choice.id, feed: choice.feed, quality: WatchOn.quality(of: choice.channel.name).score)
+        }
+        let ranked = WatchOn.ranked(options, pick: watchPicks[event.league],
                                     preferred: WatchOn.preferredLanguage(league: event.league, title: title(of: channel)),
                                     failed: liveFailures.ids)
         // The same feed on several channels: one entry (the user saw
@@ -2237,8 +2238,7 @@ final class AppModel {
     /// How many different feeds show this game: Watch On's own grouping of
     /// its channels (what its badge says, and when Watch On is there).
     func feedCount(_ entry: LiveOrganizer.Entry) -> Int {
-        var seen = Set<String>()
-        return WatchOn.grouped(entry.channels.filter { seen.insert($0.id).inserted }.map(watchOption)).count
+        groups(of: entry.channels).count
     }
 
     /// A channel's feed; one with none of its own gets one nameless feed.
@@ -2246,7 +2246,12 @@ final class AppModel {
         liveLibrary.feeds[copy.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
     }
 
-    /// A channel as Watch On ranks and groups it (and the count counts it).
+    /// The badge's count and a feed's slots both come from here.
+    private func groups(of channels: [LiveChannel]) -> [(option: WatchOn.Option, others: [WatchOn.Option])] {
+        var seen = Set<String>()
+        return WatchOn.grouped(channels.filter { seen.insert($0.id).inserted }.map(watchOption))
+    }
+
     private func watchOption(_ copy: LiveChannel) -> WatchOn.Option {
         WatchOn.Option(id: copy.id, feed: feed(of: copy), quality: WatchOn.quality(of: copy.name).score)
     }
@@ -2301,8 +2306,7 @@ final class AppModel {
     private func slots(of channel: LiveChannel) -> [String] {
         let copies = copies(of: channel)
         guard event(of: channel) != nil else { return copies.map(\.id) }
-        var seen = Set<String>()
-        let feeds = WatchOn.grouped(copies.filter { seen.insert($0.id).inserted }.map(watchOption)).map { [$0.option] + $0.others }
+        let feeds = groups(of: copies).map { [$0.option] + $0.others }
         return feeds.first { $0.contains { $0.id == channel.id } }?.map(\.id) ?? [channel.id]
     }
 
@@ -2321,7 +2325,7 @@ final class AppModel {
     /// A channel's name in the switch cue: "ESPN Unlimited (Spanish)" for a
     /// game's; "TLC HD" for a copy of a channel.
     func name(of copy: LiveChannel) -> String {
-        if liveLibrary.feeds[copy.id] != nil { return WatchOn.name(feed(of: copy)) }
+        if let feed = liveLibrary.feeds[copy.id] { return WatchOn.name(feed) }
         return [title(of: copy), WatchOn.quality(of: copy.name).label].compactMap(\.self).joined(separator: " ")
     }
 

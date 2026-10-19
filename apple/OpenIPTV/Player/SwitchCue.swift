@@ -25,7 +25,7 @@ struct SwitchCue: View {
         HStack(spacing: spacing) {
             logo(from, name: fromName)
                 .opacity(0.5)
-                .tileBadge(.didNotPlay, ring: fill, onCard: false)
+                .tileBadge(.didNotPlay, ring: fill)
             Image(systemName: "arrow.right")
                 .font(.system(size: font * 0.8, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.6))

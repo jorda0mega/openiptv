@@ -471,7 +471,7 @@ private struct TVChannelCard: View {
                         Image(systemName: "star.fill").foregroundStyle(.yellow).padding(12).padding(.trailing, failed ? TileBadgeView.size + 4 : 0)
                     }
                 }
-                .tileBadge(failed ? .didNotPlay : nil)
+                .cardBadge(failed ? .didNotPlay : nil)
             }
             .buttonStyle(.card)
             .accessibilityLabel([entry.title, failed ? LiveFailures.didNotPlay : nil, now?.title].compactMap(\.self).joined(separator: ", "))
@@ -530,7 +530,7 @@ private struct TVEventCard: View {
                     }
                 }
                 .frame(height: 216)
-                .tileBadge(badge)
+                .cardBadge(badge)
             }
             .buttonStyle(.card)
             // Press-and-hold: the channels showing it (Watch On).
