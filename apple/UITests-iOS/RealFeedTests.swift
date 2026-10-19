@@ -292,7 +292,7 @@ final class RealFeedTests: XCTestCase {
         shot("watch on")
         // Each feed once (a provider lists one feed in two slots; the user
         // saw "Football · Soccer, OneSoccer Feed" twice).
-        let named = cards.allElementsBoundByIndex.map { $0.label.components(separatedBy: ", ").filter { !$0.contains("Playing") }.joined(separator: ", ") }
+        let named = cards.allElementsBoundByIndex.map { $0.label.replacingOccurrences(of: "Playing · ", with: "").replacingOccurrences(of: ", Playing", with: "") }
         XCTAssertEqual(Set(named).count, named.count, "a feed listed twice: \(named)")
         // The others in turn until one plays (an event's feed can be over).
         let others = cards.allElementsBoundByIndex.map(\.label).filter { !$0.contains("Playing") }
