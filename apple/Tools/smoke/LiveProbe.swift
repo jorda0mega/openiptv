@@ -88,7 +88,10 @@ enum LiveProbe {
     /// refused: any character outside letters, digits, space and `_=.>-`
     /// (so no `/`, `:`, `@`), a dot anywhere but in a decimal number after
     /// `=` (so no host name or IP address), or a word over 32 characters.
+    /// One line passes otherwise: live-pick's ids for the shell, exactly
+    /// `OPENIPTV_PROBE_IDS=` and up to 20 numbers of up to 12 digits.
     static func safe(_ line: String) -> Bool {
+        if line.range(of: #"\AOPENIPTV_PROBE_IDS=(?:[0-9]{1,12}(?:,[0-9]{1,12}){0,19})?\z"#, options: .regularExpression) != nil { return true }
         let alphabet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.>- ")
         guard line.unicodeScalars.allSatisfy(alphabet.contains) else { return false }
         return line.split(separator: " ").allSatisfy { word in
@@ -119,7 +122,8 @@ enum LiveProbe {
             queue.maxConcurrentOperationCount = 1
             return queue
         }()
-        let keepBody: Bool
+        /// The body is kept up to this many bytes.
+        let keep: Int
         var started = Date()
         var redirects = 0
         var response: HTTPURLResponse?
@@ -132,7 +136,7 @@ enum LiveProbe {
         var error: Error?
         var done: (() -> Void)?
 
-        init(keepBody: Bool) { self.keepBody = keepBody }
+        init(keep: Int) { self.keep = keep }
 
         var stopped: Date { capped ?? finished ?? Date() }
 
@@ -162,7 +166,7 @@ enum LiveProbe {
             lastByte = now
             arrivals.append((now, data.count))
             bytes += data.count
-            if keepBody, body.count < 1 << 20 { body.append(data) }
+            if body.count < keep { body.append(data) }
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
@@ -177,10 +181,11 @@ enum LiveProbe {
         }
     }
 
-    /// Provider requests made: stream opens, playlist segments, the account.
+    /// Provider requests made: stream opens, playlist segments, the account,
+    /// live-pick's two lists.
     static var requests = 0
 
-    static func read(_ url: URL, agent: String, cap: Double, keepBody: Bool = false) async -> Reader {
+    static func read(_ url: URL, agent: String, cap: Double, keep: Int = 0) async -> Reader {
         requests += 1
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil
@@ -193,7 +198,7 @@ enum LiveProbe {
         // would end a dead feed or a long stall at 60 s.
         config.timeoutIntervalForRequest = cap + 5
         config.httpMaximumConnectionsPerHost = 1
-        let reader = Reader(keepBody: keepBody)
+        let reader = Reader(keep: keep)
         let session = URLSession(configuration: config, delegate: reader, delegateQueue: reader.queue)
         defer { session.invalidateAndCancel() }
         var request = URLRequest(url: url)
@@ -244,7 +249,7 @@ enum LiveProbe {
     }
 
     static func open(_ login: Login, id: String, ext: Ext, ua: Agent, round: Int, cap: Double) async -> Open {
-        let r = await read(login.stream(id, ext), agent: agent(ua), cap: cap, keepBody: ext == .m3u8)
+        let r = await read(login.stream(id, ext), agent: agent(ua), cap: cap, keep: ext == .m3u8 ? 1 << 20 : 0)
         let hops = r.metrics?.transactionMetrics ?? []
         let origin = hops.first?.fetchStartDate ?? r.started
         let response = r.response ?? hops.last?.response as? HTTPURLResponse
@@ -322,7 +327,7 @@ enum LiveProbe {
         var parts = URLComponents(url: login.server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "username", value: login.username), .init(name: "password", value: login.password)]
         guard let url = parts?.url else { return "PROBE account error=other" }
-        let r = await read(url, agent: agent(.app), cap: 30, keepBody: true)
+        let r = await read(url, agent: agent(.app), cap: 30, keep: 1 << 20)
         let http = r.response?.statusCode ?? 0
         guard http == 200, let root = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
               let info = root["user_info"] as? [String: Any]
@@ -517,7 +522,10 @@ enum LiveProbe {
         let leaks = ["PROBE x=http://10.0.0.1", "PROBE a/b", "PROBE user@example", "PROBE x://y", "PROBE host=provider.example",
                      "PROBE ip=192.168.1.20", "PROBE port=host:8080", "PROBE ::1", "PROBE v=61.7.100",
                      "PROBE host=cdn1.example", "PROBE s2.host7.tv", "PROBE edge-3.example9", "PROBE x=1.example",
-                     "PROBE tok=" + String(repeating: "a", count: 33), "PROBE name=Café", "PROBE tab\there", "PROBE newline\nhere"]
+                     "PROBE tok=" + String(repeating: "a", count: 33), "PROBE name=Café", "PROBE tab\there", "PROBE newline\nhere",
+                     "OPENIPTV_PROBE_IDS=1,abc", "OPENIPTV_PROBE_IDS=1,2 x", "OPENIPTV_PROBE_IDS=1;2", "OPENIPTV_PROBE_IDS=1,host.example",
+                     "OPENIPTV_PROBE_IDS=1,1234567890123", "OPENIPTV_PROBE_IDS=" + (1...21).map(String.init).joined(separator: ","),
+                     "OPENIPTV_PROBE_IDS=1,2\nhttp://x", "OPENIPTV_PROBE_IDS=1,2\n", "X OPENIPTV_PROBE_IDS=1,2", "OPENIPTV_PROBE_IDS=1,,2"]
         var open = Open(tok: "2001", ext: .m3u8, ua: .app, round: 3)
         (open.status, open.headers, open.hops, open.redirectMs, open.crossHost, open.ttfb, open.firstData) = (403, true, 1, 120, true, 3012, -1)
         (open.gapMax, open.stoppedAt, open.error) = (5.04, 20.3, .no_data)
@@ -525,7 +533,9 @@ enum LiveProbe {
         let lines = [open.line, "PROBE account max_conn=unlimited active=>0 ts=no m3u8=yes status=active expires_days=-3",
                      "PROBE summary tok=123456789012 ext=ts ua=mpv opens=3 with_data=2 ended_early=1 first_data_med=310 error_redirect_loop=1",
                      "PROBE pair delay=1.0 a_status=200 b_status=403 b_bytes=0 b_first_data=-1",
-                     "PROBE wait seconds=300.0 reason=pause after=10", "PROBE done opens=3 requests=4 refused_lines=0"]
+                     "PROBE wait seconds=300.0 reason=pause after=10", "PROBE done opens=3 requests=4 refused_lines=0",
+                     "PICK live=6 twins=2 always=4 requests=2", "OPENIPTV_PROBE_IDS=3011,3031,123456789012", "OPENIPTV_PROBE_IDS=",
+                     "OPENIPTV_PROBE_IDS=" + (1...20).map(String.init).joined(separator: ",")]
         var wrong = leaks.filter(safe).count + lines.filter { !safe($0) }.count
         let before = refusedLines
         say("PROBE leak=a/b")
