@@ -42,6 +42,7 @@
 		1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF28B344CA01BCD1800A4E3 /* LiveModels.swift */; };
 		1B573875ED79BC2420B63AE6 /* HomeStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6E6C6920060C5CF3CC65EF /* HomeStabilityTests.swift */; };
 		1B688B589825F83E58DA4E1B /* hogweed.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4962C0F389044958A1E2BE4 /* hogweed.xcframework */; };
+		1C08BF855CD7C51972FFC95E /* LiveCuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5BF3BF3ECFAC17AD1572470 /* LiveCuts.swift */; };
 		1CE08F6192353FDD760D3939 /* LibraryIndexFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */; };
 		1D626F013984C6DFB17DDA92 /* TVLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B020D0F87B72E286D9A48D /* TVLiveView.swift */; };
 		1FFCAB2944137C5D0E16CC38 /* gmp.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 363AD3E84AD3778E05926FBC /* gmp.xcframework */; };
@@ -250,6 +251,7 @@
 		DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */; };
 		DC9AC16AE071981D3F442D2D /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
 		DD7ABAA9E4BA1C5B1B8D7A7A /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */; };
+		DE99E11D544A79627DA3B479 /* LiveCuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5BF3BF3ECFAC17AD1572470 /* LiveCuts.swift */; };
 		DFBF0025963040E56BCDE3FC /* Signposts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1EBDEA2DAED98E26A044D2 /* Signposts.swift */; };
 		E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036E1882E4281173C09E8777 /* TabStrip.swift */; };
 		E1DC94CF4B233A2762C4FDC5 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
@@ -442,6 +444,7 @@
 		E3030647E45661C4305A8F16 /* TVSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVSearch.swift; sourceTree = "<group>"; };
 		E40F97880F2C4CB6F2C235BC /* PreparesAhead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreparesAhead.swift; sourceTree = "<group>"; };
 		E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libmpv.xcframework; path = Vendor/Libmpv.xcframework; sourceTree = "<group>"; };
+		E5BF3BF3ECFAC17AD1572470 /* LiveCuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCuts.swift; sourceTree = "<group>"; };
 		E6BB902BA3158069CE35BE75 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		E6F0061726E90B7BD6DAB284 /* LivePerf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePerf.swift; sourceTree = "<group>"; };
 		E895C7A337E5874B38A8020C /* MovieView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieView.swift; sourceTree = "<group>"; };
@@ -824,6 +827,7 @@
 				E07979C91518955236F76395 /* GameTime.swift */,
 				B878EE2EE283C3772241FCF0 /* Guide.swift */,
 				C55BBD8ED2863316936CA1F3 /* LineupCheck.swift */,
+				E5BF3BF3ECFAC17AD1572470 /* LiveCuts.swift */,
 				6CBBDDA77B65B86BB26D8D65 /* LiveFailures.swift */,
 				5CF28B344CA01BCD1800A4E3 /* LiveModels.swift */,
 				CF29F5EC9640222904218E1B /* LiveOrganizer.swift */,
@@ -1089,6 +1093,7 @@
 				53650932E226B2B55FA992A1 /* Keychain.swift in Sources */,
 				1CE08F6192353FDD760D3939 /* LibraryIndexFile.swift in Sources */,
 				859156616AB1F83E789AFFFE /* LineupCheck.swift in Sources */,
+				1C08BF855CD7C51972FFC95E /* LiveCuts.swift in Sources */,
 				622EEF15E5EF9B88F5A24976 /* LiveFailures.swift in Sources */,
 				84F1C24A345749B9277FDA29 /* LiveModels.swift in Sources */,
 				6D5968936DF5594E32D6D529 /* LiveOrganizer.swift in Sources */,
@@ -1192,6 +1197,7 @@
 				4209B928261B700D9F0978FA /* Keychain.swift in Sources */,
 				4CF9404E0D9798C453F590CD /* LibraryIndexFile.swift in Sources */,
 				5362CD7A399EB0A3245AB7DA /* LineupCheck.swift in Sources */,
+				DE99E11D544A79627DA3B479 /* LiveCuts.swift in Sources */,
 				E46D2D4F358B026B53225FC1 /* LiveFailures.swift in Sources */,
 				1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */,
 				6AAED15590593E71877BC43A /* LiveOrganizer.swift in Sources */,
