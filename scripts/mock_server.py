@@ -74,6 +74,15 @@ VIDEO_REQUESTS = []
 # address ("keyed") and without it in a header ("headerless").
 SUBTITLE_REQUESTS = []
 PLAYBACKINFO_REQUESTS = []
+# Requests that need the Emby key, which must come in a header: a film's
+# stream ("stream:item", through the relay or the player), the speed check's
+# 4 MiB reads of it ("speed:item"), a converted stream's playlist
+# ("hls:item") and the websocket, as (time, kind, the key in the address,
+# the key in a header); and those the app hung up on mid-answer, (time,
+# kind). GET /mock/key_checks?since= lists them ("items", "keyed",
+# "headerless", "cancelled").
+KEY_CHECKS = []
+CANCELLED = []
 # Requests for a stretch of a film's sound, and those with the key in
 # their address (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0, 0]
@@ -320,6 +329,12 @@ def recorded_ts():
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def key_check(self, kind, q):
+        """Records a request that needs the key; whether its header has it."""
+        headed = self.headers.get("X-Emby-Token") == "tok"
+        KEY_CHECKS.append((time.time(), kind, "api_key" in q, headed))
+        return headed
+
     def websocket(self):
         key = self.headers.get("Sec-WebSocket-Key", "")
         accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
@@ -453,8 +468,10 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         path = url.path
-        if path == "/embywebsocket" and q.get("api_key") == "tok":
-            return self.websocket()
+        if path == "/embywebsocket":
+            if self.key_check("websocket", q):
+                return self.websocket()
+            return self.send({"error": "unauthorized"}, status=401)
         if path == "/mock/mark":
             return self.send({"t": time.time()})
         if path == "/mock/video_requests":
@@ -462,6 +479,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"items": [item for t, item in VIDEO_REQUESTS if t >= since]})
         if path == "/mock/audio_requests":
             return self.send({"count": AUDIO_REQUESTS[0], "keyed": AUDIO_REQUESTS[1]})
+        if path == "/mock/key_checks":
+            since = float(q.get("since", "0"))
+            asked = [r for r in KEY_CHECKS if r[0] >= since]
+            return self.send({"items": [r[1] for r in asked], "keyed": [r[1] for r in asked if r[2]],
+                              "headerless": [r[1] for r in asked if not r[3]],
+                              "cancelled": [kind for t, kind in CANCELLED if t >= since]})
         if path == "/mock/subtitle_requests":
             since = float(q.get("since", "0"))
             asked = [r for r in SUBTITLE_REQUESTS if r[0] >= since]
@@ -479,6 +502,8 @@ class Handler(BaseHTTPRequestHandler):
                 VIDEO_REQUESTS.clear()
                 SUBTITLE_REQUESTS.clear()
                 PLAYBACKINFO_REQUESTS.clear()
+                KEY_CHECKS.clear()
+                CANCELLED.clear()
                 XTREAM_REQUESTS.clear()
                 PREFERENCES.clear()
                 DOWNLOADED.clear()
@@ -720,7 +745,7 @@ class Handler(BaseHTTPRequestHandler):
             ffmpeg.wait()
         self.close_connection = True
 
-    def send_file(self, file_path, ctype="video/x-matroska"):
+    def send_file(self, file_path, ctype="video/x-matroska", kind=None):
         """A real video with Range support, like Emby's static stream, slowed
         to roughly a home connection (~200 ms per request, ~10 MB/s)."""
         size = os.path.getsize(file_path)
@@ -740,17 +765,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        self.send_response(206 if rng else 200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(end - start + 1))
-        if rng:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.end_headers()
-        with open(file_path, "rb") as f:
-            f.seek(start)
-            left = end - start + 1
-            try:
+        try:
+            self.send_response(206 if rng else 200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(end - start + 1))
+            if rng:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                left = end - start + 1
                 while left > 0:
                     chunk = f.read(min(262144, left))
                     if not chunk:
@@ -758,8 +783,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
                     left -= len(chunk)
                     time.sleep(0.025)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+        except (BrokenPipeError, ConnectionResetError):
+            if kind:
+                CANCELLED.append((time.time(), kind))
 
     def emby(self, path, q):
         if path == "/System/Info/Public":
@@ -833,6 +859,8 @@ class Handler(BaseHTTPRequestHandler):
                 if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
             return self.send({"Items": items, "TotalRecordCount": len(items)})
         hls = os.environ.get("OPENIPTV_MOCK_HLS")
+        if path.startswith("/Videos/") and path.endswith("/master.m3u8") and not self.key_check(f"hls:{path.split('/')[2]}", q):
+            return self.send({"error": "unauthorized"}, status=401)
         if hls and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             time.sleep(float(CONTROL.get("hls_delay", 0)))
             # Server-converted HLS like Emby's: the whole film listed from
@@ -926,9 +954,14 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/Videos/") and "/stream" in path:
             print(f"{time.time():.2f} stream {path.split('/')[2]} {self.headers.get('Range', '')}", flush=True)
             VIDEO_REQUESTS.append((time.time(), path.split('/')[2]))
+            first, _, last = self.headers.get("Range", "")[6:].partition("-")
+            speed = first.isdigit() and last.isdigit() and int(first) % 4194304 == 0 and int(last) - int(first) == 4194303
+            kind = f"{'speed' if speed else 'stream'}:{path.split('/')[2]}"
+            if not self.key_check(kind, q):
+                return self.send({"error": "unauthorized"}, status=401)
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")
             if video and os.path.exists(video):
-                return self.send_file(video)
+                return self.send_file(video, kind=kind)
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
         # My List (before the library listing, which would answer it).
         if path == "/Users/U1/Items" and q.get("Filters") == "IsFavorite":
