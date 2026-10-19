@@ -13,6 +13,8 @@ final class NetworkStatus: @unchecked Sendable {
     /// The connection has been seen (until then, it's not known to be
     /// unmetered: nothing is fetched speculatively).
     private var known = false
+    private var networkValue = Conditions.Network.unknown
+    private var freeDiskRead: (bytes: Int64, at: ContinuousClock.Instant)?
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
@@ -20,6 +22,7 @@ final class NetworkStatus: @unchecked Sendable {
             lock.lock()
             unmeteredValue = path.status == .satisfied && !path.isExpensive && !path.isConstrained
             known = true
+            networkValue = path.status != .satisfied ? .unknown : path.isConstrained ? .constrained : path.isExpensive ? .expensive : .unmetered
             lock.unlock()
         }
         monitor.start(queue: DispatchQueue(label: "openiptv.network-status"))
@@ -39,15 +42,18 @@ final class NetworkStatus: @unchecked Sendable {
         return known && unmeteredValue
     }
 
-    /// How a file should be buffered: generously (in memory) when the
-    /// connection is unmetered, otherwise a couple of minutes.
-    var fileReadahead: MPVPlayer.Readahead {
-        unmetered ? .generous : .modest
+    var network: Conditions.Network {
+        lock.withLock { networkValue }
     }
 
     /// Live TV keeps what's been watched on disk only with plenty of room
     /// (8 GB free): the file grows with the session until it closes.
     var roomForTimeshift: Bool {
+        freeDisk >= 8_000_000_000
+    }
+
+    var freeDisk: Int64 {
+        if let read = lock.withLock({ freeDiskRead }), ContinuousClock.now - read.at < .seconds(60) { return read.bytes }
         let caches = FileManager.default.temporaryDirectory
         #if os(tvOS)
         let free = Int64((try? caches.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0)
@@ -55,7 +61,34 @@ final class NetworkStatus: @unchecked Sendable {
         let free = (try? caches.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage ?? 0
         #endif
-        return free >= 8_000_000_000
+        lock.withLock { freeDiskRead = (free, .now) }
+        return free
+    }
+}
+
+extension Conditions {
+    @MainActor static func current() -> Conditions {
+        Conditions(network: NetworkStatus.shared.network, playing: PlaybackActivity.isPlaying,
+                   lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, thermal: ProcessInfo.processInfo.thermalState,
+                   memoryWarned: MemoryWarnings.recent, freeDisk: NetworkStatus.shared.freeDisk)
+    }
+}
+
+@MainActor
+enum MemoryWarnings {
+    private static var last: ContinuousClock.Instant?
+    private static var observer: NSObjectProtocol?
+
+    static var recent: Bool {
+        last.map { ContinuousClock.now - $0 < .seconds(30) } ?? false
+    }
+
+    static func watch() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil,
+                                                          queue: .main) { _ in
+            MainActor.assumeIsolated { last = .now }
+        }
     }
 }
 

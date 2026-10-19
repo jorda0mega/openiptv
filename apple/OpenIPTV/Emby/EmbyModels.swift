@@ -289,9 +289,9 @@ struct EmbyPlayback: Hashable, Identifiable {
     var subtitleReferences: [SubtitleReference] = []
 
     struct SubtitleReference: Hashable, Sendable {
-        let url: URL
+        let subtitle: ServerSubtitle
         /// The film's own track (in time with it).
-        let own: Bool
+        var own: Bool { subtitle.kind == .inFile }
     }
     /// Stretches of the film's sound (the server converts each to audio
     /// alone), for putting the files in time by the speech heard in them
@@ -322,10 +322,22 @@ struct EmbyPlayback: Hashable, Identifiable {
     var subtitleLanguages: Set<String> = []
 
     struct SubtitleFile: Hashable, Sendable {
-        let url: URL
+        let source: SubtitleSource
         let language: String?
         /// "SDH", "Forced": words the player reads the kind from.
         let title: String
+
+        var url: URL {
+            switch source {
+            case let .server(subtitle): subtitle.address
+            case let .device(file): file
+            }
+        }
+    }
+
+    enum SubtitleSource: Hashable, Sendable {
+        case server(ServerSubtitle)
+        case device(URL)
     }
 
     /// The film's own English and Spanish text subtitles, as files from the
@@ -336,7 +348,7 @@ struct EmbyPlayback: Hashable, Identifiable {
 
     struct SubtitleCopy: Hashable, Sendable {
         let streamIndex: Int
-        let url: URL
+        let subtitle: ServerSubtitle
     }
 
     /// The same, starting from this second (back from Picture in Picture).
