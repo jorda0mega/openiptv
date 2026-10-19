@@ -173,6 +173,7 @@
 		8BF183511B31859CFD77CBAB /* IMDbCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C97593A755F65E9694219D4 /* IMDbCatalog.swift */; };
 		8CFD892BCDF7775B3D0C8754 /* Libavcodec.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */; };
 		8D38B6155496E8A53B744167 /* libexpat.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A9E566E295D6785A720DEA83 /* libexpat.tbd */; };
+		8ED22EEDAFCE31116298BFA4 /* LiveRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1EC37B63ED8CD9B42434CF /* LiveRecoveryTests.swift */; };
 		8F11EF6FC4C1E86511E114A3 /* TileBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE93F836A970124A83C81EB8 /* TileBadge.swift */; };
 		8F2742F08E2D8AAE9A1BC3AA /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
 		91F2A548D81B99D0F53961DA /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
@@ -390,6 +391,7 @@
 		9272170531EC055784C91DD9 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		93CA7D96298A3EB224B5F0E0 /* PersonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonView.swift; sourceTree = "<group>"; };
 		97967C99C760D04279F1A9D0 /* OpenIPTV TV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "OpenIPTV TV.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9A1EC37B63ED8CD9B42434CF /* LiveRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecoveryTests.swift; sourceTree = "<group>"; };
 		9B28084FA0D3D9F051788F09 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		9D955785FF1529F49B082EE5 /* SmartSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartSearch.swift; sourceTree = "<group>"; };
 		9DF96B743FAE66F816DD9294 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
@@ -737,6 +739,7 @@
 				E181E6602A0A74CA82B8EB92 /* HomeAfterLandscapeTests.swift */,
 				24565F5C6D48E734D5EE8D21 /* KeyLeakTests.swift */,
 				F4CB49D07772393CE3267AC2 /* LivePerfProbeTests.swift */,
+				9A1EC37B63ED8CD9B42434CF /* LiveRecoveryTests.swift */,
 				D1A9C8D5BE1D0FF094368580 /* LiveSportsTests.swift */,
 				60039C18093C4A9478614C1B /* PersonPageTests.swift */,
 				FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */,
@@ -1049,6 +1052,7 @@
 				6164F58D3BB936D5574C3FC1 /* HomeAfterLandscapeTests.swift in Sources */,
 				478A24F36571FFD69E611315 /* KeyLeakTests.swift in Sources */,
 				F53713E92CA858B3297424D8 /* LivePerfProbeTests.swift in Sources */,
+				8ED22EEDAFCE31116298BFA4 /* LiveRecoveryTests.swift in Sources */,
 				53C4FE41A43696DEC32E2768 /* LiveSportsTests.swift in Sources */,
 				201B09174ED3CF5739821CA4 /* PersonPageTests.swift in Sources */,
 				790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */,

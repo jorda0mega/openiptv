@@ -73,11 +73,14 @@ CONNECTIONS = set()
 # answer at once, its first byte that many seconds later), "live_redirect"
 # ("1": a .ts answers 302 to /stream/<id>.ts on this host, served the same
 # way; "live_redirect_delay" seconds before the 302; "live_redirect_loop"
-# ("1"): /stream/ redirects back, forever). With the test film: "live_rate"
+# ("1"): /stream/ redirects back, forever; "live_refuse" ("1"): a .ts
+# answers 302 to a port nothing listens on, refused as with no network).
+# With the test film: "live_rate"
 # (kbit/s the stream is sent at), "live_stall" ("20:5,60:2": 20 s after the
 # first byte, nothing for 5 s with the connection open, then the backlog at
 # once), "live_cut" (seconds after the first byte the connection closes: the
-# stream ends; with "live_cut_reset" ("1") it is reset instead, an error),
+# stream ends; with "live_cut_reset" ("1") it is reset instead, an error;
+# "live_cut_ids" ("951") limits it to those channels),
 # "live_chunked" ("1": the stream in chunks, Transfer-Encoding: chunked, as
 # some panels send it; URLSession takes a reset of an unframed stream for
 # its end, but of a chunked one for an error), "live_burst" ("3": the first
@@ -872,6 +875,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if ext == "ts" and CONTROL.get("live_refuse") == "1":
+            note(302)
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:1/stream/{name}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         status = int(CONTROL.get("live_status", 0))
         if status and channel in (CONTROL.get("live_status_ids") or channel).split(","):
             note(status)
@@ -896,7 +906,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return
             if ext == "ts" and os.environ.get("OPENIPTV_MOCK_VIDEO") and shutil.which("ffmpeg"):
-                return self.live_video()
+                return self.live_video(channel)
             if ext == "m3u8":
                 segs = "\n".join(f"#EXTINF:6.0,\n/seg/{i}.ts" for i in range(5))
                 return self.live_answer(f"#EXTM3U\n#EXT-X-TARGETDURATION:6\n{segs}\n".encode(), "application/vnd.apple.mpegurl", 0)
@@ -920,7 +930,7 @@ class Handler(BaseHTTPRequestHandler):
         time.sleep(float(CONTROL.get("live_first_data_delay", 0)))
         self.wfile.write(body)
 
-    def live_video(self):
+    def live_video(self, channel):
         """A real live channel: the test video looped and sent at its own
         pace as MPEG-TS, endlessly, like a provider's stream."""
         time.sleep(float(CONTROL.get("live_delay", os.environ.get("OPENIPTV_MOCK_LIVE_DELAY", "0.3"))))
@@ -937,7 +947,7 @@ class Handler(BaseHTTPRequestHandler):
             ["ffmpeg", "-v", "error", "-re", *burst, "-stream_loop", "-1", "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
              "-c", "copy", "-f", "mpegts", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            if self.live_pump(ffmpeg.stdout, chunked) and chunked:
+            if self.live_pump(ffmpeg.stdout, chunked, channel) and chunked:
                 self.wfile.write(b"0\r\n\r\n")
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -946,12 +956,13 @@ class Handler(BaseHTTPRequestHandler):
             ffmpeg.wait()
         self.close_connection = True
 
-    def live_pump(self, source, chunked):
+    def live_pump(self, source, chunked, channel):
         """Copies the stream to the client at live_rate, with live_stall's
         pauses, until live_cut. False when it reset the connection."""
         rate = float(CONTROL.get("live_rate", 0)) * 125
         stalls = live_stalls()
-        cut = float(CONTROL.get("live_cut", 0))
+        cuts = channel in (CONTROL.get("live_cut_ids") or channel).split(",")
+        cut = float(CONTROL.get("live_cut", 0)) if cuts else 0
         start = sent = None
         while True:
             chunk = source.read(65536)
