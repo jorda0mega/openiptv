@@ -65,8 +65,6 @@ final class AppModel {
     /// search; and channels from abroad, listed after the rest.
     @ObservationIgnored private var guideChannels: [String: LiveChannel] = [:]
     @ObservationIgnored private var abroad: Set<String> = []
-    /// Channels that sent no picture lately: their cards and rows say so,
-    /// and games try others first.
     private var liveFailures = LiveFailures()
     /// Games that played on none of their channels, and when: their rows say
     /// so for half an hour instead of LIVE.
@@ -2235,18 +2233,14 @@ final class AppModel {
         return grouped.count > 1 ? grouped : []
     }
 
-    /// How many different feeds show this game: Watch On's own grouping of
-    /// its channels (what its badge says, and when Watch On is there).
     func feedCount(_ entry: LiveOrganizer.Entry) -> Int {
         groups(of: entry.channels).count
     }
 
-    /// A channel's feed; one with none of its own gets one nameless feed.
     private func feed(of copy: LiveChannel) -> WatchOn.Feed {
         liveLibrary.feeds[copy.id] ?? WatchOn.Feed(service: LiveOrganizer.serviceName(""))
     }
 
-    /// The badge's count and a feed's slots both come from here.
     private func groups(of channels: [LiveChannel]) -> [(option: WatchOn.Option, others: [WatchOn.Option])] {
         var seen = Set<String>()
         return WatchOn.grouped(channels.filter { seen.insert($0.id).inserted }.map(watchOption))
@@ -2274,8 +2268,6 @@ final class AppModel {
         UserDefaults.standard.set(try? JSONEncoder().encode(picks), forKey: "watchOnPicks")
     }
 
-    /// A channel that sent no picture: marked, and tried last, until it
-    /// plays or for `failureMaxAge`.
     func noteLiveFailure(_ channel: LiveChannel) {
         let noted = liveFailures.note(channel.id)
         Task { [weak self] in
@@ -2284,8 +2276,6 @@ final class AppModel {
         }
     }
 
-    /// How long a channel that sent no picture stays marked and tried last.
-    /// UI tests: OPENREEL_DEBUG_LIVE_FAILURE_MAX_AGE.
     private static var failureMaxAge: Double {
         #if DEBUG
         if let age = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LIVE_FAILURE_MAX_AGE"].flatMap(Double.init) { return age }
@@ -2293,16 +2283,10 @@ final class AppModel {
         return 600
     }
 
-    /// The channel didn't play: it and every slot of it sent no picture
-    /// lately on this device.
     func didNotPlay(_ channel: LiveChannel) -> Bool {
-        // Most rows: nothing failed, nothing to group.
         liveFailures.contains(channel.id) && liveFailures.failed(slots(of: channel))
     }
 
-    /// The channel and the same listed again: a game's feed in its other
-    /// slots (as Watch On groups them, not the game's other feeds), any
-    /// other channel's copies.
     private func slots(of channel: LiveChannel) -> [String] {
         let copies = copies(of: channel)
         guard event(of: channel) != nil else { return copies.map(\.id) }
@@ -2310,11 +2294,6 @@ final class AppModel {
         return feeds.first { $0.contains { $0.id == channel.id } }?.map(\.id) ?? [channel.id]
     }
 
-    /// How a Watch On choice shows in every list (the player's cards, the
-    /// long press): the line under its name, and whether it's marked as not
-    /// played (every slot of its feed failed). "Playing" wins: a feed whose
-    /// other slot took over plays. `playing`: the copy open, nil outside the
-    /// player, or once it failed.
     func watchOnShown(_ choice: WatchChoice, playing: String?) -> (line: String, didNotPlay: Bool) {
         let failed = liveFailures.failed(choice.channels.map(\.id), playing: playing)
         let state = choice.shows(playing) ? "Playing" : failed ? LiveFailures.didNotPlay : nil
@@ -2322,8 +2301,6 @@ final class AppModel {
         return ([state, line.isEmpty ? nil : line].compactMap(\.self).joined(separator: " · "), failed)
     }
 
-    /// A channel's name in the switch cue: "ESPN Unlimited (Spanish)" for a
-    /// game's; "TLC HD" for a copy of a channel.
     func name(of copy: LiveChannel) -> String {
         if let feed = liveLibrary.feeds[copy.id] { return WatchOn.name(feed) }
         return [title(of: copy), WatchOn.quality(of: copy.name).label].compactMap(\.self).joined(separator: " ")
@@ -2375,8 +2352,6 @@ final class AppModel {
         entry.channels.contains { gamesNotPlaying[$0.id].map { Date().timeIntervalSince($0) < 1800 } ?? false }
     }
 
-    /// A copy that started: its mark goes, and its game's rows say LIVE
-    /// again, on every device.
     func notePlaying(_ copy: LiveChannel) {
         if liveFailures.contains(copy.id) { liveFailures.played(copy.id) }
         guard !gamesNotPlaying.isEmpty else { return }

@@ -235,8 +235,6 @@ struct EventRow: View {
         let event = entry.event
         let started = event?.start.map { $0 <= Date() } ?? false
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
-        // Different feeds showing it (the same feed on two channels once):
-        // Watch On lists them.
         let badge = TileBadge.count(model.feedCount(entry))
         // Tried in the last half hour, and none of its channels played.
         let notPlaying = live && model.isNotPlaying(entry)
@@ -273,7 +271,6 @@ struct EventRow: View {
         .padding(.vertical, 4)
         .rowForeground()
         .contentShape(Rectangle())
-        // The count last, as it was when the line said it.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([entry.title, notPlaying ? "Not playing" : live ? "LIVE" : nil, line, badge?.spoken]
             .compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", "))

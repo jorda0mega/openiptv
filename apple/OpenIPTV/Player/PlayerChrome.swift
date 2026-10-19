@@ -404,7 +404,6 @@ struct PlayerCard: Identifiable {
     let subtitle: String?
     let images: [CardImage]
     var loading = false
-    /// On its picture (a Watch On channel that didn't play).
     var badge: TileBadge? = nil
     /// For VoiceOver only (an episode's name).
     var spoken: String? = nil
@@ -450,8 +449,6 @@ struct PlayerInfoPanelView: View {
                                 .id(card.id)
                             }
                         }
-                        // Room for a badge sticking out of a picture's corner:
-                        // the scroll view cuts what's outside its content.
                         .padding(.bottom, panel.cards.contains { $0.badge != nil } ? TileBadgeView.overhang : 0)
                     }
                     .scrollIndicators(.hidden)
@@ -507,7 +504,6 @@ struct PlayerInfoPanelView: View {
             }
             .overlay(alignment: .bottomLeading) {
                 HStack(spacing: 5) {
-                    // Not beside "Didn’t play".
                     if card.badge == nil { Image(systemName: "play.fill").font(.system(size: 9, weight: .semibold)) }
                     Text(card.line ?? "").font(.footnote).lineLimit(1)
                 }

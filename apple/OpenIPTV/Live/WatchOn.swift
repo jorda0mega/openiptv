@@ -133,25 +133,16 @@ enum WatchOn {
         }.map(\.element)
     }
 
-    /// The channel to try when the one open sent no picture: the picked
-    /// channel's own feed first (its other slots: the viewer stays on what
-    /// they chose), then every feed in Watch On's order; nil once each was
-    /// tried. A channel that isn't a game passes one feed, its copies.
     static func next<Channel: Identifiable>(after picked: Channel.ID, feeds: [[Channel]], tried: Set<Channel.ID>) -> Channel? {
         let own = feeds.first { $0.contains { $0.id == picked } } ?? []
         return (own + feeds.joined()).first { !tried.contains($0.id) }
     }
 
-    /// A feed's name in a sentence: its name in the list, then its language
-    /// when it isn't the main one ("ESPN Unlimited (Spanish)", "NFL").
     static func name(_ feed: Feed) -> String {
         let title = label(feed, quality: nil).title
         return feed.language.map { "\(title) (\(languageName($0)))" } ?? title
     }
 
-    /// The switch cue, spoken: "NFL didn’t play. Switching.", then "NFL
-    /// didn’t play. Now on ESPN Unlimited."; the same name (the feed's other
-    /// slot): "… Now on another OneSoccer channel."
     static func switchSentence(from: String, to: String?) -> String {
         let now = to.map { $0 == from ? "Now on another \($0) channel." : "Now on \($0)." } ?? "Switching."
         return "\(from) didn’t play. \(now)"

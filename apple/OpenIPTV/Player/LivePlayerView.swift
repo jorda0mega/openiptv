@@ -48,9 +48,7 @@ struct LivePlayerView: View {
     @State private var lastStep = Date.distantPast
     /// "Started in 0.6 s" shows until then.
     @State private var timingUntil = Date.distantPast
-    /// The go at playing what the viewer chose (see Attempt).
     @State private var attempt: Attempt?
-    /// Takes the switch cue away once the channel moved to has played a while.
     @State private var cueTask: Task<Void, Never>?
     /// The copy open now.
     @State private var playingCopy: LiveChannel?
@@ -67,11 +65,7 @@ struct LivePlayerView: View {
     /// feed that never starts isn't tried first next time).
     @State private var pendingPick: (choice: AppModel.WatchChoice, league: String)?
 
-    /// One go at playing what the viewer chose: the channel picked (or played
-    /// first), each copy tried since (the provider often lists a channel
-    /// several times; if one won't start, the next is tried), and whether the
-    /// switch cue shows: once it moved on, until a while after the next one
-    /// plays. A new go starts clean.
+    /// The provider often lists a channel several times; if one won't start, the next is tried.
     struct Attempt {
         let picked: LiveChannel
         var tried: Set<String>
@@ -90,8 +84,6 @@ struct LivePlayerView: View {
     }
 
     private var channel: LiveChannel { model.current(channels[index]) }
-    /// The copy playing (or starting): none once it failed, so every list
-    /// shows it as not played.
     private var playingID: String? { error == nil ? playingCopy?.id : nil }
     /// "TLC" rather than "US: TLC HD".
     private var displayName: String { model.title(of: channel) }
@@ -322,8 +314,6 @@ struct LivePlayerView: View {
         return pills
     }
 
-    /// The channel picked didn't play: says so at the top, whether or not
-    /// the controls are up, while the next one starts and a while after.
     private func switchCue(_ picked: LiveChannel, _ open: LiveChannel) -> some View {
         SwitchCue(from: picked, fromName: model.name(of: picked),
                   to: started ? open : nil, toName: started ? model.name(of: open) : nil)
@@ -332,7 +322,6 @@ struct LivePlayerView: View {
             #if os(tvOS)
             .padding(.top, 50)
             #else
-            // Under the close button.
             .padding(.top, 72)
             #endif
             .allowsHitTesting(false)
@@ -343,8 +332,7 @@ struct LivePlayerView: View {
 
     /// iPhone: the channels showing the game, as in the Apple TV app's
     /// Episodes panel: the service, then the feed, language and picture;
-    /// "Playing" on the one playing, "Didn’t play" on one that sent no
-    /// picture lately. A tap switches to it.
+    /// "Playing" on the one playing. A tap switches to it.
     private var watchOnPanel: PlayerInfoPanel? {
         #if os(iOS)
         guard showWatchOn else { return nil }
@@ -563,9 +551,6 @@ struct LivePlayerView: View {
         }
     }
 
-    /// The next copy, if one hasn't been tried (the picked feed's other
-    /// slots first, see WatchOn.next), and the cue says so; false when
-    /// there's none left.
     private func fallBack() -> Bool {
         guard recording == nil, !started, var attempt else { return false }
         if let playingCopy { model.noteLiveFailure(playingCopy) }
@@ -612,8 +597,6 @@ struct LivePlayerView: View {
         if let recording { watch(recording) } else { play() }
     }
 
-    /// Before anything opens: a switch cue from what played before goes at
-    /// once.
     private func reset() {
         cueTask?.cancel()
         attempt?.cue = false
@@ -635,9 +618,7 @@ struct LivePlayerView: View {
             started = true
             buffering = false
             startWatch?.cancel()
-            // A recording playing says nothing of the live channel.
             if recording == nil { model.notePlaying(playingCopy ?? channel) }
-            // Its feed played, on the slot picked or its other one.
             if let pendingPick, pendingPick.choice.shows(playingCopy?.id) {
                 model.pickWatchChoice(pendingPick.choice, league: pendingPick.league)
             }
@@ -744,8 +725,6 @@ struct LivePlayerView: View {
         showControls()
     }
 
-    /// Nothing to watch, so the controls (and the way out) stay up; the
-    /// error says it, not the switch cue.
     private func fail(_ message: String) {
         startWatch?.cancel()
         attempt?.cue = false
@@ -762,8 +741,6 @@ struct LivePlayerView: View {
         return 15
     }
 
-    /// How long the switch cue stays once the channel moved to plays. UI
-    /// tests: OPENREEL_DEBUG_SWITCH_CUE_SECONDS.
     private static var cueSeconds: Double {
         #if DEBUG
         if let seconds = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"].flatMap(Double.init) { return seconds }

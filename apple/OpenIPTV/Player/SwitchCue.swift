@@ -1,14 +1,8 @@
 import SwiftUI
 
-/// The channel picked didn't play and the player moved on: its logo, dimmed
-/// and marked, then where the player went: a spinner and "Switching" while
-/// that channel starts, its logo and "Now on NFL" once it plays. A small
-/// capsule at the top: in the middle it would cover the play button, at the
-/// bottom the score bar and subtitles.
 struct SwitchCue: View {
     let from: LiveChannel
     let fromName: String
-    /// The channel the player moved to, once it plays; nil while it starts.
     let to: LiveChannel?
     let toName: String?
 
@@ -40,8 +34,6 @@ struct SwitchCue: View {
         .font(.system(size: font, weight: .semibold))
         .foregroundStyle(.white)
         .lineLimit(1)
-        // A long name ("Now on ESPN Unlimited (Spanish)") shrinks a little,
-        // then loses its middle.
         .minimumScaleFactor(0.75)
         .truncationMode(.middle)
         .padding(inset)
@@ -51,7 +43,6 @@ struct SwitchCue: View {
         .accessibilityIdentifier("live.switch-cue")
     }
 
-    /// The channel's logo; without one, its name's first word ("ESPN").
     private func logo(_ channel: LiveChannel, name: String) -> some View {
         ChannelLogo(url: channel.logo, name: name, size: tile,
                     initials: name.split(separator: " ").first.map(String.init) ?? name)

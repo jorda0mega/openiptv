@@ -4,9 +4,8 @@ import SwiftUI
 /// Apple TV's Watch On: the channels showing the game in a row, as the
 /// player's Episodes row (TVMovieOverlay): its tab lit over them, each
 /// one's logo, service, and its feed, language and picture; "Playing" on
-/// the one playing, "Didn’t play" on one that sent no picture lately, the
-/// remote's raised. The remote moves along it (see LivePlayerView), Select
-/// plays one.
+/// the one playing, the remote's raised. The remote moves along it (see
+/// LivePlayerView), Select plays one.
 struct TVWatchOnRow: View {
     @Environment(AppModel.self) private var model
     let choices: [AppModel.WatchChoice]

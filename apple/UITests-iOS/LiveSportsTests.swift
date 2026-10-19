@@ -196,8 +196,7 @@ final class LiveSportsTests: XCTestCase {
         game.press(forDuration: 1.2)
         // In the order they'd play: NFL, ESPN Unlimited and DAZN CA in
         // English, then ESPN Unlimited in Spanish and DAZN CA in French (the
-        // language is each item's second line, and after its name in the
-        // label).
+        // language is each item's second line).
         let espn = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'ESPN Unlimited'"))
         XCTAssertTrue(espn.firstMatch.waitForExistence(timeout: 5),
                       "no channels on a long press: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.prefix(20))")
@@ -452,19 +451,10 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(game.exists, "the game went once the lineup came back")
     }
 
-    // MARK: Channels that didn't play, and the switch cue
-
-    /// The game's best channel sends nothing: while the player moves to the
-    /// next one, a cue at the top says so ("Switching"), then names where it
-    /// went ("Now on ESPN Unlimited") for a while after it plays (4 s; 10 s
-    /// here, so the checks fit in it). Regression: the player moved without
-    /// a word ("it shouldn't be up to the user to guess why they were
-    /// switched").
     func testMoveSaysWhichChannelDidntPlay() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001", "slow_live": "2002"])
         addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none", "slow_live": "none"]) }
-        // The next channel answers in 4 s (slow_live), well inside the limit.
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "8"
         app.launchEnvironment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"] = "10"
         app.launchArguments = ["-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
@@ -482,9 +472,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(switchCue.waitForNonExistence(timeout: 15), "the cue stayed")
     }
 
-    /// No channel of the game plays: in Watch On every card says "Didn’t
-    /// play", none "Playing". Regression: the last one tried still said
-    /// "Playing", unmarked.
     func testGameNotPlayingMarksEveryCard() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
@@ -507,9 +494,6 @@ final class LiveSportsTests: XCTestCase {
         }
     }
 
-    /// A channel picked in Watch On that sends nothing: the cue names it and
-    /// where the player went, its card says "Didn’t play" with the mark on
-    /// its picture, and so does the long press on the game's row.
     func testPickThatDidntPlayIsMarked() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2003"])
@@ -540,7 +524,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(app.buttons["ESPN Unlimited, Didn’t play · Spanish"].firstMatch.exists, "the long press doesn't say which channel didn't play")
     }
 
-    /// The mark goes once that channel plays.
     func testMarkGoesWhenTheChannelPlays() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2003"])
@@ -565,8 +548,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(spanish.label.contains("Playing") && !spanish.label.contains("Didn’t"), "still marked once it played: \(spanish.label)")
     }
 
-    /// The mark lasts as long as a failure counts (ten minutes; 20 s here),
-    /// and goes on its own.
     func testMarkAgesOut() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001"])
@@ -588,8 +569,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(nfl.label.contains("Didn’t play"), "the mark outlived the failure: \(nfl.label)")
     }
 
-    /// A channel (not a game) that didn't play is marked on its row, the
-    /// mark on its logo and "Didn’t play" in its line; the next row isn't.
     func testChannelThatDidntPlayIsMarkedInItsList() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["dead_live": "5"])
@@ -617,9 +596,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertLessThan(brightest(shot, in: deadBadge(on: plain)), 150, "a mark on the logo of a channel that wasn't tried")
     }
 
-    /// A recording of a channel that didn't play (Start Over) says nothing
-    /// of the channel live: its row stays marked. Regression: the recording
-    /// playing cleared the mark.
     func testRecordingDoesNotClearTheMark() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["dead_live": "5"])
@@ -641,11 +617,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(five.label.contains("Didn’t play"), "the recording cleared the live channel's mark: \(five.label)")
     }
 
-    /// Start Over while the switch cue is up: the cue goes at once, and
-    /// doesn't come back with the recording. Channel 5 is listed twice here,
-    /// its HD copy (tried first) sending nothing, the other slow to answer,
-    /// so Start Over comes while the cue says "Switching". Regression: the
-    /// cue stayed, and spoke again when the recording played.
     func testStartOverEndsTheCue() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["hd_copy": "5", "dead_live": "955", "slow_live": "5"])
@@ -662,9 +633,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(switchCue.exists, "the cue came back with the recording: \(cueWords())")
     }
 
-    /// A picked feed listed in two slots, its slot sending nothing: the
-    /// player moves to its other slot, not to Watch On's first channel, and
-    /// keeps the pick for the league (the feed played).
     func testFailedPickTriesItsOtherSlotFirst() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "sports_dupes": "1", "dead_live": "none"])
@@ -682,8 +650,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(playing(twin), "the pick that played on its other slot wasn't kept: \(liveCopy())")
     }
 
-    /// After that move, the feed's card (now "Playing") tapped stays on the
-    /// slot playing. Regression: it reopened the slot that didn't play.
     func testPlayingCardAfterAMoveStaysPut() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "sports_dupes": "1", "dead_live": "none"])
@@ -706,10 +672,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(switchCue.exists, "a cue after tapping the card playing: \(cueWords())")
     }
 
-    /// A game's feed that didn't play while another of its feeds plays:
-    /// that feed's channel, in its provider category, is marked.
-    /// Regression: a game's channel counted every feed of the game as its
-    /// copies, so it was never marked.
     func testGameFeedThatDidntPlayIsMarkedInItsCategory() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001"])
@@ -734,10 +696,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(row.label.contains("Didn’t play"), "the game's feed that didn't play isn't marked: \(row.label)")
     }
 
-    /// A game on several channels shows how many on its tile (a white badge
-    /// on the logo, where the line's text can't cut it); VoiceOver still
-    /// reads "5 channels", and Watch On lists as many. Regression: "5
-    /// chann…" at the end of the cut-off line.
     func testGameRowShowsItsChannelCountOnItsTile() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "none"])
@@ -763,9 +721,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertEqual(cards.count, 5, "the badge and Watch On don't agree")
     }
 
-    /// The game opened (OneSoccer listed in two slots), its OneSoccer card
-    /// picked with that slot sending nothing: the player moves to the other
-    /// slot, which plays. That slot's name.
     private func moveOffDeadOneSoccerSlot(_ server: URL) throws -> String {
         openGame()
         XCTAssertTrue(started(), "the game didn't play: \(liveCopy())")
@@ -788,7 +743,6 @@ final class LiveSportsTests: XCTestCase {
         return twin
     }
 
-    /// Live TV's UK channels (the test server's lineup): Channel 5's row.
     private func channelFive() -> XCUIElement {
         let tab = app.tabBars.buttons["Live TV"].firstMatch
         if tab.waitForExistence(timeout: 10) { tab.tap() }
@@ -797,8 +751,6 @@ final class LiveSportsTests: XCTestCase {
         return five
     }
 
-    /// The player's "…" menu, Start Over: what's on now from its start (a
-    /// recording).
     private func startOver() {
         showControls()
         app.buttons["More"].firstMatch.tap()
@@ -807,8 +759,6 @@ final class LiveSportsTests: XCTestCase {
         button.tap()
     }
 
-    /// The game opened, NFL playing, then its Spanish feed (dead) picked in
-    /// Watch On: the player goes back to NFL and says so.
     private func pickSpanishThatDoesntPlay() {
         openGame()
         XCTAssertTrue(playing("NFL 01"), "the game didn't start on the best channel: \(liveCopy())")
@@ -827,7 +777,6 @@ final class LiveSportsTests: XCTestCase {
 
     private func cueWords() -> String { switchCue.exists ? switchCue.label : "no cue" }
 
-    /// The switch cue says all of `words`, within `timeout` s.
     private func waitForCue(_ words: String..., timeout: Double = 20) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -837,20 +786,14 @@ final class LiveSportsTests: XCTestCase {
         return false
     }
 
-    /// Where the mark sits on a Watch On card's 86 × 48 picture (upright):
-    /// its bottom-trailing corner, 6 pt out.
     private func cardBadge(_ card: XCUIElement) -> CGRect {
         CGRect(x: card.frame.minX + 77, y: card.frame.minY + 49, width: 13, height: 13)
     }
 
-    /// Where the "didn't play" mark sits on a row's logo tile.
     private func deadBadge(on tile: CGRect) -> CGRect {
         CGRect(x: tile.maxX - 9, y: tile.maxY - 9, width: 13, height: 13)
     }
 
-    /// A row's 68 × 48 logo tile (its grey, white 0.14) at the row's leading
-    /// edge, in points: its height from the long grey runs down it, its
-    /// width from the long runs across it (text edges make only short ones).
     private func tile(of row: XCUIElement, in shot: XCUIScreenshot) -> CGRect? {
         let area = CGRect(x: row.frame.minX, y: row.frame.minY, width: min(140, row.frame.width), height: row.frame.height)
         guard let found = pixels(shot, in: area) else { return nil }
@@ -860,7 +803,6 @@ final class LiveSportsTests: XCTestCase {
             let r = Int(data[i]), g = Int(data[i + 1]), b = Int(data[i + 2])
             return (28...46).contains(r) && abs(r - g) < 5 && abs(r - b) < 5
         }
-        /// The longest grey run along a line of `count` pixels.
         func longest(_ count: Int, _ isGrey: (Int) -> Bool) -> (start: Int, end: Int)? {
             var best: (start: Int, end: Int)?, start: Int?
             for i in 0...count {
@@ -872,20 +814,17 @@ final class LiveSportsTests: XCTestCase {
         }
         let down = (0..<width).compactMap { x in longest(height) { grey(x, $0) } }.filter { CGFloat($0.end - $0.start) > 30 * scale }
         guard let minY = down.map(\.start).min(), let maxY = down.map(\.end).max() else { return nil }
-        // Within the tile's height: the row's separator is the same grey.
         let across = (minY...maxY).compactMap { y in longest(width) { grey($0, y) } }.filter { CGFloat($0.end - $0.start) > 40 * scale }
         guard let minX = across.map(\.start).min(), let maxX = across.map(\.end).max() else { return nil }
         return CGRect(x: area.minX + CGFloat(minX) / scale, y: area.minY + CGFloat(minY) / scale,
                       width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
     }
 
-    /// Brightest pixel (0-255) of an area of a screenshot, in points.
     private func brightest(_ shot: XCUIScreenshot, in rect: CGRect) -> Double {
         guard let data = pixels(shot, in: rect)?.data else { return 0 }
         return stride(from: 0, to: data.count, by: 4).map { lum(data, $0) }.max() ?? 0
     }
 
-    /// Mean brightness (0-255) of an area of a screenshot, in points.
     private func luminance(_ shot: XCUIScreenshot, in rect: CGRect) -> Double {
         guard let data = pixels(shot, in: rect)?.data, !data.isEmpty else { return 0 }
         return stride(from: 0, to: data.count, by: 4).map { lum(data, $0) }.reduce(0, +) / Double(data.count / 4)
@@ -895,8 +834,6 @@ final class LiveSportsTests: XCTestCase {
         0.2126 * Double(data[i]) + 0.7152 * Double(data[i + 1]) + 0.0722 * Double(data[i + 2])
     }
 
-    /// An area of a screenshot as RGBA bytes, with its size in pixels and
-    /// the pixels per point.
     private func pixels(_ shot: XCUIScreenshot, in rect: CGRect) -> (data: [UInt8], width: Int, height: Int, scale: CGFloat)? {
         guard let image = shot.image.cgImage else { return nil }
         let scale = CGFloat(image.width) / app.frame.width
