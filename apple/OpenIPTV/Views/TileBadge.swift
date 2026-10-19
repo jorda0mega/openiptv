@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// The badge on a channel's or a game's tile: how many channels show a
-/// game, or that a channel didn't play. One tile has one badge.
 enum TileBadge {
     case channels(Int)
     case didNotPlay
@@ -10,7 +8,6 @@ enum TileBadge {
         channels > 1 ? .channels(channels) : nil
     }
 
-    /// What VoiceOver says for it: "5 channels", "Didn’t play".
     var spoken: String {
         switch self {
         case let .channels(count): "\(count) channels"
@@ -19,12 +16,9 @@ enum TileBadge {
     }
 }
 
-/// A white capsule with a TV and the count, or a grey circle with a
-/// crossed-out TV.
 struct TileBadgeView: View {
     let badge: TileBadge
 
-    /// Taller on Apple TV, seen from the sofa.
     #if os(tvOS)
     static let size: CGFloat = 30
     static let cardInset: CGFloat = 8
@@ -33,11 +27,7 @@ struct TileBadgeView: View {
     #endif
     static let outset: CGFloat = 6
     static let ringWidth: CGFloat = 2
-    /// How far the badge and its ring stick out. A scroll view cuts them
-    /// without this much room.
     static let overhang: CGFloat = outset + ringWidth
-    /// The TV glyph and the count, from the height: 11 points on iPhone, 19
-    /// on Apple TV.
     private let glyph = (TileBadgeView.size * 0.64).rounded()
     private let number = (TileBadgeView.size * 0.62).rounded()
 
@@ -61,15 +51,12 @@ struct TileBadgeView: View {
                 .foregroundStyle(.white)
                 .frame(width: Self.size, height: Self.size)
                 .background(Color(red: 0x48 / 255, green: 0x48 / 255, blue: 0x4A / 255), in: .circle)
-                // The words beside it say it ("Didn’t play").
                 .accessibilityHidden(true)
         }
     }
 }
 
 extension View {
-    /// The bottom-trailing corner, outside the tile, ringed in `ring`
-    /// (what's behind it) so it reads as on top.
     @ViewBuilder func tileBadge(_ badge: TileBadge?, ring: Color = .black) -> some View {
         overlay(alignment: .bottomTrailing) {
             if let badge {

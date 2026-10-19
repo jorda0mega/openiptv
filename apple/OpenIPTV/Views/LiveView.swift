@@ -340,7 +340,6 @@ struct ChannelLogo: View {
     let name: String
     var badge: TileBadge? = nil
     var size = CGSize(width: 68, height: 48)
-    /// Shown without a logo: the name's first letters, unless given.
     var initials: String? = nil
     @State private var image: UIImage?
 

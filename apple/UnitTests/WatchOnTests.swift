@@ -114,8 +114,6 @@ final class WatchOnTests: XCTestCase {
     }
 }
 
-/// After a channel that didn't play: which is tried next, and how the
-/// player names both.
 final class WatchOnMoveTests: XCTestCase {
     private struct Copy: Identifiable, Equatable { let id: String }
 
@@ -124,8 +122,6 @@ final class WatchOnMoveTests: XCTestCase {
         return WatchOn.next(after: picked, feeds: feeds, tried: tried)?.id
     }
 
-    /// The picked feed's other slot first, then Watch On's order; nothing
-    /// once every channel was tried.
     func testNextTriesThePickedFeedFirst() {
         XCTAssertEqual(next(after: "espn-es", tried: ["espn-es"]), "espn-es2")
         XCTAssertEqual(next(after: "espn-es", tried: ["espn-es", "espn-es2"]), "nfl")
@@ -144,11 +140,7 @@ final class WatchOnMoveTests: XCTestCase {
     }
 }
 
-/// Channels that sent no picture: how long they count, and when a channel
-/// or a feed didn't play.
 final class LiveFailuresTests: XCTestCase {
-    /// A failure counts until its check, unless it failed again since; a
-    /// play clears it at once.
     func testExpiry() {
         var failures = LiveFailures()
         let first = failures.note("a", at: Date(timeIntervalSince1970: 0))
@@ -164,8 +156,6 @@ final class LiveFailuresTests: XCTestCase {
         XCTAssertEqual(failures.ids, [])
     }
 
-    /// A channel didn't play when every copy failed; a feed when every slot
-    /// failed and none is playing (one open that failed isn't).
     func testEveryCopyFailed() {
         var failures = LiveFailures()
         _ = failures.note("hd")

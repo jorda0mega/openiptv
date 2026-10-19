@@ -466,7 +466,6 @@ private struct TVChannelCard: View {
                     if let now { ProgressBar(value: now.progress()).padding(14) }
                 }
                 .overlay(alignment: .topTrailing) {
-                    // Beside the badge when there's one.
                     if favorite {
                         Image(systemName: "star.fill").foregroundStyle(.yellow).padding(12).padding(.trailing, failed ? TileBadgeView.size + 4 : 0)
                     }
@@ -477,7 +476,6 @@ private struct TVChannelCard: View {
             .accessibilityLabel([entry.title, failed ? LiveFailures.didNotPlay : nil, now?.title].compactMap(\.self).joined(separator: ", "))
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title).font(.callout.weight(.semibold)).lineLimit(1)
-                // A blank line while the guide loads keeps the card's height.
                 Text(line.isEmpty ? " " : line)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }

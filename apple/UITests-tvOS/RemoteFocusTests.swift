@@ -995,19 +995,13 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(playing("ESPN UNLTD 016"), "the channel picked didn't play: \(liveCopy())")
     }
 
-    /// The game's best channel sends nothing: the cue at the top says the
-    /// player is switching, then where it went; in Watch On that channel's
-    /// card says "Didn’t play", with the mark on its picture. Regression: it
-    /// moved without a word.
     func testAppleTVSaysWhichChannelDidntPlay() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001", "slow_live": "2002"])
         addTeardownBlock { [self] in configure(server, ["sports": "0", "dead_live": "none", "slow_live": "none"]) }
         app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
             + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
-        // The next channel answers in 4 s (slow_live), well inside the limit.
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "8"
-        // The cue's 4 s, longer here: the checks after it plays fit in it.
         app.launchEnvironment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"] = "10"
         app.launchArguments = ["-tvTab", "live", "-tvLiveTab", "shelf:sports", "-freshLineup", "YES", "-forgetWatchOnPicks", "YES"]
         app.launch()
@@ -1041,15 +1035,10 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(espn.label.contains("Playing") && !espn.label.contains("Didn’t"), "the card playing: \(espn.label)")
         sleep(1)
         let picture = XCUIScreen.main.screenshot()
-        // The mark: inside the picture's top-trailing corner (a 320 × 180
-        // picture at the card's top).
         let corner = CGRect(x: nfl.frame.minX + 320 - 30, y: nfl.frame.minY + 8, width: 22, height: 22)
         XCTAssertGreaterThan(brightest(picture, in: corner), 200, "no mark on the picture of the card that didn't play")
     }
 
-    /// No channel of the game plays: in Watch On every card says "Didn’t
-    /// play", none "Playing". Regression: the last one tried still said
-    /// "Playing", unmarked.
     func testAppleTVGameNotPlayingMarksEveryCard() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "2001,2002,2003,2004,2005"])
@@ -1076,9 +1065,6 @@ final class RemoteFocusTests: XCTestCase {
         }
     }
 
-    /// A game on several channels shows how many on its card (a white
-    /// badge in the tile's top-trailing corner); VoiceOver still hears "5
-    /// channels". Regression: the count was at the end of the cut-off line.
     func testAppleTVGameCardShowsChannelCount() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["sports": "1", "dead_live": "none"])
@@ -1100,8 +1086,6 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertGreaterThan(luminance(picture, in: corner), 120, "no count badge on the game's card")
     }
 
-    /// A channel that didn't play is marked on its card: "Didn’t play" in
-    /// its label, the mark in the tile's top-trailing corner.
     func testAppleTVChannelThatDidntPlayIsMarked() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["dead_live": "none"])
