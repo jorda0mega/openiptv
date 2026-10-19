@@ -12,6 +12,7 @@ final class NetworkStatus: @unchecked Sendable {
     private let monitor = NWPathMonitor()
     private let lock = NSLock()
     private var unmeteredValue = true
+    private var satisfied = true
     /// The connection has been seen (until then, it's not known to be
     /// unmetered: nothing is fetched speculatively).
     private var known = false
@@ -25,7 +26,8 @@ final class NetworkStatus: @unchecked Sendable {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
             lock.lock()
-            unmeteredValue = path.status == .satisfied && !path.isExpensive && !path.isConstrained
+            satisfied = path.status == .satisfied
+            unmeteredValue = satisfied && !path.isExpensive && !path.isConstrained
             known = true
             networkValue = path.status != .satisfied ? .unknown : path.isConstrained ? .constrained : path.isExpensive ? .expensive : .unmetered
             #if DEBUG && canImport(Libmpv)
@@ -44,6 +46,8 @@ final class NetworkStatus: @unchecked Sendable {
         if let path = lock.withLock({ path }) { LivePerf.sayPath(path) }
     }
     #endif
+
+    var online: Bool { lock.withLock { satisfied } }
 
     var unmetered: Bool {
         lock.lock()

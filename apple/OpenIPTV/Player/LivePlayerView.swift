@@ -24,6 +24,9 @@ struct LivePlayerView: View {
     @State private var started = false
     @State private var reopening = false
     @State private var cuts = LiveCuts()
+    /// When another stream was let go: a provider allowing one stream at a
+    /// time can still count it for a moment and refuse the next.
+    @State private var switchedAt = Date.distantPast
     /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
     @State private var buffering = false
@@ -74,6 +77,7 @@ struct LivePlayerView: View {
     struct Attempt {
         let picked: LiveChannel
         var tried: Set<String>
+        var triedAgain: Set<String> = []
         var cue = false
 
         init(_ picked: LiveChannel) {
@@ -122,7 +126,7 @@ struct LivePlayerView: View {
             #if DEBUG
             debugReadout(playingCopy.map { "\($0.name) tok=\(LivePerf.Token($0).text)" } ?? "", "debug-live-copy")
             debugReadout(error != nil ? "failed" : started ? "playing" : "starting", "debug-live-state")
-            debugReadout(perf.failure.rawValue, "debug-live-fail")
+            debugReadout(perf.failure?.rawValue ?? "none", "debug-live-fail")
             #endif
         }
         #if os(iOS)
@@ -542,6 +546,7 @@ struct LivePlayerView: View {
     /// says nothing is playing. Regression: a game listed LIVE whose feed
     /// was over (the slot still there) spun forever.
     private func open(_ copy: LiveChannel, after delay: Double = 0) {
+        if copy.id != playingCopy?.id { switchedAt = Date() }
         playingCopy = copy
         #if DEBUG
         perf.opening(copy, n: attempt?.tried.count ?? 1, of: feeds.map(\.count).reduce(0, +), delay: delay)
@@ -580,19 +585,36 @@ struct LivePlayerView: View {
             #if DEBUG
             perf.timedOut()
             #endif
-            if started { return reconnect() }
-            if !fallBack() {
-                if model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
-                fail(notPlaying)
-            }
+            failed(.no_data, message: notPlaying)
+        }
+    }
+
+    private func failed(_ failure: StreamFailure, message: String) {
+        guard recording == nil, let copy = playingCopy, var attempt else { return fail(message) }
+        let failure = NetworkStatus.shared.online ? failure : .offline
+        switch failure.step(played: started, triedAgain: attempt.triedAgain.contains(copy.id),
+                            sinceSwitch: Date().timeIntervalSince(switchedAt)) {
+        case .nextCopy:
+            guard !fallBack() else { return }
+            if failure == .no_data, model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
+            fail(message)
+        case let .sameCopy(after: wait):
+            attempt.triedAgain.insert(copy.id)
+            self.attempt = attempt
+            open(copy, after: wait)
+        case .reconnect:
+            reconnect()
+        case .stop:
+            fail(message)
         }
     }
 
     private func reconnect() {
         guard let copy = playingCopy else { return }
+        reopening = true
+        guard NetworkStatus.shared.online else { return reconnectOnceOnline() }
         switch cuts.cut(copy.id) {
         case let .reopen(after: wait):
-            reopening = true
             if paused { player?.setPaused(false) }
             window = nil
             position = nil
@@ -603,6 +625,18 @@ struct LivePlayerView: View {
         case .giveUp:
             reset()
             if !fallBack() { fail(notPlaying) }
+        }
+    }
+
+    private func reconnectOnceOnline() {
+        startWatch?.cancel()
+        loadTask?.cancel()
+        loadTask = Task {
+            while !NetworkStatus.shared.online {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+            }
+            reconnect()
         }
     }
 
@@ -723,20 +757,19 @@ struct LivePlayerView: View {
         case let .window(start, end, seekable):
             window = Window(start: start, end: end, seekable: seekable)
             track()
-        case let .failed(message):
+        case let .failed(message, logged):
             #if DEBUG
             perf.failed()
             #endif
-            if started, recording == nil { return reconnect() }
-            if !fallBack() { fail("Couldn't play: \(message)") }
-        case .ended:
+            failed(logged ?? .unknown, message: "Couldn't play: \(message)")
+        case let .ended(logged):
             #if DEBUG
             perf.ended()
             #endif
             // The provider closes a stream it stops holding (a long pause, a
             // cut, a reset libmpv reads as an end).
-            if started, recording == nil { return reconnect() }
-            if started { play() } else if !fallBack() { fail("The channel stopped before it started.") }
+            if started, recording != nil { return play() }
+            failed(logged ?? .eof_before_frame, message: "The channel stopped before it started.")
         #if DEBUG
         case let .network(buffer, bytesPerSecond):
             perf.network(buffer: buffer, bytesPerSecond: bytesPerSecond, gap: liveGap)

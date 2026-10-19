@@ -1322,7 +1322,7 @@ struct MoviePlayerView: View {
             stats = String(format: "%@ · %@ · speed %.1f Mbps · %.0f s buffered", quality, file,
                            (governor?.speed ?? bytesPerSecond * 8) / 1e6, buffer)
             #endif
-        case let .failed(message):
+        case let .failed(message, _):
             // Back to full quality didn't open: carry on at the lower one.
             if started, let bitrate = revertTo,
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
