@@ -280,6 +280,23 @@ class LiveSwitches(unittest.TestCase):
         later = self.mock.get(f"/mock/live_requests?since={time.time()}")["items"]
         self.assertEqual(later, [])
 
+    def test_pick_adds_its_lineup_only_when_set(self):
+        def lists(action):
+            return self.mock.get(f"/player_api.php?username=u&password=p&action={action}")
+        before = {c["category_id"] for c in lists("get_live_categories")}
+        self.assertFalse({"20", "27", "28"} & before)
+        self.mock.set(pick=1)
+        names = {c["category_id"]: c["category_name"] for c in lists("get_live_categories")}
+        self.assertEqual((names["27"], names["28"]), ("Account Info", "Max Connections 1"))
+        streams = {s["stream_id"]: s for s in lists("get_live_streams")}
+        self.assertEqual(sorted(i for i in streams if len(i) == 4 and i.startswith("30")),
+                         ["3001", "3002", "3003", "3004", "3011", "3012", "3021", "3022", "3023", "3031", "3041", "3042",
+                          "3043", "3044", "3045", "3051", "3052", "3053", "3061", "3062", "3063", "3064", "3071", "3072", "3073",
+                          "3081", "3082", "3083", "3084"])
+        self.assertEqual(streams["3081"]["category_id"], "28")
+        self.assertEqual([s["stream_id"] for s in self.mock.get("/player_api.php?username=u&password=p&action=get_live_streams"
+                                                                "&category_id=21")], ["3011", "3012"])
+
     def test_reset_clears_the_live_switches_and_requests(self):
         self.mock.set(live_status=403, xtream_formats="m3u8")
         self.open("/live/u/p/1.ts")

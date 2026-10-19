@@ -389,6 +389,36 @@ def sports_games(now):
     return [{"num": 2001 + n, "name": f"{name} ({start})", "stream_id": str(2001 + n), "stream_icon": "",
              "epg_channel_id": None, "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0}
             for n, (name, cat) in enumerate(games)]
+# /mock/set?pick=1: a lineup with a known answer for the smoke tool's
+# live-pick. Games live now (two of them in two slots each: one category,
+# and two services), one later, one over, an empty slot; ESPN in FHD, HD and
+# SD, and other channels with copies; and what the account filter must drop
+# first: "Account Info" (its "US: ESPN FHD" too), and a category named like
+# the account's limits whose QVC copies would be the biggest group.
+PICK_CATEGORIES = [("20", "NFL"), ("21", "NBA"), ("22", "NHL"), ("23", "ESPN Unlimited"), ("24", "US | Sports"),
+                   ("25", "US | News"), ("26", "US | Entertainment"), ("27", "Account Info"), ("28", "Max Connections 1")]
+
+
+def pick_lineup(now):
+    def at(minutes):
+        # Eastern time, as event lists stamp their games.
+        return datetime.fromtimestamp(now + 60 * minutes, EASTERN).strftime("%Y-%m-%d %H:%M:%S")
+    streams = [(3001, f"NFL 01: Bills vs. Dolphins ({at(-30)})", "20"), (3002, f"NFL 02: Bills vs. Dolphins ({at(-30)})", "20"),
+               (3003, f"NFL 03: Chiefs vs. Raiders ({at(120)})", "20"), (3004, "NFL 04: NO EVENT", "20"),
+               (3011, f"NBA 01: Lakers vs. Celtics ({at(-60)})", "21"), (3012, f"NBA 02: Knicks vs. Bulls ({at(-240)})", "21"),
+               (3021, f"NHL 01: Bruins vs. Rangers ({at(-10)})", "22"), (3022, f"NHL 02: Oilers vs. Flames ({at(-50)})", "22"),
+               (3023, f"NHL 03: Kings vs. Ducks ({at(-20)})", "22"),
+               (3031, f"ESPN UNLTD 01: basketball: Lakers vs. Celtics ({at(-60)})", "23"),
+               (3041, "US: ESPN FHD", "24"), (3042, "US: ESPN HD", "24"), (3043, "US: ESPN SD", "24"),
+               (3044, "US: ESPN2 HD", "24"), (3045, "US: FS1 HD", "24"),
+               (3051, "US: CNN HD", "25"), (3052, "US: CNN SD", "25"), (3053, "US: FOX NEWS HD", "25"),
+               (3061, "US: TLC HD", "26"), (3062, "US: TLC SD", "26"), (3063, "US: TLC FHD", "26"), (3064, "US: HGTV HD", "26"),
+               (3071, "Username: u", "27"), (3072, "Password: p", "27"), (3073, "US: ESPN FHD", "27"),
+               (3081, "US: QVC FHD", "28"), (3082, "US: QVC HD", "28"), (3083, "US: QVC SD", "28"), (3084, "US: QVC 4K", "28")]
+    return [{"num": id_, "name": name, "stream_id": str(id_), "stream_icon": "", "epg_channel_id": None,
+             "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0} for id_, name, cat in streams]
+
+
 if os.environ.get("OPENIPTV_MOCK_LINEUP"):
     with open(os.environ["OPENIPTV_MOCK_LINEUP"]) as f:
         LINEUP = json.load(f)
@@ -711,9 +741,13 @@ class Handler(BaseHTTPRequestHandler):
                               {"category_id": "2", "category_name": "US | Local ABC", "parent_id": 0},
                               {"category_id": "3", "category_name": "US | Local CBS", "parent_id": 0}]
                              + ([{"category_id": c, "category_name": n, "parent_id": 0} for c, n in SPORTS_CATEGORIES]
-                                if CONTROL.get("sports") == "1" else []))
+                                if CONTROL.get("sports") == "1" else [])
+                             + ([{"category_id": c, "category_name": n, "parent_id": 0} for c, n in PICK_CATEGORIES]
+                                if CONTROL.get("pick") == "1" else []))
         if action == "get_live_streams" and CONTROL.get("sports") == "1" and q.get("category_id") in dict(SPORTS_CATEGORIES):
             return self.send([g for g in sports_games(now) if g["category_id"] == q["category_id"]])
+        if action == "get_live_streams" and CONTROL.get("pick") == "1" and q.get("category_id") in dict(PICK_CATEGORIES):
+            return self.send([g for g in pick_lineup(now) if g["category_id"] == q["category_id"]])
         if action == "get_live_streams":
             # A few local stations, named the way real providers name them.
             local = [("TX: ABC 13 Houston (KTRK)", "2"), ("TX: ABC 8 Dallas (WFAA)", "2"), ("NY: ABC 7 New York (WABC)", "2"),
@@ -728,7 +762,8 @@ class Handler(BaseHTTPRequestHandler):
               + [{"num": 950 + i, "name": f"UK: Channel {i} HD", "stream_id": str(950 + i), "stream_icon": f"http://logo/{i}.png",
                   "epg_channel_id": f"ch{i}.uk", "category_id": "1", "tv_archive": 1, "tv_archive_duration": "7"}
                  for i in ([int(CONTROL["hd_copy"])] if CONTROL.get("hd_copy", "").isdigit() else [])]
-              + (sports_games(now) if CONTROL.get("sports") == "1" else []))
+              + (sports_games(now) if CONTROL.get("sports") == "1" else [])
+              + (pick_lineup(now) if CONTROL.get("pick") == "1" else []))
         if action == "get_simple_data_table":
             # A channel's schedule two days back to a day ahead; channels with
             # archives mark what's recorded.
