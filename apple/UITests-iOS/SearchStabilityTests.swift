@@ -140,6 +140,17 @@ final class SearchStabilityTests: XCTestCase {
         }
     }
 
+    /// Opening Search with nothing typed brings up the keyboard at once, in
+    /// the search field. Regression: no keyboard until the next touch (6 s
+    /// and more).
+    func testKeyboardComesUpWhenSearchOpens() {
+        openSearch("")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard 1 s after Search opened")
+        XCTAssertEqual(app.searchFields.firstMatch.value(forKey: "hasKeyboardFocus") as? Bool, true,
+                       "the search field doesn't have the keyboard")
+        shot("search opened")
+    }
+
     /// One bar at the bottom while searching, as in the Apple TV app: the
     /// search field in the tab bar (with a Home button), not a field of our
     /// own stacked over the whole tab bar.
