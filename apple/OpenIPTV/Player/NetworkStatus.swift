@@ -13,6 +13,9 @@ final class NetworkStatus: @unchecked Sendable {
     private let lock = NSLock()
     private var unmeteredValue = true
     private var satisfied = true
+    #if DEBUG
+    private var debugOnline = true
+    #endif
     /// The connection has been seen (until then, it's not known to be
     /// unmetered: nothing is fetched speculatively).
     private var known = false
@@ -39,7 +42,26 @@ final class NetworkStatus: @unchecked Sendable {
             #endif
         }
         monitor.start(queue: DispatchQueue(label: "openiptv.network-status"))
+        #if DEBUG
+        if let url = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_ONLINE_URL"].flatMap(URL.init(string:)) { followDebugOnline(url) }
+        #endif
     }
+
+    #if DEBUG
+    /// UI tests: the network taken as down while the test server says so.
+    private func followDebugOnline(_ url: URL) {
+        let session = URLSession(configuration: .ephemeral)
+        Task.detached { [weak self] in
+            while let self {
+                if let (data, _) = try? await session.data(from: url),
+                   let answer = try? JSONSerialization.jsonObject(with: data) as? [String: Bool], let online = answer["online"] {
+                    self.lock.withLock { self.debugOnline = online }
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+    #endif
 
     #if DEBUG && canImport(Libmpv)
     func sayLivePath() {
@@ -47,7 +69,15 @@ final class NetworkStatus: @unchecked Sendable {
     }
     #endif
 
-    var online: Bool { lock.withLock { satisfied } }
+    var online: Bool {
+        lock.withLock {
+            #if DEBUG
+            return satisfied && debugOnline
+            #else
+            return satisfied
+            #endif
+        }
+    }
 
     var unmetered: Bool {
         lock.lock()
