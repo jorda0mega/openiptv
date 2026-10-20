@@ -221,15 +221,14 @@ final class StreamRelay: @unchecked Sendable {
     func forgetAccount() {
         account.mutate { $0 = UUID().uuidString }
         let stopping: [URLSessionDataTask] = lock.withLock {
-            defer {
-                routes = RelayRoutes()
-                caches = []
-                ahead = [:]
-                aheadFiles = []
-                stoppedAhead = []
-                playingFile = nil
-            }
-            return ahead.values.flatMap { $0 }
+            let stopping = ahead.values.flatMap { $0 }
+            routes = RelayRoutes()
+            caches = []
+            ahead = [:]
+            aheadFiles = []
+            stoppedAhead = []
+            playingFile = nil
+            return stopping
         }
         stopping.forEach { $0.cancel() }
     }

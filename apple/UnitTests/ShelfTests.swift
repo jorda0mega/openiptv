@@ -342,7 +342,7 @@ final class ShelfTests: XCTestCase {
     func testFreshOnDiskIsReadWithoutAFetch() async throws {
         let fetches = Fetches(), clock = Locked(start)
         let stored = clock.value - 30
-        let shelf = shelf(fetches, now: { clock.value }, disk: .init(find: { _ in (value: 7, at: stored) }))
+        let shelf = shelf(fetches, now: { clock.value }, disk: { _ in (value: 7, at: stored) })
         let played = try await shelf.value(for: "a")
         XCTAssertEqual(played, 7)
         XCTAssertEqual(fetches.asked, 0)
@@ -351,7 +351,7 @@ final class ShelfTests: XCTestCase {
     func testStaleOnDiskIsFetchedAgain() async throws {
         let fetches = Fetches(), clock = Locked(start)
         let stored = clock.value - 61
-        let shelf = shelf(fetches, now: { clock.value }, disk: .init(find: { _ in (value: 7, at: stored) }))
+        let shelf = shelf(fetches, now: { clock.value }, disk: { _ in (value: 7, at: stored) })
         let played = try await shelf.value(for: "a")
         XCTAssertEqual(played, 1)
     }
