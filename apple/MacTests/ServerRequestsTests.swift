@@ -1,11 +1,12 @@
 import XCTest
+@testable import OpenIPTV
 
 final class ServerRequestsTests: XCTestCase {
     private func server() throws -> URL {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
               let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               let address = (json["serverURL"] as? String).flatMap(URL.init(string:)) else {
-            throw XCTSkip("needs the test server (TEST_RUNNER_DEBUG_EMBY)")
+            throw XCTSkip(#"needs the test server: DEBUG_EMBY='{"serverURL": "http://127.0.0.1:<port>"}' swift test"#)
         }
         return address
     }

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 @MainActor
 final class ShelfTests: XCTestCase {

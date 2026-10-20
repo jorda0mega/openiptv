@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 final class SharedGuideRuleTests: XCTestCase {
     private let now: Int64 = 1_800_000_000

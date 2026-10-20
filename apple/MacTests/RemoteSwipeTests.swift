@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// The Siri Remote's sideways swipes in the film player (Apple TV), as in
 /// Apple's own player. Regression: a swipe while the film played, on the way

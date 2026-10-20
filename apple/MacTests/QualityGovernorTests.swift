@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// The quality governor (original file or a server-converted version).
 final class QualityGovernorTests: XCTestCase {
