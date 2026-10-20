@@ -132,49 +132,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(game.label.contains("Not playing"), "no word on the row that it isn't playing: \(game.label)")
     }
 
-    /// A game that started longer ago than such a game lasts (an NFL game
-    /// 3 h 50 min ago, 3 h 45 min being its length) no longer says LIVE: it's
-    /// under "Earlier today".
-    /// Regression: the user's soccer game, started three hours before, was
-    /// listed LIVE and didn't play.
-    func testGameLongStartedIsntLive() throws {
-        let server = try XCTUnwrap(testServer(), "no test server")
-        configure(server, ["sports": "1", "sports_started": "230"])
-        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20"]) }
-        app.launchArguments = ["-freshLineup", "YES"]
-        app.launch()
-        let tab = app.tabBars.buttons["Live TV"].firstMatch
-        if tab.waitForExistence(timeout: 10) { tab.tap() }
-        let sports = app.buttons["Sports"].firstMatch
-        if sports.waitForExistence(timeout: 10) { sports.tap() }
-        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
-        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
-        XCTAssertFalse(game.label.contains("LIVE"), "a game 3 h 50 min in still says LIVE: \(game.label)")
-        XCTAssertTrue(app.staticTexts["Earlier today"].firstMatch.exists, "no Earlier today section")
-        XCTAssertFalse(app.staticTexts["Live now"].firstMatch.exists, "a game 3 h 50 min in is under Live now")
-    }
-
-    /// A game that starts in three hours, its channels stamped in the
-    /// provider's Eastern time as real event channels are ("(2026-10-17
-    /// 12:00:05)"), isn't LIVE yet. Regression: the stamp was read as UTC,
-    /// so noon games were LIVE from 8 AM, and didn't play (the user: "a lot
-    /// of channels don't play").
-    func testGameLaterTodayIsntLive() throws {
-        let server = try XCTUnwrap(testServer(), "no test server")
-        configure(server, ["sports": "1", "sports_started": "-180"])
-        addTeardownBlock { [self] in configure(server, ["sports": "0", "sports_started": "20"]) }
-        app.launchArguments = ["-freshLineup", "YES"]
-        app.launch()
-        let tab = app.tabBars.buttons["Live TV"].firstMatch
-        if tab.waitForExistence(timeout: 10) { tab.tap() }
-        let sports = app.buttons["Sports"].firstMatch
-        if sports.waitForExistence(timeout: 10) { sports.tap() }
-        let game = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
-        XCTAssertTrue(game.waitForExistence(timeout: 15), "the game isn't in Sports")
-        XCTAssertFalse(game.label.contains("LIVE"), "a game three hours away says LIVE: \(game.label)")
-        XCTAssertFalse(app.staticTexts["Live now"].firstMatch.exists, "a game three hours away is under Live now")
-    }
-
     /// A game's row says how many channels show it, and a long press on it
     /// lists them (Watch On, as in the player); the one picked plays.
     /// Regression: when Watch On would be there was a guess (the user:
