@@ -35,8 +35,8 @@ struct ScopeBar: View {
         }
         .backgroundPreferenceValue(PillFrames.self) { frames in
             GeometryReader { proxy in
-                if let frame = frames[scope].map({ proxy[$0] }) {
-                    Pill(frame: frame, scope: scope, slide: reduceMotion ? nil : Self.slide)
+                if let anchor = frames[scope] {
+                    Pill(frame: proxy[anchor], scope: scope, slide: reduceMotion ? nil : Self.slide)
                 }
             }
         }
@@ -68,9 +68,9 @@ private struct Pill: UIViewRepresentable {
         let bar = UIView()
         bar.isUserInteractionEnabled = false
         bar.accessibilityElements = []
-        let capsule = UIView(frame: frame)
+        let capsule = UIView()
         capsule.backgroundColor = .white
-        capsule.layer.cornerRadius = frame.height / 2
+        Self.place(capsule, in: frame)
         bar.addSubview(capsule)
         context.coordinator.placed = scope
         return bar
@@ -78,15 +78,20 @@ private struct Pill: UIViewRepresentable {
 
     func updateUIView(_ bar: UIView, context: Context) {
         guard let capsule = bar.subviews.first, capsule.frame != frame else { return }
-        let move = {
-            capsule.frame = frame
-            capsule.layer.cornerRadius = frame.height / 2
-        }
+        let move = { Self.place(capsule, in: frame) }
         let chosen = context.coordinator.placed != scope
         context.coordinator.placed = scope
-        guard chosen, let slide else { return UIView.performWithoutAnimation(move) }
-        UIView.animate(springDuration: slide.duration, bounce: slide.bounce, options: [.beginFromCurrentState, .allowUserInteraction],
-                       animations: move)
+        if chosen, let slide {
+            UIView.animate(springDuration: slide.duration, bounce: slide.bounce,
+                           options: [.beginFromCurrentState, .allowUserInteraction], animations: move)
+        } else {
+            UIView.performWithoutAnimation(move)
+        }
+    }
+
+    private static func place(_ capsule: UIView, in frame: CGRect) {
+        capsule.frame = frame
+        capsule.layer.cornerRadius = frame.height / 2
     }
 }
 

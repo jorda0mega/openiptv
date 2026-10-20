@@ -356,14 +356,3 @@ private final class XMLTVDelegate: NSObject, XMLParserDelegate {
         return Int64(date.timeIntervalSince1970) - offset
     }
 }
-
-extension AppModel.GuideHit {
-    /// Whether a guide search for these words, now, finds it.
-    func found(by words: [String], at now: Int64) -> Bool {
-        guard let league else {
-            return GuideMatch.programme(words, title: GuideMatch.fold(title), channel: GuideMatch.fold(channelTitle),
-                                        stop: stop ?? .max, now: now)
-        }
-        return GuideMatch.game(words, text: GuideMatch.fold(title + " " + league), start: start, now: now)
-    }
-}

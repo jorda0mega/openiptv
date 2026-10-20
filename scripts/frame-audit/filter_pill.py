@@ -33,8 +33,11 @@ while len(buf := decoder.stdout.read(W * H)) == W * H:
 decoder.wait()
 times = times[:len(edges)]
 
-moving = [n for n in range(1, len(edges)) if edges[n] and edges[n - 1]
-          and max(abs(a - b) for a, b in zip(edges[n], edges[n - 1])) > 1]
+moving = []
+for n in range(1, len(edges)):
+    edge, previous = edges[n], edges[n - 1]
+    if edge and previous and max(abs(a - b) for a, b in zip(edge, previous)) > 1:
+        moving.append(n)
 runs = []
 for n in moving:
     if runs and times[n] - times[runs[-1][-1]] < 0.15:
@@ -54,13 +57,14 @@ def slide(run):
 slides = [run for run in runs if slide(run)]
 
 failed = 0
-for slide in slides:
-    start, end = times[slide[0]], times[slide[-1]]
+for move in slides:
+    start, end = times[move[0]], times[move[-1]]
     listed = [times[n] for n in range(len(edges)) if start - 0.3 <= times[n] <= start + 0.3 and changes[n] > 0.5]
     slots = round((end - start) / FRAME) + 1
-    missed = max(0, slots - len(slide))
+    missed = max(0, slots - len(move))
     order = f"changed {(listed[0] - start) / FRAME:+.1f} frames after its first" if listed else "didn't change"
-    print(f"{start:6.2f} s: pill moved in {len(slide)} of {slots} frames, results {order}")
-    failed += len(slide) < 4 or missed > 1 or not listed or listed[0] <= start
+    print(f"{start:6.2f} s: pill moved in {len(move)} of {slots} frames, results {order}")
+    if len(move) < 4 or missed > 1 or not listed or listed[0] <= start:
+        failed += 1
 print(f"{len(slides)} moves, {failed} a jump, with frames dropped, or with results first or unchanged")
 sys.exit(2 if len(slides) < 6 else 1 if failed else 0)
