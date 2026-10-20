@@ -38,16 +38,18 @@ enum SpeechHeard {
     }
 
     private static func hear(_ stretch: EmbyPlayback.SpeechStretch) async -> SubtitleSync.Speech? {
-        guard !Task.isCancelled, let file = await fetch(stretch.url) else { return nil }
+        guard !Task.isCancelled, let file = await fetch(stretch) else { return nil }
         defer { try? FileManager.default.removeItem(at: file) }
         return classify(file, start: stretch.start)
     }
 
     /// The server converts for as long as it's read: a stretch's worth is
     /// read (64 kb/s), then the request ends.
-    private static func fetch(_ url: URL) async -> URL? {
+    private static func fetch(_ stretch: EmbyPlayback.SpeechStretch) async -> URL? {
         let wanted = Int(seconds * 64_000 / 8)
-        guard let (bytes, response) = try? await HTTP.patient.bytes(for: HTTP.keyInHeader(url), delegate: HTTP.keyOutOfRedirects),
+        var request = URLRequest(url: stretch.url)
+        request.setValue(stretch.token, forHTTPHeaderField: "X-Emby-Token")
+        guard let (bytes, response) = try? await HTTP.patient.bytes(for: request, delegate: HTTP.keyOutOfRedirects),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         defer { bytes.task.cancel() }
         var data = Data()

@@ -75,6 +75,15 @@ final class MPVPlayer: @unchecked Sendable {
     private let stateLock = NSLock()
     private var closed = false
     private var playedLive = false
+    /// Opened before a tap: its server subtitles wait their turn for it.
+    private var ahead: Interest?
+    private var subtitleWork: [Task<Void, Never>] = []
+    private var serverSubtitles: [ServerSubtitle] = []
+    #if DEBUG
+    private var playlistKeys = ""
+    /// Real-feed checks: the converted stream's playlists, keyed addresses / all (see PlaylistKeys).
+    var hlsKeys: String { stateLock.withLock { playlistKeys } }
+    #endif
 
     private var mpv: OpaquePointer?
     private let queue = DispatchQueue(label: "openiptv.mpv", qos: .userInitiated)
@@ -83,15 +92,15 @@ final class MPVPlayer: @unchecked Sendable {
     private var trackPlan: TrackPlan?
     /// The server's subtitle files added to this film, their tracks, and
     /// the shift and stretch that put each in time (the player's queue).
-    private var addedFiles: Set<URL> = []
+    private var addedFiles: Set<String> = []
     /// The film's own subtitle tracks and their copies from the server (by
     /// track id, both ways): a pick of the track shows the copy, which the
     /// menu never lists.
     private var copies: [Int: Int] = [:]
     private var copied: [Int: Int] = [:]
-    private var fileTracks: [URL: Int] = [:]
+    private var fileTracks: [EmbyPlayback.SubtitleFile.ID: Int] = [:]
     private var fits: [Int: SubtitleSync.Fit] = [:]
-    private var pendingFits: [URL: SubtitleSync.Fit] = [:]
+    private var pendingFits: [EmbyPlayback.SubtitleFile.ID: SubtitleSync.Fit] = [:]
     /// The subtitle tracks the files are put in time with, as text: the
     /// film's other files (quick) and its own track (the server reads the
     /// whole film for it), asked for once a film, dropped on close.
@@ -103,13 +112,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// converts sixteen stretches of the film's sound for it: not asked
     /// for a film watched without them), by their text; those stretches;
     /// and the references to match against beside them.
-    private var bySpeech: [URL: String] = [:]
+    private var bySpeech: [EmbyPlayback.SubtitleFile.ID: String] = [:]
     private var speechStretches: [EmbyPlayback.SpeechStretch] = []
     private var guides: [SubtitleSync.Reference] = []
     /// Each file as listed, and the files shown rewritten part by part
     /// (their track is the rewritten copy from then on).
-    private var fileInfo: [URL: EmbyPlayback.SubtitleFile] = [:]
-    private var rewritten: Set<URL> = []
+    private var fileInfo: [EmbyPlayback.SubtitleFile.ID: EmbyPlayback.SubtitleFile] = [:]
+    private var rewritten: Set<EmbyPlayback.SubtitleFile.ID> = []
     #if DEBUG
     /// A rewritten file's sections, by its track (UI tests' readout).
     private var sectionNotes: [Int: String] = [:]
@@ -125,7 +134,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var carried: [(key: CarriedKey, local: URL, title: String, language: String)] = []
     private var carriedIds: [CarriedKey: Int] = [:]
     enum CarriedKey: Hashable {
-        case file(URL)
+        case file(EmbyPlayback.SubtitleFile.ID)
         /// A copy of the film's own track at this place in the file.
         case copy(Int)
         /// The film's own track at this place (no copy: a picture one).
@@ -352,6 +361,15 @@ final class MPVPlayer: @unchecked Sendable {
             headers = []
         }
         if !file { stateLock.withLock { playedLive = true } }
+        #if DEBUG
+        if !file, url.path().hasSuffix(".m3u8"), UserDefaults.standard.bool(forKey: "debugHLSCounts") {
+            let (master, sent) = (url, headers)
+            Task.detached { [weak self] in
+                let counts = await PlaylistKeys.count(master, headers: sent)
+                self?.stateLock.withLock { self?.playlistKeys = counts }
+            }
+        }
+        #endif
         queue.async { [self] in
             guard let mpv, !stateLock.withLock({ closed }) else { return }
             if !file { _ = Self.closing.wait(timeout: .now() + 2) }
@@ -682,32 +700,34 @@ final class MPVPlayer: @unchecked Sendable {
         guard !files.isEmpty else { return }
         // Asked for at once, beside the files: the server may take
         // minutes to give the film's own.
+        let ahead = wantServerSubtitles(files.compactMap(\.server) + references.map(\.subtitle))
         let asked = stateLock.withLock { () -> (files: Task<[SubtitleSync.Reference], Never>, own: Task<[SubtitleSync.Reference], Never>) in
             let urls = references.map(\.subtitle.address)
             if let asked = self.references, asked.urls == urls { return (asked.files, asked.own) }
             let others = references.filter { !$0.own }, own = references.filter(\.own)
-            let filesTask = Task.detached(priority: .utility) { await Self.fetchReferences(others) }
-            let ownTask = Task.detached(priority: .utility) { await Self.fetchReferences(own) }
+            let filesTask = Task.detached(priority: .utility) { await Self.fetchReferences(others, ahead: ahead) }
+            let ownTask = Task.detached(priority: .utility) { await Self.fetchReferences(own, ahead: ahead) }
             self.references = (urls, filesTask, ownTask)
             return (filesTask, ownTask)
         }
-        Task.detached(priority: .utility) { [weak self] in
+        startSubtitleWork { [weak self] in
             var fetched: [(EmbyPlayback.SubtitleFile, String)] = []
             for file in files {
-                guard let local = await Self.local(file.source) else { continue }
+                guard !Task.isCancelled else { return }
+                guard let local = await Self.local(file.source, ahead: self?.stillAhead) else { continue }
                 let text = try? String(contentsOf: local, encoding: .utf8)
                 if let text { fetched.append((file, text)) }
                 // In time from the first line when it played before.
                 let remembered = text.flatMap { SubtitleTiming.remembered(file.url, text: $0) }
                 self?.queue.async { [weak self] in
                     self?.add(file, at: local)
-                    if let remembered, let text { self?.apply(remembered, to: file.url, text: text, why: "remembered") }
+                    if let remembered, let text { self?.apply(remembered, to: file.id, text: text, why: "remembered") }
                 }
             }
             guard !fetched.isEmpty else { return }
             // By the references: the files first (seconds), then with the
             // film's own too, once the server has it (minutes, at times).
-            var settled = Set<URL>()
+            var settled = Set<EmbyPlayback.SubtitleFile.ID>()
             let quick = await asked.files.value
             for stage in ["files", "own"] {
                 let references = stage == "files" ? quick : quick + (await asked.own.value)
@@ -715,9 +735,9 @@ final class MPVPlayer: @unchecked Sendable {
                 for (file, text) in fetched {
                     guard let match = SubtitleSync.match(text, speech: [], references: references), match.score >= 1 else { continue }
                     SubtitleTiming.remember(match, for: file.url, text: text)
-                    self?.queue.async { [weak self] in self?.apply(match, to: file.url, text: text, why: "references (\(stage))") }
+                    self?.queue.async { [weak self] in self?.apply(match, to: file.id, text: text, why: "references (\(stage))") }
                     // The film's own track is in time with it: no need to hear it.
-                    if stage == "own", match.isGoodEnough { settled.insert(file.url) }
+                    if stage == "own", match.isGoodEnough { settled.insert(file.id) }
                 }
             }
             let guides = await asked.files.value + asked.own.value
@@ -728,8 +748,8 @@ final class MPVPlayer: @unchecked Sendable {
                 guard let self else { return }
                 speechStretches = stretches
                 self.guides = guides
-                for (file, text) in fetched where !settled.contains(file.url) && !SubtitleTiming.settles(file.url, text: text) {
-                    bySpeech[file.url] = text
+                for (file, text) in fetched where !settled.contains(file.id) && !SubtitleTiming.settles(file.url, text: text) {
+                    bySpeech[file.id] = text
                 }
                 fitBySpeechIfShown()
             }
@@ -750,7 +770,10 @@ final class MPVPlayer: @unchecked Sendable {
         addSubtitles([first], references: references, speech: stretches)
         guard files.count > 1 else { return }
         Task.detached(priority: .utility) { [weak self] in
-            let texts = files.compactMap { file in (try? String(contentsOf: file.url, encoding: .utf8)).map { (file: file, text: $0) } }
+            let texts = files.compactMap { file -> (file: EmbyPlayback.SubtitleFile, text: String)? in
+                guard case let .device(found) = file.source, let text = try? String(contentsOf: found, encoding: .utf8) else { return nil }
+                return (file, text)
+            }
             guard let asked = self?.stateLock.withLock({ self?.references }) ?? nil else { return }
             let guides = await asked.files.value + asked.own.value
             // After the file showing has started listening: it's put in
@@ -764,14 +787,14 @@ final class MPVPlayer: @unchecked Sendable {
             NSLog("%@", "PERF subtitles found, matched: " + matched.map { "\($0.file.url.lastPathComponent) " + Self.describe($0.match) }.joined(separator: " | "))
             #endif
             guard let self, let best = matched.max(by: { $0.match < $1.match }) else { return }
-            let shown = matched.first { $0.file.url == first.url }?.match
-            guard best.file.url != first.url, Self.clearlyBetter(best.match, than: shown) else {
+            let shown = matched.first { $0.file.id == first.id }?.match
+            guard best.file.id != first.id, Self.clearlyBetter(best.match, than: shown) else {
                 if let shown, shown.isGoodEnough { picked(first.url) }
                 return
             }
             SubtitleTiming.remember(best.match, for: best.file.url, text: best.text)
             picked(best.file.url)
-            queue.async { [weak self] in self?.replaceFound(first.url, with: best.file, references: references, speech: stretches) }
+            queue.async { [weak self] in self?.replaceFound(first.id, with: best.file, references: references, speech: stretches) }
         }
     }
 
@@ -784,7 +807,7 @@ final class MPVPlayer: @unchecked Sendable {
 
     /// On the queue: a found file in another's place: the other's track
     /// taken off, this one added (and shown, if subtitles are wanted).
-    private func replaceFound(_ old: URL, with file: EmbyPlayback.SubtitleFile, references: [EmbyPlayback.SubtitleReference],
+    private func replaceFound(_ old: EmbyPlayback.SubtitleFile.ID, with file: EmbyPlayback.SubtitleFile, references: [EmbyPlayback.SubtitleReference],
                               speech stretches: [EmbyPlayback.SpeechStretch]) {
         if let id = fileTracks.removeValue(forKey: old) {
             command(["sub-remove", String(id)])
@@ -802,8 +825,9 @@ final class MPVPlayer: @unchecked Sendable {
     /// put in time by it and the references (the stretches are listened
     /// to once a film).
     private func fitBySpeechIfShown() {
-        guard let shown = shownSubtitle, let (url, text) = bySpeech.first(where: { fileTracks[$0.key] == shown }) else { return }
-        bySpeech[url] = nil
+        guard let shown = shownSubtitle, let (file, text) = bySpeech.first(where: { fileTracks[$0.key] == shown }),
+              let url = fileInfo[file]?.url else { return }
+        bySpeech[file] = nil
         let guides = guides
         // Half the stretches heard (spread across the film): a file off by
         // the same everywhere is put in time by them already; one off by
@@ -815,7 +839,7 @@ final class MPVPlayer: @unchecked Sendable {
             NSLog("%@", "PERF subsync speech (half) \(partial.count) stretches, \(guides.count) references: " + Self.describe(match))
             #endif
             guard let match, match.score >= 1, match.sections.count == 1, match.evenness >= 0.9 else { return }
-            self?.queue.async { [weak self] in self?.apply(match, to: url, text: text, why: "speech (half)") }
+            self?.queue.async { [weak self] in self?.apply(match, to: file, text: text, why: "speech (half)") }
         }
         let stretches = speechStretches
         Task.detached(priority: .utility) { [weak self] in
@@ -826,7 +850,7 @@ final class MPVPlayer: @unchecked Sendable {
             #endif
             guard let match, match.score >= 1 else { return }
             SubtitleTiming.remember(match, for: url, text: text)
-            self?.queue.async { [weak self] in self?.apply(match, to: url, text: text, why: "speech") }
+            self?.queue.async { [weak self] in self?.apply(match, to: file, text: text, why: "speech") }
             // Parts at odds with their section: heard in more places, then
             // matched again (see SubtitleSync.moreSpeech).
             let more = SubtitleSync.moreSpeech(match.unsure ?? [], heard: heard)
@@ -838,7 +862,7 @@ final class MPVPlayer: @unchecked Sendable {
             #endif
             guard let again, again.score >= 1, again != match else { return }
             SubtitleTiming.remember(again, for: url, text: text)
-            self?.queue.async { [weak self] in self?.apply(again, to: url, text: text, why: "more speech") }
+            self?.queue.async { [weak self] in self?.apply(again, to: file, text: text, why: "more speech") }
         }
     }
 
@@ -846,7 +870,7 @@ final class MPVPlayer: @unchecked Sendable {
     /// shows; several (a file for another cut), by showing it rewritten
     /// in its place, and from then on always rewritten (a shift on top of
     /// a rewritten copy would move it twice).
-    private func apply(_ match: SubtitleSync.Match, to file: URL, text: String, why: String) {
+    private func apply(_ match: SubtitleSync.Match, to file: EmbyPlayback.SubtitleFile.ID, text: String, why: String) {
         #if DEBUG
         NSLog("%@", "PERF subsync \(why): " + Self.describe(match))
         #endif
@@ -854,7 +878,7 @@ final class MPVPlayer: @unchecked Sendable {
             store(SubtitleSync.Fit(delay: section.delay, speed: section.speed, score: match.score), for: file)
             return
         }
-        let local = ServerSubtitles.perPlay.appending(path: "\(UUID().uuidString).\(text.contains("[Events]") ? "ass" : "srt")")
+        let local = ServerSubtitles.perPlayFile(text.contains("[Events]") ? "ass" : "srt")
         guard (try? SubtitleSync.retimed(text, by: match).write(to: local, atomically: true, encoding: .utf8)) != nil,
               let mpv, let old = fileTracks[file], let info = fileInfo[file] else { return }
         let showing = shownSubtitle == old
@@ -894,15 +918,15 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     private func add(_ file: EmbyPlayback.SubtitleFile, at local: URL) {
-        guard let mpv, addedFiles.insert(file.url).inserted else { return }
-        fileInfo[file.url] = file
+        guard let mpv, addedFiles.insert(file.id).inserted else { return }
+        fileInfo[file.id] = file
         let title = file.title.isEmpty ? (file.language ?? "") : file.title
         command(["sub-add", local.path, "auto", title, file.language ?? ""])
         if let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external }).map(\.id).max() {
-            fileTracks[file.url] = id
-            carried.append((.file(file.url), local, title, file.language ?? ""))
-            carriedIds[.file(file.url)] = id
-            if let fit = pendingFits.removeValue(forKey: file.url) { fits[id] = fit }
+            fileTracks[file.id] = id
+            carried.append((.file(file.id), local, title, file.language ?? ""))
+            carriedIds[.file(file.id)] = id
+            if let fit = pendingFits.removeValue(forKey: file.id) { fits[id] = fit }
         }
         // The menu hears of it once it's chosen or not.
         defer { emit(.tracksChanged) }
@@ -916,7 +940,7 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     /// A file's fit: kept for its track, applied now if it's showing.
-    private func store(_ fit: SubtitleSync.Fit, for file: URL) {
+    private func store(_ fit: SubtitleSync.Fit, for file: EmbyPlayback.SubtitleFile.ID) {
         guard let id = fileTracks[file] else { return pendingFits[file] = fit }
         fits[id] = fit
         if shownSubtitle == id { applyFit(for: id) }
@@ -935,7 +959,7 @@ final class MPVPlayer: @unchecked Sendable {
                 ?? list.first { $0.id == id && !$0.external }?.ffIndex.map { .own($0) }
         }
         var carriedFits: [CarriedKey: SubtitleSync.Fit] = [:]
-        for (url, id) in fileTracks { if let fit = fits[id] { carriedFits[.file(url)] = fit } }
+        for (file, id) in fileTracks { if let fit = fits[id] { carriedFits[.file(file)] = fit } }
         carryOver = (shown, carriedFits)
         #if DEBUG
         NSLog("%@", "PERF subtitles carry: showing \(shownSubtitle.map(String.init) ?? "none") as \(shown.map { "\($0)" } ?? "none"), ids \(carriedIds.values.sorted())")
@@ -976,8 +1000,8 @@ final class MPVPlayer: @unchecked Sendable {
             }
             carriedIds[entry.key] = id
             switch entry.key {
-            case let .file(url):
-                fileTracks[url] = id
+            case let .file(file):
+                fileTracks[file] = id
                 if let fit = carry.fits[entry.key] { fits[id] = fit }
             case let .copy(index):
                 if let original = own.first(where: { $0.ffIndex == index }) {
@@ -1024,11 +1048,11 @@ final class MPVPlayer: @unchecked Sendable {
         fitBySpeechIfShown()
     }
 
-    private static func fetchReferences(_ references: [EmbyPlayback.SubtitleReference]) async -> [SubtitleSync.Reference] {
+    private static func fetchReferences(_ references: [EmbyPlayback.SubtitleReference], ahead: Interest?) async -> [SubtitleSync.Reference] {
         await withTaskGroup(of: (Int, SubtitleSync.Reference?).self) { group in
             for (i, reference) in references.enumerated() {
                 group.addTask {
-                    guard let local = await ServerSubtitles.local(reference.subtitle),
+                    guard let local = await ServerSubtitles.local(reference.subtitle, ahead: ahead),
                           let text = try? String(contentsOf: local, encoding: .utf8) else { return (i, nil) }
                     return (i, SubtitleSync.Reference(cues: SubtitleSync.cues(text), own: reference.own))
                 }
@@ -1039,14 +1063,49 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    private static func local(_ source: EmbyPlayback.SubtitleSource) async -> URL? {
+    private static func local(_ source: EmbyPlayback.SubtitleSource, ahead: Interest?) async -> URL? {
         switch source {
         case let .server(subtitle):
-            return await ServerSubtitles.local(subtitle)
+            return await ServerSubtitles.local(subtitle, ahead: ahead)
         case let .device(file):
-            try? FileManager.default.createDirectory(at: ServerSubtitles.perPlay, withIntermediateDirectories: true)
-            let local = ServerSubtitles.perPlay.appending(path: "\(UUID().uuidString).\(file.pathExtension.isEmpty ? "srt" : file.pathExtension)")
+            let local = ServerSubtitles.perPlayFile(file.pathExtension.isEmpty ? "srt" : file.pathExtension)
             return (try? FileManager.default.copyItem(at: file, to: local)) != nil ? local : nil
+        }
+    }
+
+    /// Opened before a tap (`interest`), its server subtitles wait their
+    /// turn until `playNow`.
+    func openedAhead(for interest: Interest) {
+        stateLock.withLock { ahead = interest }
+    }
+
+    /// Played: what its subtitles still wait for goes now.
+    func playNow() {
+        let waiting = stateLock.withLock { () -> [ServerSubtitle] in
+            ahead = nil
+            return serverSubtitles
+        }
+        Task { @MainActor in ServerSubtitles.hurry(waiting) }
+    }
+
+    @discardableResult
+    private func wantServerSubtitles(_ subtitles: [ServerSubtitle]) -> Interest? {
+        stateLock.withLock {
+            serverSubtitles += subtitles
+            return ahead
+        }
+    }
+
+    /// Asked again before each fetch: a player played since goes now.
+    private var stillAhead: Interest? {
+        stateLock.withLock { ahead }
+    }
+
+    /// Stopped when the player closes: no one waits for its subtitles then.
+    private func startSubtitleWork(_ work: @escaping @Sendable () async -> Void) {
+        stateLock.withLock {
+            guard !closed else { return }
+            subtitleWork.append(Task.detached(priority: .utility, operation: work))
         }
     }
 
@@ -1107,23 +1166,25 @@ final class MPVPlayer: @unchecked Sendable {
     /// adds them, unshown (see `subtitleCopies`). Each once.
     func addCopies(_ wanted: [EmbyPlayback.SubtitleCopy]) {
         guard !wanted.isEmpty else { return }
-        Task.detached(priority: .utility) { [weak self] in
+        wantServerSubtitles(wanted.map(\.subtitle))
+        startSubtitleWork { [weak self] in
             for copy in wanted {
-                guard let local = await ServerSubtitles.local(copy.subtitle) else { continue }
+                guard !Task.isCancelled else { return }
+                guard let local = await ServerSubtitles.local(copy.subtitle, ahead: self?.stillAhead) else { continue }
                 self?.queue.async { [weak self] in self?.addCopy(copy, at: local, tries: 10) }
             }
         }
     }
 
     private func addCopy(_ copy: EmbyPlayback.SubtitleCopy, at local: URL, tries: Int) {
-        guard let mpv, !addedFiles.contains(copy.subtitle.address) else { return }
+        guard let mpv, !addedFiles.contains(copy.subtitle.id) else { return }
         let list = Self.trackList(mpv)
         guard let original = list.first(where: { $0.kind == .subtitle && !$0.external && $0.ffIndex == copy.streamIndex }) else {
             // The file isn't open yet (a player opened ahead): again shortly.
             if tries > 0 { queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.addCopy(copy, at: local, tries: tries - 1) } }
             return
         }
-        addedFiles.insert(copy.subtitle.address)
+        addedFiles.insert(copy.subtitle.id)
         command(["sub-add", local.path, "auto", original.title ?? "", original.language ?? ""])
         // Subtitle numbers only: audio tracks are numbered apart.
         let known = Set(list.filter { $0.kind == .subtitle }.map(\.id))
@@ -1207,6 +1268,7 @@ final class MPVPlayer: @unchecked Sendable {
             references?.files.cancel()
             references?.own.cancel()
             speech?.cancel()
+            subtitleWork.forEach { $0.cancel() }
             return playedLive
         }
         if live { Self.closing.enter() }

@@ -122,6 +122,27 @@ struct EmbyClient {
     static let readOnly = false
     #endif
 
+    #if DEBUG
+    /// Real-feed checks only (`-debugWebsocketProbe YES`): a title marked
+    /// watched or not, whatever `-readOnlyServer` says.
+    func debugSetPlayed(_ itemId: String, _ played: Bool) async throws {
+        var request = URLRequest(url: Self.api(account.serverURL, "Users/\(account.userId)/PlayedItems/\(itemId)"))
+        request.httpMethod = played ? "POST" : "DELETE"
+        authorize(&request)
+        _ = try await HTTP.data(request)
+    }
+
+    /// A film the viewer hasn't watched or started, to mark and unmark.
+    func debugUnwatchedFilm() async -> String? {
+        struct Page: Decodable { let Items: [Lenient<EmbyItem>]? }
+        let page: Page? = try? await get("Users/\(account.userId)/Items", [
+            .init(name: "IncludeItemTypes", value: "Movie"), .init(name: "Recursive", value: "true"),
+            .init(name: "Filters", value: "IsUnplayed"), .init(name: "Fields", value: "UserData"), .init(name: "Limit", value: "20"),
+        ])
+        return page?.Items?.compactMap(\.value).first { $0.userData?.played != true && ($0.userData?.playbackPositionTicks ?? 0) == 0 }?.id
+    }
+    #endif
+
     // MARK: My List
 
     /// Puts a film or show on the viewer's My List (Emby's favorites), or
@@ -977,7 +998,7 @@ struct EmbyClient {
         (source.MediaStreams ?? []).compactMap { stream in
             guard stream.Type == "Subtitle", stream.IsExternal == true, let language = stream.Language,
                   ["en", "es"].contains(TrackChoice.normalized(language) ?? ""),
-                  let subtitle = subtitle(itemId, source, stream, format: ["ass", "ssa"].contains(stream.Codec?.lowercased() ?? "") ? "ass" : "srt")
+                  let subtitle = subtitle(itemId, source, stream)
             else { return nil }
             let kind = [stream.IsForced == true ? "Forced" : nil, stream.IsHearingImpaired == true ? "SDH" : nil, stream.Title]
             return EmbyPlayback.SubtitleFile(source: .server(subtitle), language: language, title: kind.compactMap(\.self).joined(separator: " "))
@@ -991,25 +1012,27 @@ struct EmbyClient {
             guard stream.Type == "Subtitle", stream.IsExternal != true, stream.IsForced != true, let index = stream.Index,
                   let codec = stream.Codec?.lowercased(), Self.textSubtitles.contains(codec),
                   ["en", "es"].contains(stream.Language.flatMap(TrackChoice.normalized) ?? "") else { return nil }
-            return subtitle(itemId, source, stream, format: ["ass", "ssa"].contains(codec) ? "ass" : "srt").map { .init(streamIndex: index, subtitle: $0) }
+            return subtitle(itemId, source, stream).map { .init(streamIndex: index, subtitle: $0) }
         }
     }
 
     /// The film's own text track (one, not forced: the server reads the
     /// whole film to extract it), then its other text files in any
-    /// language, at most eight in all, as SRT from the server.
+    /// language, at most eight in all.
     private func subtitleReferences(_ itemId: String, _ source: PlaybackInfo.Source) -> [EmbyPlayback.SubtitleReference] {
         let tracks = (source.MediaStreams ?? []).filter { $0.Type == "Subtitle" && Self.textSubtitles.contains($0.Codec?.lowercased() ?? "") }
         let own = tracks.filter { $0.IsExternal != true }
         let files = tracks.filter { $0.IsExternal == true && $0.IsForced != true }
         let references = ((own.first { $0.IsForced != true } ?? own.first).map { [$0] } ?? []) + files
-        return references.prefix(8).compactMap { subtitle(itemId, source, $0, format: "srt") }.map { .init(subtitle: $0) }
+        return references.prefix(8).compactMap { subtitle(itemId, source, $0) }.map { .init(subtitle: $0) }
     }
 
     private static let textSubtitles: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
 
-    private func subtitle(_ itemId: String, _ source: PlaybackInfo.Source, _ stream: PlaybackInfo.Stream, format: String) -> ServerSubtitle? {
+    /// One format per track, so a copy and a reference are one request.
+    private func subtitle(_ itemId: String, _ source: PlaybackInfo.Source, _ stream: PlaybackInfo.Stream) -> ServerSubtitle? {
         guard let index = stream.Index else { return nil }
+        let format = ["ass", "ssa"].contains(stream.Codec?.lowercased() ?? "") ? "ass" : "srt"
         let url = Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)")
         let beside = stream.IsExternal == true
         let version = beside
@@ -1036,9 +1059,8 @@ struct EmbyClient {
                                 .init(name: "StartTimeTicks", value: String(Int64(start * 10_000_000))),
                                 .init(name: "AudioCodec", value: "mp3"), .init(name: "AudioBitRate", value: "64000"),
                                 .init(name: "AudioChannels", value: "1"),
-                                .init(name: "PlaySessionId", value: UUID().uuidString.replacingOccurrences(of: "-", with: "")),
-                                .init(name: "api_key", value: account.accessToken)]
-            return parts.url.map { .init(start: start, url: $0) }
+                                .init(name: "PlaySessionId", value: UUID().uuidString.replacingOccurrences(of: "-", with: ""))]
+            return parts.url.map { .init(start: start, url: $0, token: account.accessToken) }
         }
     }
 
