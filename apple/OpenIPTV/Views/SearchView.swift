@@ -43,6 +43,8 @@ struct SearchView: View {
     enum Scope: String, CaseIterable, Identifiable {
         case all = "All", movies = "Movies", shows = "Shows", live = "Live TV"
         var id: Self { self }
+        var listsLive: Bool { self == .all || self == .live }
+        var listsEpisodes: Bool { self == .all || self == .shows }
     }
     #if os(iOS)
     @FocusState private var fieldFocused: Bool
@@ -56,15 +58,16 @@ struct SearchView: View {
     @State private var extrasQuery = ""
     @State private var channels: [LiveChannel] = []
     @State private var onTV: [AppModel.GuideHit] = []
-    /// What's on TV that came while the list was scrolled down: listed when
-    /// it's back at the top, so it doesn't push down the rows being read.
-    @State private var heldOnTV: [AppModel.GuideHit]?
-    @State private var atTop = true
     @State private var completions: [String] = []
     @State private var serverCards: [Card] = []
     @State private var serverQuery = ""
-    /// The text the results on screen are for.
-    @State private var shownQuery = ""
+    /// The text the device's results are for.
+    @State private var foundQuery = ""
+    /// What the list shows. Changed only through `show(_:)`.
+    @State private var shown = Shown()
+    /// A change waiting for the list to be back at the top.
+    @State private var held: Shown?
+    @State private var atTop = true
     /// Filters a finished search found nothing for: their "no results"
     /// stays while the next letter's search runs, until results come,
     /// rather than blinking off and on at each letter.
@@ -80,20 +83,40 @@ struct SearchView: View {
 
     private var thumbWidth: Int { Int(Layout.searchThumbWide * displayScale) }
 
-    /// Titles and episodes for what's typed, worked out once when results
-    /// arrive, not on every redraw (a filter tap redraws the page).
-    private struct Titles {
+    /// Everything the list shows, for one text. Titles and episodes are
+    /// sorted out once when results arrive, not on every redraw (a filter
+    /// tap redraws the page).
+    private struct Shown {
+        var query = ""
         var all: [Card] = []
         var movies: [Card] = []
         var shows: [Card] = []
         var episodes: [Card] = []
-    }
-    @State private var titles = Titles()
+        var channels: [LiveChannel] = []
+        var onTV: [AppModel.GuideHit] = []
+        var completions: [String] = []
 
-    private var episodes: [Card] { titles.episodes }
-    private var moviesAndShows: [Card] { titles.all }
-    private var movies: [Card] { titles.movies }
-    private var shows: [Card] { titles.shows }
+        func titles(for scope: Scope) -> [Card] {
+            switch scope {
+            case .all: all
+            case .movies: movies
+            case .shows: shows
+            case .live: []
+            }
+        }
+
+        /// The rows in the order they're listed, as the filter shows them.
+        func rows(for scope: Scope) -> [String] {
+            var rows: [String] = []
+            #if os(iOS)
+            if scope == .all, !completions.isEmpty { rows.append("suggestions") }
+            #endif
+            rows += titles(for: scope).map(\.id)
+            if scope.listsLive { rows += onTV.map(\.id) + channels.map(\.id) }
+            if scope.listsEpisodes { rows += episodes.map(\.id) }
+            return rows
+        }
+    }
 
     /// The library's matches, then what the server added that isn't
     /// another copy of one already listed (HD and 4K are one title): after
@@ -101,7 +124,7 @@ struct SearchView: View {
     /// answers. The server's cards from an earlier letter stay while they
     /// still fit what's typed now (no flicker while the next request is in
     /// flight).
-    private func publishTitles() {
+    private func publish() {
         let server = fitting(serverCards, foundFor: serverQuery)
         var seen = Set(library.flatMap { model.library.versions(of: $0.id) })
         let added = (fitting(extras, foundFor: extrasQuery) + server.filter { $0.kind != "Episode" }).filter { card in
@@ -113,9 +136,28 @@ struct SearchView: View {
         #if DEBUG
         searchSignposter.emitEvent("search results", "titles=\(all.count) episodes=\(server.count)")
         #endif
-        titles = Titles(all: all, movies: all.filter { $0.kind != "Series" }, shows: all.filter { $0.kind == "Series" },
-                        episodes: server.filter { $0.kind == "Episode" })
+        show(Shown(query: foundQuery, all: all, movies: all.filter { $0.kind != "Series" }, shows: all.filter { $0.kind == "Series" },
+                   episodes: server.filter { $0.kind == "Episode" }, channels: channels, onTV: onTV, completions: completions))
+    }
+
+    /// The one way the list changes. Scrolled down, a change for the same
+    /// text that adds or takes away rows anywhere but after the last waits
+    /// until the list is back at the top, so the rows being read stay put
+    /// (a re-run as the library or the lineup grows, a late answer); new
+    /// text, or rows only added at the end, go on at once.
+    private func show(_ next: Shown) {
+        if !atTop, next.query == shown.query, !next.rows(for: shownScope).starts(with: shown.rows(for: shownScope)) {
+            held = next
+        } else {
+            shown = next
+            held = nil
+        }
         resultsChanged()
+    }
+
+    private func reachedTop(_ top: Bool) {
+        atTop = top
+        if top, let held { show(held) }
     }
 
     /// Cards the server found for `text`: all of them for what's typed
@@ -132,13 +174,11 @@ struct SearchView: View {
         return Set(Scope.allCases.filter { $0 != .all && isEmpty($0) })
     }
 
+    /// Rows waiting for the top count: they're there, just not drawn yet.
     private func isEmpty(_ scope: Scope) -> Bool {
-        switch scope {
-        case .all: moviesAndShows.isEmpty && episodes.isEmpty && channels.isEmpty && onTV.isEmpty
-        case .movies: movies.isEmpty
-        case .shows: shows.isEmpty && episodes.isEmpty
-        case .live: channels.isEmpty && onTV.isEmpty
-        }
+        let results = held ?? shown
+        return results.titles(for: scope).isEmpty && (!scope.listsLive || results.channels.isEmpty && results.onTV.isEmpty)
+            && (!scope.listsEpisodes || results.episodes.isEmpty)
     }
 
     /// Results came: a filter that has some again loses its "no results".
@@ -174,10 +214,7 @@ struct SearchView: View {
                 }
             }
             .listStyle(.plain)
-            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top <= 1 } action: { _, top in
-                atTop = top
-                if top, let held = heldOnTV { listOnTV(held) }
-            }
+            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top <= 1 } action: { reachedTop($1) }
             .overlay { emptyState }
             #if DEBUG
             .background {
@@ -228,12 +265,12 @@ struct SearchView: View {
     /// come later (the server's) go below, so what's listed never moves
     /// down when they arrive.
     @ViewBuilder private var results: some View {
-        if shownScope == .all, !completions.isEmpty {
+        if shownScope == .all, !shown.completions.isEmpty {
             // One row of suggestions, the same height however many there
             // are, so the results under it don't move as they change.
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
-                    ForEach(completions, id: \.self) { completion in
+                    ForEach(shown.completions, id: \.self) { completion in
                         Button { query = completion } label: {
                             Label(completion, systemImage: "magnifyingglass")
                                 .font(.subheadline)
@@ -255,16 +292,16 @@ struct SearchView: View {
         }
         // One section whatever the filter, so a title shown before
         // and after a filter tap keeps its row instead of a new one.
-        let shown = shownScope == .movies ? movies : shownScope == .shows ? shows : shownScope == .all ? moviesAndShows : []
-        if !shown.isEmpty {
+        let titles = shown.titles(for: shownScope)
+        if !titles.isEmpty {
             Section(shownScope == .movies ? "Movies" : shownScope == .shows ? "Shows" : "Movies & Shows") {
-                ForEach(shown) { card in result(card, wide: false) }
+                ForEach(titles) { card in result(card, wide: false) }
             }
         }
-        if shownScope == .all || shownScope == .live, !onTV.isEmpty {
+        if shownScope.listsLive, !shown.onTV.isEmpty {
             Section("On TV") {
-                let tuned = onTV.map(\.channel)
-                ForEach(Array(onTV.enumerated()), id: \.element.id) { index, hit in
+                let tuned = shown.onTV.map(\.channel)
+                ForEach(Array(shown.onTV.enumerated()), id: \.element.id) { index, hit in
                     Button {
                         playing = .live(tuned, index)
                     } label: {
@@ -274,8 +311,9 @@ struct SearchView: View {
                 }
             }
         }
-        if shownScope == .all || shownScope == .live, !channels.isEmpty {
+        if shownScope.listsLive, !shown.channels.isEmpty {
             Section("Channels") {
+                let channels = shown.channels
                 ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
                     Button {
                         playing = .live(channels, index)
@@ -294,9 +332,9 @@ struct SearchView: View {
                 }
             }
         }
-        if shownScope == .all || shownScope == .shows, !episodes.isEmpty {
+        if shownScope.listsEpisodes, !shown.episodes.isEmpty {
             Section("Episodes") {
-                ForEach(episodes) { card in result(card, wide: true) }
+                ForEach(shown.episodes) { card in result(card, wide: true) }
             }
         }
     }
@@ -329,13 +367,13 @@ struct SearchView: View {
                 // Titles, then what's on and channels, then episodes: the
                 // parts that come later (the server's) go below, so a row
                 // never moves down when they arrive.
-                if !moviesAndShows.isEmpty {
-                    TVPosterRow(title: "Movies & Shows", cards: moviesAndShows, captions: .always) { openDetails($0) }
+                if !shown.all.isEmpty {
+                    TVPosterRow(title: "Movies & Shows", cards: shown.all, captions: .always) { openDetails($0) }
                 }
-                if !onTV.isEmpty {
+                if !shown.onTV.isEmpty {
                     TVShelf(title: "On TV") {
-                        let tuned = onTV.map(\.channel)
-                        ForEach(Array(onTV.enumerated()), id: \.element.id) { index, hit in
+                        let tuned = shown.onTV.map(\.channel)
+                        ForEach(Array(shown.onTV.enumerated()), id: \.element.id) { index, hit in
                             Button { playing = .live(tuned, index) } label: {
                                 GuideHitRow(hit: hit)
                                     .padding(.horizontal, 24)
@@ -345,8 +383,9 @@ struct SearchView: View {
                         }
                     }
                 }
-                if !channels.isEmpty {
+                if !shown.channels.isEmpty {
                     TVShelf(title: "Channels") {
+                        let channels = shown.channels
                         ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
                             Button { playing = .live(channels, index) } label: {
                                 ChannelRow(channel: channel, slot: model.slot(channel.id), favorite: prefs.isFavorite(channel))
@@ -359,8 +398,8 @@ struct SearchView: View {
                         }
                     }
                 }
-                if !episodes.isEmpty {
-                    TVContinueRow(row: HomeRow(title: "Episodes", shape: "landscape", aspect: 16.0 / 9, cards: episodes),
+                if !shown.episodes.isEmpty {
+                    TVContinueRow(row: HomeRow(title: "Episodes", shape: "landscape", aspect: 16.0 / 9, cards: shown.episodes),
                                   loadingCard: loadingCard, play: { play($0) }, open: { openDetails($0) })
                 }
             }
@@ -368,6 +407,7 @@ struct SearchView: View {
             .environment(\.rowInvertsOnFocus, false)
         }
         .scrollClipDisabled()
+        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top <= 1 } action: { reachedTop($1) }
         // Rows line up with Home's, 90 points in from the screen's edge.
         .ignoresSafeArea(edges: .horizontal)
         .overlay { emptyState }
@@ -733,11 +773,12 @@ struct SearchView: View {
         let asksServer = trimmed.count >= 2 && model.sources.emby != nil
         let showsNow = !local.titles.isEmpty || !local.channels.isEmpty || early?.isEmpty == false || !asksServer
         if showsNow {
-            show(local, onTV: early)
+            take(local, onTV: early)
             let titleNames = (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
             let channelIndices = Array(cm.ranked.prefix(6)) + Array(found.typoChannels.prefix(3))
             let channelNames = channelIndices.map { model.title(of: channelCorpus.items[$0]) }
             updateCompletions(for: q, names: titleNames + channelNames)
+            publish()
         }
         #if DEBUG
         mark("local")
@@ -794,18 +835,16 @@ struct SearchView: View {
         let channels: [LiveChannel]
     }
 
-    /// The device's matches on the page. The same text again (an index
+    /// The device's matches, for the page. The same text again (an index
     /// grew meanwhile): what's listed keeps its place, anything new after.
-    private func show(_ local: Local, onTV hits: [AppModel.GuideHit]?) {
-        let again = query == shownQuery
+    private func take(_ local: Local, onTV hits: [AppModel.GuideHit]?) {
+        let again = query == foundQuery
         library = again ? Self.keepingOrder(library, local.titles) : local.titles
         channels = again ? Self.keepingOrder(channels, local.channels) : local.channels
         // Until the guide answers for new text, its last hits that still
         // fit, so its section doesn't jump at each letter.
         onTV = hits ?? (again ? onTV : AppModel.guideHits(onTV, fitting: query))
-        heldOnTV = nil
-        shownQuery = query
-        publishTitles()
+        foundQuery = query
     }
 
     /// `fresh`, with the items also in `old` in old's order, then the rest.
@@ -823,13 +862,12 @@ struct SearchView: View {
         serverCards = []
         channels = []
         onTV = []
-        heldOnTV = nil
         completions = []
         libraryMatch = nil
         channelMatch = nil
-        shownQuery = ""
+        foundQuery = ""
         finishedEmpty = []
-        publishTitles()
+        publish()
     }
 
     @MainActor private final class GuideAnswer {
@@ -840,13 +878,8 @@ struct SearchView: View {
     private func showOnTV(_ search: Task<[AppModel.GuideHit], Never>) async {
         let hits = await search.value
         guard !Task.isCancelled else { return }
-        if atTop { listOnTV(hits) } else { heldOnTV = hits }
-    }
-
-    private func listOnTV(_ hits: [AppModel.GuideHit]) {
         onTV = hits
-        heldOnTV = nil
-        resultsChanged()
+        publish()
     }
 
     /// The server's part: cast checks for the titles waiting on one,
@@ -856,10 +889,10 @@ struct SearchView: View {
                               held: (local: Local, onTV: [AppModel.GuideHit])?) async {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2, model.sources.emby != nil else {
-            if let held { show(held.local, onTV: held.onTV) }
+            if let held { take(held.local, onTV: held.onTV) }
             serverCards = []
             extras = []
-            publishTitles()
+            publish()
             return
         }
         try? await Task.sleep(for: .milliseconds(150))
@@ -881,7 +914,7 @@ struct SearchView: View {
         let castMatches = confirmed.filter { titles.insert($0.entry.titleKey).inserted }
         let withPeople = people.filter { titles.insert($0.item.titleKey).inserted }
             .compactMap { model.card(for: $0.item, width: thumbWidth, with: $0.person) }
-        if let held { show(held.local, onTV: held.onTV) }
+        if let held { take(held.local, onTV: held.onTV) }
         extras = cards(castMatches) + withPeople
         extrasQuery = q
         if held != nil || !castMatches.isEmpty || !people.isEmpty {
@@ -891,7 +924,7 @@ struct SearchView: View {
         }
         serverCards = found
         serverQuery = q
-        publishTitles()
+        publish()
     }
 
     private func cards(_ hits: [SearchHit]) -> [Card] {
