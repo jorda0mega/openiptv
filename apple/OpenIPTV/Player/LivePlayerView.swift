@@ -50,7 +50,6 @@ struct LivePlayerView: View {
     @State private var lastStep = Date.distantPast
     /// "Started in 0.6 s" shows until then.
     @State private var timingUntil = Date.distantPast
-    /// The copy picked, while the cue says it didn't play.
     @State private var cue: LiveChannel?
     @State private var cueTask: Task<Void, Never>?
     /// Gives up on a copy that sends no picture (see startLimit).
@@ -581,8 +580,6 @@ struct LivePlayerView: View {
         }
     }
 
-    /// Opens one copy of the channel. Regression: a game listed LIVE whose
-    /// feed was over (the slot still there) spun forever (see startLimit).
     private func load(_ copy: LiveChannel, _ attempt: Int, after delay: Double) {
         #if DEBUG
         perf.opening(copy, n: session.triedCount, of: feeds.map(\.count).reduce(0, +), delay: delay)
@@ -722,7 +719,6 @@ struct LivePlayerView: View {
         #if DEBUG
         perf.started(frame: frameSeconds)
         #endif
-        // Development builds with the stats on.
         if prefs.performanceStats {
             timing = String(format: "Started in %.1f s", frameSeconds)
             timingUntil = Date().addingTimeInterval(3)

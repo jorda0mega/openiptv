@@ -8,8 +8,6 @@ protocol LivePerfWord: RawRepresentable<String> {}
 
 extension StreamFailure: LivePerfWord {}
 
-/// `PERF live` lines: numbers and fixed words only, never a URL, host,
-/// name or mpv's own text (stream URLs carry the login).
 enum LivePerf {
     enum Line: String { case open, fail, stall, net, end, path, codec, mpv }
 
@@ -23,7 +21,6 @@ enum LivePerf {
     enum Video: String, LivePerfWord { case h264, hevc, mpeg2video, av1, vp9, other }
     enum Audio: String, LivePerfWord { case aac, ac3, eac3, mp2, mp3, opus, other }
 
-    /// The Xtream stream id, or the first 8 hex of SHA256 of the channel's id.
     struct Token {
         let text: String
 
@@ -66,9 +63,6 @@ enum LivePerf {
         NSLog("%@", text)
     }
 
-    /// Letters, digits, space and `_=.-` only (no `/`, `:`, `@`), words of
-    /// at most 32 characters, and a dot only in a decimal number after `=`
-    /// (no host name or IP address).
     static func safe(_ line: String) -> Bool {
         let alphabet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.- ")
         guard line.unicodeScalars.allSatisfy(alphabet.contains) else { return false }
@@ -120,7 +114,6 @@ enum LivePerf {
         return String(cString: value)
     }
 
-    /// The player's side of one open, in ms since `loadfile` (-1: not yet).
     struct Opening {
         var setup = -1
         var closeWait = -1
@@ -131,7 +124,6 @@ enum LivePerf {
         var drops = 0
     }
 
-    /// One live screen's opens, stalls and ends, told by its events.
     @MainActor @Observable
     final class Watch {
         private(set) var failure: StreamFailure?

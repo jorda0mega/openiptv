@@ -1002,8 +1002,6 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(started(), "live TV didn't play on return")
     }
 
-    /// The account's streams open now, as the test server's account answer
-    /// counts them.
     private func activeConnections(_ server: URL) -> String? {
         let url = server.appending(path: "player_api.php").appending(queryItems: [.init(name: "username", value: "u"), .init(name: "password", value: "p")])
         var data: Data?

@@ -1,8 +1,5 @@
 import Foundation
 
-/// Why a live stream failed, read from ffmpeg's and libmpv's warnings. Only
-/// the class is kept: a warning can hold the stream's address, and with it
-/// the login.
 enum StreamFailure: String, CaseIterable {
     case http_401, http_403, http_404, http_429, http_5xx, http_other
     case refused, reset, timeout, dns, tls, redirect_loop, probe_failed, decode
@@ -99,8 +96,7 @@ enum StreamFailure: String, CaseIterable {
 }
 
 /// ffmpeg's warnings come from every player and every load at once, with
-/// nothing saying whose: one counts for a load only while that load alone
-/// is open.
+/// nothing saying whose.
 struct FailureLedger {
     struct Load: Hashable {
         let player: Int

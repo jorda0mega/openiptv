@@ -1,9 +1,5 @@
 import Foundation
 
-/// Channels and games tried lately that didn't play. A channel's mark is
-/// this device's alone; a game's ("Not playing") is shared through the
-/// server. A mark made before the game's kickoff ends at kickoff: the
-/// channel wasn't on yet.
 struct LiveFailures: Equatable {
     static let didNotPlay = "Didn’t play"
 

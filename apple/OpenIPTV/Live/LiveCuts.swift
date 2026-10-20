@@ -1,8 +1,5 @@
 import Foundation
 
-/// The server cuts some channels mid-stream, some again and again: a cut
-/// copy opens again in place after a growing wait, and one cut `limit`
-/// times within `span` is given up for the next copy.
 struct LiveCuts {
     static let waits: [Double] = [0, 1, 2, 4, 8]
     static let limit = 4

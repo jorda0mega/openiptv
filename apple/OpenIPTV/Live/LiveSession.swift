@@ -1,9 +1,5 @@
 import Foundation
 
-/// One live screen's stream: the copy asked for, what became of it, and
-/// what to do next. The screen feeds it what happens and runs the actions
-/// it returns. Every load has an attempt number; an input from an older
-/// attempt changes nothing.
 struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     typealias Attempt = Int
 
@@ -207,8 +203,6 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         }
     }
 
-    /// Paused in the background, with no AirPlay: the stream is let go, as
-    /// soon as both are true whichever came first.
     private mutating func leaveIfAway(_ now: Date) -> [Action] {
         guard paused, keepsStreamAway == false else { return [] }
         let away: Phase

@@ -65,34 +65,6 @@ CONNECTIONS = set()
 # a conversion's first segment), "convert_clock" (see converted_segment),
 # "resume_movies" ("1,2,3": those films in Continue Watching after the
 # rest, each stopped 5 minutes in).
-# Live channels (/live/u/p/<id>.<ext>), set and reset the same way:
-# "live_status" ("403": every live request answers that status, empty,
-# Connection: close; "live_status_ids" ("2003,2005") limits it to those
-# channels), "live_delay" (seconds before the answer: a server starting the
-# channel; overrides OPENIPTV_MOCK_LIVE_DELAY), "live_first_data_delay" (the
-# answer at once, its first byte that many seconds later), "live_redirect"
-# ("1": a .ts answers 302 to /stream/<id>.ts on this host, served the same
-# way; "live_redirect_delay" seconds before the 302; "live_redirect_loop"
-# ("1"): /stream/ redirects back, forever; "live_refuse" ("1"): a .ts
-# answers 302 to a port nothing listens on, refused as with no network).
-# With the test film: "live_rate"
-# (kbit/s the stream is sent at), "live_stall" ("20:5,60:2": 20 s after the
-# first byte, nothing for 5 s with the connection open, then the backlog at
-# once), "live_cut" (seconds after the first byte the connection closes: the
-# stream ends; with "live_cut_reset" ("1") it is reset instead, an error;
-# "live_cut_ids" ("951") limits it to those channels),
-# "live_chunked" ("1": the stream in chunks, Transfer-Encoding: chunked, as
-# some panels send it; URLSession takes a reset of an unframed stream for
-# its end, but of a chunked one for an error), "live_burst" ("3": the first
-# 3 s of the film at once, then its own pace, as panels send their buffer
-# first). "live_max_connections" ("1": the account's streams at once; past
-# it a stream answers "live_limit_status", 403 unless set, empty),
-# "live_linger" (seconds a closed stream still counts, as a panel takes to
-# notice). The account answer's max_connections is "xtream_max_connections",
-# else live_max_connections, else 2; its active_cons is
-# "xtream_active_cons", else (with live_max_connections) the streams
-# counted, else 0; its allowed_output_formats is "xtream_formats" ("m3u8",
-# "ts", or "m3u8,ts" as unset).
 CONTROL = {}
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
@@ -120,12 +92,7 @@ AUDIO_REQUESTS = [0, 0]
 # from /mock/mark) lists them. Only action names and category ids, never a
 # login or an address.
 XTREAM_REQUESTS = []
-# Live channel requests, {"t", "id", "ext", "status", "ua"}: GET
-# /mock/live_requests?since= lists them. The user agent only as a word
-# ("mpv", "lavf", "openreel" or "other"), never the header itself.
 LIVE_REQUESTS = []
-# The live streams live_max_connections counts: an open one maps to None,
-# a closed one to the time its slot frees (live_linger).
 LIVE_HELD = {}
 LIVE_LOCK = threading.Lock()
 MOVIE_TICKS = int(float(os.environ.get("OPENIPTV_MOCK_RUNTIME", "7200")) * 10_000_000)
@@ -277,7 +244,6 @@ def user_agent_class(header):
 
 
 def live_counted():
-    """Streams open, and closed ones still lingering. Under LIVE_LOCK."""
     now = time.time()
     for key in [k for k, frees in LIVE_HELD.items() if frees is not None and frees <= now]:
         del LIVE_HELD[key]
@@ -285,7 +251,6 @@ def live_counted():
 
 
 def live_take():
-    """A slot for a new stream, or None when live_max_connections are in use."""
     limit = int(CONTROL.get("live_max_connections", 0))
     with LIVE_LOCK:
         if limit and live_counted() >= limit:
@@ -297,7 +262,6 @@ def live_take():
 
 def live_release(key):
     with LIVE_LOCK:
-        # (A reset in between already forgot it.)
         if key in LIVE_HELD:
             LIVE_HELD[key] = time.time() + float(CONTROL.get("live_linger", 0))
 
@@ -380,10 +344,7 @@ SPORTS_CATEGORIES = [("10", "NFL"), ("11", "ESPN Unlimited"), ("12", "DAZN CA"),
 
 
 def sports_games(now):
-    # "sports_started": "300": the game started that many minutes ago (20;
-    # negative: it starts in that many); "sports_kickoff": "1792440000": it
-    # starts then (seconds since 1970). Stamped in Eastern time, as real
-    # providers stamp event channels.
+    # Stamped in Eastern time, as real providers stamp event channels.
     kickoff = float(CONTROL["sports_kickoff"]) if "sports_kickoff" in CONTROL else now - 60 * int(CONTROL.get("sports_started", 20))
     start = datetime.fromtimestamp(kickoff, EASTERN).strftime("%Y-%m-%d %H:%M:%S")
     games = [("NFL 01: Eagles vs. Jaguars", "10"),
@@ -398,12 +359,6 @@ def sports_games(now):
     return [{"num": 2001 + n, "name": f"{name} ({start})", "stream_id": str(2001 + n), "stream_icon": "",
              "epg_channel_id": None, "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0}
             for n, (name, cat) in enumerate(games)]
-# /mock/set?pick=1: a lineup with a known answer for the smoke tool's
-# live-pick. Games live now (two of them in two slots each: one category,
-# and two services), one later, one over, an empty slot; ESPN in FHD, HD and
-# SD, and other channels with copies; and what the account filter must drop
-# first: "Account Info" (its "US: ESPN FHD" too), and a category named like
-# the account's limits whose QVC copies would be the biggest group.
 PICK_CATEGORIES = [("20", "NFL"), ("21", "NBA"), ("22", "NHL"), ("23", "ESPN Unlimited"), ("24", "US | Sports"),
                    ("25", "US | News"), ("26", "US | Entertainment"), ("27", "Account Info"), ("28", "Max Connections 1")]
 
@@ -832,8 +787,6 @@ class Handler(BaseHTTPRequestHandler):
                  "cmd": f"ffmpeg http://localhost/ch/{i}", "tv_genre_id": "1" if i <= 30 else "2",
                  "xmltv_id": f"ch{i}.uk"} for i in range(1, CHANNELS + 1)]}})
         if action == "create_link":
-            # "stalker_link_delay" (seconds before the answer: a slow portal),
-            # "stalker_link_status" ("429": that status, empty).
             time.sleep(float(CONTROL.get("stalker_link_delay", 0)))
             if CONTROL.get("stalker_link_status"):
                 return self.refuse(int(CONTROL["stalker_link_status"]))
@@ -872,8 +825,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send("\n".join(parts), "application/xml")
 
     def live(self, path):
-        """A live channel, /live/u/p/<id>.<ext> (or /stream/<id>.ts behind
-        live_redirect), as the live_* switches shape it."""
         name = path.rsplit("/", 1)[1]
         channel, _, ext = name.partition(".")
 
@@ -902,9 +853,6 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if channel in CONTROL.get("slow_live", "").split(","):
                 time.sleep(4)
-            # /mock/set?dead_live=2003,2005: those channels answer and never
-            # send a picture (an event feed that's over), until the client
-            # hangs up.
             if channel in CONTROL.get("dead_live", "").split(","):
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp2t")
@@ -955,6 +903,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "video/mp2t")
         self.send_header("Connection", "close")
+        # URLSession takes a reset of an unframed stream for its end,
+        # but of a chunked one for an error.
         chunked = CONTROL.get("live_chunked") == "1"
         if chunked:
             self.send_header("Transfer-Encoding", "chunked")
@@ -975,8 +925,6 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def live_pump(self, source, chunked, channel):
-        """Copies the stream to the client at live_rate, with live_stall's
-        pauses, until live_cut. False when it reset the connection."""
         rate = float(CONTROL.get("live_rate", 0)) * 125
         stalls = live_stalls()
         cuts = live_chosen("live_cut_ids", channel)
@@ -1000,7 +948,6 @@ class Handler(BaseHTTPRequestHandler):
                     self.connection.close()
                     return False
                 return True
-            # Small pieces keep a slow rate even.
             step = 16384 if rate else len(chunk)
             for i in range(0, len(chunk), step):
                 if rate:
