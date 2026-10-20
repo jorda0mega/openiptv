@@ -2285,10 +2285,11 @@ final class AppModel {
     }
 
     func notePlaying(_ copy: LiveChannel) {
-        if liveFailures.contains(copy.id) { sayCleared(liveFailures.played(copy.id), game: false) }
+        sayCleared(liveFailures.playedIfCurrent(copy.id), game: false)
         let all = copies(of: copy)
-        guard liveFailures.gameNotPlaying(all.map(\.id)) else { return }
-        let cleared = liveFailures.gamePlayed(all.map(\.id))
+        let ids = all.map(\.id)
+        guard liveFailures.gameNotPlaying(ids) else { return }
+        let cleared = liveFailures.gamePlayed(ids)
         sayCleared(cleared.values.min { $0.noted < $1.noted }, game: true)
         let keys = all.filter { cleared[$0.id] != nil }.compactMap(sharedKey)
         guard let emby, !keys.isEmpty else { return }

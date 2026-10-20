@@ -22,14 +22,7 @@ enum StreamFailure: String, CaseIterable {
 
     init?(logged text: String) {
         if let status = text.firstMatch(of: #/(?:HTTP error|Server returned) ([1-5][0-9X]{2})/#)?.1 {
-            self = switch status {
-            case "401": .http_401
-            case "403": .http_403
-            case "404": .http_404
-            case "429": .http_429
-            case _ where status.hasPrefix("5"): .http_5xx
-            default: .http_other
-            }
+            self = Self.http(status)
             return
         }
         guard let match = Self.patterns.first(where: { text.range(of: $0.0, options: .regularExpression) != nil }) else { return nil }
@@ -42,14 +35,7 @@ enum StreamFailure: String, CaseIterable {
         case .offline: self = .offline
         case .rejected: self = .http_401
         case let .http(code):
-            self = switch code {
-            case 401: .http_401
-            case 403: .http_403
-            case 404: .http_404
-            case 429: .http_429
-            case 500..<600: .http_5xx
-            default: .http_other
-            }
+            self = Self.http(code)
         case let .network(_, code):
             self = switch code {
             case .timedOut?: .timeout
@@ -73,6 +59,23 @@ enum StreamFailure: String, CaseIterable {
         "TLS", "SSL", "certificate", "edirect", "codec parameters", "Could not open codec", "Failed to initialize",
         "Invalid data",
     ]
+
+    private static func http(_ code: Int) -> StreamFailure {
+        switch code {
+        case 401: .http_401
+        case 403: .http_403
+        case 404: .http_404
+        case 429: .http_429
+        case 500..<600: .http_5xx
+        default: .http_other
+        }
+    }
+
+    /// "5XX" is not a number. Every other status the log regex yields is.
+    private static func http(_ status: some StringProtocol) -> StreamFailure {
+        if let code = Int(status) { return http(code) }
+        return status.hasPrefix("5") ? .http_5xx : .http_other
+    }
 
     static func worthReading(format: UnsafePointer<CChar>) -> Bool {
         let length = strlen(format)

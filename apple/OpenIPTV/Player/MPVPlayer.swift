@@ -58,11 +58,10 @@ final class MPVPlayer: @unchecked Sendable {
             // Tracks added, or a failure, while nobody listened (a player
             // opened ahead): the screen that takes it over hears it now.
             guard let handler = onEvent else { return }
-            let (tracks, failure) = stateLock.withLock {
+            let (tracks, failure, attempt) = stateLock.withLock {
                 defer { tracksUnheard = false; failureUnheard = nil }
-                return (tracksUnheard, failureUnheard)
+                return (tracksUnheard, failureUnheard, loads.current)
             }
-            let attempt = stateLock.withLock { loads.current }
             if tracks { Task { @MainActor in handler(.tracksChanged, attempt) } }
             if let failure { Task { @MainActor in handler(.failed(failure.message, failure.class), failure.attempt) } }
         }
@@ -95,8 +94,9 @@ final class MPVPlayer: @unchecked Sendable {
     var hlsKeys: String { stateLock.withLock { playlistKeys } }
     private var perf = LivePerf.Opening()
     var livePerf: LivePerf.Opening {
-        var opening = stateLock.withLock { perf }
-        let load = FailureLedger.Load(player: ledgerID, attempt: stateLock.withLock { loads.current })
+        let (snapshot, attempt) = stateLock.withLock { (perf, loads.current) }
+        var opening = snapshot
+        let load = FailureLedger.Load(player: ledgerID, attempt: attempt)
         if let loadfile = opening.loadfile, let failure = FFmpegLog.failure(of: load, since: loadfile) { opening.failure = failure }
         return opening
     }
@@ -1353,8 +1353,9 @@ final class MPVPlayer: @unchecked Sendable {
         guard mpv_command_ret(mpv, &args, &result) >= 0 else { return (false, nil) }
         defer { mpv_free_node_contents(&result) }
         guard result.format == MPV_FORMAT_NODE_MAP, let map = result.u.list?.pointee else { return (true, nil) }
-        for i in 0..<Int(map.num) where map.keys[i].map({ String(cString: $0) }) == "playlist_entry_id" {
-            if map.values[i].format == MPV_FORMAT_INT64 { return (true, map.values[i].u.int64) }
+        for i in 0..<Int(map.num) where map.keys[i].map({ String(cString: $0) }) == "playlist_entry_id"
+            && map.values[i].format == MPV_FORMAT_INT64 {
+            return (true, map.values[i].u.int64)
         }
         return (true, nil)
     }
