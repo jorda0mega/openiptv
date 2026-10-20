@@ -75,6 +75,15 @@ struct SearchView: View {
     @State private var debugLocalMs = ""
     #endif
 
+    #if DEBUG
+    /// UI tests: what each section holds, for which text ("the|titles 60 …").
+    private var debugCounts: String {
+        "\(shown.query)|titles \(shown.all.count) (movies \(shown.movies.count), shows \(shown.shows.count)) · "
+            + "episodes \(shown.episodes.count) · on TV \(shown.onTV.count) · channels \(shown.channels.count) · "
+            + "library \(model.library.count) · waiting for the top \(waitingForTop == nil ? "no" : "yes")"
+    }
+    #endif
+
     private var thumbWidth: Int { Int(Layout.searchThumbWide * displayScale) }
 
     private struct Shown {
@@ -205,6 +214,10 @@ struct SearchView: View {
             .background {
                 Text(debugLocalMs).frame(width: 1, height: 1).opacity(0.02)
                     .accessibilityLabel(debugLocalMs).accessibilityIdentifier("debug-search-local-ms")
+            }
+            .background {
+                Text(debugCounts).frame(width: 1, height: 1).opacity(0.02)
+                    .accessibilityLabel(debugCounts).accessibilityIdentifier("debug-search-counts")
             }
             #endif
             // The name pages opened from here go back to.
