@@ -115,12 +115,12 @@ enum TrackChoice {
     /// choice) and subtitles (nil: none). In the plan's languages, the kind
     /// picked for the title (SDH, commentary), else the main track; no
     /// subtitles asked for: forced ones in the audio's language only.
-    static func choose(_ tracks: [MPVPlayer.Track], plan: TrackPlan) -> (audio: Int?, subtitle: Int?) {
-        func matches(_ track: MPVPlayer.Track, _ codes: [String]) -> Bool {
+    static func choose(_ tracks: [Track], plan: TrackPlan) -> (audio: Int?, subtitle: Int?) {
+        func matches(_ track: Track, _ codes: [String]) -> Bool {
             let wanted = Set(codes.compactMap(normalized))
             return track.language.flatMap(normalized).map(wanted.contains) ?? false
         }
-        func best(_ list: [MPVPlayer.Track], _ codes: [String], role: String?) -> MPVPlayer.Track? {
+        func best(_ list: [Track], _ codes: [String], role: String?) -> Track? {
             var found = list.filter { matches($0, codes) }
             // Two Spanish: the one for where the title was made.
             let variant = found.filter { $0.variant == plan.spanish }
@@ -156,7 +156,7 @@ enum TrackChoice {
     /// AC-3, then the rest) for audio; for subtitles text before pictures
     /// (sharper, any size), inside the film before a file beside it (always
     /// in time with it); then the file's own order.
-    static func ranked(_ tracks: [MPVPlayer.Track]) -> [MPVPlayer.Track] {
+    static func ranked(_ tracks: [Track]) -> [Track] {
         func sound(_ codec: String?) -> Int {
             switch codec ?? "" {
             case "truehd", "mlp": 4
@@ -185,13 +185,13 @@ enum TrackChoice {
     /// and SDH (forced ones show by themselves where they're needed).
     /// Spanish: the variant for where the title was made. Other languages
     /// are left out; with nothing left, everything shows.
-    static func menu(_ tracks: [MPVPlayer.Track], spanish: Variant) -> [MPVPlayer.Track] {
+    static func menu(_ tracks: [Track], spanish: Variant) -> [Track] {
         let audio = tracks.filter { $0.kind == .audio }
         let subtitles = tracks.filter { $0.kind == .subtitle }
         let original = audio.first?.language.flatMap(normalized)
-        func language(_ track: MPVPlayer.Track) -> String? { track.language.flatMap(normalized) }
-        func pick(_ list: [MPVPlayer.Track], languages: [String], roles: [String?]) -> [MPVPlayer.Track] {
-            var chosen: [MPVPlayer.Track] = []
+        func language(_ track: Track) -> String? { track.language.flatMap(normalized) }
+        func pick(_ list: [Track], languages: [String], roles: [String?]) -> [Track] {
+            var chosen: [Track] = []
             for role in roles {
                 for code in languages {
                     var group = list.filter { language($0) == code && $0.role == role }
@@ -345,5 +345,57 @@ enum TrackChoice {
         }
         UserDefaults.standard.set(recent, forKey: order)
         if let data = try? JSONEncoder().encode(list) { UserDefaults.standard.set(data, forKey: defaultsKey) }
+    }
+}
+
+/// An audio or subtitle track of the file.
+struct Track: Identifiable, Hashable, Sendable {
+    enum Kind: Sendable { case audio, subtitle }
+    let id: Int
+    let kind: Kind
+    let title: String?
+    /// ISO 639 code ("eng"), when the file says.
+    let language: String?
+    let channels: Int?
+    let forced: Bool
+    var selected: Bool
+    /// Subtitles for the deaf and hard of hearing (the file says so).
+    var hearingImpaired = false
+    /// "subrip", "ass", "hdmv_pgs_subtitle", "truehd", "eac3", …
+    var codec: String? = nil
+    /// Subtitles drawn as pictures (PGS, VobSub), not text.
+    var image = false
+    /// From a file beside the film (the server's), not inside it.
+    var external = false
+    /// The file marks it as its default.
+    var isDefault = false
+    /// Its place in the file (FFmpeg's stream index; the server's
+    /// "Index" for the same track).
+    var ffIndex: Int? = nil
+
+    /// Spain's or Latin American Spanish, from the track's language tag
+    /// or name ("es-ES", "Castellano"; "es-419", "Latino"); nil: not said.
+    var variant: TrackChoice.Variant? {
+        let tag = (language ?? "").lowercased()
+        if tag == "es-es" { return .spain }
+        if ["es-419", "es-mx", "es-us", "es-ar", "es-co", "es-cl", "spa-419"].contains(tag) { return .latinAmerica }
+        let name = (title ?? "").folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        let words = Set(name.split { !$0.isLetter && !$0.isNumber }.map(String.init))
+        if !words.isDisjoint(with: ["castellano", "castilian", "espana", "spain", "european", "europe"]) { return .spain }
+        if !words.isDisjoint(with: ["latino", "latin", "latam", "latinoamerica", "latinoamericano", "mexico", "mexican", "419"]) {
+            return .latinAmerica
+        }
+        return nil
+    }
+
+    /// What the track is for besides its language: "commentary", "sdh",
+    /// "forced", or nil (the main one). Two English subtitle tracks,
+    /// say, are told apart by it.
+    var role: String? {
+        let words = Set((title ?? "").lowercased().split { !$0.isLetter }.map(String.init))
+        if words.contains("commentary") { return "commentary" }
+        if hearingImpaired || !words.isDisjoint(with: ["sdh", "cc", "hoh"]) { return "sdh" }
+        if forced || words.contains("forced") { return "forced" }
+        return nil
     }
 }

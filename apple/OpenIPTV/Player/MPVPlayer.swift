@@ -592,58 +592,6 @@ final class MPVPlayer: @unchecked Sendable {
         followNext = nil
     }
 
-    /// An audio or subtitle track of the file.
-    struct Track: Identifiable, Hashable, Sendable {
-        enum Kind: Sendable { case audio, subtitle }
-        let id: Int
-        let kind: Kind
-        let title: String?
-        /// ISO 639 code ("eng"), when the file says.
-        let language: String?
-        let channels: Int?
-        let forced: Bool
-        var selected: Bool
-        /// Subtitles for the deaf and hard of hearing (the file says so).
-        var hearingImpaired = false
-        /// "subrip", "ass", "hdmv_pgs_subtitle", "truehd", "eac3", …
-        var codec: String? = nil
-        /// Subtitles drawn as pictures (PGS, VobSub), not text.
-        var image = false
-        /// From a file beside the film (the server's), not inside it.
-        var external = false
-        /// The file marks it as its default.
-        var isDefault = false
-        /// Its place in the file (FFmpeg's stream index; the server's
-        /// "Index" for the same track).
-        var ffIndex: Int? = nil
-
-        /// Spain's or Latin American Spanish, from the track's language tag
-        /// or name ("es-ES", "Castellano"; "es-419", "Latino"); nil: not said.
-        var variant: TrackChoice.Variant? {
-            let tag = (language ?? "").lowercased()
-            if tag == "es-es" { return .spain }
-            if ["es-419", "es-mx", "es-us", "es-ar", "es-co", "es-cl", "spa-419"].contains(tag) { return .latinAmerica }
-            let name = (title ?? "").folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-            let words = Set(name.split { !$0.isLetter && !$0.isNumber }.map(String.init))
-            if !words.isDisjoint(with: ["castellano", "castilian", "espana", "spain", "european", "europe"]) { return .spain }
-            if !words.isDisjoint(with: ["latino", "latin", "latam", "latinoamerica", "latinoamericano", "mexico", "mexican", "419"]) {
-                return .latinAmerica
-            }
-            return nil
-        }
-
-        /// What the track is for besides its language: "commentary", "sdh",
-        /// "forced", or nil (the main one). Two English subtitle tracks,
-        /// say, are told apart by it.
-        var role: String? {
-            let words = Set((title ?? "").lowercased().split { !$0.isLetter }.map(String.init))
-            if words.contains("commentary") { return "commentary" }
-            if hearingImpaired || !words.isDisjoint(with: ["sdh", "cc", "hoh"]) { return "sdh" }
-            if forced || words.contains("forced") { return "forced" }
-            return nil
-        }
-    }
-
     /// The file's audio and subtitle tracks, as they are now.
     func tracks() async -> [Track] {
         await withCheckedContinuation { continuation in

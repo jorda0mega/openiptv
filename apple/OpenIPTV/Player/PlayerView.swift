@@ -77,12 +77,12 @@ enum PlaybackSpeed {
 /// the player (several times a second while the film plays), an open menu
 /// closed at once, so subtitles could only be changed with the film paused.
 struct TrackMenuButton: View, Equatable {
-    let tracks: [MPVPlayer.Track]
+    let tracks: [Track]
     /// Languages only another copy of the title is heard in ("ja").
     var otherLanguages: [String] = []
-    let pick: (MPVPlayer.Track) -> Void
+    let pick: (Track) -> Void
     var pickOther: (String) -> Void = { _ in }
-    let pickSubtitles: (MPVPlayer.Track?) -> Void
+    let pickSubtitles: (Track?) -> Void
     let opened: () -> Void
 
     static func == (a: Self, b: Self) -> Bool { a.tracks == b.tracks && a.otherLanguages == b.otherLanguages }
@@ -126,7 +126,7 @@ struct TrackMenuButton: View, Equatable {
         .accessibilityLabel("Audio and Subtitles")
     }
 
-    @ViewBuilder private func item(_ track: MPVPlayer.Track) -> some View {
+    @ViewBuilder private func item(_ track: Track) -> some View {
         if track.selected {
             Label(MoviePlayerView.label(track), systemImage: "checkmark")
         } else {
@@ -269,7 +269,7 @@ struct MoviePlayerView: View {
     @State private var warmStart = false
     /// The file's audio and subtitle tracks, and the picture's badges ("4K",
     /// "HDR") for the Info panel.
-    @State private var tracks: [MPVPlayer.Track] = []
+    @State private var tracks: [Track] = []
     @State private var badges: [String] = []
     /// The title being started in this player screen (the next episode, or
     /// one from Continue Watching).
@@ -788,7 +788,7 @@ struct MoviePlayerView: View {
         .glassEffect(.regular.interactive(), in: .capsule)
     }
 
-    private func pick(_ track: MPVPlayer.Track) {
+    private func pick(_ track: Track) {
         trackSwitched()
         player?.selectAudio(track.id)
         markSelected(track.id, kind: .audio)
@@ -796,7 +796,7 @@ struct MoviePlayerView: View {
         showControls()
     }
 
-    private func pickSubtitles(_ track: MPVPlayer.Track?) {
+    private func pickSubtitles(_ track: Track?) {
         trackSwitched()
         player?.selectSubtitle(track?.id)
         markSelected(track?.id, kind: .subtitle)
@@ -907,7 +907,7 @@ struct MoviePlayerView: View {
         try? await Task.sleep(for: .milliseconds(500))
         guard let player else { return }
         let playing = await player.tracks()
-        func describe(_ track: MPVPlayer.Track, role: Bool) -> String {
+        func describe(_ track: Track, role: Bool) -> String {
             let language: String = track.language ?? "und"
             let variant: String = track.variant.map { "~" + $0.rawValue } ?? ""
             let kind: String = role ? (track.role.map { "+" + $0 } ?? "") : ""
@@ -920,7 +920,7 @@ struct MoviePlayerView: View {
     #endif
 
     /// The tick moves at once (the player confirms on its own queue).
-    private func markSelected(_ id: Int?, kind: MPVPlayer.Track.Kind) {
+    private func markSelected(_ id: Int?, kind: Track.Kind) {
         tracks = tracks.map { track in
             guard track.kind == kind else { return track }
             var marked = track
@@ -994,21 +994,21 @@ struct MoviePlayerView: View {
 
     /// The tracks the viewer chooses from (see TrackChoice.menu): no
     /// duplicates, English and Spanish.
-    private var menuTracks: [MPVPlayer.Track] {
+    private var menuTracks: [Track] {
         TrackChoice.menu(tracks, spanish: TrackChoice.spanish(for: playback.tracks?.basis?.countries ?? []))
     }
-    private var audioTracks: [MPVPlayer.Track] { menuTracks.filter { $0.kind == .audio } }
-    private var subtitleTracks: [MPVPlayer.Track] { menuTracks.filter { $0.kind == .subtitle } }
+    private var audioTracks: [Track] { menuTracks.filter { $0.kind == .audio } }
+    private var subtitleTracks: [Track] { menuTracks.filter { $0.kind == .subtitle } }
 
     private func phoneClock(_ seconds: Double) -> String { PlayerClock.phoneTime(seconds, total: total) }
 
-    private func label(_ track: MPVPlayer.Track) -> String { Self.label(track) }
+    private func label(_ track: Track) -> String { Self.label(track) }
 
     /// The language and kind, as in the Apple TV app: "English",
     /// "English SDH", "Spanish", "English (Commentary)" (one of each shows:
     /// a file's own names, "Castellano" or "English [Full]", only repeated
     /// it).
-    static func label(_ track: MPVPlayer.Track) -> String {
+    static func label(_ track: Track) -> String {
         let code = track.language.flatMap { TrackChoice.normalized($0) }
         let language = code.flatMap { Locale.current.localizedString(forLanguageCode: $0) }
             ?? track.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown language"
@@ -1827,7 +1827,7 @@ struct MoviePlayerView: View {
         let request = menuRequest
         let button = Self.button(for: kind)
         Task {
-            var fresh: [MPVPlayer.Track]?
+            var fresh: [Track]?
             if kind != .speed { fresh = await player?.tracks() }
             // Still asked for: the latest request, the remote still on its
             // button, nothing else opened meanwhile.
@@ -1854,7 +1854,7 @@ struct MoviePlayerView: View {
             player.setSpeed(speed)
             return
         }
-        let trackKind: MPVPlayer.Track.Kind = kind == .audio ? .audio : .subtitle
+        let trackKind: Track.Kind = kind == .audio ? .audio : .subtitle
         // The rows as shown (see `menu`). Regression: the row picked the
         // file's track at that place among all of them, so English chose
         // the Spanish listed first in the file.
