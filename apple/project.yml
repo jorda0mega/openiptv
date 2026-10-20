@@ -214,6 +214,7 @@ targets:
       - OpenIPTV/Player/ServerSubtitles.swift
       - OpenIPTV/Player/NetworkStatus.swift
       - OpenIPTV/Player/StreamRelay.swift
+      - OpenIPTV/Player/PlaylistKeys.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv.unittests
