@@ -741,10 +741,11 @@ final class PlayerLookTests: XCTestCase {
     }
 
     /// No request for a film's stream (through the relay, and those cut off
-    /// when the film closes), nor the server's websocket, has the Emby key
-    /// in its address: each sends it in a header (the system logs the
-    /// address of a request that fails or is stopped). Regression: each
-    /// address had it, and a real run found the key in that log.
+    /// when the film closes) has the Emby key in its address: each sends it
+    /// in a header (the system logs the address of a request that fails or
+    /// is stopped). No websocket is opened: Emby takes its key only in the
+    /// address. Regression: each address had it, and a real run found the
+    /// key in that log.
     func testFilmRequestsKeepTheKeyOutOfTheirAddress() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -756,7 +757,7 @@ final class PlayerLookTests: XCTestCase {
         app.buttons["Close player"].firstMatch.tap()
         sleep(3)
         XCTAssertTrue(keyChecks(server, "items").contains { $0.hasPrefix("stream:") }, "no film was streamed")
-        XCTAssertTrue(keyChecks(server, "items").contains("websocket"), "the server's websocket wasn't opened")
+        XCTAssertFalse(keyChecks(server, "items").contains("websocket"), "the app opened Emby's websocket")
         XCTAssertTrue(keyChecks(server, "cancelled").contains { $0.hasPrefix("stream:") }, "no stream was cut off")
         XCTAssertEqual(keyChecks(server, "keyed"), [], "asked with the key in the address")
         XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
@@ -1150,6 +1151,35 @@ final class PlayerLookTests: XCTestCase {
         }
         XCTAssertEqual(at, 300, accuracy: 8, "it didn't resume where it was stopped")
         XCTAssertLessThan(took, 1.2, "a resumed title took \(took) s to start from a slow server")
+    }
+
+    /// Watched further on another device while the app was in the
+    /// background: played once it's back, the film starts where the other
+    /// device left it. Regression: a plan made before the app went away
+    /// (kept three minutes) started it where it had been before.
+    func testResumeMovedElsewhereWhileAwayPlaysFromThere() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        stopped(server, item: "m5", seconds: 300)
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Movie 5'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "Movie 5 isn't in Continue Watching")
+        sleep(6)
+        XCUIDevice.shared.press(.home)
+        stopped(server, item: "m5", seconds: 500)
+        sleep(2)
+        app.activate()
+        sleep(4)
+        card.tap()
+        let readout = app.staticTexts["debug-start"].firstMatch
+        var parts: [Substring] = []
+        for _ in 0..<60 where parts.count < 4 {
+            usleep(250_000)
+            parts = readout.exists ? readout.label.split(separator: " ") : []
+        }
+        guard parts.count == 4, let at = Double(parts[3]) else { return XCTFail("no start readout: \(parts)") }
+        XCTAssertEqual(at, 500, accuracy: 8, "it didn't start where the other device left it")
     }
 
     /// An episode whose intro the server has marked (Emby's intro detection:
@@ -1661,7 +1691,8 @@ final class PlayerLookTests: XCTestCase {
     }
 
     /// The requests that need the Emby key ("stream:item", "speed:item",
-    /// "hls:item", "websocket"): all ("items"), those with the key in their
+    /// "hls:item", "playlist:item", "segment:name", "websocket"): all
+    /// ("items"), those with the key in their
     /// address ("keyed") or without it in a header ("headerless"), and those
     /// the app hung up on mid-answer ("cancelled").
     private func keyChecks(_ server: URL, _ field: String) -> [String] {

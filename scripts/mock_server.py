@@ -12,7 +12,6 @@ have something to find.
 """
 
 import base64
-import hashlib
 import select
 import socket
 import shutil
@@ -33,7 +32,8 @@ PANEL_TZ = timezone(timedelta(hours=1))
 EASTERN = ZoneInfo("America/New_York")
 CHANNELS = 40
 SLOT = 1800
-SOCKETS = set()
+# The connections open now (the server can close them all).
+CONNECTIONS = set()
 # How the server behaves, set by UI tests at run time (GET /mock/set?k=v,
 # /mock/set?reset=1): "latency" (seconds per request), "home_delay" (seconds
 # for Continue Watching), "fail=persons" (a person's titles fail),
@@ -46,7 +46,9 @@ SOCKETS = set()
 # "a8:spa+spa+jpn": those tracks, in that order), "min_resume_pct" ("5":
 # like Emby, a stop before 5% of a title keeps no place), "imdb" ("k8:tt0000001":
 # that copy listed with another IMDb id, its TMDb id the same),
-# "watched_elsewhere" ("m7": a film just played on another device),
+# "watched_elsewhere" ("m7": a film just played on another device), "added"
+# ("z9": a film added to the library on another device, the one answer to
+# what changed since a date),
 # "favorites_delay" (seconds before My List answers: a slow refresh),
 # "reference_delay" (seconds before one of the film's own subtitle tracks
 # answers: a real server reads the whole film to take it out),
@@ -61,6 +63,10 @@ SOCKETS = set()
 # empty list, HTTP 200, a provider that sent nothing; other requests as
 # normal).
 CONTROL = {}
+# The test account's key (OPENIPTV_MOCK_TOKEN): a fake one, never a login.
+TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
+# Until then, every connection is dropped at once: a server gone down.
+DOWN_UNTIL = [0.0]
 # A film's length (seconds; OPENIPTV_MOCK_RUNTIME): two hours unless the
 # test film is shorter and its length matters (stretches of its sound).
 # Apps' own records in the user's display preferences, by (id, client):
@@ -90,22 +96,6 @@ CANCELLED = []
 # still taking them out, (time, "item:index").
 SUBTITLES_CUT = []
 
-
-def push(message):
-    """Announces a change to the connected apps, as Emby does."""
-    sent = 0
-    for client in list(SOCKETS):
-        try:
-            client.send_ws(json.dumps(message))
-            sent += 1
-        except OSError:
-            SOCKETS.discard(client)
-    return sent
-
-
-def user_data_changed(item, played):
-    return {"MessageType": "UserDataChanged", "Data": {"UserId": "U1", "UserDataList": [
-        {"ItemId": item, "PlaybackPositionTicks": 0, "Played": played}]}}
 # Requests for a stretch of a film's sound, and those with the key in
 # their address (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0, 0]
@@ -213,6 +203,14 @@ def _file_streams_cached():
                             "Codec": "srt", "IsExternal": True, "IsTextSubtitleStream": True,
                             "IsHearingImpaired": "sdh" in title.lower(), "DeliveryMethod": "External"})
         _STREAMS = streams
+
+
+# Titles added to the library on another device ("added": "z9,z10").
+ADDED = {"z9": ("z9", "Zorro Returns", "Movie", 2026, None, None), "z10": ("z10", "Zorro Rides Again", "Movie", 2026, None, None)}
+
+
+def added_titles():
+    return [known_item(ADDED[i]) for i in CONTROL.get("added", "").split(",") if i in ADDED]
 
 
 def remote_subtitles():
@@ -352,6 +350,20 @@ def recorded_ts():
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def handle(self):
+        if time.time() < DOWN_UNTIL[0]:
+            try:
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                self.connection.close()
+            except OSError:
+                pass
+            return
+        CONNECTIONS.add(self.connection)
+        try:
+            super().handle()
+        finally:
+            CONNECTIONS.discard(self.connection)
+
     def client_gone(self):
         """The app hung up (its request stopped) before the answer."""
         ready, _, _ = select.select([self.connection], [], [], 0)
@@ -364,46 +376,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def key_check(self, kind, q):
         """Records a request that needs the key; whether its header has it."""
-        headed = self.headers.get("X-Emby-Token") == "tok"
+        headed = self.headers.get("X-Emby-Token") == TOKEN
         KEY_CHECKS.append((time.time(), kind, "api_key" in q, headed))
         return headed
-
-    def websocket(self):
-        key = self.headers.get("Sec-WebSocket-Key", "")
-        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
-        self.send_response(101)
-        self.send_header("Upgrade", "websocket")
-        self.send_header("Connection", "Upgrade")
-        self.send_header("Sec-WebSocket-Accept", accept)
-        self.end_headers()
-        self.ws_lock = threading.Lock()
-        SOCKETS.add(self)
-        print(f"{time.time():.2f} websocket connected", flush=True)
-        try:
-            while True:
-                head = self.rfile.read(2)
-                if len(head) < 2:
-                    break
-                length = head[1] & 0x7F
-                if length == 126:
-                    length = struct.unpack(">H", self.rfile.read(2))[0]
-                elif length == 127:
-                    length = struct.unpack(">Q", self.rfile.read(8))[0]
-                mask = self.rfile.read(4) if head[1] & 0x80 else b"\0\0\0\0"
-                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(self.rfile.read(length)))
-                if head[0] & 0x0F == 8:
-                    break
-                print(f"{time.time():.2f} websocket got {payload.decode(errors='replace')[:60]}", flush=True)
-        finally:
-            SOCKETS.discard(self)
-            self.close_connection = True
-
-    def send_ws(self, text):
-        data = text.encode()
-        head = bytes([0x81, len(data)]) if len(data) < 126 else bytes([0x81, 126]) + struct.pack(">H", len(data))
-        with self.ws_lock:
-            self.wfile.write(head + data)
-            self.wfile.flush()
 
     def log_message(self, *args):
         pass
@@ -423,10 +398,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urlparse(self.path).path
-        if path.startswith("/emby/Users/U1/PlayedItems/") and self.headers.get("X-Emby-Token") == "tok":
-            push(user_data_changed(path.rsplit("/", 1)[1], False))
-            return self.send({"Played": False})
-        if path.startswith("/emby/Users/U1/FavoriteItems/") and self.headers.get("X-Emby-Token") == "tok":
+        if path.startswith("/emby/Users/U1/FavoriteItems/") and self.headers.get("X-Emby-Token") == TOKEN:
             item = path.rsplit("/", 1)[1]
             if item in FAVORITES:
                 FAVORITES.remove(item)
@@ -441,12 +413,9 @@ class Handler(BaseHTTPRequestHandler):
             body = {k: v[0] for k, v in parse_qs(raw).items()}
         else:
             body = json.loads(raw or "{}")
-        if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == "tok":
+        if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == TOKEN:
             return self.send(b"", status=204)
-        if "/Users/U1/PlayedItems/" in self.path and self.headers.get("X-Emby-Token") == "tok":
-            push(user_data_changed(urlparse(self.path).path.rsplit("/", 1)[1], True))
-            return self.send({"Played": True})
-        if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == "tok":
+        if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
             # "ignore_reports": a server that hasn't heard (or kept) them.
             if self.path.split("?")[0].endswith(("/Progress", "/Stopped")) and body.get("ItemId") \
                     and CONTROL.get("ignore_reports") != "1":
@@ -457,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
                     ticks = 0
                 POSITIONS[body["ItemId"]] = ticks
             return self.send(b"", status=204)
-        if "/RemoteSearch/Subtitles/" in self.path and self.headers.get("X-Emby-Token") == "tok":
+        if "/RemoteSearch/Subtitles/" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
             # Download one: it's a subtitle file of the item from now on.
             # "subtitle_rights": "none": an account that may not manage
             # subtitles (Emby refuses it).
@@ -468,19 +437,19 @@ class Handler(BaseHTTPRequestHandler):
             DOWNLOADED.append((subtitle, subtitle.rsplit("-", 1)[1]))
             print(f"{time.time():.2f} subtitle download {subtitle}", flush=True)
             return self.send({"NewIndex": 199 + len(DOWNLOADED)})
-        if "/DisplayPreferences/" in self.path and self.headers.get("X-Emby-Token") == "tok":
+        if "/DisplayPreferences/" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
             key = (urlparse(self.path).path.rsplit("/", 1)[1], (parse_qs(urlparse(self.path).query).get("client") or [""])[0])
             PREFERENCES[key] = dict(body.get("CustomPrefs") or {})
             print(f"{time.time():.2f} preferences {key[0]} saved: {len(PREFERENCES[key])} entries", flush=True)
             return self.send(b"", status=204)
-        if "/Users/U1/FavoriteItems/" in self.path and self.headers.get("X-Emby-Token") == "tok":
+        if "/Users/U1/FavoriteItems/" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
             item = urlparse(self.path).path.rsplit("/", 1)[1]
             if item not in FAVORITES:
                 FAVORITES.append(item)
             return self.send({"IsFavorite": True})
         if os.environ.get("OPENIPTV_MOCK_LOG"):
             print(f"{time.time():.2f} POST {self.path.split('?')[0]}", flush=True)
-        if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == "tok":
+        if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
             PLAYBACKINFO_REQUESTS.append((time.time(), item))
             width = 3840 if item.startswith("k") else 1920
@@ -500,7 +469,7 @@ class Handler(BaseHTTPRequestHandler):
                                                 "MediaStreams": [{"Type": "Video", "Width": width}] + streams}],
                               "PlaySessionId": "ps1"})
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
-            return self.send({"AccessToken": "tok", "User": {"Id": "U1", "Name": body["Username"]}})
+            return self.send({"AccessToken": TOKEN, "User": {"Id": "U1", "Name": body["Username"]}})
         self.send({"error": "unauthorized"}, status=401)
 
     def do_GET(self):
@@ -508,12 +477,33 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         path = url.path
         if path == "/embywebsocket":
-            # The token header, or Emby's own authorization header with it;
-            # not the plain Authorization header, nor the key in the address.
-            headed = self.key_check("websocket", q)
-            if headed or 'Token="tok"' in self.headers.get("X-Emby-Authorization", ""):
-                return self.websocket()
+            # Emby's websocket takes its key only in the address: recorded,
+            # and refused.
+            self.key_check("websocket", q)
             return self.send({"error": "unauthorized"}, status=401)
+        if path == "/mock/close_connections":
+            # The server closes every other connection ("abrupt": dropped,
+            # as a server going down does).
+            for connection in list(CONNECTIONS - {self.connection}):
+                try:
+                    if q.get("abrupt") == "1":
+                        connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                    connection.shutdown(socket.SHUT_RDWR)
+                    connection.close()
+                except OSError:
+                    pass
+            return self.send({"closed": True})
+        if path == "/mock/down":
+            # Gone down for "seconds": every connection dropped at once.
+            DOWN_UNTIL[0] = time.time() + float(q.get("seconds", "10"))
+            return self.send({"down": True})
+        if path == "/mock/log_matches":
+            # How many times the test key is in the simulator's log
+            # (OPENIPTV_MOCK_SIMULATOR), as a count only.
+            simulator = os.environ.get("OPENIPTV_MOCK_SIMULATOR", "")
+            out = subprocess.run(["xcrun", "simctl", "spawn", simulator, "log", "show", "--last", "5m", "--style", "compact"],
+                                 capture_output=True, text=True).stdout if simulator else ""
+            return self.send({"count": out.count(TOKEN), "read": bool(out)})
         if path == "/mock/mark":
             return self.send({"t": time.time()})
         if path == "/mock/video_requests":
@@ -562,13 +552,6 @@ class Handler(BaseHTTPRequestHandler):
         latency = float(CONTROL.get("latency", os.environ.get("OPENIPTV_MOCK_LATENCY", "0")))
         if latency and not (path.startswith("/Videos/") or path.endswith((".ts", ".m3u8", ".mkv"))):
             time.sleep(latency)
-        if path == "/mock/push":
-            # Announce a change to connected apps, like Emby does.
-            if q.get("type") == "library":
-                message = {"MessageType": "LibraryChanged", "Data": {"ItemsAdded": [q.get("item", "a4")], "ItemsUpdated": [], "ItemsRemoved": []}}
-            else:
-                message = user_data_changed(q.get("item", "e203"), True)
-            return self.send({"sent": push(message)})
         if path.startswith("/emby/"):
             if os.environ.get("OPENIPTV_MOCK_LOG") and "/Images/" not in path:
                 print(f"{time.time():.2f} GET {path}", flush=True)
@@ -827,7 +810,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/System/Info/Public":
             return self.send({"ServerName": "Mock Emby", "Version": "4.10.1.0", "Id": "srv"})
         # Like Emby: the token can come as a header or as ?api_key= (players).
-        if self.headers.get("X-Emby-Token") != "tok" and q.get("api_key") != "tok" and not path.startswith("/Items/"):
+        if self.headers.get("X-Emby-Token") != TOKEN and q.get("api_key") != TOKEN and not path.startswith("/Items/"):
             return self.send({"error": "unauthorized"}, status=401)
         movie = lambda i: {"Id": f"m{i}", "Name": f"Movie {i}", "Type": "Movie", "ProductionYear": 2020,
                            "PrimaryImageAspectRatio": 0.6667,
@@ -1012,10 +995,6 @@ class Handler(BaseHTTPRequestHandler):
             if video and os.path.exists(video):
                 return self.send_file(video, kind=kind)
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
-        # Films not watched or started (Emby's IsUnplayed filter).
-        if path == "/Users/U1/Items" and q.get("Filters") == "IsUnplayed" and q.get("IncludeItemTypes") == "Movie":
-            films = [known_item(entry) for entry in KNOWN_TITLES if entry[2] == "Movie" and not POSITIONS.get(entry[0])]
-            return self.send({"Items": films[:int(q.get("Limit", "20"))]})
         # My List (before the library listing, which would answer it).
         if path == "/Users/U1/Items" and q.get("Filters") == "IsFavorite":
             time.sleep(float(CONTROL.get("favorites_delay", 0)))
@@ -1030,7 +1009,10 @@ class Handler(BaseHTTPRequestHandler):
                       "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
             # Same-named and similar titles with real IMDb ids, to check
             # that search ranks by popularity (the 2026 "Animals" first).
-            known = [known_item(entry) for entry in KNOWN_TITLES]
+            known = [known_item(entry) for entry in KNOWN_TITLES] + added_titles()
+            # Asked what changed since a date: only the titles added since.
+            if "MinDateLastSaved" in q:
+                return self.send({"Items": added_titles(), "TotalRecordCount": len(added_titles())})
             # Big enough to page: real libraries run to 100k+ titles.
             extra = [{"Id": f"x{i}", "Name": f"Library Title {i:05d}", "Type": "Movie", "ProductionYear": 2000 + i % 25,
                       "ImageTags": {"Primary": f"t{i % 40}"}} for i in range(23000)]
