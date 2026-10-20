@@ -689,11 +689,6 @@ final class RemoteFocusTests: XCTestCase {
         press(.down, "next episode playing")
     }
 
-    /// Focus held on a Continue Watching card opens its player out of sight,
-    /// subtitles and all; focus moved on to the next card closes it, and
-    /// its request for the film's own track (the server reads the whole
-    /// film for it) stops. Regression: those requests went on, and the film
-    /// played next waited behind them. Needs the multi-track test file.
     func testFocusMovedOnStopsTheCardsSubtitles() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -711,7 +706,6 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertFalse(subtitleCuts(server).isEmpty, "a card's player left behind kept asking for its subtitles")
     }
 
-    /// The subtitle requests the app hung up on (scripts/mock_server.py).
     private func subtitleCuts(_ server: URL) -> [String] {
         var cut: [String] = []
         let done = DispatchSemaphore(value: 0)

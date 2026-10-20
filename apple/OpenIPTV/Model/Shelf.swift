@@ -71,7 +71,6 @@ final class Lane {
         fileprivate var turn: CheckedContinuation<Void, Error>?
         fileprivate var running = false
 
-        /// No interest: a play, which never waits.
         init(_ interest: Interest?) {
             self.interest = interest
             plays = interest == nil
@@ -123,7 +122,6 @@ final class Lane {
         admit()
     }
 
-    /// From now on, and at once if it waits, the ticket goes as a play.
     func playNow(_ ticket: Ticket) {
         ticket.plays = true
         guard waiting.contains(where: { $0 === ticket }) else { return }
@@ -196,15 +194,14 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     struct Policy {
         let lane: Lane
         let lifetime: Duration
-        var onLeave: OnLeave = .finish
+        var whenUnused: WhenUnused = .finish
         var retries: [Duration] = []
         var retryable: @Sendable (Error) -> Bool = { _ in false }
         var failureKept: Duration = .seconds(600)
         var stillThere: @MainActor (Value) -> Bool = { _ in true }
     }
 
-    /// What a fetch under way does once no one waits for it or holds it.
-    enum OnLeave: Sendable {
+    enum WhenUnused: Sendable {
         case finish
         case cancel
     }
@@ -216,8 +213,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         var task: Task<Void, Never>?
         var holders: Set<Interest.ID> = []
         var waiters: [UUID: CheckedContinuation<Value, Error>] = [:]
-        /// Work ahead waiting for the result: the interest keeps the job, not they.
-        var listeners: [UUID: CheckedContinuation<Value, Error>] = [:]
+        var nonOwningWaiters: [UUID: CheckedContinuation<Value, Error>] = [:]
         var result: Result<Value, Error>?
 
         init(_ ticket: Lane.Ticket) { self.ticket = ticket }
@@ -251,8 +247,6 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         self.fetch = fetch
     }
 
-    /// `ahead`: for that interest (a player opened before a tap), so it
-    /// waits for the lane like work ahead; nil: a play.
     func value(for key: Key, ahead interest: Interest? = nil) async throws -> Value {
         try Task.checkCancellation()
         switch current(key) {
@@ -281,10 +275,9 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             job = start(key, Lane.Ticket(interest))
         }
         job.holders.insert(interest.id)
-        return try? await wait(for: job, key, keeping: false)
+        return try? await wait(for: job, key, keepingJob: false)
     }
 
-    /// A player opened ahead is being played: its fetches go now.
     func hurry(_ key: Key) {
         if let job = entries[key]?.job { policy.lane.playNow(job.ticket) }
     }
@@ -363,12 +356,12 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         disk?(key)
     }
 
-    private func wait(for job: Job, _ key: Key, keeping: Bool = true) async throws -> Value {
+    private func wait(for job: Job, _ key: Key, keepingJob: Bool = true) async throws -> Value {
         let id = UUID()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { waiter in
                 if let result = job.result { return waiter.resume(with: result) }
-                if keeping { job.waiters[id] = waiter } else { job.listeners[id] = waiter }
+                if keepingJob { job.waiters[id] = waiter } else { job.nonOwningWaiters[id] = waiter }
             }
         } onCancel: {
             Task { @MainActor in self.stopWaiting(id, for: job, key) }
@@ -376,14 +369,14 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     private func stopWaiting(_ id: UUID, for job: Job, _ key: Key) {
-        guard let waiter = job.waiters.removeValue(forKey: id) ?? job.listeners.removeValue(forKey: id) else { return }
+        guard let waiter = job.waiters.removeValue(forKey: id) ?? job.nonOwningWaiters.removeValue(forKey: id) else { return }
         waiter.resume(throwing: CancellationError())
         stopIfUnwanted(job, key)
     }
 
     private func stopIfUnwanted(_ job: Job, _ key: Key) {
         guard job.result == nil, job.waiters.isEmpty, job.holders.isEmpty, entries[key]?.job === job else { return }
-        if case .fetching? = entries[key], policy.onLeave == .finish { return }
+        if case .fetching? = entries[key], policy.whenUnused == .finish { return }
         stop(job)
         entries[key] = nil
     }
@@ -398,8 +391,8 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         guard job.result == nil else { return }
         job.result = result
         for waiter in job.waiters.values { waiter.resume(with: result) }
-        for listener in job.listeners.values { listener.resume(with: result) }
+        for listener in job.nonOwningWaiters.values { listener.resume(with: result) }
         job.waiters = [:]
-        job.listeners = [:]
+        job.nonOwningWaiters = [:]
     }
 }

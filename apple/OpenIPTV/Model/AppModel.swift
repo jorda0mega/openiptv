@@ -1438,15 +1438,10 @@ final class AppModel {
         await emby?.diagnose(playback) ?? ""
     }
 
-    /// Loads (or quietly updates) the on-device library index. Called when
-    /// the app opens; never blocks the UI. `checkingChanges`: back in the
-    /// app, where what was added on another device meanwhile is asked for
-    /// at once rather than on the ten-minute schedule.
     func prepareLibrary(checkingChanges: Bool = false) async {
         if let emby { await syncLibrary(emby, urgent: checkingChanges) }
     }
 
-    /// Back in the app: a resume point may have moved on another device.
     func forgetPlaybackPlans() {
         prepared = [:]
     }

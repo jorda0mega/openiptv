@@ -430,9 +430,6 @@ final class LibraryIndex {
     /// seen by this app; Home rebuilds its other rows after it.
     private(set) var changedAt: Date?
 
-    /// `now`: back in the app, where something may have changed on
-    /// another device; check at once rather than on the ten-minute
-    /// schedule.
     func prepare(_ emby: EmbyClient, now urgent: Bool = false) async {
         await open(emby)
         guard let server else { return }

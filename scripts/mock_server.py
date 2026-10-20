@@ -32,7 +32,6 @@ PANEL_TZ = timezone(timedelta(hours=1))
 EASTERN = ZoneInfo("America/New_York")
 CHANNELS = 40
 SLOT = 1800
-# The connections open now (the server can close them all).
 CONNECTIONS = set()
 # How the server behaves, set by UI tests at run time (GET /mock/set?k=v,
 # /mock/set?reset=1): "latency" (seconds per request), "home_delay" (seconds
@@ -63,7 +62,6 @@ CONNECTIONS = set()
 # empty list, HTTP 200, a provider that sent nothing; other requests as
 # normal).
 CONTROL = {}
-# The test account's key (OPENIPTV_MOCK_TOKEN): a fake one, never a login.
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
 DOWN_UNTIL = [0.0]
@@ -75,25 +73,10 @@ PREFERENCES = {}
 # Requests for a film's file, (time, item id): GET /mock/video_requests?since=
 # (a time from GET /mock/mark) lists the items asked for since.
 VIDEO_REQUESTS = []
-# Requests for a subtitle track, (time, "item:index", the key in the address,
-# the key in a header), and for PlaybackInfo, (time, item id):
-# GET /mock/subtitle_requests?since= and /mock/playbackinfo_requests?since=
-# list them; the first also lists the tracks asked with the key in the
-# address ("keyed") and without it in a header ("headerless").
 SUBTITLE_REQUESTS = []
 PLAYBACKINFO_REQUESTS = []
-# Requests that need the Emby key, which must come in a header: a film's
-# stream ("stream:item", through the relay or the player), the speed check's
-# 4 MiB reads of it ("speed:item"), a converted stream's master playlist
-# ("hls:item"), its variant ("playlist:item") and segments ("segment:name"),
-# and the websocket, as (time, kind, the key in the address,
-# the key in a header); and those the app hung up on mid-answer, (time,
-# kind). GET /mock/key_checks?since= lists them ("items", "keyed",
-# "headerless", "cancelled").
 KEY_CHECKS = []
 CANCELLED = []
-# Subtitle tracks whose request the app hung up on while the server was
-# still taking them out, (time, "item:index").
 SUBTITLES_CUT = []
 
 # Requests for a stretch of a film's sound, and those with the key in
@@ -365,7 +348,6 @@ class Handler(BaseHTTPRequestHandler):
             CONNECTIONS.discard(self.connection)
 
     def client_gone(self):
-        """The app hung up (its request stopped) before the answer."""
         ready, _, _ = select.select([self.connection], [], [], 0)
         if not ready:
             return False
@@ -375,7 +357,6 @@ class Handler(BaseHTTPRequestHandler):
             return True
 
     def key_check(self, kind, q):
-        """Records a request that needs the key; whether its header has it."""
         headed = self.headers.get("X-Emby-Token") == TOKEN
         KEY_CHECKS.append((time.time(), kind, "api_key" in q, headed))
         return headed
@@ -498,8 +479,6 @@ class Handler(BaseHTTPRequestHandler):
             DOWN_UNTIL[0] = time.time() + float(q.get("seconds", "10"))
             return self.send({"down": True})
         if path == "/mock/log_matches":
-            # How many times the test key is in the simulator's log
-            # (OPENIPTV_MOCK_SIMULATOR), as a count only.
             simulator = os.environ.get("OPENIPTV_MOCK_SIMULATOR", "")
             out = subprocess.run(["xcrun", "simctl", "spawn", simulator, "log", "show", "--last", "5m", "--style", "compact"],
                                  capture_output=True, text=True).stdout if simulator else ""

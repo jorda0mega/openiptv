@@ -1,9 +1,5 @@
 import XCTest
 
-/// iPhone: no connection the app opens carries the Emby key in its address
-/// (the system logs the address of a request that fails or is stopped),
-/// and the app opens no websocket to Emby (Emby takes the websocket's key
-/// only in its address). Against the test server, with its own fake key.
 final class KeyLeakTests: XCTestCase {
     private let app = XCUIApplication()
 
@@ -23,15 +19,6 @@ final class KeyLeakTests: XCTestCase {
         return get(url).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
     }
 
-    /// The key is in no address in the simulator's log, whatever happens
-    /// to the app's connections: just opened, closed by the server, dropped
-    /// by a server gone down, closed as the app goes to the background and
-    /// back, and at sign-out. Each count is the test server's own key (not
-    /// a login) in the last five minutes of the log. The account comes from
-    /// a helper's address (TEST_RUNNER_LEAK_FEED), not the launch
-    /// environment, which the log records. Regression: the websocket
-    /// carried the key in its address, and a server gone down wrote it to
-    /// the log (4 lines).
     func testNoConnectionCarriesTheKeyInItsAddress() throws {
         let feed = try XCTUnwrap(ProcessInfo.processInfo.environment["LEAK_FEED"].flatMap(URL.init(string:)), "needs TEST_RUNNER_LEAK_FEED")
         let server = try XCTUnwrap(ProcessInfo.processInfo.environment["LEAK_SERVER"].flatMap(URL.init(string:)), "needs TEST_RUNNER_LEAK_SERVER")

@@ -37,7 +37,6 @@ final class PlayerLookTests: XCTestCase {
         print("SHOT \(note) → \(name)")
     }
 
-    /// The film "Animals" (or the one with this title) from Search, playing.
     private func openFilm(_ arguments: [String] = [], titled title: String? = nil) {
         app.launchArguments = ["-debugSearch", title?.lowercased() ?? "animals"] + arguments
         app.launch()
@@ -649,8 +648,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(after, before, "picking subtitles went back into the film to read it again")
     }
 
-    /// Picks the film's own English subtitles: how many times the player
-    /// read back into the film for them (none when their copy is here).
     private func readsBackPickingEnglish() throws -> Int {
         let readout = app.staticTexts["debug-reads-back"].firstMatch
         XCTAssertTrue(readout.waitForExistence(timeout: 5), "no reads-back readout")
@@ -668,11 +665,6 @@ final class PlayerLookTests: XCTestCase {
         return (Int(readout.label) ?? -1) - before
     }
 
-    /// The server's copy of the film's own English track comes even when
-    /// the server takes 25 s to take each track out (a real one reads the
-    /// whole film: Asterix the Gaul took over a minute), so picking English
-    /// reads nothing back. Regression: the copy gave up after 20 s. Needs
-    /// the multi-track test file (TEST_RUNNER_MULTI_TRACK=1).
     func testCopyOfTheFilmsTrackWaitsForASlowServer() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
@@ -680,15 +672,10 @@ final class PlayerLookTests: XCTestCase {
         configure(server, ["reference_delay": "25"])
         defer { configure(server, ["reset": "1"]) }
         openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"])
-        // The Spanish copy, then the English one.
         sleep(55)
         XCTAssertEqual(try readsBackPickingEnglish(), 0, "picking English read back into the film: its copy never came")
     }
 
-    /// A copy the server failed to give is asked for again (after 15 s and
-    /// 60 s; 1 s and 2 s with -quickSubtitleRetries), so picking English
-    /// reads nothing back. Regression: one failure, and the film played on
-    /// without it. Needs the multi-track test file.
     func testCopyOfTheFilmsTrackIsAskedAgainAfterAFailure() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
@@ -702,12 +689,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(try readsBackPickingEnglish(), 0, "picking English read back into the film: its copy never came")
     }
 
-    /// Each subtitle track is asked for once per play, though the film's
-    /// own track is both a copy and the reference a file beside the film is
-    /// put in time with (the server reads the whole film for each ask).
-    /// Regression: both at once. Needs the multi-track US film with the
-    /// English SDH file beside it (TEST_RUNNER_SUBTITLE_FILES=1,
-    /// TEST_RUNNER_MULTI_TRACK=1).
     func testEachSubtitleTrackIsAskedForOnce() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_FILES"] != nil
                           && ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track film with a file beside it")
@@ -721,11 +702,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(asked.count, Set(asked).count, "a track was asked for more than once: \(asked.sorted())")
     }
 
-    /// No subtitle request carries the Emby key in its address, even when
-    /// the server redirects it to an address with the key: the key goes in
-    /// a header (the system logs the address of a request that fails).
-    /// Regression: a real run found the key in that log, from a subtitle
-    /// copy's request. Same needs as testEachSubtitleTrackIsAskedForOnce.
     func testSubtitleRequestsKeepTheKeyOutOfTheirAddress() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_FILES"] != nil
                           && ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track film with a file beside it")
@@ -740,16 +716,9 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(subtitleRequests(server, "headerless"), [], "subtitles were asked for without the key in a header")
     }
 
-    /// No request for a film's stream (through the relay, and those cut off
-    /// when the film closes) has the Emby key in its address: each sends it
-    /// in a header (the system logs the address of a request that fails or
-    /// is stopped). No websocket is opened: Emby takes its key only in the
-    /// address. Regression: each address had it, and a real run found the
-    /// key in that log.
     func testFilmRequestsKeepTheKeyOutOfTheirAddress() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
-        // Slow answers: a request is still under way when the film closes.
         configure(server, ["video_delay": "2"])
         defer { configure(server, ["reset": "1"]) }
         openFilm()
@@ -763,10 +732,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
     }
 
-    /// While a converted version plays, the connection is tested every 20 s
-    /// by reading 4 MiB of the original, then stopping: that request, and
-    /// the converted stream's own, send the Emby key in a header, not in
-    /// the address. Regression: in the address.
     func testSpeedCheckKeepsTheKeyOutOfItsAddress() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -787,12 +752,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
     }
 
-    /// A film page opens a player out of sight (and its subtitles); the
-    /// next page's player takes its place, and the first one's request for
-    /// its own track (the server reads the whole film for it) is stopped.
-    /// Regression: those requests went on after their player closed, and
-    /// on Apple TV four of them held up the film then played. Needs the
-    /// multi-track test file.
     func testPlayersOpenedAheadStopTheirSubtitlesWhenLeft() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
@@ -817,9 +776,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertFalse(subtitleRequests(server, "cut").isEmpty, "a player left behind kept asking for its subtitles: \(subtitleRequests(server))")
     }
 
-    /// No address of a playback carries the Emby key (its streams, its
-    /// subtitles, the stretches of its sound): the key goes in a header.
-    /// Regression: the stretches of sound carried it.
     func testPlaybackAddressesHoldNoKey() throws {
         openFilm()
         let keyed = app.staticTexts["debug-keyed"].firstMatch
@@ -827,11 +783,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(keyed.label, "0", "addresses of the playback carry the key")
     }
 
-    /// The converted version is asked for as the real Emby serves it to a
-    /// header alone (a master playlist, its variant, the segments, none
-    /// with the key in its address), each request with the key in a
-    /// header, and it plays. Regression: the test server put the key in
-    /// every segment's address and asked for no header, unlike the real one.
     func testConvertedVersionSendsTheKeyOnlyInAHeader() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -857,26 +808,20 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
     }
 
-    /// A film played again, after the app was closed, asks the server for
-    /// none of its subtitles: the files beside it and the copies of its own
-    /// tracks are kept on the device. Regression: every play fetched them
-    /// all again (the copies, each a read of the whole film). Same needs as
-    /// testEachSubtitleTrackIsAskedForOnce.
     func testSecondPlayAsksForNoSubtitles() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBTITLE_FILES"] != nil
                           && ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track film with a file beside it")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
-        // One film of that name: three are named Animals, and their order
-        // changes once IMDb's ratings have come.
-        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"], titled: "Oppenheimer")
+        let uniquelyNamedFilm = "Oppenheimer"
+        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"], titled: uniquelyNamedFilm)
         sleep(5)
         let film = app.staticTexts["debug-item"].firstMatch.label
         XCTAssertFalse(subtitleRequests(server).filter { $0.hasPrefix("\(film):") }.isEmpty, "the first play asked for no subtitles")
         app.terminate()
         let mark = markTime(server)
-        openFilm(["-forgetTrackChoices", "YES"], titled: "Oppenheimer")
+        openFilm(["-forgetTrackChoices", "YES"], titled: uniquelyNamedFilm)
         sleep(5)
         XCTAssertEqual(app.staticTexts["debug-item"].firstMatch.label, film, "the second play is another film")
         XCTAssertEqual(subtitleRequests(server, since: mark).filter { $0.hasPrefix("\(film):") }, [], "the second play asked for subtitles again")
@@ -1153,10 +1098,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertLessThan(took, 1.2, "a resumed title took \(took) s to start from a slow server")
     }
 
-    /// Watched further on another device while the app was in the
-    /// background: played once it's back, the film starts where the other
-    /// device left it. Regression: a plan made before the app went away
-    /// (kept three minutes) started it where it had been before.
     func testResumeMovedElsewhereWhileAwayPlaysFromThere() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -1683,18 +1624,10 @@ final class PlayerLookTests: XCTestCase {
         listed(server, "mock/video_requests", since: since)
     }
 
-    /// "item:index" for each request for a subtitle track ("items"), for
-    /// those with the key in their address ("keyed") or without it in a
-    /// header ("headerless"), and those the app hung up on ("cut").
     private func subtitleRequests(_ server: URL, since: Double = 0, _ field: String = "items") -> [String] {
         listed(server, "mock/subtitle_requests", since: since, field)
     }
 
-    /// The requests that need the Emby key ("stream:item", "speed:item",
-    /// "hls:item", "playlist:item", "segment:name", "websocket"): all
-    /// ("items"), those with the key in their
-    /// address ("keyed") or without it in a header ("headerless"), and those
-    /// the app hung up on mid-answer ("cancelled").
     private func keyChecks(_ server: URL, _ field: String) -> [String] {
         listed(server, "mock/key_checks", since: 0, field)
     }

@@ -1,15 +1,5 @@
 import XCTest
 
-/// iPhone: Home doesn't change while you look at it, like Netflix's. The
-/// app runs with OPENREEL_DEBUG_HOME_VARY: each Home built comes with its
-/// cards in another order and its number after each row's name, so a build
-/// put on the page under your eyes would move things. A film is added and
-/// a show watched on another device while the app is away: back in it,
-/// the rows must stay exactly as they were until Home is chosen again in
-/// the tab bar (there is no pull to refresh, as in the Apple TV app and
-/// Netflix). Run with `xcodebuild test -scheme OpenIPTV` on
-/// an iPhone simulator signed in to the test server (scripts/mock_server.py)
-/// through TEST_RUNNER_DEBUG_EMBY; screenshots go to /tmp/openiptv/uitest-agent.
 final class PhoneHomeStabilityTests: XCTestCase {
     private let app = XCUIApplication()
     private let shots = URL(fileURLWithPath: "/tmp/openiptv/uitest-agent")
@@ -36,8 +26,6 @@ final class PhoneHomeStabilityTests: XCTestCase {
         // Down to the rows, so they're all on screen together.
         drag(from: 0.75, to: 0.35)
         sleep(2)
-        // A short trip away, meanwhile a film added and the show's next
-        // episode started elsewhere: Home is built again once it's back.
         XCUIDevice.shared.press(.home)
         configure(server, ["resume_episode": "4", "added": "z9"])
         sleep(3)
@@ -143,8 +131,6 @@ final class PhoneHomeStabilityTests: XCTestCase {
         sleep(10)
         let before = pageNumbers()
         XCTAssertFalse(before.isEmpty, "no numbered rows on Home")
-        // A short trip away, meanwhile a film added elsewhere: a new Home is
-        // built once it's back, and waits.
         XCUIDevice.shared.press(.home)
         configure(server, ["added": "z9"])
         sleep(2)
@@ -289,10 +275,6 @@ final class PhoneHomeStabilityTests: XCTestCase {
         shot("continue watching after return")
     }
 
-    /// Added to the library on another device while the app was in the
-    /// background: back in the app, search finds it. Regression: what
-    /// changed was asked every ten minutes, or when Emby's websocket (no
-    /// longer opened) said so.
     func testFilmAddedElsewhereShowsAfterReturn() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])

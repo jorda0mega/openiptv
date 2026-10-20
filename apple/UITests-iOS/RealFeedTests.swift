@@ -515,11 +515,6 @@ final class RealFeedTests: XCTestCase {
         return readout.label.split(separator: " ").first.flatMap { Double($0) }
     }
 
-    /// How the server takes the Emby key in a header alone, as counts and
-    /// yes or no only (never an address or the key): (a) a film lowered to
-    /// the converted version plays; (b) how many addresses in that
-    /// version's playlists carry the key. The film:
-    /// TEST_RUNNER_REAL_FEED_FILM, else Asterix and Cleopatra.
     func testFilmAuthAsSeenNow() throws {
         let film = ProcessInfo.processInfo.environment["REAL_FEED_FILM"] ?? "Asterix and Cleopatra"
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil

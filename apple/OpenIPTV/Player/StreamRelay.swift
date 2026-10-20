@@ -38,9 +38,7 @@ final class StreamRelay: @unchecked Sendable {
     private var ahead: [String: [URLSessionDataTask]] = [:]
     private var aheadFiles: Set<String> = []
     private var stoppedAhead: Set<String> = []
-    /// The account signed in (not its key): bytes fetched for one are never
-    /// served to the next.
-    private let account = Locked(UUID().uuidString)
+    private let accountCacheID = Locked(UUID().uuidString)
     /// The file playing (none: nothing yet): while something plays, no
     /// other file is fetched ahead.
     private var playingFile: String?
@@ -212,14 +210,13 @@ final class StreamRelay: @unchecked Sendable {
 
     /// A file's address without the server's session for one request.
     private func cacheKey(_ url: URL) -> String {
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return account.value + " " + url.absoluteString }
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return accountCacheID.value + " " + url.absoluteString }
         parts.queryItems = parts.queryItems?.filter { !["playsessionid", "api_key"].contains($0.name.lowercased()) }
-        return account.value + " " + (parts.string ?? url.absoluteString)
+        return accountCacheID.value + " " + (parts.string ?? url.absoluteString)
     }
 
-    /// Signed out: nothing kept, under way or routed for that account.
     func forgetAccount() {
-        account.mutate { $0 = UUID().uuidString }
+        accountCacheID.mutate { $0 = UUID().uuidString }
         let stopping: [URLSessionDataTask] = lock.withLock {
             let stopping = ahead.values.flatMap { $0 }
             routes = RelayRoutes()

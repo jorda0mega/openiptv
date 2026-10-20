@@ -75,13 +75,11 @@ final class MPVPlayer: @unchecked Sendable {
     private let stateLock = NSLock()
     private var closed = false
     private var playedLive = false
-    /// Opened before a tap: its server subtitles wait their turn for it.
     private var ahead: Interest?
-    private var subtitleWork: [Task<Void, Never>] = []
+    private var subtitleTasks: [Task<Void, Never>] = []
     private var serverSubtitles: [ServerSubtitle] = []
     #if DEBUG
     private var playlistKeys = ""
-    /// Real-feed checks: the converted stream's playlists, keyed addresses / all (see PlaylistKeys).
     var hlsKeys: String { stateLock.withLock { playlistKeys } }
     #endif
 
@@ -714,7 +712,7 @@ final class MPVPlayer: @unchecked Sendable {
             var fetched: [(EmbyPlayback.SubtitleFile, String)] = []
             for file in files {
                 guard !Task.isCancelled else { return }
-                guard let local = await Self.local(file.source, ahead: self?.stillAhead) else { continue }
+                guard let local = await Self.local(file.source, ahead: self?.currentAheadInterest) else { continue }
                 let text = try? String(contentsOf: local, encoding: .utf8)
                 if let text { fetched.append((file, text)) }
                 // In time from the first line when it played before.
@@ -1073,13 +1071,10 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    /// Opened before a tap (`interest`), its server subtitles wait their
-    /// turn until `playNow`.
     func openedAhead(for interest: Interest) {
         stateLock.withLock { ahead = interest }
     }
 
-    /// Played: what its subtitles still wait for goes now.
     func playNow() {
         let waiting = stateLock.withLock { () -> [ServerSubtitle] in
             ahead = nil
@@ -1096,16 +1091,14 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    /// Asked again before each fetch: a player played since goes now.
-    private var stillAhead: Interest? {
+    private var currentAheadInterest: Interest? {
         stateLock.withLock { ahead }
     }
 
-    /// Stopped when the player closes: no one waits for its subtitles then.
     private func startSubtitleWork(_ work: @escaping @Sendable () async -> Void) {
         stateLock.withLock {
             guard !closed else { return }
-            subtitleWork.append(Task.detached(priority: .utility, operation: work))
+            subtitleTasks.append(Task.detached(priority: .utility, operation: work))
         }
     }
 
@@ -1170,7 +1163,7 @@ final class MPVPlayer: @unchecked Sendable {
         startSubtitleWork { [weak self] in
             for copy in wanted {
                 guard !Task.isCancelled else { return }
-                guard let local = await ServerSubtitles.local(copy.subtitle, ahead: self?.stillAhead) else { continue }
+                guard let local = await ServerSubtitles.local(copy.subtitle, ahead: self?.currentAheadInterest) else { continue }
                 self?.queue.async { [weak self] in self?.addCopy(copy, at: local, tries: 10) }
             }
         }
@@ -1268,7 +1261,7 @@ final class MPVPlayer: @unchecked Sendable {
             references?.files.cancel()
             references?.own.cancel()
             speech?.cancel()
-            subtitleWork.forEach { $0.cancel() }
+            subtitleTasks.forEach { $0.cancel() }
             return playedLive
         }
         if live { Self.closing.enter() }
@@ -1854,8 +1847,6 @@ extension MPVPlayer {
 }
 
 extension NetworkStatus {
-    /// How a file should be buffered: generously (in memory) when the
-    /// connection is unmetered, otherwise a couple of minutes.
     var fileReadahead: MPVPlayer.Readahead {
         unmetered ? .generous : .modest
     }

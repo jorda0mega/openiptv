@@ -1,8 +1,5 @@
 import XCTest
 
-/// The server's subtitle files kept on the device (ServerSubtitles): known
-/// by the track, never by the key, with one owner of the folder that a
-/// sign-out or launch pruning cannot race.
 final class ServerSubtitlesTests: XCTestCase {
     private let folder = FileManager.default.temporaryDirectory.appending(path: "server-subtitles-\(UUID().uuidString)")
     private let perPlay = FileManager.default.temporaryDirectory.appending(path: "subtitles-\(UUID().uuidString)")
