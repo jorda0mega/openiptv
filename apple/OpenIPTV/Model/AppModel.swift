@@ -2277,7 +2277,7 @@ final class AppModel {
     }
 
     func notePlaying(_ copy: LiveChannel) {
-        sayCleared(liveFailures.playedIfCurrent(copy.id), game: false)
+        if liveFailures.contains(copy.id) { sayCleared(liveFailures.played(copy.id), game: false) }
         let all = copies(of: copy)
         let ids = all.map(\.id)
         guard liveFailures.gameNotPlaying(ids) else { return }

@@ -37,12 +37,6 @@ struct LiveFailures: Equatable {
         channels.removeValue(forKey: id)
     }
 
-    mutating func playedIfCurrent(_ id: String, at now: Date = Date()) -> Mark? {
-        guard let mark = channels[id], mark.end(after: channelLife) > now else { return nil }
-        channels[id] = nil
-        return mark
-    }
-
     func failed(_ ids: [String], playingCopy: String? = nil, at now: Date = Date()) -> Bool {
         !ids.isEmpty && !ids.contains { $0 == playingCopy } && ids.allSatisfy { contains($0, at: now) }
     }
