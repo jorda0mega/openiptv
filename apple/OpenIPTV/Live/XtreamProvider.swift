@@ -55,9 +55,19 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
         let formats = account.user_info.allowed_output_formats
         if !formats.isEmpty, !formats.contains("ts"), formats.contains("m3u8") { outputExtension = "m3u8" }
 
-        let rawCategories = JSONDecoder().lenientList(RawCategory.self, from: try await categoryData)
+        let (categories, channels) = lineup(categoryData: try await categoryData, channelData: try await channelData)
+        var xmltv = URLComponents(url: server.appending(path: "xmltv.php"), resolvingAgainstBaseURL: false)!
+        // Today and tomorrow only, a quarter smaller than everything; a
+        // channel's earlier programmes come from its own schedule.
+        xmltv.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password),
+                            .init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")]
+        return LiveLineup(categories: categories, channels: channels, guideURLs: [xmltv.url!])
+    }
+
+    func lineup(categoryData: Data, channelData: Data) -> (categories: [LiveCategory], channels: [LiveChannel]) {
+        let rawCategories = JSONDecoder().lenientList(RawCategory.self, from: categoryData)
         let hidden = Set(rawCategories.filter { AccountInfoFilter.looksLikeAccountInfo($0.name) }.map(\.id))
-        let channels = JSONDecoder().lenientList(RawChannel.self, from: try await channelData).compactMap { channel($0, hidden: hidden) }
+        let channels = JSONDecoder().lenientList(RawChannel.self, from: channelData).compactMap { channel($0, hidden: hidden) }
         var counts: [String: Int] = [:]
         for c in channels { if let cat = c.categoryId { counts[cat, default: 0] += 1 } }
         let categories = rawCategories.compactMap { raw -> LiveCategory? in
@@ -65,12 +75,7 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
             guard let count = counts[id], count > 0 else { return nil }
             return LiveCategory(id: id, name: raw.name, channels: count)
         }
-        var xmltv = URLComponents(url: server.appending(path: "xmltv.php"), resolvingAgainstBaseURL: false)!
-        // Today and tomorrow only, a quarter smaller than everything; a
-        // channel's earlier programmes come from its own schedule.
-        xmltv.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password),
-                            .init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")]
-        return LiveLineup(categories: categories, channels: channels, guideURLs: [xmltv.url!])
+        return (categories, channels)
     }
 
     private func channel(_ raw: RawChannel, hidden: Set<String>) -> LiveChannel? {

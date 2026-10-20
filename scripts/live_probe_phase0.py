@@ -33,8 +33,12 @@ def fields(line):
     return dict(word.split("=", 1) for word in line.split()[2:] if "=" in word)
 
 
+def is_picked_ids_for_the_shell(line):
+    return re.fullmatch(r"OPENIPTV_PROBE_IDS=(?:\d{1,12}(?:,\d{1,12}){0,19})?", line) is not None
+
+
 def leaks(line):
-    if re.fullmatch(r"OPENIPTV_PROBE_IDS=(?:\d{1,12}(?:,\d{1,12}){0,19})?", line):
+    if is_picked_ids_for_the_shell(line):
         return False
     return bool(re.search(r"[^A-Za-z0-9_=.> -]", line) or any(
         len(word) > 32 or ("." in word and not re.fullmatch(r"[a-z0-9_]+=-?\d+\.\d+", word)) for word in line.split()))
@@ -183,7 +187,7 @@ ROWS = [
 ]
 
 
-def holder(port):
+def debug_sign_in_holder(port):
     source = json.dumps({"id": "00000000-0000-0000-0000-000000000001", "name": "Test server",
                          "kind": {"xtream": {"server": f"http://127.0.0.1:{port}/", "username": "u", "password": "p"}}}).encode()
 
@@ -250,7 +254,7 @@ def main():
                 time.sleep(0.1)
         if mock.poll() is not None:
             sys.exit(f"the test server did not start on port {args.port}")
-        feed = holder(args.port)
+        feed = debug_sign_in_holder(args.port)
         echoed, agents = echo()
         failed = 0
         pids = []

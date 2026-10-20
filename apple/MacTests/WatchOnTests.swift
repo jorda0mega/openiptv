@@ -158,10 +158,10 @@ final class LiveFailuresTests: XCTestCase {
 
     func testGameMarkLastsFifteenMinutes() {
         var failures = LiveFailures()
-        failures.noteGame(["a", "b"], at: at(0), now: at(0))
+        failures.noteSharedGame(["a", "b"], at: at(0), now: at(0))
         XCTAssertTrue(failures.gameNotPlaying(["b", "c"], at: at(899)))
         XCTAssertFalse(failures.gameNotPlaying(["a"], at: at(900)), "the game's mark outlived 15 min")
-        failures.noteGame(["a"], at: at(-600), now: at(0))
+        failures.noteSharedGame(["a"], at: at(-600), now: at(0))
         XCTAssertTrue(failures.gameNotPlaying(["a"], at: at(899)), "an older finding from another device shortened the mark")
         XCTAssertEqual(Set(failures.gamePlayed(["a", "c"]).keys), ["a"])
         XCTAssertFalse(failures.gameNotPlaying(["a"], at: at(1)))
@@ -172,22 +172,22 @@ final class LiveFailuresTests: XCTestCase {
         failures.note("soon", at: at(0), kickoff: at(120))
         failures.note("later", at: at(0), kickoff: at(3600))
         failures.note("on", at: at(0), kickoff: at(-60))
-        failures.noteGame(["game"], at: at(0), kickoff: at(120), now: at(0))
+        failures.noteSharedGame(["game"], at: at(0), kickoff: at(120), now: at(0))
         XCTAssertTrue(failures.contains("soon", at: at(119)))
         XCTAssertFalse(failures.contains("soon", at: at(120)), "a try before kickoff outlived it")
         XCTAssertFalse(failures.gameNotPlaying(["game"], at: at(120)), "a game tried before kickoff stayed Not playing")
         XCTAssertFalse(failures.contains("later", at: at(600)), "a try an hour early outlived its 10 min")
         XCTAssertTrue(failures.contains("on", at: at(599)), "a try during the game ended at its kickoff")
-        XCTAssertEqual(failures.played("soon")?.beforeKickoff, true)
-        XCTAssertEqual(failures.played("on")?.beforeKickoff, false)
+        XCTAssertEqual(failures.played("soon")?.madeBeforeKickoff, true)
+        XCTAssertEqual(failures.played("on")?.madeBeforeKickoff, false)
     }
 
     func testAnEndedGameMarkIsNotNoted() {
         var failures = LiveFailures()
         let before = failures
-        failures.noteGame(["g"], at: at(0), now: at(900))
+        failures.noteSharedGame(["g"], at: at(0), now: at(900))
         XCTAssertEqual(failures, before, "a game mark already over was noted again")
-        failures.noteGame(["g"], at: at(0), kickoff: at(60), now: at(60))
+        failures.noteSharedGame(["g"], at: at(0), kickoff: at(60), now: at(60))
         XCTAssertEqual(failures, before, "a mark from before kickoff was noted after kickoff")
     }
 
@@ -195,7 +195,7 @@ final class LiveFailuresTests: XCTestCase {
         var failures = LiveFailures()
         XCTAssertNil(failures.nextEnd)
         failures.note("a", at: at(0))
-        failures.noteGame(["g"], at: at(0), kickoff: at(60), now: at(0))
+        failures.noteSharedGame(["g"], at: at(0), kickoff: at(60), now: at(0))
         XCTAssertEqual(failures.nextEnd, at(60))
         failures.dropEnded(at: at(60))
         XCTAssertEqual(failures.nextEnd, at(600))

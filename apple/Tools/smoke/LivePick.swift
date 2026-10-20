@@ -3,40 +3,6 @@ import Foundation
 enum LivePick {
     static let slots = 6
 
-    struct Category: Decodable {
-        let id: String
-        let name: String
-        enum CodingKeys: String, CodingKey { case category_id, category_name }
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            guard let id = c.flexString(.category_id) else {
-                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "no id"))
-            }
-            self.id = id
-            name = c.flexString(.category_name) ?? id
-        }
-    }
-
-    struct Stream: Decodable {
-        let streamId: Int64?
-        let num: Int64?
-        let name: String
-        let epgId: String?
-        let categoryId: String?
-        let archiveDays: Int?
-        enum CodingKeys: String, CodingKey { case stream_id, num, name, epg_channel_id, category_id, tv_archive, tv_archive_duration }
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            streamId = c.flexInt(.stream_id)
-            num = c.flexInt(.num)
-            name = (c.flexString(.name) ?? "").trimmingCharacters(in: .whitespaces)
-            epgId = c.flexString(.epg_channel_id)?.trimmingCharacters(in: .whitespaces)
-            categoryId = c.flexString(.category_id)
-            let days = c.flexInt(.tv_archive_duration).map(Int.init) ?? 0
-            archiveDays = c.flexInt(.tv_archive) == 1 && days > 0 ? days : nil
-        }
-    }
-
     static func list(_ login: LiveProbe.Login, _ action: String) async -> Data? {
         guard let url = login.api(action) else { LiveProbe.say("PICK error=other"); return nil }
         let r = await LiveProbe.read(url, agent: LiveProbe.agent(.app), cap: 120, keep: 256 << 20)
@@ -61,31 +27,37 @@ enum LivePick {
         guard let categoryData = await list(login, "get_live_categories"), let streamData = await list(login, "get_live_streams")
         else { return 1 }
 
-        let source = UUID()
-        let rawCategories = JSONDecoder().lenientList(Category.self, from: categoryData)
-        let hidden = Set(rawCategories.filter { AccountInfoFilter.looksLikeAccountInfo($0.name) }.map(\.id))
-        let channels = JSONDecoder().lenientList(Stream.self, from: streamData).compactMap { raw -> LiveChannel? in
-            guard let id = raw.streamId,
-                  !AccountInfoFilter.looksLikeAccountInfo(raw.name),
-                  !AccountInfoFilter.mentions(raw.name, secrets: [login.username, login.password]),
-                  raw.categoryId.map({ !hidden.contains($0) }) ?? true
-            else { return nil }
-            return LiveChannel(id: "\(source.uuidString)|\(id)", sourceId: source, number: raw.num, name: raw.name, logo: nil,
-                               categoryId: raw.categoryId.map { "\(source.uuidString)|\($0)" }, epgId: raw.epgId,
-                               nativeId: String(id), stream: .xtream(streamId: id), archiveDays: raw.archiveDays)
-        }
-        var counts: [String: Int] = [:]
-        for c in channels { if let category = c.categoryId { counts[category, default: 0] += 1 } }
-        let categories = rawCategories.compactMap { raw -> LiveCategory? in
-            let id = "\(source.uuidString)|\(raw.id)"
-            guard let count = counts[id], count > 0 else { return nil }
-            return LiveCategory(id: id, name: raw.name, channels: count)
-        }
-        let (own, shown) = LiveOrganizer.withoutLogin(categories: categories, channels: channels)
+        let source = IPTVSource(name: "Pick", kind: .xtream(server: login.server, username: login.username, password: login.password))
+        let lineup = XtreamProvider(source: source).lineup(categoryData: categoryData, channelData: streamData)
+        let (own, shown) = LiveOrganizer.withoutLogin(categories: lineup.categories, channels: lineup.channels)
         let now = Date()
         let library = LiveOrganizer.organize(categories: own, channels: shown, home: home, now: now)
-        let sections = library.shelves.flatMap { shelf in shelf.sections.map { (shelf: shelf.id, section: $0) } }
+        let sections = library.shelves.flatMap { shelf in shelf.sections.map { Placed(shelf: shelf.id, section: $0) } }
 
+        let (live, twins) = liveGameSlotsTwinsFirst(sections, now: now)
+        let groups = copyGroupsHomeFirstBiggestFirst(sections)
+        var always = fhdAndSDCopies(in: groups.filter { named($0, word) }, besides: live)
+        always += bestCopies(ofFirst: 2, groups.filter { !named($0, word) }, besides: live + always)
+
+        LiveProbe.say("PICK live=\(live.count) twins=\(twins) always=\(always.count) requests=\(LiveProbe.requests)")
+        LiveProbe.say("OPENIPTV_PROBE_IDS=" + (live + always).joined(separator: ","))
+        return LiveProbe.refusedLines == 0 ? 0 : 2
+    }
+
+    struct Placed {
+        let shelf: String
+        let section: LiveOrganizer.Section
+    }
+
+    static let fhd = 6, sd = 2
+
+    static func quality(_ channel: LiveChannel) -> Int { WatchOn.quality(of: channel.name).score }
+
+    static func named(_ entry: LiveOrganizer.Entry, _ word: String) -> Bool {
+        LiveOrganizer.EventName.words(entry.title).contains(word)
+    }
+
+    static func liveGameSlotsTwinsFirst(_ sections: [Placed], now: Date) -> (ids: [String], twins: Int) {
         let games = sections.filter { $0.section.id == "events" }.flatMap(\.section.entries).filter {
             GameTime.state(start: $0.event?.start, league: $0.event?.league ?? "", title: $0.title, now: now) == .live
         }
@@ -98,9 +70,12 @@ enum LivePick {
         for game in games where live.count < slots && !live.contains(game.channels[0].nativeId) {
             live.append(game.channels[0].nativeId)
         }
+        return (live, twins)
+    }
 
+    static func copyGroupsHomeFirstBiggestFirst(_ sections: [Placed]) -> [LiveOrganizer.Entry] {
         let international = LiveOrganizer.internationalID
-        let groups = sections.filter { $0.section.id != "events" }
+        return sections.filter { $0.section.id != "events" }
             .flatMap { place in place.section.entries.map { (abroad: place.shelf == international, entry: $0) } }
             .enumerated().sorted { a, b in
                 let (x, y) = (a.element, b.element)
@@ -108,29 +83,28 @@ enum LivePick {
                 if x.entry.channels.count != y.entry.channels.count { return x.entry.channels.count > y.entry.channels.count }
                 return a.offset < b.offset
             }.map(\.element.entry)
-        func quality(_ channel: LiveChannel) -> Int { WatchOn.quality(of: channel.name).score }
-        func named(_ entry: LiveOrganizer.Entry) -> Bool { LiveOrganizer.EventName.words(entry.title).contains(word) }
-        let candidates = groups.filter(named)
-        let chosen = candidates.first { e in e.channels.contains { quality($0) == 6 } && e.channels.contains { quality($0) == 2 } }
-            ?? candidates.first { $0.channels.count > 1 } ?? candidates.first
-        var always: [String] = []
-        if let chosen {
-            let fhd = chosen.channels.first { quality($0) == 6 }, sd = chosen.channels.first { quality($0) == 2 }
-            for channel in [fhd ?? chosen.channels[0], sd ?? chosen.channels[chosen.channels.count - 1]]
-            where !always.contains(channel.nativeId) && !live.contains(channel.nativeId) {
-                always.append(channel.nativeId)
-            }
-        }
-        var others = 0
-        for entry in groups where others < 2 && !named(entry) {
-            let id = entry.channels[0].nativeId
-            guard !live.contains(id), !always.contains(id) else { continue }
-            always.append(id)
-            others += 1
-        }
+    }
 
-        LiveProbe.say("PICK live=\(live.count) twins=\(twins) always=\(always.count) requests=\(LiveProbe.requests)")
-        LiveProbe.say("OPENIPTV_PROBE_IDS=" + (live + always).joined(separator: ","))
-        return LiveProbe.refusedLines == 0 ? 0 : 2
+    static func fhdAndSDCopies(in candidates: [LiveOrganizer.Entry], besides live: [String]) -> [String] {
+        let chosen = candidates.first { e in e.channels.contains { quality($0) == fhd } && e.channels.contains { quality($0) == sd } }
+            ?? candidates.first { $0.channels.count > 1 } ?? candidates.first
+        guard let chosen else { return [] }
+        let fhdCopy = chosen.channels.first { quality($0) == fhd } ?? chosen.channels[0]
+        let sdCopy = chosen.channels.first { quality($0) == sd } ?? chosen.channels[chosen.channels.count - 1]
+        var picked: [String] = []
+        for channel in [fhdCopy, sdCopy] where !picked.contains(channel.nativeId) && !live.contains(channel.nativeId) {
+            picked.append(channel.nativeId)
+        }
+        return picked
+    }
+
+    static func bestCopies(ofFirst count: Int, _ groups: [LiveOrganizer.Entry], besides taken: [String]) -> [String] {
+        var picked: [String] = []
+        for entry in groups where picked.count < count {
+            let id = entry.channels[0].nativeId
+            guard !taken.contains(id), !picked.contains(id) else { continue }
+            picked.append(id)
+        }
+        return picked
     }
 }

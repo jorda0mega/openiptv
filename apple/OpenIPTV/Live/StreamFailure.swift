@@ -126,8 +126,12 @@ struct FailureLedger {
         found = found.filter { $0.key.player != player }
     }
 
+    private var onlyOpenLoad: Load? {
+        open.count == 1 ? open.first : nil
+    }
+
     mutating func record(_ failure: StreamFailure, at time: Double) {
-        guard open.count == 1, let load = open.first else { return }
+        guard let load = onlyOpenLoad else { return }
         found[load] = (failure, time)
     }
 

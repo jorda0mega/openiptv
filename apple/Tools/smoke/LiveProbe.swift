@@ -64,7 +64,8 @@ enum LiveProbe {
             return line
         }
 
-        var endedEarly: Bool { ext == .ts && framing != "length" && status == 200 && bytes > 0 && !capped }
+        var endsByDesign: Bool { ext == .m3u8 || framing == "length" }
+        var endedEarly: Bool { !endsByDesign && status == 200 && bytes > 0 && !capped }
     }
 
     struct Playlist {
@@ -73,17 +74,28 @@ enum LiveProbe {
 
     static var refusedLines = 0
 
-    static func safe(_ line: String) -> Bool {
-        if line.range(of: #"\AOPENIPTV_PROBE_IDS=(?:[0-9]{1,12}(?:,[0-9]{1,12}){0,19})?\z"#, options: .regularExpression) != nil { return true }
-        let alphabet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.>- ")
-        guard line.unicodeScalars.allSatisfy(alphabet.contains) else { return false }
+    static let fieldCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.>- ")
+    static let longestWord = 32
+
+    /// The provider's stream addresses carry the login.
+    static func holdsNoAddress(_ line: String) -> Bool {
+        if isPickedIdsForTheShell(line) { return true }
+        guard line.unicodeScalars.allSatisfy(fieldCharacters.contains) else { return false }
         return line.split(separator: " ").allSatisfy { word in
-            word.count <= 32 && (!word.contains(".") || word.range(of: "^[a-z0-9_]+=-?[0-9]+[.][0-9]+$", options: .regularExpression) != nil)
+            word.count <= longestWord && (!word.contains(".") || isDecimalField(word))
         }
     }
 
+    static func isPickedIdsForTheShell(_ line: String) -> Bool {
+        line.range(of: #"\AOPENIPTV_PROBE_IDS=(?:[0-9]{1,12}(?:,[0-9]{1,12}){0,19})?\z"#, options: .regularExpression) != nil
+    }
+
+    static func isDecimalField(_ word: Substring) -> Bool {
+        word.range(of: "^[a-z0-9_]+=-?[0-9]+[.][0-9]+$", options: .regularExpression) != nil
+    }
+
     static func say(_ line: String) {
-        if safe(line) {
+        if holdsNoAddress(line) {
             print(line)
         } else {
             refusedLines += 1
@@ -270,12 +282,12 @@ enum LiveProbe {
         }
         o.error = failure(r, headers: o.headers)
         if ext == .m3u8, o.status == 200 {
-            o.playlist = await playlist(r, agent: agent(ua), cap: cap)
+            o.playlist = await playlistAndFirstSegment(r, agent: agent(ua), cap: cap)
         }
         return o
     }
 
-    static func playlist(_ r: Reader, agent: String, cap: Double) async -> Playlist {
+    static func playlistAndFirstSegment(_ r: Reader, agent: String, cap: Double) async -> Playlist {
         let lines = String(decoding: r.body, as: UTF8.self).split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
         var p = Playlist()
@@ -328,16 +340,22 @@ enum LiveProbe {
     static func agent(_ ua: Agent) -> String { agents[ua] ?? libmpvAgent }
 
     static func login(_ env: [String: String]) async -> Login? {
-        if let holder = env["OPENIPTV_SMOKE_FEED"].flatMap(URL.init(string:)) {
-            let config = URLSessionConfiguration.ephemeral
-            config.urlCache = nil
-            let session = URLSession(configuration: config)
-            defer { session.invalidateAndCancel() }
-            guard let (data, response) = try? await session.data(from: holder), (response as? HTTPURLResponse)?.statusCode == 200,
-                  let source = try? JSONDecoder().decode(IPTVSource.self, from: data),
-                  case let .xtream(server, username, password) = source.kind else { return nil }
-            return Login(server: server, username: username, password: password)
-        }
+        if let holder = env["OPENIPTV_SMOKE_FEED"].flatMap(URL.init(string:)) { return await loginFromHolder(holder) }
+        return loginFromEnvironment(env)
+    }
+
+    static func loginFromHolder(_ holder: URL) async -> Login? {
+        let config = URLSessionConfiguration.ephemeral
+        config.urlCache = nil
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        guard let (data, response) = try? await session.data(from: holder), (response as? HTTPURLResponse)?.statusCode == 200,
+              let source = try? JSONDecoder().decode(IPTVSource.self, from: data),
+              case let .xtream(server, username, password) = source.kind else { return nil }
+        return Login(server: server, username: username, password: password)
+    }
+
+    static func loginFromEnvironment(_ env: [String: String]) -> Login? {
         guard let server = env["OPENIPTV_XTREAM_URL"].flatMap({ XtreamProvider.parse($0)?.server }),
               let username = env["OPENIPTV_XTREAM_USER"], let password = env["OPENIPTV_XTREAM_PASS"] else { return nil }
         return Login(server: server, username: username, password: password)
@@ -492,7 +510,7 @@ enum LiveProbe {
                      "PROBE wait seconds=300.0 reason=pause after=10", "PROBE done opens=3 requests=4 refused_lines=0",
                      "PICK live=6 twins=2 always=4 requests=2", "OPENIPTV_PROBE_IDS=3011,3031,123456789012", "OPENIPTV_PROBE_IDS=",
                      "OPENIPTV_PROBE_IDS=" + (1...20).map(String.init).joined(separator: ",")]
-        var wrong = leaks.filter(safe).count + lines.filter { !safe($0) }.count
+        var wrong = leaks.filter(holdsNoAddress).count + lines.filter { !holdsNoAddress($0) }.count
         let before = refusedLines
         say("PROBE leak=a/b")
         if refusedLines != before + 1 { wrong += 1 }

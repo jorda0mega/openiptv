@@ -232,7 +232,7 @@ def subtitle_file(index):
 _STREAMS = None
 
 
-def user_agent_class(header):
+def user_agent_word(header):
     agent = (header or "").lower()
     if agent.startswith("openreel"):
         return "openreel"
@@ -830,7 +830,7 @@ class Handler(BaseHTTPRequestHandler):
 
         def note(status):
             LIVE_REQUESTS.append({"t": time.time(), "id": channel, "ext": ext, "status": status,
-                                  "ua": user_agent_class(self.headers.get("User-Agent"))})
+                                  "ua": user_agent_word(self.headers.get("User-Agent"))})
 
         loop = CONTROL.get("live_redirect_loop") == "1"
         if ext == "ts" and (loop or (CONTROL.get("live_redirect") == "1" and path.startswith("/live/"))):

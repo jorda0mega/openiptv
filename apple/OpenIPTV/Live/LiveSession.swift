@@ -36,6 +36,17 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         case away(keepsStream: Bool)
         case back
         case closed
+
+        private var attempt: Attempt? {
+            switch self {
+            case let .opening(at), let .started(at), let .failed(at, _, _), let .timedOut(at, _), let .ended(at, _): at
+            case .play, .recording, .online, .paused, .away, .back, .closed: nil
+            }
+        }
+
+        func isStale(current: Attempt) -> Bool {
+            attempt.map { $0 != current } ?? false
+        }
     }
 
     enum Action: Equatable {
@@ -65,6 +76,10 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         airPlay && !onTV
     }
 
+    private enum InBackground {
+        case no, keepingStream, lettingStreamGo
+    }
+
     private(set) var phase = Phase.idle
     private(set) var attempt: Attempt = 0
     private(set) var copy: Copy?
@@ -76,7 +91,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     private var cuts = LiveCuts()
     private(set) var paused = false
     private var deadline: Attempt?
-    private var keepsStreamAway: Bool?
+    private var inBackground = InBackground.no
     private var releasedAt = Date.distantPast
     private var startLimit: Double = 15
 
@@ -124,9 +139,15 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         }
     }
 
+    private var deadlineOutlivedItsLoad: Bool {
+        guard let deadline else { return false }
+        return deadline != attempt || !isOpening
+    }
+
     mutating func handle(_ input: Input, now: Date = Date()) -> [Action] {
+        guard !input.isStale(current: attempt) else { return [] }
         let actions = step(input, now)
-        guard let timed = deadline, timed != attempt || !isOpening else { return actions }
+        guard deadlineOutlivedItsLoad else { return actions }
         deadline = nil
         return [.cancelDeadline] + actions
     }
@@ -148,22 +169,18 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             phase = .recording(started: false)
             return [.clearTimeline, .unpause, .loadRecording(attempt, resume: false)]
         case let .opening(at):
-            guard at == attempt else { return [] }
             releasedAt = now
             guard isOpening else { return [] }
             deadline = at
             return [.deadline(at, after: startLimit)]
-        case let .started(at):
-            guard at == attempt else { return [] }
+        case .started:
             return started(now)
-        case let .failed(at, failure, shown):
-            guard at == attempt else { return [] }
+        case let .failed(_, failure, shown):
             return failed(failure, shown, now)
-        case let .timedOut(at, failure):
-            guard at == attempt, isOpening else { return [] }
+        case let .timedOut(_, failure):
+            guard isOpening else { return [] }
             return failed(failure, .notPlaying, now)
-        case let .ended(at, failure):
-            guard at == attempt else { return [] }
+        case let .ended(_, failure):
             if case .recording(started: true) = phase { return [.goLive] }
             return failed(failure, .ended, now)
         case .online:
@@ -177,14 +194,14 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             return [.clearTimeline, .load(copy, attempt, after: 0)]
         case let .paused(isPaused):
             paused = isPaused
-            if isPaused { return leaveIfAway(now) }
+            if isPaused { return letStreamGoIfPausedInBackground(now) }
             guard case let .stoppedWhilePaused(copy, wasCut) = phase else { return [] }
             return wasCut ? cut(copy, now) : reopen(copy)
         case let .away(keepsStream):
-            keepsStreamAway = keepsStream
-            return leaveIfAway(now)
+            inBackground = keepsStream ? .keepingStream : .lettingStreamGo
+            return letStreamGoIfPausedInBackground(now)
         case .back:
-            keepsStreamAway = nil
+            inBackground = .no
             switch phase {
             case let .away(copy):
                 triedAgain = []
@@ -203,8 +220,8 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         }
     }
 
-    private mutating func leaveIfAway(_ now: Date) -> [Action] {
-        guard paused, keepsStreamAway == false else { return [] }
+    private mutating func letStreamGoIfPausedInBackground(_ now: Date) -> [Action] {
+        guard paused, inBackground == .lettingStreamGo else { return [] }
         let away: Phase
         switch phase {
         case let .playing(copy), let .stoppedWhilePaused(copy, _), let .offline(copy, hadPicture: true):
