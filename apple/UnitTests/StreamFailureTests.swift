@@ -49,7 +49,9 @@ final class StreamFailureTests: XCTestCase {
         XCTAssertEqual(StreamFailure(lookup: .network("The server took too long to answer.", .timedOut)), .timeout)
         XCTAssertEqual(StreamFailure(lookup: .network("That server address couldn't be found.", .cannotFindHost)), .dns)
         XCTAssertEqual(StreamFailure(lookup: .network("The server's secure connection failed.", .secureConnectionFailed)), .tls)
-        XCTAssertEqual(StreamFailure(lookup: .network("Network error (-1005).", .networkConnectionLost)), .unknown)
+        XCTAssertEqual(StreamFailure(lookup: .network("Network error (-1005).", .networkConnectionLost)), .reset)
+        XCTAssertEqual(StreamFailure(lookup: .network("Network error (-1020).", .dataNotAllowed)), .offline)
+        XCTAssertEqual(StreamFailure(lookup: .network("Network error (-1018).", .internationalRoamingOff)), .offline)
         XCTAssertEqual(StreamFailure(lookup: SourceError.wrap(URLError(.cannotConnectToHost))), .refused, "wrapping lost the kind")
         XCTAssertNil(StreamFailure(lookup: .cancelled), "a lookup the screen stopped counted as a failure")
     }
