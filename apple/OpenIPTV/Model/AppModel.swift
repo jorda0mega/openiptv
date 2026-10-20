@@ -2088,7 +2088,7 @@ final class AppModel {
                 guard let epg = channel.epgId, byGuide[epg] == nil else { continue }
                 let best = library.copies[channel.id]?.first ?? channel
                 byGuide[epg] = best
-                names[epg] = GuideMatch.fold(library.titles[best.id] ?? LiveOrganizer.Name(best.name).display)
+                names[epg] = SharedGuideRule.fold(library.titles[best.id] ?? LiveOrganizer.Name(best.name).display)
             }
             self.library = library
             self.categories = cats
@@ -2127,7 +2127,7 @@ final class AppModel {
     /// Sports. On now first, then by start; channels from abroad after
     /// local ones; local stations only for your area.
     func searchGuide(_ query: String, area: LocalArea?, limit: Int = 40) async -> [GuideHit] {
-        let words = GuideMatch.words(query)
+        let words = SharedGuideRule.words(in: query)
         guard !words.isEmpty else { return [] }
         let now = Int64(Date().timeIntervalSince1970)
         var hits: [GuideHit] = []
@@ -2145,8 +2145,8 @@ final class AppModel {
         let events = shelf(LiveOrganizer.sportsID)?.sections.first { $0.id == "events" }?.entries ?? []
         for entry in events {
             let start = entry.event?.start.map { Int64($0.timeIntervalSince1970) }
-            let text = GuideMatch.fold(entry.title + " " + (entry.event?.league ?? ""))
-            guard GuideMatch.game(words, text: text, start: start, now: now) else { continue }
+            let text = SharedGuideRule.fold(entry.title + " " + (entry.event?.league ?? ""))
+            guard SharedGuideRule.findsGame(words, text: text, start: start, now: now) else { continue }
             hits.append(GuideHit(title: entry.title, channel: entry.channels[0], channelTitle: entry.event?.league ?? "",
                                  start: start, stop: start.map { $0 + Int64(GameTime.length(league: entry.event?.league ?? "", title: entry.title)) },
                                  league: entry.event?.league))
