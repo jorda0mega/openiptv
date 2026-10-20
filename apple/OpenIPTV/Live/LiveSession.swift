@@ -12,9 +12,10 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         case opening(Copy)
         case playing(Copy)
         case reopening(Copy)
-        case cutWhilePaused(Copy)
+        case stoppedWhilePaused(Copy, cut: Bool)
         case offline(Copy, hadPicture: Bool)
         case away(Copy)
+        case awayFromRecording
         case recording(started: Bool)
         case failed(Failure)
         case closed
@@ -43,7 +44,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
 
     enum Action: Equatable {
         case load(Copy, Attempt, after: Double)
-        case loadRecording(Attempt)
+        case loadRecording(Attempt, resume: Bool)
         case stop
         case deadline(Attempt, after: Double)
         case cancelDeadline
@@ -79,6 +80,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     private var cuts = LiveCuts()
     private(set) var paused = false
     private var deadline: Attempt?
+    private var keepsStreamAway: Bool?
     private var releasedAt = Date.distantPast
     private var startLimit: Double = 15
 
@@ -86,7 +88,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
 
     var hasPicture: Bool {
         switch phase {
-        case .playing, .reopening, .cutWhilePaused, .away: true
+        case .playing, .reopening, .stoppedWhilePaused, .away, .awayFromRecording: true
         case let .offline(_, hadPicture): hadPicture
         case let .recording(started): started
         case .idle, .opening, .failed, .closed: false
@@ -97,7 +99,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         switch phase {
         case .opening, .reopening, .offline: true
         case let .recording(started): !started
-        case .idle, .playing, .cutWhilePaused, .away, .failed, .closed: false
+        case .idle, .playing, .stoppedWhilePaused, .away, .awayFromRecording, .failed, .closed: false
         }
     }
 
@@ -109,10 +111,10 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     var readout: String {
         switch phase {
         case .idle, .opening: "starting"
-        case .playing, .cutWhilePaused: "playing"
+        case .playing, .stoppedWhilePaused: "playing"
         case .reopening: "reopening"
         case .offline: "waiting"
-        case .away: "away"
+        case .away, .awayFromRecording: "away"
         case let .recording(started): started ? "playing" : "starting"
         case .failed: "failed"
         case .closed: "closed"
@@ -148,7 +150,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             cueing = false
             attempt += 1
             phase = .recording(started: false)
-            return [.clearTimeline, .unpause, .loadRecording(attempt)]
+            return [.clearTimeline, .unpause, .loadRecording(attempt, resume: false)]
         case let .opening(at):
             guard at == attempt else { return [] }
             releasedAt = now
@@ -171,7 +173,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         case .online:
             guard case let .offline(copy, hadPicture) = phase else { return [] }
             guard !(hadPicture && paused) else {
-                phase = .cutWhilePaused(copy)
+                phase = .stoppedWhilePaused(copy, cut: false)
                 return []
             }
             attempt += 1
@@ -179,28 +181,47 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             return [.clearTimeline, .load(copy, attempt, after: 0)]
         case let .paused(isPaused):
             paused = isPaused
-            guard !isPaused, case let .cutWhilePaused(copy) = phase else { return [] }
-            return cut(copy, now)
+            if isPaused { return leaveIfAway(now) }
+            guard case let .stoppedWhilePaused(copy, wasCut) = phase else { return [] }
+            return wasCut ? cut(copy, now) : reopen(copy)
         case let .away(keepsStream):
-            guard paused, !keepsStream else { return [] }
+            keepsStreamAway = keepsStream
+            return leaveIfAway(now)
+        case .back:
+            keepsStreamAway = nil
             switch phase {
-            case let .playing(copy), let .cutWhilePaused(copy), let .offline(copy, hadPicture: true):
+            case let .away(copy):
+                triedAgain = []
+                return [.unpause] + open(copy, after: 0)
+            case .awayFromRecording:
                 attempt += 1
-                releasedAt = now
-                phase = .away(copy)
-                return [.stop]
+                phase = .recording(started: false)
+                return [.unpause, .loadRecording(attempt, resume: true)]
             default:
                 return []
             }
-        case .back:
-            guard case let .away(copy) = phase else { return [] }
-            triedAgain = []
-            return [.unpause] + open(copy, after: 0)
         case .closed:
             attempt += 1
             phase = .closed
             return []
         }
+    }
+
+    /// Paused in the background, with no AirPlay: the stream is let go, as
+    /// soon as both are true whichever came first.
+    private mutating func leaveIfAway(_ now: Date) -> [Action] {
+        guard paused, keepsStreamAway == false else { return [] }
+        switch phase {
+        case let .playing(copy), let .stoppedWhilePaused(copy, _), let .offline(copy, hadPicture: true):
+            phase = .away(copy)
+        case .recording(started: true):
+            phase = .awayFromRecording
+        default:
+            return []
+        }
+        attempt += 1
+        releasedAt = now
+        return [.stop]
     }
 
     private mutating func started(_ now: Date) -> [Action] {
@@ -230,7 +251,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             case .gone, .flaky, .turnedAway, .unreachable:
                 guard !paused else {
                     attempt += 1
-                    phase = .cutWhilePaused(copy)
+                    phase = .stoppedWhilePaused(copy, cut: true)
                     return []
                 }
                 return cut(copy, now)
@@ -241,7 +262,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             return failedStart(copy, failure, shown, hadPicture: true, now)
         case .recording:
             return stop(shown, now)
-        case .idle, .cutWhilePaused, .offline, .away, .failed, .closed:
+        case .idle, .stoppedWhilePaused, .offline, .away, .awayFromRecording, .failed, .closed:
             return []
         }
     }
@@ -290,6 +311,12 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         case .giveUp:
             return nextCopy(after: copy, marking: false, .unknown, .notPlaying, now)
         }
+    }
+
+    private mutating func reopen(_ copy: Copy) -> [Action] {
+        attempt += 1
+        phase = .reopening(copy)
+        return [.clearTimeline, .load(copy, attempt, after: 0)]
     }
 
     private mutating func open(_ copy: Copy, after: Double) -> [Action] {
