@@ -31,6 +31,10 @@ enum FFmpegLog {
         lock.withLock { ledger.ended(load) }
     }
 
+    static func started(_ load: FailureLedger.Load) {
+        lock.withLock { ledger.started(load) }
+    }
+
     static func closed(player: Int) {
         lock.withLock { ledger.closed(player: player) }
     }

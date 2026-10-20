@@ -1368,6 +1368,7 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func drainEvents() {
         queue.async { [self] in
+            stateLock.withLock { loads.drainBegan() }
             while let mpv, let event = mpv_wait_event(mpv, 0), event.pointee.event_id != MPV_EVENT_NONE {
                 handle(event.pointee)
             }
@@ -1413,7 +1414,9 @@ final class MPVPlayer: @unchecked Sendable {
         case MPV_EVENT_START_FILE:
             guard let data = event.data else { return }
             let entry = data.assumingMemoryBound(to: mpv_event_start_file.self).pointee.playlist_entry_id
-            stateLock.withLock { loads.started(entry: entry) }
+            if let attempt = stateLock.withLock({ loads.started(entry: entry) }) {
+                FFmpegLog.started(FailureLedger.Load(player: ledgerID, attempt: attempt))
+            }
         case MPV_EVENT_FILE_LOADED:
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
             #if DEBUG
@@ -1472,7 +1475,7 @@ final class MPVPlayer: @unchecked Sendable {
             let failure = StreamFailure(logged: String(cString: message.text))
             let now = CFAbsoluteTimeGetCurrent()
             stateLock.withLock {
-                if let failure { logged = (failure, now, loads.current) }
+                if let failure, let attempt = loads.logAttempt { logged = (failure, now, attempt) }
                 #if DEBUG
                 perf.warnings += 1
                 if let failure { perf.failure = failure }
