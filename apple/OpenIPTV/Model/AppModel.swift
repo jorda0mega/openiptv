@@ -165,7 +165,6 @@ final class AppModel {
             let urls = Self.visibleImages(home)
             Task.detached(priority: .userInitiated) { await ImagePipeline.shared.prefetch(urls) }
         }
-        live.onChange = { [weak self] change in self?.apply(change) }
         Task { await guide.loadCache(); guideState = await guide.state }
     }
 
@@ -276,7 +275,6 @@ final class AppModel {
             stagedHome = nil
             return
         }
-        connectLive()
         // Trending and versions come from the index and charts on the
         // device: opened while Continue Watching is asked of the server, not
         // before it.
@@ -1116,88 +1114,10 @@ final class AppModel {
         return false
     }
 
-    // MARK: Live updates from Emby
-
-    let live = EmbyLive()
     /// The newest Home built (waiting or shown): when, and the recent
     /// watches its Top picks came from.
     private var homeBuiltAt: Date?
     private var homeHistory: [String] = []
-    /// What's playing now: its own progress reports don't refresh Home.
-    private var playingItem: String?
-    private var watchRefresh: Task<Void, Never>?
-    private var libraryRefresh: Task<Void, Never>?
-
-    /// Listen for changes while the app is in use.
-    func connectLive() {
-        guard let account = sources.emby else { return live.disconnect() }
-        live.connect(account, deviceId: sources.deviceId)
-    }
-
-    func disconnectLive() { live.disconnect() }
-
-    #if DEBUG
-    /// Real-feed checks (`-debugWebsocketProbe YES`): for each way of
-    /// sending the key, whether Emby's websocket refused it, opened but
-    /// missed a watched change made meanwhile, or heard it; "skipped" when
-    /// no film could be marked.
-    var websocketProbe = ""
-
-    func probeWebsocket() async {
-        guard websocketProbe.isEmpty, let emby else { return }
-        websocketProbe = "trying"
-        guard let film = await emby.debugUnwatchedFilm() else { return websocketProbe = "skipped" }
-        var heard: [String] = []
-        for form in SocketProbe.Form.allCases {
-            heard.append("\(form.name): \(await emby.debugProbeSocket(form, marking: film))")
-        }
-        websocketProbe = "done " + heard.joined(separator: "; ")
-    }
-    #endif
-
-    private func apply(_ change: EmbyLive.Change) {
-        switch change {
-        case let .watched(list):
-            for change in list {
-                // Its resume point moved: prepare it again when needed.
-                if change.itemId != playingItem { prepared[change.itemId] = nil }
-                patchShows(change)
-            }
-            // Mid-video these are its own progress reports; Home is
-            // refreshed when it stops.
-            guard playingItem == nil else { return }
-            watchRefresh?.cancel()
-            watchRefresh = Task {
-                try? await Task.sleep(for: .seconds(1.5))
-                guard !Task.isCancelled else { return }
-                await refreshContinueWatching()
-            }
-        case .library:
-            libraryRefresh?.cancel()
-            libraryRefresh = Task {
-                // Additions come in bursts; let them settle. The Home
-                // built from them waits for the next moment (see stagedHome).
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, let emby else { return }
-                await library.prepare(emby, now: true)
-                await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
-            }
-        }
-    }
-
-    /// A watched or progress change applied to any show saved in memory.
-    private func patchShows(_ change: EmbyLive.WatchChange) {
-        for (series, data) in shows {
-            guard let index = data.episodes.firstIndex(where: { $0.id == change.itemId }) else { continue }
-            var episodes = data.episodes
-            var user = episodes[index].userData ?? EmbyItem.UserData()
-            if let played = change.played { user.played = played }
-            if let ticks = change.positionTicks { user.playbackPositionTicks = ticks }
-            user.playedPercentage = change.playedPercentage
-            episodes[index].userData = user
-            shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: data.nextUp, loadedAt: data.loadedAt, similar: data.similar)
-        }
-    }
 
     // MARK: Warm start
 
@@ -1519,16 +1439,23 @@ final class AppModel {
     }
 
     /// Loads (or quietly updates) the on-device library index. Called when
-    /// the app opens; never blocks the UI.
-    func prepareLibrary() async {
-        if let emby { await syncLibrary(emby) }
+    /// the app opens; never blocks the UI. `checkingChanges`: back in the
+    /// app, where what was added on another device meanwhile is asked for
+    /// at once rather than on the ten-minute schedule.
+    func prepareLibrary(checkingChanges: Bool = false) async {
+        if let emby { await syncLibrary(emby, urgent: checkingChanges) }
     }
 
-    private func syncLibrary(_ emby: EmbyClient) async {
+    /// Back in the app: a resume point may have moved on another device.
+    func forgetPlaybackPlans() {
+        prepared = [:]
+    }
+
+    private func syncLibrary(_ emby: EmbyClient, urgent: Bool = false) async {
         let before = library.trending.prefix(40).map(\.id)
         let hadNotable = !library.notable.isEmpty
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
-        await library.prepare(emby)
+        await library.prepare(emby, now: urgent)
         // IMDb's genres and makers for the library's titles (Wi-Fi, about
         // monthly), in the background; the first time they arrive, Top
         // picks are remade from them (on the page at the next moment, see
@@ -1580,7 +1507,6 @@ final class AppModel {
     /// server hears; called while the player is still up, so the page
     /// appears as it will stay (nothing changes on it after).
     func noteStop(_ playback: EmbyPlayback, seconds: Double) {
-        playingItem = nil
         let duration = playback.durationSeconds ?? 0
         stops[playback.itemId] = (duration > 0 && seconds >= duration * 0.9 ? 0 : seconds, Date())
         // Where it was stopped, for every device's Continue Watching (the
@@ -1614,7 +1540,6 @@ final class AppModel {
     /// `noted`: a stop already on the page (see noteStop).
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent, noted: Bool = false) async {
         if event == .started {
-            playingItem = playback.itemId
             notePlay(playback.seriesId ?? playback.itemId, kind: playback.seriesId != nil ? "Series" : "Movie")
         }
         if event == .stopped, !noted {
@@ -1709,7 +1634,6 @@ final class AppModel {
         catalogJob?.cancel()
         showLoads = [:]
         movieLoads = [:]
-        live.disconnect()
         await emby?.logout()
         sources.setEmby(nil)
         rows = []

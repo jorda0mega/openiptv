@@ -122,51 +122,6 @@ struct EmbyClient {
     static let readOnly = false
     #endif
 
-    #if DEBUG
-    /// Real-feed checks only (`-debugWebsocketProbe YES`): a title marked
-    /// watched or not, whatever `-readOnlyServer` says.
-    func debugSetPlayed(_ itemId: String, _ played: Bool) async throws {
-        var request = URLRequest(url: Self.api(account.serverURL, "Users/\(account.userId)/PlayedItems/\(itemId)"))
-        request.httpMethod = played ? "POST" : "DELETE"
-        authorize(&request)
-        _ = try await HTTP.data(request)
-    }
-
-    /// Emby's websocket with one way of sending the key: refused, opened
-    /// but deaf to a watched change made meanwhile, or hearing it.
-    func debugProbeSocket(_ form: SocketProbe.Form, marking film: String) async -> String {
-        #if canImport(UIKit)
-        let device = UIDevice.current.model.replacingOccurrences(of: "\"", with: "")
-        #else
-        let device = "Mac"
-        #endif
-        let authorization = "MediaBrowser Client=\"Openreel\", Device=\"\(device)\", DeviceId=\"\(deviceId)\", "
-            + "Version=\"\(HTTP.appVersion)\", Token=\"\(account.accessToken)\""
-        switch await SocketProbe.open(account.serverURL, form, token: account.accessToken, deviceId: deviceId, authorization: authorization) {
-        case .unreachable:
-            return "unreachable"
-        case .refused:
-            return "refused"
-        case let .opened(socket):
-            try? await debugSetPlayed(film, true)
-            let heard = await socket.hears(film, within: .seconds(15))
-            try? await debugSetPlayed(film, false)
-            socket.close()
-            return heard ? "heard the change" : "opened, heard nothing"
-        }
-    }
-
-    /// A film the viewer hasn't watched or started, to mark and unmark.
-    func debugUnwatchedFilm() async -> String? {
-        struct Page: Decodable { let Items: [Lenient<EmbyItem>]? }
-        let page: Page? = try? await get("Users/\(account.userId)/Items", [
-            .init(name: "IncludeItemTypes", value: "Movie"), .init(name: "Recursive", value: "true"),
-            .init(name: "Filters", value: "IsUnplayed"), .init(name: "Fields", value: "UserData"), .init(name: "Limit", value: "20"),
-        ])
-        return page?.Items?.compactMap(\.value).first { $0.userData?.played != true && ($0.userData?.playbackPositionTicks ?? 0) == 0 }?.id
-    }
-    #endif
-
     // MARK: My List
 
     /// Puts a film or show on the viewer's My List (Emby's favorites), or
