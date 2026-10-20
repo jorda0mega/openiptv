@@ -243,6 +243,52 @@ final class SearchStabilityTests: XCTestCase {
         shot("search opened")
     }
 
+    /// Back on Search with results there, they stay uncovered: no keyboard.
+    /// Cleared, the next time Search opens the keyboard comes up again.
+    func testKeyboardOnlyWhenSearchOpensEmpty() {
+        openSearch("zorro")
+        sleep(2)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "the keyboard came up over the results")
+        app.tabBars.buttons["Home"].firstMatch.tap()
+        sleep(1)
+        app.tabBars.buttons["Search"].firstMatch.tap()
+        sleep(2)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "the keyboard came up over the results on coming back")
+        app.searchFields.firstMatch.buttons["Clear text"].firstMatch.tap()
+        sleep(1)
+        app.buttons["Close"].firstMatch.tap()
+        sleep(1)
+        app.tabBars.buttons["Home"].firstMatch.tap()
+        sleep(1)
+        app.tabBars.buttons["Search"].firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard on coming back to an empty Search")
+    }
+
+    /// Spaces alone are nothing typed: the keyboard comes up.
+    func testKeyboardWhenOnlySpacesAreTyped() {
+        openSearch(#""   ""#)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard with only spaces typed")
+    }
+
+    /// A genre's page opened from Search is what you come back to, with no
+    /// keyboard over it.
+    func testNoKeyboardOverAGenrePage() {
+        openSearch("")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard on an empty Search")
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-'")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 3), "no genre tiles")
+        let name = tile.label
+        tile.tap()
+        sleep(2)
+        app.tabBars.buttons["Home"].firstMatch.tap()
+        sleep(1)
+        app.tabBars.buttons["Search"].firstMatch.tap()
+        sleep(2)
+        shot("genre page again")
+        XCTAssertTrue(app.navigationBars[name].exists, "the \(name) page isn't what Search came back to")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "the keyboard came up over the \(name) page")
+    }
+
     /// One bar at the bottom while searching, as in the Apple TV app: the
     /// search field in the tab bar (with a Home button), not a field of our
     /// own stacked over the whole tab bar.

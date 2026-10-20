@@ -18,19 +18,24 @@ struct SearchView: View {
     @Environment(\.displayScale) private var displayScale
     @Binding var playing: PlayerItem?
     #if os(iOS)
-    /// Opening the Search tab brings up the keyboard while nothing is typed;
-    /// with text, the results are what you came back to.
     @Binding var activation: TabSearchActivation
+
+    /// How the Search tab opens: with the keyboard while nothing is typed
+    /// and no page opened from Search is showing; else on what's there.
+    static func activation(query: String, path: NavigationPath = NavigationPath()) -> TabSearchActivation {
+        query.trimmingCharacters(in: .whitespaces).isEmpty && path.isEmpty ? .searchTabSelection : .automatic
+    }
     #endif
 
     /// Debug builds: `-debugSearch "text"` at launch starts with a search.
-    @State private var query: String = {
+    static let launchQuery: String = {
         #if DEBUG
         UserDefaults.standard.string(forKey: "debugSearch") ?? ""
         #else
         ""
         #endif
     }()
+    @State private var query = Self.launchQuery
     /// The filter chosen: the pill moves to it in the tap's own frame.
     @State private var scope: Scope = .all
     /// The filter the results show, a frame after the pill starts moving, so
@@ -246,7 +251,7 @@ struct SearchView: View {
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
             .scrollDismissesKeyboard(.immediately)
-            .onChange(of: query.isEmpty, initial: true) { _, empty in activation = empty ? .searchTabSelection : .automatic }
+            .onChange(of: Self.activation(query: query, path: path), initial: true) { activation = $1 }
             #endif
             // Re-run when the text changes or an index finishes loading.
             .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") {

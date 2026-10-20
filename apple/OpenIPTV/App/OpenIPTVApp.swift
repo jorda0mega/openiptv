@@ -44,7 +44,7 @@ struct RootView: View {
     @State private var shown: PlayerItem?
     #if os(iOS)
     @State private var tab = RootTab.home
-    @State private var searchActivation = TabSearchActivation.searchTabSelection
+    @State private var searchActivation = SearchView.activation(query: SearchView.launchQuery)
     #endif
 
     var body: some View {
