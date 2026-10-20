@@ -13,6 +13,8 @@ have something to find.
 
 import base64
 import hashlib
+import select
+import socket
 import shutil
 import subprocess
 import json
@@ -83,6 +85,26 @@ PLAYBACKINFO_REQUESTS = []
 # "headerless", "cancelled").
 KEY_CHECKS = []
 CANCELLED = []
+# Subtitle tracks whose request the app hung up on while the server was
+# still taking them out, (time, "item:index").
+SUBTITLES_CUT = []
+
+
+def push(message):
+    """Announces a change to the connected apps, as Emby does."""
+    sent = 0
+    for client in list(SOCKETS):
+        try:
+            client.send_ws(json.dumps(message))
+            sent += 1
+        except OSError:
+            SOCKETS.discard(client)
+    return sent
+
+
+def user_data_changed(item, played):
+    return {"MessageType": "UserDataChanged", "Data": {"UserId": "U1", "UserDataList": [
+        {"ItemId": item, "PlaybackPositionTicks": 0, "Played": played}]}}
 # Requests for a stretch of a film's sound, and those with the key in
 # their address (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0, 0]
@@ -329,6 +351,16 @@ def recorded_ts():
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def client_gone(self):
+        """The app hung up (its request stopped) before the answer."""
+        ready, _, _ = select.select([self.connection], [], [], 0)
+        if not ready:
+            return False
+        try:
+            return self.connection.recv(1, socket.MSG_PEEK) == b""
+        except OSError:
+            return True
+
     def key_check(self, kind, q):
         """Records a request that needs the key; whether its header has it."""
         headed = self.headers.get("X-Emby-Token") == "tok"
@@ -390,6 +422,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urlparse(self.path).path
+        if path.startswith("/emby/Users/U1/PlayedItems/") and self.headers.get("X-Emby-Token") == "tok":
+            push(user_data_changed(path.rsplit("/", 1)[1], False))
+            return self.send({"Played": False})
         if path.startswith("/emby/Users/U1/FavoriteItems/") and self.headers.get("X-Emby-Token") == "tok":
             item = path.rsplit("/", 1)[1]
             if item in FAVORITES:
@@ -407,6 +442,9 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw or "{}")
         if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == "tok":
             return self.send(b"", status=204)
+        if "/Users/U1/PlayedItems/" in self.path and self.headers.get("X-Emby-Token") == "tok":
+            push(user_data_changed(urlparse(self.path).path.rsplit("/", 1)[1], True))
+            return self.send({"Played": True})
         if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == "tok":
             # "ignore_reports": a server that hasn't heard (or kept) them.
             if self.path.split("?")[0].endswith(("/Progress", "/Stopped")) and body.get("ItemId") \
@@ -489,7 +527,8 @@ class Handler(BaseHTTPRequestHandler):
             since = float(q.get("since", "0"))
             asked = [r for r in SUBTITLE_REQUESTS if r[0] >= since]
             return self.send({"items": [r[1] for r in asked], "keyed": [r[1] for r in asked if r[2]],
-                              "headerless": [r[1] for r in asked if not r[3]]})
+                              "headerless": [r[1] for r in asked if not r[3]],
+                              "cut": [track for t, track in SUBTITLES_CUT if t >= since]})
         if path == "/mock/playbackinfo_requests":
             since = float(q.get("since", "0"))
             return self.send({"items": [item for t, item in PLAYBACKINFO_REQUESTS if t >= since]})
@@ -501,6 +540,7 @@ class Handler(BaseHTTPRequestHandler):
                 AUDIO_REQUESTS[0] = AUDIO_REQUESTS[1] = 0
                 VIDEO_REQUESTS.clear()
                 SUBTITLE_REQUESTS.clear()
+                SUBTITLES_CUT.clear()
                 PLAYBACKINFO_REQUESTS.clear()
                 KEY_CHECKS.clear()
                 CANCELLED.clear()
@@ -523,16 +563,8 @@ class Handler(BaseHTTPRequestHandler):
             if q.get("type") == "library":
                 message = {"MessageType": "LibraryChanged", "Data": {"ItemsAdded": [q.get("item", "a4")], "ItemsUpdated": [], "ItemsRemoved": []}}
             else:
-                message = {"MessageType": "UserDataChanged", "Data": {"UserId": "U1", "UserDataList": [
-                    {"ItemId": q.get("item", "e203"), "PlaybackPositionTicks": 0, "Played": True}]}}
-            sent = 0
-            for client in list(SOCKETS):
-                try:
-                    client.send_ws(json.dumps(message))
-                    sent += 1
-                except OSError:
-                    SOCKETS.discard(client)
-            return self.send({"sent": sent})
+                message = user_data_changed(q.get("item", "e203"), True)
+            return self.send({"sent": push(message)})
         if path.startswith("/emby/"):
             if os.environ.get("OPENIPTV_MOCK_LOG") and "/Images/" not in path:
                 print(f"{time.time():.2f} GET {path}", flush=True)
@@ -946,6 +978,10 @@ class Handler(BaseHTTPRequestHandler):
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")
             if index < 100 and video and shutil.which("ffmpeg"):
                 time.sleep(float(CONTROL.get("reference_delay", 0)))
+                if self.client_gone():
+                    SUBTITLES_CUT.append((time.time(), track))
+                    self.close_connection = True
+                    return
                 out = subprocess.run(["ffmpeg", "-v", "error", "-i", video, "-map", f"0:{index}", "-f", "srt", "-"],
                                      capture_output=True).stdout
                 if out:
@@ -963,6 +999,10 @@ class Handler(BaseHTTPRequestHandler):
             if video and os.path.exists(video):
                 return self.send_file(video, kind=kind)
             return self.send(b"\x1aE\xdf\xa3" + b"\0" * 1000, "video/x-matroska")
+        # Films not watched or started (Emby's IsUnplayed filter).
+        if path == "/Users/U1/Items" and q.get("Filters") == "IsUnplayed" and q.get("IncludeItemTypes") == "Movie":
+            films = [known_item(entry) for entry in KNOWN_TITLES if entry[2] == "Movie" and not POSITIONS.get(entry[0])]
+            return self.send({"Items": films[:int(q.get("Limit", "20"))]})
         # My List (before the library listing, which would answer it).
         if path == "/Users/U1/Items" and q.get("Filters") == "IsFavorite":
             time.sleep(float(CONTROL.get("favorites_delay", 0)))
