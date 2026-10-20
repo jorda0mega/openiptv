@@ -144,7 +144,7 @@ final class Lane {
 
     private func start(_ ticket: Ticket) {
         refillTokens()
-        if bucket != nil, tokens > 0 { tokens -= 1 }
+        if tokens > 0 { tokens -= 1 }
         ticket.running = true
         running += 1
         ticket.turn?.resume()
@@ -209,9 +209,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         case cancel
     }
 
-    struct Disk: Sendable {
-        let find: @Sendable (Key) -> (value: Value, at: Date)?
-    }
+    typealias Disk = @Sendable (Key) -> (value: Value, at: Date)?
 
     private final class Job {
         let ticket: Lane.Ticket
@@ -362,7 +360,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     private nonisolated static func find(_ key: Key, in disk: Disk?) async -> (value: Value, at: Date)? {
-        disk?.find(key)
+        disk?(key)
     }
 
     private func wait(for job: Job, _ key: Key, keeping: Bool = true) async throws -> Value {
@@ -399,7 +397,8 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     private func deliver(_ job: Job, _ result: Result<Value, Error>) {
         guard job.result == nil else { return }
         job.result = result
-        for waiter in Array(job.waiters.values) + Array(job.listeners.values) { waiter.resume(with: result) }
+        for waiter in job.waiters.values { waiter.resume(with: result) }
+        for listener in job.listeners.values { listener.resume(with: result) }
         job.waiters = [:]
         job.listeners = [:]
     }

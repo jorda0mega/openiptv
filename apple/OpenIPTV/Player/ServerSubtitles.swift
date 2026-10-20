@@ -18,14 +18,12 @@ struct ServerSubtitle: Hashable, Sendable {
     let kind: Kind
     let version: String
 
-    fileprivate var place: String {
+    var id: String {
         "\(address.host() ?? ""):\(address.port ?? 0)\(address.deletingPathExtension().path())#\(version)"
     }
 
-    var id: String { place }
-
-    static func == (a: ServerSubtitle, b: ServerSubtitle) -> Bool { a.place == b.place }
-    func hash(into hasher: inout Hasher) { hasher.combine(place) }
+    static func == (a: ServerSubtitle, b: ServerSubtitle) -> Bool { a.id == b.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 extension ServerSubtitle: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
@@ -45,14 +43,12 @@ extension Lane {
 actor SubtitleStore {
     let folder: URL
     let perPlay: URL
-    private var generation = 0
+    private(set) var generation = 0
 
     init(folder: URL, perPlay: URL) {
         self.folder = folder
         self.perPlay = perPlay
     }
-
-    func current() -> Int { generation }
 
     func publish(_ data: Data, as file: URL, since generation: Int) throws -> Bool {
         guard generation == self.generation else { return false }
@@ -170,7 +166,7 @@ enum ServerSubtitles {
     }
 
     nonisolated static func file(for subtitle: ServerSubtitle, in folder: URL = folder) -> URL {
-        let name = SHA256.hash(data: Data(subtitle.place.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
+        let name = SHA256.hash(data: Data(subtitle.id.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
         let format = subtitle.address.pathExtension.isEmpty ? "srt" : subtitle.address.pathExtension
         return folder.appending(path: subtitle.kind.folder).appending(path: "\(name).\(format)")
     }
@@ -194,13 +190,13 @@ enum ServerSubtitles {
         FileManager.default.fileExists(atPath: file.path)
     }
 
-    private nonisolated static let disk = Shelf<ServerSubtitle, URL>.Disk { subtitle in
+    private nonisolated static let disk: Shelf<ServerSubtitle, URL>.Disk = { subtitle in
         let file = file(for: subtitle)
         return (try? file.resourceValues(forKeys: [.creationDateKey]))?.creationDate.map { (file, $0) }
     }
 
     private nonisolated static func download(_ subtitle: ServerSubtitle, on session: URLSession) async throws -> URL {
-        let generation = await store.current()
+        let generation = await store.generation
         do {
             let (data, response) = try await session.data(for: request(for: subtitle), delegate: HTTP.keyOutOfRedirects)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0

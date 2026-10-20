@@ -91,7 +91,7 @@ final class ServerSubtitlesTests: XCTestCase {
 
     func testADownloadThatEndsAfterASignOutLeavesNoFile() async throws {
         let store = store, file = ServerSubtitles.file(for: track(), in: folder)
-        let began = await store.current()
+        let began = await store.generation
         await store.removeAll()
         let published = try await store.publish(Data("1\n00:00:01,000 --> 00:00:02,000\nHi\n".utf8), as: file, since: began)
         XCTAssertFalse(published)
@@ -101,7 +101,7 @@ final class ServerSubtitlesTests: XCTestCase {
 
     func testADownloadIsPublishedWhole() async throws {
         let store = store, file = ServerSubtitles.file(for: track(), in: folder)
-        let published = try await store.publish(Data("subtitles".utf8), as: file, since: await store.current())
+        let published = try await store.publish(Data("subtitles".utf8), as: file, since: await store.generation)
         XCTAssertTrue(published)
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "subtitles")
     }
