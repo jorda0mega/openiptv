@@ -113,6 +113,13 @@ struct FailureLedger {
         open.remove(load)
     }
 
+    /// libmpv starts a file only once every file before it on that player is
+    /// over.
+    mutating func started(_ load: Load) {
+        open = open.filter { $0.player != load.player }
+        open.insert(load)
+    }
+
     mutating func closed(player: Int) {
         open = open.filter { $0.player != player }
         found = found.filter { $0.key.player != player }
