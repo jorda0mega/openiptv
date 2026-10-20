@@ -41,13 +41,13 @@ final class LiveSessionTests: XCTestCase {
             XCTAssertEqual(session.phase, .opening(b))
         }
         XCTAssertEqual(session.handle(.opening(second), now: at(3)), [.deadline(second, after: 15)], "the late start cancelled the deadline")
-        XCTAssertEqual(session.handle(.failed(second, .no_data, shown: .notPlaying), now: at(18)).first, .markFailed(b))
+        XCTAssertEqual(session.handle(.timedOut(second, .no_data), now: at(18)).prefix(2), [.cancelDeadline, .markFailed(b)])
     }
 
     func testNothingReloadsAfterGivingUp() {
         var session = opening([[a]])
         let given = session.attempt
-        XCTAssertEqual(session.handle(.failed(given, .no_data, shown: .notPlaying), now: at(15)), [.markFailed(a), .markNotPlaying, .stop])
+        XCTAssertEqual(session.handle(.timedOut(given, .no_data), now: at(15)), [.cancelDeadline, .markFailed(a), .markNotPlaying, .stop])
         XCTAssertEqual(session.phase, .failed(.notPlaying))
         XCTAssertEqual(session.handle(.failed(given, .timeout, shown: .message("late")), now: at(60)), [], "a late timeout reloaded")
         XCTAssertEqual(session.handle(.started(given), now: at(61)), [], "a late start cleared the marks")
@@ -57,14 +57,14 @@ final class LiveSessionTests: XCTestCase {
     func testARefusalRightAfterAReleaseIsTriedOnceMore() {
         var session = opening([[a]])
         let retry = session.handle(.failed(session.attempt, .http_403, shown: .message("403")), now: at(1))
-        XCTAssertEqual(retry, [.load(a, session.attempt, after: 2.5)])
+        XCTAssertEqual(retry, [.cancelDeadline, .load(a, session.attempt, after: 2.5)])
         _ = session.handle(.opening(session.attempt), now: at(3.5))
-        XCTAssertEqual(session.handle(.failed(session.attempt, .http_403, shown: .message("403")), now: at(3.75)), [.stop],
+        XCTAssertEqual(session.handle(.failed(session.attempt, .http_403, shown: .message("403")), now: at(3.75)), [.cancelDeadline, .stop],
                        "a second refusal didn't stop")
         XCTAssertEqual(session.failure, .message("403"))
 
         var late = opening([[a]])
-        XCTAssertEqual(late.handle(.failed(late.attempt, .http_401, shown: .message("401")), now: at(5)), [.stop],
+        XCTAssertEqual(late.handle(.failed(late.attempt, .http_401, shown: .message("401")), now: at(5)), [.cancelDeadline, .stop],
                        "a refusal long after any release was tried again")
     }
 
@@ -82,13 +82,20 @@ final class LiveSessionTests: XCTestCase {
     func testAddressLookupFailuresFollowThePolicy() {
         var offline = opening()
         XCTAssertEqual(offline.handle(.failed(offline.attempt, .offline, shown: .message("No internet connection.")), now: at(1)),
-                       [.stop, .waitForNetwork])
+                       [.cancelDeadline, .stop, .waitForNetwork])
         XCTAssertEqual(offline.readout, "waiting")
         XCTAssertEqual(offline.handle(.online, now: at(9)), [.clearTimeline, .load(a, offline.attempt, after: 0)])
 
         var busy = opening()
-        XCTAssertEqual(busy.handle(.failed(busy.attempt, .http_429, shown: .message("busy")), now: at(1)), [.stop])
+        XCTAssertEqual(busy.handle(.failed(busy.attempt, .http_429, shown: .message("busy")), now: at(1)), [.cancelDeadline, .stop])
         XCTAssertEqual(busy.failure, .message("busy"))
+
+        var slow = opening()
+        XCTAssertEqual(slow.handle(.failed(slow.attempt, .timeout, shown: .message("too long")), now: at(1)),
+                       [.cancelDeadline, .load(a, slow.attempt, after: 1)], "a lookup that timed out wasn't tried once more")
+        var refused = opening()
+        XCTAssertEqual(refused.handle(.failed(refused.attempt, .refused, shown: .message("refused")), now: at(1)),
+                       [.cancelDeadline, .stop], "a portal that refused the connection marked the channel")
     }
 
     func testAQuickReturnRetriesTheRefusal() {
@@ -99,7 +106,7 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(session.handle(.back, now: at(11)), [.unpause, .clearTimeline, .load(a, session.attempt, after: 0)])
         _ = session.handle(.opening(session.attempt), now: at(11.5))
         let retry = session.handle(.failed(session.attempt, .http_403, shown: .message("403")), now: at(12))
-        XCTAssertEqual(retry, [.load(a, session.attempt, after: 2.5)], "a quick return ended on the refusal")
+        XCTAssertEqual(retry, [.cancelDeadline, .load(a, session.attempt, after: 2.5)], "a quick return ended on the refusal")
     }
 
     func testACutWhilePausedWaitsForPlay() {
@@ -168,7 +175,7 @@ final class LiveSessionTests: XCTestCase {
     func testAFlakyCopyIsTriedOnceMore() {
         var session = opening()
         let retry = session.handle(.failed(session.attempt, .http_5xx, shown: .message("503")), now: at(1))
-        XCTAssertEqual(retry, [.load(a, session.attempt, after: 1)])
+        XCTAssertEqual(retry, [.cancelDeadline, .load(a, session.attempt, after: 1)])
         XCTAssertEqual(session.handle(.failed(session.attempt, .http_5xx, shown: .message("503")), now: at(3)).prefix(2),
                        [.markFailed(a), .switching(from: a)])
     }
@@ -177,8 +184,55 @@ final class LiveSessionTests: XCTestCase {
         var session = opening()
         _ = session.handle(.failed(session.attempt, .http_404, shown: .message("404")), now: at(1))
         _ = session.handle(.opening(session.attempt), now: at(1.5))
-        XCTAssertEqual(session.handle(.started(session.attempt), now: at(2)), [.picture, .played(b), .switched(from: a, to: b)])
+        XCTAssertEqual(session.handle(.started(session.attempt), now: at(2)), [.cancelDeadline, .picture, .played(b), .switched(from: a, to: b)])
         XCTAssertEqual(session.phase, .playing(b))
+    }
+
+    func testTheFirstPictureEndsTheDeadline() {
+        var session = opening()
+        let shown = session.attempt
+        XCTAssertEqual(session.handle(.started(shown), now: at(1)), [.cancelDeadline, .picture, .played(a)])
+        XCTAssertEqual(session.handle(.timedOut(shown, .no_data), now: at(15.5)), [], "the start limit cut a stream that plays")
+        XCTAssertEqual(session.phase, .playing(a))
+    }
+
+    func testEveryWayOutOfTheOpenEndsTheDeadline() {
+        var stopped = opening([[a]])
+        XCTAssertEqual(stopped.handle(.failed(stopped.attempt, .http_429, shown: .message("busy")), now: at(1)).first, .cancelDeadline)
+        var closed = opening()
+        XCTAssertEqual(closed.handle(.closed, now: at(1)), [.cancelDeadline])
+        var moved = opening()
+        XCTAssertEqual(moved.handle(.play(b, feeds: [[b]], after: 0, startLimit: 15), now: at(1)).first, .cancelDeadline)
+    }
+
+    func testPausedWithNoNetworkWaitsForPlay() {
+        var session = playing()
+        _ = session.handle(.paused(true), now: at(5))
+        XCTAssertEqual(session.handle(.ended(session.attempt, .offline), now: at(10)), [.stop, .waitForNetwork])
+        XCTAssertEqual(session.handle(.online, now: at(20)), [], "the network coming back reopened paused live TV")
+        XCTAssertEqual(session.phase, .cutWhilePaused(a))
+        XCTAssertEqual(session.handle(.paused(false), now: at(30)), [.clearTimeline, .load(a, session.attempt, after: 0)])
+    }
+
+    func testAwayWithNoNetworkStaysClosed() {
+        var session = playing()
+        _ = session.handle(.paused(true), now: at(5))
+        _ = session.handle(.ended(session.attempt, .offline), now: at(10))
+        XCTAssertEqual(session.handle(.away(keepsStream: false), now: at(11)), [.stop])
+        XCTAssertEqual(session.phase, .away(a))
+        XCTAssertEqual(session.handle(.online, now: at(20)), [], "the network coming back reopened live TV in the background")
+        XCTAssertEqual(session.handle(.back, now: at(30)), [.unpause, .clearTimeline, .load(a, session.attempt, after: 0)])
+    }
+
+    func testClosingDropsWhatComesAfter() {
+        var session = playing()
+        let last = session.attempt
+        XCTAssertEqual(session.handle(.closed, now: at(5)), [])
+        for input: Session.Input in [.started(last), .opening(last), .ended(last, .eof_before_frame), .online, .back,
+                                     .failed(last, .reset, shown: .message("x"))] {
+            XCTAssertEqual(session.handle(input, now: at(6)), [], "the closed screen acted: \(input)")
+        }
+        XCTAssertEqual(session.phase, .closed)
     }
 
     func testRecording() {
