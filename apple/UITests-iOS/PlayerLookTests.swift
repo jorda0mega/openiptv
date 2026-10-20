@@ -1161,13 +1161,13 @@ final class PlayerLookTests: XCTestCase {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
-        stopped(server, item: "m5", seconds: 300)
+        stopped(server, item: "m5", seconds: 30)
         app.launch()
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Movie 5'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "Movie 5 isn't in Continue Watching")
         sleep(6)
         XCUIDevice.shared.press(.home)
-        stopped(server, item: "m5", seconds: 500)
+        stopped(server, item: "m5", seconds: 80)
         sleep(2)
         app.activate()
         sleep(4)
@@ -1179,7 +1179,7 @@ final class PlayerLookTests: XCTestCase {
             parts = readout.exists ? readout.label.split(separator: " ") : []
         }
         guard parts.count == 4, let at = Double(parts[3]) else { return XCTFail("no start readout: \(parts)") }
-        XCTAssertEqual(at, 500, accuracy: 8, "it didn't start where the other device left it")
+        XCTAssertEqual(at, 80, accuracy: 8, "it didn't start where the other device left it")
     }
 
     /// An episode whose intro the server has marked (Emby's intro detection:
