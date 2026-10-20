@@ -302,6 +302,7 @@ struct EmbyPlayback: Hashable, Identifiable {
         /// Where it starts in the film (seconds).
         let start: Double
         let url: URL
+        let token: String
 
         /// The same from `start`, in its own play session (each stretch
         /// is converted apart).
@@ -314,24 +315,35 @@ struct EmbyPlayback: Hashable, Identifiable {
                 default: item
                 }
             }
-            return .init(start: start, url: parts.url ?? url)
+            return .init(start: start, url: parts.url ?? url, token: token)
         }
     }
     /// The languages of every subtitle track the server knows for it (the
     /// film's own and files), normalized ("en", "es").
     var subtitleLanguages: Set<String> = []
 
-    struct SubtitleFile: Hashable, Sendable {
+    struct SubtitleFile: Hashable, Sendable, Identifiable {
         let source: SubtitleSource
         let language: String?
         /// "SDH", "Forced": words the player reads the kind from.
         let title: String
+
+        var id: String {
+            switch source {
+            case let .server(subtitle): "server " + subtitle.id
+            case let .device(file): "device " + file.path
+            }
+        }
 
         var url: URL {
             switch source {
             case let .server(subtitle): subtitle.address
             case let .device(file): file
             }
+        }
+
+        var server: ServerSubtitle? {
+            if case let .server(subtitle) = source { subtitle } else { nil }
         }
     }
 

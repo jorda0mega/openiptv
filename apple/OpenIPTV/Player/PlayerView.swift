@@ -460,12 +460,15 @@ struct MoviePlayerView: View {
                 debugReadout(startReadout, "debug-start")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
+                debugReadout(String(keyedAddresses), "debug-keyed")
                 PlayerRenders.Readout()
                 // Not the player's own state: read again every half second
                 // (the player isn't drawn again for the clock any more).
                 TimelineView(.periodic(from: .now, by: 0.5)) { _ in
                     ZStack {
                         debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
+                        debugReadout(player?.hlsKeys ?? "", "debug-hls-keys")
+                        debugReadout(model.websocketProbe, "debug-websocket")
                         debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
                         #if os(iOS)
                         debugReadout(player?.subtitleShift ?? "", "debug-subshift")
@@ -1245,6 +1248,9 @@ struct MoviePlayerView: View {
             buffering = false
             guard !startedOnce else { return }
             startedOnce = true
+            #if DEBUG
+            if UserDefaults.standard.bool(forKey: "debugWebsocketProbe") { Task { await model.probeWebsocket() } }
+            #endif
             // Whole start from the tap: server, then screen/player setup,
             // opening the file, and seeking + the first frame.
             let total = Date().timeIntervalSince(playback.requestedAt)
@@ -1474,6 +1480,12 @@ struct MoviePlayerView: View {
     }
 
     #if DEBUG
+    private var keyedAddresses: Int {
+        let all = [playback.url] + playback.fallbacks + playback.subtitleFiles.map(\.url) + playback.subtitleCopies.map(\.subtitle.address)
+            + playback.subtitleReferences.map(\.subtitle.address) + playback.speechStretches.map(\.url)
+        return all.filter { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "api_key" } == true }.count
+    }
+
     private func debugReadout(_ text: String, _ id: String) -> some View {
         Text(text)
             .font(.caption2)

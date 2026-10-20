@@ -111,10 +111,11 @@ enum SourceError: LocalizedError {
 enum HTTP {
     static let session = make(connections: 8)
     static let ahead = make(connections: 4)
-    /// For answers a server takes minutes to start: a film's own subtitle
-    /// track, which Emby reads the whole film to take out (over a minute
-    /// for Asterix the Gaul).
+    /// Emby converts a stretch of the film's sound for each answer.
     static let patient = make(connections: 2, wait: 300)
+    /// Emby reads the whole film to take out one of its subtitle tracks
+    /// (over a minute for Asterix the Gaul).
+    static let extraction = make(connections: 2, wait: 300)
 
     private static func make(connections: Int, wait: TimeInterval = 20) -> URLSession {
         let config = URLSessionConfiguration.default
@@ -151,14 +152,8 @@ enum HTTP {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
-    /// `url` as a request with its `api_key` sent as the X-Emby-Token
-    /// header instead: the system logs the address of a request stopped or
-    /// failed, key and all (speech stretches are stopped once a minute is
-    /// read). Players still get addresses with the key.
-    static func keyInHeader(_ url: URL) -> URLRequest {
-        keyInHeader(URLRequest(url: url))
-    }
-
+    /// The system logs the address of a request that fails or is stopped,
+    /// key and all.
     static func keyInHeader(_ request: URLRequest) -> URLRequest {
         guard let url = request.url, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let key = parts.queryItems?.first(where: { $0.name == "api_key" })?.value else { return request }
@@ -170,14 +165,28 @@ enum HTTP {
         return moved
     }
 
-    /// The address a server redirects to is the server's choice, and the
-    /// system logs the address of a request that fails.
+    /// The address a server redirects to is the server's choice.
+    static func redirected(_ request: URLRequest, from original: URL?) -> URLRequest {
+        guard let target = request.url, let original,
+              target.host() != original.host() || target.port != original.port || target.scheme != original.scheme else {
+            return keyInHeader(request)
+        }
+        var elsewhere = request
+        elsewhere.setValue(nil, forHTTPHeaderField: "X-Emby-Token")
+        if var parts = URLComponents(url: target, resolvingAgainstBaseURL: false), parts.queryItems != nil {
+            parts.queryItems = parts.queryItems?.filter { $0.name != "api_key" }
+            if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
+            elsewhere.url = parts.url ?? target
+        }
+        return elsewhere
+    }
+
     static let keyOutOfRedirects = KeyOutOfRedirects()
 
     final class KeyOutOfRedirects: NSObject, URLSessionTaskDelegate, Sendable {
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest) async -> URLRequest? {
-            HTTP.keyInHeader(request)
+            HTTP.redirected(request, from: task.originalRequest?.url)
         }
     }
 

@@ -38,6 +38,9 @@ final class StreamRelay: @unchecked Sendable {
     private var ahead: [String: [URLSessionDataTask]] = [:]
     private var aheadFiles: Set<String> = []
     private var stoppedAhead: Set<String> = []
+    /// The account signed in (not its key): bytes fetched for one are never
+    /// served to the next.
+    private let account = Locked(UUID().uuidString)
     /// The file playing (none: nothing yet): while something plays, no
     /// other file is fetched ahead.
     private var playingFile: String?
@@ -192,7 +195,7 @@ final class StreamRelay: @unchecked Sendable {
     }
 
     private func cache(for url: URL) -> ByteCache? {
-        let key = Self.cacheKey(url)
+        let key = cacheKey(url)
         lock.lock()
         defer { lock.unlock() }
         if let index = caches.firstIndex(where: { $0.key == key }) {
@@ -208,16 +211,33 @@ final class StreamRelay: @unchecked Sendable {
     }
 
     /// A file's address without the server's session for one request.
-    private static func cacheKey(_ url: URL) -> String {
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.absoluteString }
+    private func cacheKey(_ url: URL) -> String {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return account.value + " " + url.absoluteString }
         parts.queryItems = parts.queryItems?.filter { !["playsessionid", "api_key"].contains($0.name.lowercased()) }
-        return parts.string ?? url.absoluteString
+        return account.value + " " + (parts.string ?? url.absoluteString)
+    }
+
+    /// Signed out: nothing kept, under way or routed for that account.
+    func forgetAccount() {
+        account.mutate { $0 = UUID().uuidString }
+        let stopping: [URLSessionDataTask] = lock.withLock {
+            defer {
+                routes = RelayRoutes()
+                caches = []
+                ahead = [:]
+                aheadFiles = []
+                stoppedAhead = []
+                playingFile = nil
+            }
+            return ahead.values.flatMap { $0 }
+        }
+        stopping.forEach { $0.cancel() }
     }
 
     /// The Emby key goes in a header: the system logs the address of a
     /// request that fails or is stopped.
     private static func route(_ url: URL, _ headers: [String]) -> (url: URL, headers: [(String, String)]) {
-        let request = HTTP.keyInHeader(url)
+        let request = HTTP.keyInHeader(URLRequest(url: url))
         var pairs = headers.compactMap { header -> (String, String)? in
             let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             return pair.count == 2 ? (pair[0], pair[1]) : nil
@@ -288,7 +308,7 @@ final class StreamRelay: @unchecked Sendable {
     /// resumes); one from the beginning, once.
     func prefetchStart(url: URL, headers: [String], at seconds: Double) {
         start()
-        let key = Self.cacheKey(url)
+        let key = cacheKey(url)
         // Asked a moment after something started playing: not now.
         let allowed = lock.withLock { () -> Bool in
             guard !PlaybackActivity.isPlaying || key == playingFile else { return false }
@@ -365,7 +385,7 @@ final class StreamRelay: @unchecked Sendable {
     /// files stops (under way and still to come), so it has the connection
     /// to itself; that for `playing` (the same file) goes on.
     func stopAhead(keeping playing: URL?) {
-        let keep = playing.map(Self.cacheKey)
+        let keep = playing.map(cacheKey)
         let stopping: [URLSessionDataTask] = lock.withLock {
             playingFile = keep
             let others = aheadFiles.filter { $0 != keep }
@@ -484,7 +504,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(HTTP.keyInHeader(request))
+        completionHandler(HTTP.redirected(request, from: task.originalRequest?.url))
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,

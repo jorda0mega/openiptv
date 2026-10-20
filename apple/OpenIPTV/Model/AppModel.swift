@@ -1136,7 +1136,31 @@ final class AppModel {
 
     func disconnectLive() { live.disconnect() }
 
+    #if DEBUG
+    /// Real-feed checks (`-debugWebsocketProbe YES`): a watched change made
+    /// through the API came back over the websocket ("yes", "no"), or
+    /// nothing could be tried ("skipped").
+    var websocketProbe = ""
+    @ObservationIgnored private var heardWatched: Set<String> = []
+
+    func probeWebsocket() async {
+        guard websocketProbe.isEmpty, let emby else { return }
+        websocketProbe = "trying"
+        guard let film = await emby.debugUnwatchedFilm() else { return websocketProbe = "skipped" }
+        heardWatched.remove(film)
+        guard (try? await emby.debugSetPlayed(film, true)) != nil else { return websocketProbe = "skipped" }
+        let asked = Date()
+        while Date().timeIntervalSince(asked) < 30, !heardWatched.contains(film) { try? await Task.sleep(for: .milliseconds(500)) }
+        let heard = heardWatched.contains(film)
+        try? await emby.debugSetPlayed(film, false)
+        websocketProbe = heard ? "yes" : "no"
+    }
+    #endif
+
     private func apply(_ change: EmbyLive.Change) {
+        #if DEBUG
+        if case let .watched(list) = change { heardWatched.formUnion(list.map(\.itemId)) }
+        #endif
         switch change {
         case let .watched(list):
             for change in list {
@@ -1215,6 +1239,7 @@ final class AppModel {
             #endif
             let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding)
             player.prepareOffscreen()
+            player.openedAhead(for: Interest(at: .page, .next))
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
                         tracks: playback.tracks)
             player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
@@ -1303,6 +1328,7 @@ final class AppModel {
         }
         self.warm = nil
         warmExpiry?.cancel()
+        warm.player.playNow()
         return (warm.player, warm.playback)
     }
 
@@ -1659,6 +1685,7 @@ final class AppModel {
 
     func signedInToEmby(_ account: EmbyAccount) async {
         accountGeneration += 1
+        StreamRelay.shared.forgetAccount()
         // A Home on its way for the old account is dropped, not waited for.
         homeLoad = nil
         homeLoadID = UUID()
@@ -1704,7 +1731,8 @@ final class AppModel {
         prepared = [:]
         previews = []
         previewLoads = [:]
-        ServerSubtitles.forgetAll()
+        StreamRelay.shared.forgetAccount()
+        await ServerSubtitles.forgetAll()
         habits = Habits()
         AppCache.remove("habits.json")
         AppCache.remove("home.v4.json")
@@ -1729,7 +1757,8 @@ final class AppModel {
         await guide.clear()
         AppCache.remove(Self.lineupFile)
         library.clear()
-        ServerSubtitles.forgetAll()
+        StreamRelay.shared.forgetAccount()
+        await ServerSubtitles.forgetAll()
         serverSearchCache = [:]
         channelCorpus = SearchCorpus(name: \.name)
         rows = []

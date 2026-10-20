@@ -24,6 +24,7 @@ enum Likelihood: Int, Comparable, Sendable {
 }
 
 final class Interest: Identifiable, Sendable {
+    let id = UUID()
     let place: Place
     let likelihood: Likelihood
     let since = ContinuousClock.now
@@ -65,11 +66,16 @@ struct Bucket: Sendable {
 @MainActor
 final class Lane {
     final class Ticket {
-        let interest: Interest
+        let interest: Interest?
+        fileprivate(set) var plays: Bool
         fileprivate var turn: CheckedContinuation<Void, Error>?
         fileprivate var running = false
 
-        init(_ interest: Interest) { self.interest = interest }
+        /// No interest: a play, which never waits.
+        init(_ interest: Interest?) {
+            self.interest = interest
+            plays = interest == nil
+        }
     }
 
     let weight: Weight
@@ -93,7 +99,8 @@ final class Lane {
     func enter(_ ticket: Ticket) async throws {
         if ticket.running { return }
         try Task.checkCancellation()
-        guard conditions().allows(weight, at: ticket.interest.place) else { throw CancellationError() }
+        if ticket.plays { return start(ticket) }
+        guard let interest = ticket.interest, conditions().allows(weight, at: interest.place) else { throw CancellationError() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { turn in
                 ticket.turn = turn
@@ -116,8 +123,10 @@ final class Lane {
         admit()
     }
 
-    func admitNow(_ ticket: Ticket) {
-        guard !ticket.running else { return }
+    /// From now on, and at once if it waits, the ticket goes as a play.
+    func playNow(_ ticket: Ticket) {
+        ticket.plays = true
+        guard waiting.contains(where: { $0 === ticket }) else { return }
         waiting.removeAll { $0 === ticket }
         start(ticket)
     }
@@ -134,6 +143,8 @@ final class Lane {
     }
 
     private func start(_ ticket: Ticket) {
+        refillTokens()
+        if bucket != nil, tokens > 0 { tokens -= 1 }
         ticket.running = true
         running += 1
         ticket.turn?.resume()
@@ -146,19 +157,19 @@ final class Lane {
 
     private func admit() {
         let now = conditions()
-        for ticket in waiting where !now.allows(weight, at: ticket.interest.place) { withdraw(ticket) }
+        for ticket in waiting where !now.allows(weight, at: ticket.interest?.place ?? .page) { withdraw(ticket) }
         refillTokens()
         while running < atOnce, hasToken, let next = waiting.min(by: goesBefore) {
             waiting.removeAll { $0 === next }
-            if bucket != nil { tokens -= 1 }
             start(next)
         }
         awaitRefill()
     }
 
     private func goesBefore(_ a: Ticket, _ b: Ticket) -> Bool {
-        if a.interest.likelihood != b.interest.likelihood { return a.interest.likelihood > b.interest.likelihood }
-        return a.interest.since > b.interest.since
+        let (first, second) = (a.interest?.likelihood ?? .next, b.interest?.likelihood ?? .next)
+        if first != second { return first > second }
+        return (a.interest?.since ?? .now) > (b.interest?.since ?? .now)
     }
 
     private func refillTokens() {
@@ -187,9 +198,12 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         let lifetime: Duration
         var onLeave: OnLeave = .finish
         var retries: [Duration] = []
+        var retryable: @Sendable (Error) -> Bool = { _ in false }
         var failureKept: Duration = .seconds(600)
+        var stillThere: @MainActor (Value) -> Bool = { _ in true }
     }
 
+    /// What a fetch under way does once no one waits for it or holds it.
     enum OnLeave: Sendable {
         case finish
         case cancel
@@ -197,29 +211,25 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     struct Disk: Sendable {
         let find: @Sendable (Key) -> (value: Value, at: Date)?
-        let removeAll: @Sendable () -> Void
     }
 
     private final class Job {
-        let id: UUID
-        let task: Task<Value, Error>
-        let ticket: Lane.Ticket?
+        let ticket: Lane.Ticket
+        var task: Task<Void, Never>?
         var holders: Set<Interest.ID> = []
-        var joined: Bool
+        var waiters: [UUID: CheckedContinuation<Value, Error>] = [:]
+        /// Work ahead waiting for the result: the interest keeps the job, not they.
+        var listeners: [UUID: CheckedContinuation<Value, Error>] = [:]
+        var result: Result<Value, Error>?
 
-        init(id: UUID, task: Task<Value, Error>, ticket: Lane.Ticket?) {
-            self.id = id
-            self.task = task
-            self.ticket = ticket
-            joined = ticket == nil
-        }
+        init(_ ticket: Lane.Ticket) { self.ticket = ticket }
     }
 
     private enum Entry {
         case waiting(Job)
         case fetching(Job)
         case kept(Value, until: Date)
-        case failed(until: Date)
+        case failed(Error, until: Date)
 
         var job: Job? {
             switch self {
@@ -243,99 +253,154 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         self.fetch = fetch
     }
 
-    func value(for key: Key) async throws -> Value {
-        switch entries[key] {
-        case let .kept(value, until) where now() < until:
+    /// `ahead`: for that interest (a player opened before a tap), so it
+    /// waits for the lane like work ahead; nil: a play.
+    func value(for key: Key, ahead interest: Interest? = nil) async throws -> Value {
+        try Task.checkCancellation()
+        switch current(key) {
+        case let .kept(value, _)?:
             return value
-        case let .waiting(job):
-            job.joined = true
-            if let ticket = job.ticket { policy.lane.admitNow(ticket) }
-            return try await job.task.value
-        case let .fetching(job):
-            job.joined = true
-            return try await job.task.value
-        default:
-            return try await start(key, ticket: nil).task.value
+        case let .failed(error, _)?:
+            throw error
+        case let .waiting(job)?, let .fetching(job)?:
+            if interest == nil { policy.lane.playNow(job.ticket) }
+            return try await wait(for: job, key)
+        case nil:
+            return try await wait(for: start(key, Lane.Ticket(interest)), key)
         }
     }
 
     func warm(_ key: Key, for interest: Interest) async -> Value? {
         let job: Job
-        switch entries[key] {
-        case let .kept(value, until) where now() < until:
+        switch current(key) {
+        case let .kept(value, _)?:
             return value
-        case let .failed(until) where now() < until:
+        case .failed?:
             return nil
-        case let .waiting(running), let .fetching(running):
+        case let .waiting(running)?, let .fetching(running)?:
             job = running
-        default:
-            job = start(key, ticket: Lane.Ticket(interest))
+        case nil:
+            job = start(key, Lane.Ticket(interest))
         }
         job.holders.insert(interest.id)
-        return try? await job.task.value
+        return try? await wait(for: job, key, keeping: false)
+    }
+
+    /// A player opened ahead is being played: its fetches go now.
+    func hurry(_ key: Key) {
+        if let job = entries[key]?.job { policy.lane.playNow(job.ticket) }
     }
 
     func release(_ key: Key, from interest: Interest.ID) {
-        guard let entry = entries[key], let job = entry.job else { return }
+        guard let job = entries[key]?.job else { return }
         job.holders.remove(interest)
-        guard job.holders.isEmpty, !job.joined else { return }
-        if case .fetching = entry, policy.onLeave == .finish { return }
-        stop(job)
-        entries[key] = nil
+        stopIfUnwanted(job, key)
     }
 
     func forgetAll() {
         for case let job? in entries.values.map(\.job) { stop(job) }
         entries = [:]
-        disk?.removeAll()
     }
 
-    private func stop(_ job: Job) {
-        job.task.cancel()
-        if let ticket = job.ticket { policy.lane.withdraw(ticket) }
-    }
-
-    private func start(_ key: Key, ticket: Lane.Ticket?) -> Job {
-        let id = UUID()
-        let task = Task(priority: ticket == nil ? nil : .utility) { [self, policy, disk, now, fetch] in
-            do {
-                if let ticket { try await policy.lane.enter(ticket) }
-                defer { if let ticket { policy.lane.leave(ticket) } }
-                began(key, id)
-                let (value, at) = try await Self.load(key, lifetime: policy.lifetime, retries: policy.retries,
-                                                      disk: disk, now: now, fetch: fetch)
-                finished(key, id, with: .kept(value, until: at.addingTimeInterval(policy.lifetime / .seconds(1))))
-                return value
-            } catch {
-                let stopped = Task.isCancelled || error is CancellationError
-                finished(key, id, with: stopped ? nil : Entry.failed(until: now().addingTimeInterval(policy.failureKept / .seconds(1))))
-                throw error
-            }
+    private func current(_ key: Key) -> Entry? {
+        switch entries[key] {
+        case let .kept(value, until)? where now() < until && policy.stillThere(value):
+            return entries[key]
+        case let .failed(_, until)? where now() < until:
+            return entries[key]
+        case .waiting?, .fetching?:
+            return entries[key]
+        default:
+            entries[key] = nil
+            return nil
         }
-        let job = Job(id: id, task: task, ticket: ticket)
-        entries[key] = ticket == nil ? .fetching(job) : .waiting(job)
+    }
+
+    private func start(_ key: Key, _ ticket: Lane.Ticket) -> Job {
+        let job = Job(ticket)
+        job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in await run(job, key) }
+        entries[key] = .waiting(job)
         return job
     }
 
-    private func began(_ key: Key, _ id: UUID) {
-        if case let .waiting(job) = entries[key], job.id == id { entries[key] = .fetching(job) }
-    }
-
-    private func finished(_ key: Key, _ id: UUID, with entry: Entry?) {
-        guard entries[key]?.job?.id == id else { return }
-        entries[key] = entry
-    }
-
-    private nonisolated static func load(_ key: Key, lifetime: Duration, retries: [Duration], disk: Disk?, now: @Sendable () -> Date,
-                                         fetch: @Sendable (Key) async throws -> Value) async throws -> (Value, Date) {
-        if let found = disk?.find(key), now() < found.at.addingTimeInterval(lifetime / .seconds(1)) { return found }
-        var waits = retries[...]
-        while true {
-            do {
-                return (try await fetch(key), now())
-            } catch where !(error is CancellationError) && !Task.isCancelled && !waits.isEmpty {
-                try await Task.sleep(for: waits.removeFirst())
+    private func run(_ job: Job, _ key: Key) async {
+        let result: Result<(Value, Date), Error>
+        do { result = .success(try await tries(job, key)) } catch { result = .failure(error) }
+        if entries[key]?.job === job {
+            switch result {
+            case let .success((value, at)):
+                entries[key] = .kept(value, until: at.addingTimeInterval(policy.lifetime / .seconds(1)))
+            case let .failure(error):
+                entries[key] = Task.isCancelled || error is CancellationError
+                    ? nil : .failed(error, until: now().addingTimeInterval(policy.failureKept / .seconds(1)))
             }
         }
+        deliver(job, result.map(\.0))
+    }
+
+    private func tries(_ job: Job, _ key: Key) async throws -> (Value, Date) {
+        if let found = await Self.find(key, in: disk), now() < found.at.addingTimeInterval(policy.lifetime / .seconds(1)),
+           policy.stillThere(found.value) {
+            return found
+        }
+        var waits = policy.retries[...]
+        while true {
+            try await policy.lane.enter(job.ticket)
+            if case .waiting? = entries[key], entries[key]?.job === job { entries[key] = .fetching(job) }
+            do {
+                let value = try await fetch(key)
+                policy.lane.leave(job.ticket)
+                return (value, now())
+            } catch {
+                policy.lane.leave(job.ticket)
+                guard !Task.isCancelled, !(error is CancellationError), policy.retryable(error), let pause = waits.popFirst() else {
+                    throw error
+                }
+                try await Task.sleep(for: pause)
+            }
+        }
+    }
+
+    private nonisolated static func find(_ key: Key, in disk: Disk?) async -> (value: Value, at: Date)? {
+        disk?.find(key)
+    }
+
+    private func wait(for job: Job, _ key: Key, keeping: Bool = true) async throws -> Value {
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { waiter in
+                if let result = job.result { return waiter.resume(with: result) }
+                if keeping { job.waiters[id] = waiter } else { job.listeners[id] = waiter }
+            }
+        } onCancel: {
+            Task { @MainActor in self.stopWaiting(id, for: job, key) }
+        }
+    }
+
+    private func stopWaiting(_ id: UUID, for job: Job, _ key: Key) {
+        guard let waiter = job.waiters.removeValue(forKey: id) ?? job.listeners.removeValue(forKey: id) else { return }
+        waiter.resume(throwing: CancellationError())
+        stopIfUnwanted(job, key)
+    }
+
+    private func stopIfUnwanted(_ job: Job, _ key: Key) {
+        guard job.result == nil, job.waiters.isEmpty, job.holders.isEmpty, entries[key]?.job === job else { return }
+        if case .fetching? = entries[key], policy.onLeave == .finish { return }
+        stop(job)
+        entries[key] = nil
+    }
+
+    private func stop(_ job: Job) {
+        job.task?.cancel()
+        policy.lane.withdraw(job.ticket)
+        deliver(job, .failure(CancellationError()))
+    }
+
+    private func deliver(_ job: Job, _ result: Result<Value, Error>) {
+        guard job.result == nil else { return }
+        job.result = result
+        for waiter in Array(job.waiters.values) + Array(job.listeners.values) { waiter.resume(with: result) }
+        job.waiters = [:]
+        job.listeners = [:]
     }
 }
