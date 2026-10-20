@@ -91,6 +91,7 @@
 		461BF742965E3E5A547A1485 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DF96B743FAE66F816DD9294 /* Platform.swift */; };
 		468B592D440F128C951AC8B5 /* SpeechHeard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0888A0AF0DE6B28F24365AE1 /* SpeechHeard.swift */; };
 		478113F2FE0EB0C868169933 /* PictureInPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 404C86B1D60778438688EBC2 /* PictureInPicture.swift */; };
+		478A24F36571FFD69E611315 /* KeyLeakTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24565F5C6D48E734D5EE8D21 /* KeyLeakTests.swift */; };
 		484B832C1477FD548B848A9E /* FoundSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */; };
 		4A04418C373899BEE64BEB0D /* IMDbSignals.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1FD9D66654217AC33F67CB5 /* IMDbSignals.swift */; };
 		4B549190154807E418B0C270 /* FoundSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */; };
@@ -357,6 +358,7 @@
 		2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenIPTVApp.swift; sourceTree = "<group>"; };
 		22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		24565F5C6D48E734D5EE8D21 /* KeyLeakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyLeakTests.swift; sourceTree = "<group>"; };
 		25632E2613497E37F388902A /* PlayerChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerChrome.swift; sourceTree = "<group>"; };
 		29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSubtitles.swift; sourceTree = "<group>"; };
 		2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundSubtitles.swift; sourceTree = "<group>"; };
@@ -786,6 +788,7 @@
 			isa = PBXGroup;
 			children = (
 				E181E6602A0A74CA82B8EB92 /* HomeAfterLandscapeTests.swift */,
+				24565F5C6D48E734D5EE8D21 /* KeyLeakTests.swift */,
 				D1A9C8D5BE1D0FF094368580 /* LiveSportsTests.swift */,
 				60039C18093C4A9478614C1B /* PersonPageTests.swift */,
 				FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */,
@@ -1117,6 +1120,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6164F58D3BB936D5574C3FC1 /* HomeAfterLandscapeTests.swift in Sources */,
+				478A24F36571FFD69E611315 /* KeyLeakTests.swift in Sources */,
 				53C4FE41A43696DEC32E2768 /* LiveSportsTests.swift in Sources */,
 				201B09174ED3CF5739821CA4 /* PersonPageTests.swift in Sources */,
 				790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */,

@@ -3,10 +3,11 @@ import XCTest
 /// iPhone: Home doesn't change while you look at it, like Netflix's. The
 /// app runs with OPENREEL_DEBUG_HOME_VARY: each Home built comes with its
 /// cards in another order and its number after each row's name, so a build
-/// put on the page under your eyes would move things. The test server then
-/// says the library changed and something was watched: the rows must stay
-/// exactly as they were until Home is chosen again in the tab bar (there
-/// is no pull to refresh, as in the Apple TV app and Netflix). Run with `xcodebuild test -scheme OpenIPTV` on
+/// put on the page under your eyes would move things. A film is added and
+/// a show watched on another device while the app is away: back in it,
+/// the rows must stay exactly as they were until Home is chosen again in
+/// the tab bar (there is no pull to refresh, as in the Apple TV app and
+/// Netflix). Run with `xcodebuild test -scheme OpenIPTV` on
 /// an iPhone simulator signed in to the test server (scripts/mock_server.py)
 /// through TEST_RUNNER_DEBUG_EMBY; screenshots go to /tmp/openiptv/uitest-agent.
 final class PhoneHomeStabilityTests: XCTestCase {
@@ -26,6 +27,8 @@ final class PhoneHomeStabilityTests: XCTestCase {
 
     func testHomeStaysPutUntilChosenAgain() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
         app.launch()
         // Past the first seconds after a launch, when a build may still go
         // straight on the page.
@@ -33,17 +36,17 @@ final class PhoneHomeStabilityTests: XCTestCase {
         // Down to the rows, so they're all on screen together.
         drag(from: 0.75, to: 0.35)
         sleep(2)
+        // A short trip away, meanwhile a film added and the show's next
+        // episode started elsewhere: Home is built again once it's back.
+        XCUIDevice.shared.press(.home)
+        configure(server, ["resume_episode": "4", "added": "z9"])
+        sleep(3)
+        app.activate()
+        sleep(8)
         let before = rows()
         shot("home before")
         let numbers = rowNumbers(before)
         XCTAssertFalse(numbers.isEmpty, "no numbered rows on Home: \(before.keys.sorted())")
-
-        // Regression: the show's card moving to its next episode (watched
-        // elsewhere) replaced the card on screen; it must wait too.
-        configure(server, ["resume_episode": "4"])
-        defer { configure(server, ["reset": "1"]) }
-        push(server, "library")
-        push(server, "watched")
         sleep(18)
         let after = rows()
         shot("home after changes")
@@ -133,20 +136,20 @@ final class PhoneHomeStabilityTests: XCTestCase {
     /// is 8 seconds (OPENREEL_DEBUG_LONG_AWAY).
     func testHomeChangesOnlyAfterLongAway() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
         app.launchEnvironment["OPENREEL_DEBUG_LONG_AWAY"] = "8"
         app.launch()
         sleep(10)
         let before = pageNumbers()
         XCTAssertFalse(before.isEmpty, "no numbered rows on Home")
-        // The library changes: a new Home is built and waits.
-        push(server, "library")
-        sleep(8)
-        XCTAssertEqual(pageNumbers(), before, "Home changed while on screen")
-        // A short trip away: still the same Home.
+        // A short trip away, meanwhile a film added elsewhere: a new Home is
+        // built once it's back, and waits.
         XCUIDevice.shared.press(.home)
+        configure(server, ["added": "z9"])
         sleep(2)
         app.activate()
-        sleep(3)
+        sleep(10)
         XCTAssertEqual(pageNumbers(), before, "Home changed after a short time away")
         // A long time away: the Home built meanwhile goes on.
         XCUIDevice.shared.press(.home)
@@ -284,6 +287,32 @@ final class PhoneHomeStabilityTests: XCTestCase {
         app.activate()
         XCTAssertTrue(elsewhere.waitForExistence(timeout: 8), "what was watched elsewhere isn't in Continue Watching")
         shot("continue watching after return")
+    }
+
+    /// Added to the library on another device while the app was in the
+    /// background: back in the app, search finds it. Regression: what
+    /// changed was asked every ten minutes, or when Emby's websocket (no
+    /// longer opened) said so.
+    func testFilmAddedElsewhereShowsAfterReturn() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        sleep(12)
+        XCUIDevice.shared.press(.home)
+        configure(server, ["added": "z9"])
+        sleep(3)
+        app.activate()
+        sleep(6)
+        app.tabBars.buttons["Search"].firstMatch.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "no search field")
+        field.tap()
+        field.typeText("Zorro Returns")
+        let found = app.buttons["More for Zorro Returns"].firstMatch
+        let shown = found.waitForExistence(timeout: 10)
+        shot("search after return")
+        XCTAssertTrue(shown, "the film added elsewhere isn't found")
     }
 
     /// Put on My List on another device while the app was in the
@@ -604,14 +633,6 @@ final class PhoneHomeStabilityTests: XCTestCase {
               let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               let address = json["serverURL"] as? String else { return nil }
         return URL(string: address)
-    }
-
-    /// Asks the test server to announce a change to connected apps.
-    private func push(_ server: URL, _ type: String) {
-        let url = server.appending(path: "mock/push").appending(queryItems: [URLQueryItem(name: "type", value: type)])
-        let done = expectation(description: "push \(type)")
-        URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
-        wait(for: [done], timeout: 10)
     }
 
     /// The rows' buttons and texts (from Continue Watching's heading down,

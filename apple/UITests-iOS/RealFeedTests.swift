@@ -516,19 +516,15 @@ final class RealFeedTests: XCTestCase {
     }
 
     /// How the server takes the Emby key in a header alone, as counts and
-    /// words only (never an address or the key): (a) a film lowered to the
-    /// converted version plays; (b) how many addresses in that version's
-    /// playlists carry the key; (c) for each way of sending the key to the
-    /// websocket (X-Emby-Token, X-Emby-Authorization, Authorization, the key
-    /// in the query), whether it is refused, opens but misses a watched
-    /// change made meanwhile (a film neither watched nor started, marked
-    /// watched, then not), or hears it. The film: TEST_RUNNER_REAL_FEED_FILM,
-    /// else Asterix and Cleopatra.
+    /// yes or no only (never an address or the key): (a) a film lowered to
+    /// the converted version plays; (b) how many addresses in that
+    /// version's playlists carry the key. The film:
+    /// TEST_RUNNER_REAL_FEED_FILM, else Asterix and Cleopatra.
     func testFilmAuthAsSeenNow() throws {
         let film = ProcessInfo.processInfo.environment["REAL_FEED_FILM"] ?? "Asterix and Cleopatra"
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "10"
-        app.launchArguments += ["-debugSearch", film, "-debugHLSCounts", "YES", "-debugWebsocketProbe", "YES"]
+        app.launchArguments += ["-debugSearch", film, "-debugHLSCounts", "YES"]
         app.launch()
         let tab = app.tabBars.buttons["Search"].firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
@@ -549,17 +545,11 @@ final class RealFeedTests: XCTestCase {
         sleep(10)
         let plays = converted && (position() ?? 0) > from + 5
         let keys = app.staticTexts["debug-hls-keys"].firstMatch
-        let probe = app.staticTexts["debug-websocket"].firstMatch
-        let probed = Date()
-        func ended() -> Bool { probe.exists && (probe.label.hasPrefix("done") || probe.label == "skipped") }
-        while Date().timeIntervalSince(probed) < 150, !ended() { sleep(2) }
         shot("film auth")
         let counted = keys.exists && keys.label.hasPrefix("master") ? keys.label : "not counted"
-        let sockets = probe.exists ? probe.label.replacingOccurrences(of: "done ", with: "") : "no readout"
-        print("REAL auth: converted version plays \(plays ? "yes" : "no") | playlist addresses with the key: \(counted) | websocket: \(sockets)")
+        print("REAL auth: converted version plays \(plays ? "yes" : "no") | playlist addresses with the key: \(counted)")
         XCTAssertTrue(converted, "the film wasn't lowered to the converted version")
         XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
-        XCTAssertTrue(ended(), "the websocket check didn't end")
     }
 
     private func waitForPosition(timeout: TimeInterval) -> Double? {

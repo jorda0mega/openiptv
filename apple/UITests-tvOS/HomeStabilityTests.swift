@@ -3,10 +3,10 @@ import XCTest
 /// Apple TV: Home doesn't change while you look at it, like Netflix's. The
 /// app runs with OPENREEL_DEBUG_HOME_VARY: each Home built comes with its
 /// cards in another order and its number after each row's name, so a build
-/// put on the page under your eyes would move things. The test server then
-/// says the library changed and something was watched (as Emby does): Home
-/// is built again in the background, and must stay exactly as it was until
-/// it's chosen again in the tab bar. Run on an Apple TV simulator signed in
+/// put on the page under your eyes would move things. A film is added on
+/// another device while the app is away: back in it, Home is built again
+/// in the background, and must stay exactly as it was until it's chosen
+/// again in the tab bar. Run on an Apple TV simulator signed in
 /// to the test server (scripts/mock_server.py) through
 /// TEST_RUNNER_DEBUG_EMBY; screenshots go to /tmp/openiptv/uitest-agent.
 final class HomeStabilityTests: XCTestCase {
@@ -26,11 +26,20 @@ final class HomeStabilityTests: XCTestCase {
 
     func testHomeStaysPutUntilChosenAgain() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
         app.launchArguments = ["-tvTab", "home"]
         app.launch()
         // Past the first seconds after a launch, when a build may still go
         // straight on the page.
         wait(seconds: 10)
+        // A short trip away, meanwhile a film added elsewhere: Home is
+        // built again (another order, another number) once it's back.
+        remote.press(.home)
+        configure(server, ["added": "z9"])
+        sleep(3)
+        app.activate()
+        wait(seconds: 6)
         // Resting on the hero's Play, as after a launch (it doesn't turn
         // to another title meanwhile).
         for _ in 0..<2 where focusedIsTab() { remote.press(.down); sleep(1) }
@@ -39,11 +48,6 @@ final class HomeStabilityTests: XCTestCase {
         XCTAssertTrue(before.keys.contains { $0.hasPrefix("button:continue-") }, "no Continue Watching on Home")
         let numbers = rowNumbers(before)
         print("HOME rows \(numbers) cards \(before.count)")
-
-        // The library changed and something was watched: Home is built
-        // again (another order, another number) while it's on screen.
-        push(server, "library")
-        push(server, "watched")
         wait(seconds: 18)
         let after = layout()
         shot("home after changes")
@@ -104,10 +108,10 @@ final class HomeStabilityTests: XCTestCase {
         return URL(string: address)
     }
 
-    /// Asks the test server to announce a change to connected apps.
-    private func push(_ server: URL, _ type: String) {
-        let url = server.appending(path: "mock/push").appending(queryItems: [URLQueryItem(name: "type", value: type)])
-        let done = expectation(description: "push \(type)")
+    /// Sets how the test server behaves (see CONTROL in mock_server.py).
+    private func configure(_ server: URL, _ settings: [String: String]) {
+        let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
+        let done = expectation(description: "configure")
         URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
         wait(for: [done], timeout: 10)
     }
