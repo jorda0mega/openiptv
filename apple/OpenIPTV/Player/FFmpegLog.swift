@@ -6,23 +6,36 @@ import Libavutil
 /// the app, often a film warming up, and puts ffmpeg's own printer (stderr)
 /// back when that player closes: the hook is set again after every player
 /// opens or closes. A line can hold the stream's address, and with it the
-/// login: it is matched and dropped.
+/// login: it is matched and dropped. The lines say nothing of which player
+/// they're from (see FailureLedger).
 enum FFmpegLog {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var last: (failure: StreamFailure, at: CFAbsoluteTime)?
+    nonisolated(unsafe) private static var ledger = FailureLedger()
 
     static func listen() {
         av_log_set_callback { _, level, format, arguments in
-            guard level & 0xff <= AV_LOG_WARNING, let format, let arguments else { return }
+            guard level & 0xff <= AV_LOG_WARNING, let format, StreamFailure.worthReading(format: format), let arguments else { return }
             var text = [CChar](repeating: 0, count: 512)
             vsnprintf(&text, text.count, format, arguments)
             guard let failure = text.withUnsafeBufferPointer({ StreamFailure(logged: String(cString: $0.baseAddress!)) }) else { return }
-            FFmpegLog.lock.withLock { FFmpegLog.last = (failure, CFAbsoluteTimeGetCurrent()) }
+            let now = CFAbsoluteTimeGetCurrent()
+            FFmpegLog.lock.withLock { FFmpegLog.ledger.record(failure, at: now) }
         }
     }
 
-    static func failure(since time: CFAbsoluteTime) -> StreamFailure? {
-        guard let last = lock.withLock({ last }), last.at >= time else { return nil }
-        return last.failure
+    static func began(_ player: Int) {
+        lock.withLock { ledger.began(player) }
+    }
+
+    static func ended(_ player: Int) {
+        lock.withLock { ledger.ended(player) }
+    }
+
+    static func closed(_ player: Int) {
+        lock.withLock { ledger.closed(player) }
+    }
+
+    static func failure(of player: Int, since time: CFAbsoluteTime) -> StreamFailure? {
+        lock.withLock { ledger.failure(of: player, since: time) }
     }
 }

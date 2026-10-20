@@ -259,7 +259,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             guard phase == .starting else { return }
             phase = .active
             PlaybackActivity.began()
-            player?.onEvent = { [weak self] event in self?.handle(event) }
+            player?.onEvent = { [weak self] event, _ in self?.handle(event) }
             if let host { host.superview?.sendSubviewToBack(host) }
             #if DEBUG
             startMs = Int(Date().timeIntervalSince(askedAt) * 1000)
