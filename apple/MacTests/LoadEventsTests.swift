@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 final class LoadEventsTests: XCTestCase {
     func testAReplacedFilesEventsDontHideTheNextPicture() {

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 final class LiveSessionTests: XCTestCase {
     private struct C: Identifiable, Equatable { let id: String }
