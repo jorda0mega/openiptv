@@ -1,9 +1,5 @@
 import XCTest
 
-/// What's on TV for a search, by one rule: the guide's search and the rows
-/// kept from the last letter's search while the next runs. Regression: the
-/// kept rows used a looser rule (any word anywhere, ended programmes too),
-/// so rows went when the next answer came, and the list jumped.
 final class GuideMatchTests: XCTestCase {
     private let now: Int64 = 1_800_000_000
 

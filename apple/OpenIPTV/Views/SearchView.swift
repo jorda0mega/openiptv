@@ -13,8 +13,6 @@ struct SearchView: View {
     #if os(iOS)
     @Binding var activation: TabSearchActivation
 
-    /// How the Search tab opens: with the keyboard while nothing is typed
-    /// and no page opened from Search is showing; else on what's there.
     static func activation(query: String, path: NavigationPath = NavigationPath()) -> TabSearchActivation {
         query.trimmingCharacters(in: .whitespaces).isEmpty && path.isEmpty ? .searchTabSelection : .automatic
     }
@@ -29,7 +27,6 @@ struct SearchView: View {
         #endif
     }()
     @State private var query = Self.launchQuery
-    /// The filter chosen: the pill moves to it in the tap's own frame.
     @State private var scope: Scope = .all
     /// The filter the results show, a frame after the pill starts moving, so
     /// rebuilding the list doesn't hold up the pill's first frame.
@@ -60,11 +57,8 @@ struct SearchView: View {
     @State private var completions: [String] = []
     @State private var serverCards: [Card] = []
     @State private var serverQuery = ""
-    /// The text the device's results are for.
     @State private var foundQuery = ""
-    /// What the list shows. Changed only through `show(_:)`.
     @State private var shown = Shown()
-    /// A change waiting for the list to be back at the top.
     @State private var held: Shown?
     @State private var atTop = true
     /// Filters a finished search found nothing for: their "no results"
@@ -83,9 +77,6 @@ struct SearchView: View {
 
     private var thumbWidth: Int { Int(Layout.searchThumbWide * displayScale) }
 
-    /// Everything the list shows, for one text. Titles and episodes are
-    /// sorted out once when results arrive, not on every redraw (a filter
-    /// tap redraws the page).
     private struct Shown {
         var query = ""
         var all: [Card] = []
@@ -105,7 +96,6 @@ struct SearchView: View {
             }
         }
 
-        /// The rows in the order they're listed, as the filter shows them.
         func rows(for scope: Scope) -> [String] {
             var rows: [String] = []
             #if os(iOS)
@@ -140,11 +130,6 @@ struct SearchView: View {
                    episodes: server.filter { $0.kind == "Episode" }, channels: channels, onTV: onTV, completions: completions))
     }
 
-    /// The one way the list changes. Scrolled down, a change for the same
-    /// text that adds or takes away rows anywhere but after the last waits
-    /// until the list is back at the top, so the rows being read stay put
-    /// (a re-run as the library or the lineup grows, a late answer); new
-    /// text, or rows only added at the end, go on at once.
     private func show(_ next: Shown) {
         if !atTop, next.query == shown.query, !next.rows(for: shownScope).starts(with: shown.rows(for: shownScope)) {
             held = next
@@ -168,13 +153,11 @@ struct SearchView: View {
         return corpus.search(query).ranked.sorted().map { corpus.items[$0] }
     }
 
-    /// Filters with nothing for what's typed (dimmed in the bar).
     private var emptyScopes: Set<Scope> {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
         return Set(Scope.allCases.filter { $0 != .all && isEmpty($0) })
     }
 
-    /// Rows waiting for the top count: they're there, just not drawn yet.
     private func isEmpty(_ scope: Scope) -> Bool {
         let results = held ?? shown
         return results.titles(for: scope).isEmpty
@@ -677,8 +660,6 @@ struct SearchView: View {
         let typos = found.typoLibrary.map { SearchHit(entry: $0, pending: []) }
         let local = Local(titles: cards(hits + typos),
                           channels: (Array(cm.ranked.prefix(60)) + found.typoChannels).map { channelCorpus.items[$0] })
-        // Shown with the rest when the guide has answered by then; the rest
-        // doesn't wait for it.
         let early = guide.hits
         let asksServer = trimmed.count >= 2 && model.sources.emby != nil
         let showsNow = !local.titles.isEmpty || !local.channels.isEmpty || early?.isEmpty == false || !asksServer
@@ -745,14 +726,10 @@ struct SearchView: View {
         let channels: [LiveChannel]
     }
 
-    /// The device's matches, for the page. The same text again (an index
-    /// grew meanwhile): what's listed keeps its place, anything new after.
     private func take(_ local: Local, onTV hits: [AppModel.GuideHit]?) {
         let again = query == foundQuery
         library = again ? Self.keepingOrder(library, local.titles) : local.titles
         channels = again ? Self.keepingOrder(channels, local.channels) : local.channels
-        // Until the guide answers for new text, its last hits that it will
-        // find again, so its section doesn't jump at each letter.
         let words = GuideMatch.words(query), now = Int64(Date().timeIntervalSince1970)
         onTV = hits ?? (again ? onTV : onTV.filter { $0.found(by: words, at: now) })
         foundQuery = query

@@ -143,9 +143,6 @@ final class SearchStabilityTests: XCTestCase {
         }
     }
 
-    /// VoiceOver finds the chosen filter, not the pill behind it.
-    /// Regression: the pill was an element of its own, with no name, where
-    /// the chosen filter is.
     func testPillIsHiddenFromVoiceOver() {
         openSearch("movie")
         sleep(3)
@@ -159,12 +156,6 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertEqual(pill.map(\.frame), [], "the pill behind “All” is an element of its own")
     }
 
-    /// What's on TV doesn't hold up the rest, and doesn't push it down: with
-    /// the guide's answer late, the channels for "channel 1" are listed at
-    /// once; when the answer comes with the list scrolled down, the rows
-    /// being read stay put, and "On TV" (above the channels) is listed once
-    /// the list is back at the top. Regression: the results waited up to
-    /// 100 ms for the guide, and a late answer pushed the rows down.
     func testGuideNeitherHoldsUpNorPushesResults() throws {
         addTestChannels(try XCTUnwrap(testServer(), "no test server"))
         app.launchEnvironment["OPENREEL_DEBUG_GUIDE_DELAY"] = "8"
@@ -197,11 +188,6 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["On TV"].exists, "On TV isn't listed back at the top")
     }
 
-    /// The library growing while the results are scrolled (a big library's
-    /// pages still arriving after launch) doesn't move the rows being read;
-    /// the titles it adds are listed once the list is back at the top.
-    /// Regression: each batch of pages ran the search again and put the new
-    /// titles above the rows on screen, pushing them down.
     func testLibraryGrowingLeavesAScrolledListAlone() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["library_hold": "1"])
@@ -210,8 +196,6 @@ final class SearchStabilityTests: XCTestCase {
         openSearch("13", arguments: ["-freshLibrary", "YES"])
         sleep(6)
         XCTAssertTrue(libraryTitles().isEmpty, "the library's titles were in before its pages")
-        // A little way down: the server's "Movie 13" at the top, the guide's
-        // rows under it.
         drag(from: 0.6, to: 0.53, hold: 0.5, velocity: .slow)
         sleep(1)
         let scrolled = rows()
@@ -227,15 +211,10 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertFalse(libraryTitles().isEmpty, "the library's titles aren't listed back at the top")
     }
 
-    /// Titles only the library index has (the test server's search finds
-    /// "Movie 13", not these).
     private func libraryTitles() -> [String: CGRect] {
         results().filter { $0.key.hasPrefix("More for Library Title") }
     }
 
-    /// Opening Search with nothing typed brings up the keyboard at once, in
-    /// the search field. Regression: no keyboard until the next touch (6 s
-    /// and more).
     func testKeyboardComesUpWhenSearchOpens() {
         openSearch("")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard 1 s after Search opened")
@@ -244,8 +223,6 @@ final class SearchStabilityTests: XCTestCase {
         shot("search opened")
     }
 
-    /// Back on Search with results there, they stay uncovered: no keyboard.
-    /// Cleared, the next time Search opens the keyboard comes up again.
     func testKeyboardOnlyWhenSearchOpensEmpty() {
         openSearch("zorro")
         sleep(2)
@@ -265,14 +242,11 @@ final class SearchStabilityTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard on coming back to an empty Search")
     }
 
-    /// Spaces alone are nothing typed: the keyboard comes up.
     func testKeyboardWhenOnlySpacesAreTyped() {
         openSearch(#""   ""#)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard with only spaces typed")
     }
 
-    /// A genre's page opened from Search is what you come back to, with no
-    /// keyboard over it.
     func testNoKeyboardOverAGenrePage() {
         openSearch("")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 1), "no keyboard on an empty Search")
@@ -360,17 +334,10 @@ final class SearchStabilityTests: XCTestCase {
         frames { $0.elementType == .button && $0.label.hasPrefix("More for ") }
     }
 
-    /// The channel rows listed, by channel, with their frames: "CH, Show
-    /// 17-4, 10m left · Channel 17" (the guide's rows say when, not what's
-    /// left).
     private func channelRows() -> [String: CGRect] {
         rows { $0.contains(" left · Channel ") }
     }
 
-    /// Every row of the list on screen, named by the words in it, with its
-    /// frame. What changes by itself is left out (a channel's "12m left", a
-    /// programme's progress); rows with the same words are kept apart
-    /// ("words #2").
     private func rows(where wanted: (String) -> Bool = { _ in true }) -> [String: CGRect] {
         guard let root = try? app.snapshot() else { return [:] }
         var found: [String: CGRect] = [:]
@@ -395,13 +362,11 @@ final class SearchStabilityTests: XCTestCase {
         return found
     }
 
-    /// The test server's channels and guide too (its test login, for this run).
     private func addTestChannels(_ server: URL) {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
             + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
     }
 
-    /// Sets how the test server behaves (see CONTROL in mock_server.py).
     private func configure(_ server: URL, _ settings: [String: String]) {
         let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
         let done = expectation(description: "configure")
