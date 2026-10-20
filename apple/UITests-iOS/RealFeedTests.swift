@@ -19,7 +19,7 @@ final class RealFeedTests: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = feed!.appending(path: "iptv").absoluteString
         // The viewer's own account: playing reports nothing to the server,
         // so where they are in a title stays as it was.
-        app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", "real"]
+        app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", ProcessInfo.processInfo.environment["REAL_FEED_CACHE"] ?? "real"]
         XCUIDevice.shared.orientation = .portrait
     }
 
@@ -240,6 +240,106 @@ final class RealFeedTests: XCTestCase {
             app.buttons["Close player"].firstMatch.tap()
             sleep(2)
         }
+    }
+
+    /// Search as the viewer sees it now (diagnostic). Plays nothing and opens
+    /// nothing ahead: "the", then "man" (or REAL_FEED_WORDS, "the,man"),
+    /// typed; what each section holds;
+    /// every filter twice, each followed by the list; three screens down
+    /// while the library may still be growing, the row at the top of the
+    /// screen watched; back at the top. Prints counts and yes or no only,
+    /// no titles or channels.
+    func testSearchAsSeenNow() throws {
+        app.launchArguments += ["-noStreamAhead", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "no search field")
+        let counts = app.staticTexts["debug-search-counts"].firstMatch
+        for word in (ProcessInfo.processInfo.environment["REAL_FEED_WORDS"] ?? "the,man").split(separator: ",").map(String.init) {
+            field.tap()
+            let clear = field.buttons["Clear text"].firstMatch
+            if clear.exists { clear.tap() }
+            field.typeText(word + "\n")
+            let listed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", word + "|"), object: counts)
+            guard XCTWaiter().wait(for: [listed], timeout: 60) == .completed else {
+                print("REAL search \(word): no results in 60 s")
+                continue
+            }
+            sleep(5)
+            print("REAL search \(word): \(sections(counts))")
+
+            var chosen = 0, followed = 0
+            let taps = ["Movies", "Shows", "Live TV", "All"] + ["Movies", "Shows", "Live TV", "All"]
+            for name in taps {
+                let filter = app.buttons["scope-\(name)"].firstMatch
+                filter.tap()
+                sleep(1)
+                if filter.isSelected { chosen += 1 }
+                if listFollows(name) { followed += 1 }
+            }
+            print("REAL search \(word) filters: \(taps.count) taps, chosen \(chosen), list followed \(followed); "
+                + "the frame-by-frame pill check needs a screen recording, not made on the real feeds")
+
+            var moved = 0, stayed = 0
+            for _ in 1...3 {
+                let above = topRow()
+                drag(from: 0.85, to: 0.2, hold: 0.3, velocity: .slow)
+                sleep(1)
+                let top = topRow()
+                if top != above { moved += 1 }
+                sleep(4)
+                if top != nil, topRow() == top { stayed += 1 }
+            }
+            print("REAL search \(word) 3 screens down: the list moved \(moved) of 3, the top row then stayed put "
+                + "\(stayed == 3 ? "yes" : "no") (\(stayed) of 3); " + sections(counts))
+            for _ in 0..<8 { drag(from: 0.25, to: 0.9) }
+            sleep(2)
+            print("REAL search \(word) back at the top: \(sections(counts))")
+        }
+    }
+
+    /// The counts readout without the text it's for.
+    private func sections(_ counts: XCUIElement) -> String {
+        counts.label.split(separator: "|", maxSplits: 1).last.map(String.init) ?? "none"
+    }
+
+    /// The list shows what the filter is for: its section, or its "No …".
+    private func listFollows(_ filter: String) -> Bool {
+        let shown = { (texts: [String]) in texts.contains { self.app.staticTexts[$0].exists } }
+        switch filter {
+        case "Movies": return shown(["Movies", "No movies"]) && !shown(["Movies & Shows", "Shows"])
+        case "Shows": return shown(["Shows", "No shows or episodes"]) && !shown(["Movies & Shows", "Movies"])
+        case "Live TV": return shown(["On TV", "Channels", "No channels"]) && !shown(["Movies & Shows", "Movies", "Shows"])
+        default: return shown(["Movies & Shows", "On TV", "Channels", "Episodes"]) && !shown(["Movies", "Shows"])
+        }
+    }
+
+    /// The row at the top of the list on screen, by the words in it and where
+    /// it is (never printed).
+    private func topRow() -> String? {
+        let below = app.otherElements["search-header"].firstMatch.frame.maxY + 2
+        guard let root = try? app.snapshot() else { return nil }
+        var cells: [XCUIElementSnapshot] = []
+        func walk(_ element: XCUIElementSnapshot) {
+            if element.elementType == .cell, element.frame.maxY > below { cells.append(element) } else { element.children.forEach(walk) }
+        }
+        walk(root)
+        func words(_ element: XCUIElementSnapshot) -> [String] {
+            ([.staticText, .button].contains(element.elementType) ? [element.label] : []) + element.children.flatMap(words)
+        }
+        guard let top = cells.min(by: { $0.frame.minY < $1.frame.minY }) else { return nil }
+        let name = words(top).joined(separator: "|").replacingOccurrences(of: #"(\d+h )?\d+m left|\d+%"#, with: "", options: .regularExpression)
+        return "\(name)@\(Int(top.frame.minY.rounded()))"
+    }
+
+    private func drag(from: Double, to: Double, hold: TimeInterval = 0, velocity: XCUIGestureVelocity = .default) {
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)),
+                   withVelocity: velocity, thenHoldForDuration: hold)
     }
 
     /// A live game on several channels: it starts on one, Watch On lists

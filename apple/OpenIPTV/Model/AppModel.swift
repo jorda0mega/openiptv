@@ -1197,7 +1197,7 @@ final class AppModel {
         // Opens a stream: only on a connection known to be unmetered, never
         // while something plays.
         guard warm?.key != itemId, warming != itemId, !PlaybackActivity.isPlaying,
-              NetworkStatus.shared.knownUnmetered else { return }
+              NetworkStatus.shared.knownUnmetered, !Self.noStreamAhead else { return }
         coolDown()
         warming = itemId
         prepare([(id: itemId, kind: kind)])
@@ -1349,7 +1349,7 @@ final class AppModel {
     /// waited for the server three times before its first frame. Only on a
     /// connection known to be unmetered, never while something plays.
     func prefetchContinueWatching(_ cards: [Card]) {
-        guard NetworkStatus.shared.knownUnmetered, !PlaybackActivity.isPlaying else { return }
+        guard NetworkStatus.shared.knownUnmetered, !PlaybackActivity.isPlaying, !Self.noStreamAhead else { return }
         let items = cards.prefix(4).compactMap { card -> (id: String, kind: String?)? in
             if let episode = card.episodeId { return (episode, "Episode") }
             return card.kind == "Series" ? nil : (card.id, card.kind)
@@ -2717,6 +2717,15 @@ extension AppModel {
     private nonisolated static var freshLineup: Bool { UserDefaults.standard.bool(forKey: "freshLineup") }
     #else
     private nonisolated static let freshLineup = false
+    #endif
+
+    #if DEBUG
+    /// UI tests: `-noStreamAhead YES` opens no film before a tap, neither a
+    /// player warmed up nor a file's start fetched (a run on the real feeds
+    /// that must play nothing).
+    private nonisolated static var noStreamAhead: Bool { UserDefaults.standard.bool(forKey: "noStreamAhead") }
+    #else
+    private nonisolated static let noStreamAhead = false
     #endif
 
     #if DEBUG
