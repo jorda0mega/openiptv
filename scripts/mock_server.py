@@ -53,7 +53,8 @@ SOCKETS = set()
 # unset: as normal), "xtream_empty" ("streams" or "categories": that list
 # for the whole lineup, get_live_streams or get_live_categories, answers an
 # empty list, HTTP 200, a provider that sent nothing; other requests as
-# normal).
+# normal), "library_hold" ("1": the library index's pages after the first
+# wait until it's set back to 0: a big library still loading).
 CONTROL = {}
 # A film's length (seconds; OPENIPTV_MOCK_RUNTIME): two hours unless the
 # test film is shorter and its length matters (stretches of its sound).
@@ -918,6 +919,8 @@ class Handler(BaseHTTPRequestHandler):
             everything = shows + known + [movie(i) for i in range(40)] + extra
             start, limit = int(q.get("StartIndex", 0)), int(q.get("Limit", 100))
             time.sleep(0.5)  # a page takes a while on a real server
+            while start > 0 and CONTROL.get("library_hold") == "1":
+                time.sleep(0.1)
             body = {"Items": everything[start:start + limit]}
             if q.get("EnableTotalRecordCount") == "true":
                 body["TotalRecordCount"] = len(everything)

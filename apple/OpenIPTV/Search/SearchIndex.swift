@@ -409,6 +409,13 @@ final class LibraryIndex {
     private nonisolated static let legacyFile = "library-index.json"
     private nonisolated static let pageSize = 5000
     private nonisolated static let parallel = 4
+    #if DEBUG
+    /// UI tests: `-freshLibrary YES` starts from no index, every page asked
+    /// of the server again (the saved index is written over when they're in).
+    private nonisolated static var freshIndex: Bool { UserDefaults.standard.bool(forKey: "freshLibrary") }
+    #else
+    private nonisolated static let freshIndex = false
+    #endif
     private nonisolated static let changesEvery: TimeInterval = 10 * 60
     private nonisolated static let fullEvery: TimeInterval = 7 * 24 * 3600
 
@@ -471,7 +478,7 @@ final class LibraryIndex {
             corpus = SearchCorpus(name: \.name)
             generation += 1
             catalogChanged()
-            if let (cache, legacy) = await Self.readCache(), cache.server == server {
+            if !Self.freshIndex, let (cache, legacy) = await Self.readCache(), cache.server == server {
                 pages = cache.pages
                 total = cache.total
                 syncedAt = cache.syncedAt
