@@ -153,7 +153,7 @@ actor GuideStore {
 
     private nonisolated static func index(_ programmes: [String: [Programme]]) -> [(epgId: String, programme: Programme, folded: String)] {
         programmes.flatMap { id, list in
-            list.map { (epgId: id, programme: $0, folded: GuideStore.fold($0.title)) }
+            list.map { (epgId: id, programme: $0, folded: GuideMatch.fold($0.title)) }
         }.sorted { $0.programme.start < $1.programme.start }
     }
 
@@ -169,25 +169,14 @@ actor GuideStore {
         }
         prepareSearch()
         var onNow: [(String, Programme)] = [], later: [(String, Programme)] = []
-        for (offset, item) in (searchIndex ?? []).enumerated() where item.programme.stop > now {
+        for (offset, item) in (searchIndex ?? []).enumerated() {
             if offset & 4095 == 0, Task.isCancelled { return [] }
-            var inTitle = false
-            var matched = true
-            for word in words {
-                if item.folded.contains(word) { inTitle = true; continue }
-                if channelNames[item.epgId]?.contains(word) == true { continue }
-                matched = false
-                break
-            }
-            guard matched, inTitle else { continue }
+            guard GuideMatch.programme(words, title: item.folded, channel: channelNames[item.epgId],
+                                       stop: item.programme.stop, now: now) else { continue }
             if item.programme.start <= now { onNow.append((item.epgId, item.programme)) } else { later.append((item.epgId, item.programme)) }
             if onNow.count + later.count >= limit { break }
         }
         return (onNow + later).map { (epgId: $0.0, programme: $0.1) }
-    }
-
-    nonisolated static func fold(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
     func clear() {
@@ -365,5 +354,16 @@ private final class XMLTVDelegate: NSObject, XMLParserDelegate {
             }
         }
         return Int64(date.timeIntervalSince1970) - offset
+    }
+}
+
+extension AppModel.GuideHit {
+    /// Whether a guide search for these words, now, finds it.
+    func found(by words: [String], at now: Int64) -> Bool {
+        guard let league else {
+            return GuideMatch.programme(words, title: GuideMatch.fold(title), channel: GuideMatch.fold(channelTitle),
+                                        stop: stop ?? .max, now: now)
+        }
+        return GuideMatch.game(words, text: GuideMatch.fold(title + " " + league), start: start, now: now)
     }
 }

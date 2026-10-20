@@ -2088,7 +2088,7 @@ final class AppModel {
                 guard let epg = channel.epgId, byGuide[epg] == nil else { continue }
                 let best = library.copies[channel.id]?.first ?? channel
                 byGuide[epg] = best
-                names[epg] = GuideStore.fold(library.titles[best.id] ?? LiveOrganizer.Name(best.name).display)
+                names[epg] = GuideMatch.fold(library.titles[best.id] ?? LiveOrganizer.Name(best.name).display)
             }
             self.library = library
             self.categories = cats
@@ -2127,7 +2127,7 @@ final class AppModel {
     /// Sports. On now first, then by start; channels from abroad after
     /// local ones; local stations only for your area.
     func searchGuide(_ query: String, area: LocalArea?, limit: Int = 40) async -> [GuideHit] {
-        let words = Self.guideWords(query)
+        let words = GuideMatch.words(query)
         guard !words.isEmpty else { return [] }
         let now = Int64(Date().timeIntervalSince1970)
         var hits: [GuideHit] = []
@@ -2145,9 +2145,8 @@ final class AppModel {
         let events = shelf(LiveOrganizer.sportsID)?.sections.first { $0.id == "events" }?.entries ?? []
         for entry in events {
             let start = entry.event?.start.map { Int64($0.timeIntervalSince1970) }
-            if let start, now - start > Int64(GameTime.listed) { continue }
-            let text = GuideStore.fold(entry.title + " " + (entry.event?.league ?? ""))
-            guard words.allSatisfy({ text.contains($0) }) else { continue }
+            let text = GuideMatch.fold(entry.title + " " + (entry.event?.league ?? ""))
+            guard GuideMatch.game(words, text: text, start: start, now: now) else { continue }
             hits.append(GuideHit(title: entry.title, channel: entry.channels[0], channelTitle: entry.event?.league ?? "",
                                  start: start, stop: start.map { $0 + Int64(GameTime.length(league: entry.event?.league ?? "", title: entry.title)) },
                                  league: entry.event?.league))
@@ -2160,22 +2159,6 @@ final class AppModel {
             let sx = x.start ?? .max, sy = y.start ?? .max
             return sx != sy ? sx < sy : a.offset < b.offset
         }.prefix(limit).map(\.element)
-    }
-
-    private nonisolated static func guideWords(_ query: String) -> [String] {
-        GuideStore.fold(query).split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
-            .filter { $0.count >= 2 || $0.allSatisfy(\.isNumber) }
-    }
-
-    /// Hits found for earlier text that the new text's words still find, in
-    /// the programme's title, its channel or its league.
-    nonisolated static func guideHits(_ hits: [GuideHit], fitting query: String) -> [GuideHit] {
-        let words = guideWords(query)
-        guard !words.isEmpty else { return [] }
-        return hits.filter { hit in
-            let text = GuideStore.fold("\(hit.title) \(hit.channelTitle) \(hit.channel.name) \(hit.league ?? "")")
-            return words.allSatisfy(text.contains)
-        }
     }
 
     /// The country Live TV is arranged for: the device's region.
