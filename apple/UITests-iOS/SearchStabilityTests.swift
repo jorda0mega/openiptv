@@ -147,9 +147,7 @@ final class SearchStabilityTests: XCTestCase {
     /// the list is back at the top. Regression: the results waited up to
     /// 100 ms for the guide, and a late answer pushed the rows down.
     func testGuideNeitherHoldsUpNorPushesResults() throws {
-        let server = try XCTUnwrap(testServer(), "no test server")
-        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
-            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        addTestChannels(try XCTUnwrap(testServer(), "no test server"))
         app.launchEnvironment["OPENREEL_DEBUG_GUIDE_DELAY"] = "8"
         openSearch("channel")
         sleep(2)
@@ -176,6 +174,42 @@ final class SearchStabilityTests: XCTestCase {
         sleep(1)
         shot("guide at top")
         XCTAssertTrue(app.staticTexts["On TV"].exists, "On TV isn't listed back at the top")
+    }
+
+    /// The library growing while the results are scrolled (a big library's
+    /// pages still arriving after launch) doesn't move the rows being read;
+    /// the titles it adds are listed once the list is back at the top.
+    /// Regression: each batch of pages ran the search again and put the new
+    /// titles above the rows on screen, pushing them down.
+    func testLibraryGrowingLeavesAScrolledListAlone() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["library_hold": "1"])
+        addTeardownBlock { [self] in configure(server, ["library_hold": "0"]) }
+        addTestChannels(server)
+        openSearch("13", arguments: ["-freshLibrary", "YES"])
+        sleep(6)
+        XCTAssertTrue(libraryTitles().isEmpty, "the library's titles were in before its pages")
+        // A little way down: the server's "Movie 13" at the top, the guide's
+        // rows under it.
+        drag(from: 0.6, to: 0.53, hold: 0.5, velocity: .slow)
+        sleep(1)
+        let scrolled = rows()
+        shot("library scrolled")
+        XCTAssertFalse(scrolled.isEmpty, "nothing on screen for “13”")
+        configure(server, ["library_hold": "0"])
+        sleep(6)
+        shot("library grown")
+        XCTAssertEqual(differences(scrolled, rows()), [], "the library's new pages moved the rows being read")
+        for _ in 0..<3 { drag(from: 0.3, to: 0.8) }
+        sleep(1)
+        shot("library at top")
+        XCTAssertFalse(libraryTitles().isEmpty, "the library's titles aren't listed back at the top")
+    }
+
+    /// Titles only the library index has (the test server's search finds
+    /// "Movie 13", not these).
+    private func libraryTitles() -> [String: CGRect] {
+        results().filter { $0.key.hasPrefix("More for Library Title") }
     }
 
     /// Opening Search with nothing typed brings up the keyboard at once, in
@@ -236,17 +270,17 @@ final class SearchStabilityTests: XCTestCase {
 
     /// A finger drag down the middle of the screen, between heights given
     /// as fractions of it.
-    private func drag(from: Double, to: Double, hold: TimeInterval = 0) {
+    private func drag(from: Double, to: Double, hold: TimeInterval = 0, velocity: XCUIGestureVelocity = .default) {
         let window = app.windows.firstMatch
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
             .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)),
-                   withVelocity: .default, thenHoldForDuration: hold)
+                   withVelocity: velocity, thenHoldForDuration: hold)
     }
 
     // MARK: Helpers
 
-    private func openSearch(_ text: String) {
-        app.launchArguments = ["-debugSearch", text]
+    private func openSearch(_ text: String, arguments: [String] = []) {
+        app.launchArguments = ["-debugSearch", text] + arguments
         app.launch()
         sleep(3)
         app.tabBars.buttons["Search"].firstMatch.tap()
@@ -263,8 +297,49 @@ final class SearchStabilityTests: XCTestCase {
     /// 17-4, 10m left · Channel 17" (the guide's rows say when, not what's
     /// left).
     private func channelRows() -> [String: CGRect] {
-        let rows = frames { $0.elementType == .button && $0.label.contains(" left · Channel ") }
-        return Dictionary(rows.map { (String($0.key.split(separator: "·").last ?? ""), $0.value) }) { first, _ in first }
+        rows { $0.contains(" left · Channel ") }
+    }
+
+    /// Every row of the list on screen, named by the words in it, with its
+    /// frame. What changes by itself is left out (a channel's "12m left", a
+    /// programme's progress); rows with the same words are kept apart
+    /// ("words #2").
+    private func rows(where wanted: (String) -> Bool = { _ in true }) -> [String: CGRect] {
+        guard let root = try? app.snapshot() else { return [:] }
+        var found: [String: CGRect] = [:]
+        func words(_ element: XCUIElementSnapshot) -> [String] {
+            let own = [.staticText, .button].contains(element.elementType) ? [element.label] : []
+            return (own + element.children.flatMap(words)).filter { !$0.isEmpty }
+        }
+        func walk(_ element: XCUIElementSnapshot) {
+            guard element.elementType != .cell else {
+                let all = words(element).joined(separator: " | ")
+                let name = all.replacingOccurrences(of: #"(\d+h )?\d+m left|\d+%"#, with: "", options: .regularExpression)
+                guard !all.isEmpty, wanted(all), !element.frame.isEmpty else { return }
+                var key = name
+                var copy = 1
+                while found[key] != nil { copy += 1; key = "\(name) #\(copy)" }
+                found[key] = element.frame
+                return
+            }
+            element.children.forEach(walk)
+        }
+        walk(root)
+        return found
+    }
+
+    /// The test server's channels and guide too (its test login, for this run).
+    private func addTestChannels(_ server: URL) {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+    }
+
+    /// Sets how the test server behaves (see CONTROL in mock_server.py).
+    private func configure(_ server: URL, _ settings: [String: String]) {
+        let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
+        let done = expectation(description: "configure")
+        URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
     }
 
     private func testServer() -> URL? {
