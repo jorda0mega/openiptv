@@ -20,7 +20,6 @@ struct LoadEvents {
         entries[entry] = attempt
     }
 
-    /// The load that starts, and every file asked for before it is over.
     @discardableResult
     mutating func started(entry: Int64) -> Int? {
         guard let attempt = entries[entry] else { return nil }
@@ -35,7 +34,6 @@ struct LoadEvents {
         startedSinceDrain = false
     }
 
-    /// The load a log line belongs to; nil when it can't be told.
     var logAttempt: Int? {
         startedSinceDrain ? nil : current
     }

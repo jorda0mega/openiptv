@@ -24,13 +24,10 @@ final class MPVMetalLayer: CAMetalLayer {
 /// instance is reused across channel changes so zapping only swaps streams.
 final class MPVPlayer: @unchecked Sendable {
     enum Event {
-        /// The stream is asked for (`loadfile`), after any wait for a
-        /// closing player.
         case opening
         /// First frame is on screen; seconds since `load`.
         case started(Double)
         case buffering(Bool)
-        /// libmpv's error, and its class when a warning said.
         case failed(String, StreamFailure?)
         case time(position: Double, duration: Double?)
         case paused(Bool)
@@ -52,7 +49,6 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     let layer = MPVMetalLayer()
-    /// Each event with the attempt of the load it belongs to (see `load`).
     var onEvent: (@MainActor (Event, Int) -> Void)? {
         didSet {
             // Tracks added, or a failure, while nobody listened (a player
@@ -208,8 +204,6 @@ final class MPVPlayer: @unchecked Sendable {
     /// used to re-render the player's screen for nothing.
     private var lastTimeEmit: CFAbsoluteTime = 0
     private var lastTimePosition: Double = 0
-    /// The first picture, readable from the screen without waiting for the
-    /// player's queue (busy starting up or opening a file).
     private let startLock = NSLock()
     private var startedFlag = false
     /// The first frame is ready (a warmed-up player may already be there).

@@ -1,16 +1,5 @@
 import Foundation
 
-/// `OPENIPTV_SMOKE_MODE=live-probe`: how a provider's live streams answer
-/// from this Mac, for the Live TV start and stall measurements
-/// (.audit/live-perf/fable-plan.md §4.2). Channels by stream id only
-/// (OPENIPTV_PROBE_IDS), one stream at a time; nothing else is asked for
-/// but the account, when OPENIPTV_PROBE_ACCOUNT=1.
-///
-/// The login comes from the holder's address (OPENIPTV_SMOKE_FEED, as the
-/// app's debug sign-in fetches it) or from OPENIPTV_XTREAM_URL, _USER and
-/// _PASS. Every line goes out through `say`: numbers, fixed words and the
-/// stream id only, never an address, host, header, login or error text.
-///
 /// The provider's rate rules are built in: OPENIPTV_PROBE_GAP (3 s) between
 /// opens, OPENIPTV_PROBE_ROUND_GAP (600 s) between rounds, and a pause of
 /// OPENIPTV_PROBE_PAUSE_SECONDS (300) before the requests would pass
@@ -18,8 +7,6 @@ import Foundation
 enum LiveProbe {
     enum Ext: String { case ts, m3u8 }
     enum Agent: String { case mpv, app }
-    /// `timeout`: no answer by the cap. `no_data`: an answer, then no body
-    /// by the cap.
     enum Failure: String { case none, dns, refused, reset, timeout, no_data, tls, cancelled, redirect_loop, other }
 
     struct Login {
@@ -46,24 +33,18 @@ enum LiveProbe {
         env[key].flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// One stream open, as printed.
     struct Open {
         var tok = "", ext = Ext.ts, ua = Agent.mpv, round = 0
         /// URLSession hands over the status only with the first body byte:
         /// an answer whose body hasn't started reads `status=0 headers=yes`.
         var status = 0, headers = false
         var hops = 0, redirectMs = -1, crossHost = false
-        /// Summed over the hops that opened a connection; `tcp` without the
-        /// TLS handshake. -1: none did, or not measured.
         var dns = -1, tcp = -1, tls = -1
         var ttfb = -1, firstData = -1
-        /// -1 when the read was too short: 1 s after the first byte for
-        /// `first_1s_kb`, 6 s for `rate_tail_kbps` (its last 5 s).
         var rateKbps = -1, first1sKB = -1, rateTailKbps = -1
         var gapMax = 0.0, gaps1s = 0, stoppedAt = 0.0, bytes = 0
         var ctype = "other"
-        /// How the body is delimited: length, chunked or close (none: not
-        /// handed over). URLSession takes a reset of a close-delimited body
+        /// URLSession takes a reset of a close-delimited body
         /// for its end, so there `error=none` before the cap is an end or a
         /// reset.
         var framing = "none"
@@ -83,8 +64,6 @@ enum LiveProbe {
             return line
         }
 
-        /// A stream that played, then stopped before the cap: an end or a
-        /// reset. A playlist or a sized answer ends by design.
         var endedEarly: Bool { ext == .ts && framing != "length" && status == 200 && bytes > 0 && !capped }
     }
 
@@ -92,16 +71,8 @@ enum LiveProbe {
         var master = false, segments = 0, target = 0.0, segmentFirstData = -1
     }
 
-    // MARK: Output
-
     static var refusedLines = 0
 
-    /// Lines that could carry an address, host, login or free text are
-    /// refused: any character outside letters, digits, space and `_=.>-`
-    /// (so no `/`, `:`, `@`), a dot anywhere but in a decimal number after
-    /// `=` (so no host name or IP address), or a word over 32 characters.
-    /// One line passes otherwise: live-pick's ids for the shell, exactly
-    /// `OPENIPTV_PROBE_IDS=` and up to 20 numbers of up to 12 digits.
     static func safe(_ line: String) -> Bool {
         if line.range(of: #"\AOPENIPTV_PROBE_IDS=(?:[0-9]{1,12}(?:,[0-9]{1,12}){0,19})?\z"#, options: .regularExpression) != nil { return true }
         let alphabet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.>- ")
@@ -123,18 +94,12 @@ enum LiveProbe {
     static func yes(_ flag: Bool) -> String { flag ? "yes" : "no" }
     static func fixed(_ x: Double, _ places: Int) -> String { String(format: "%.\(places)f", x) }
 
-    // MARK: Reading a stream
-
-    /// One request read for at most `cap` seconds: when each piece of the
-    /// body came, the answer and the timings. Its callbacks and the cap run
-    /// on one serial queue.
     final class Reader: NSObject, URLSessionDataDelegate {
         let queue: OperationQueue = {
             let queue = OperationQueue()
             queue.maxConcurrentOperationCount = 1
             return queue
         }()
-        /// The body is kept up to this many bytes.
         let keep: Int
         var started = Date()
         var redirects = 0
@@ -193,8 +158,6 @@ enum LiveProbe {
         }
     }
 
-    /// Provider requests made: stream opens, playlist segments, the account,
-    /// live-pick's two lists.
     static var requests = 0
 
     static func read(_ url: URL, agent: String, cap: Double, keep: Int = 0) async -> Reader {
@@ -312,9 +275,6 @@ enum LiveProbe {
         return o
     }
 
-    /// The playlist's segments and target duration, and how long its first
-    /// segment takes to start (one more request). A master playlist is only
-    /// marked: its variants are not asked for.
     static func playlist(_ r: Reader, agent: String, cap: Double) async -> Playlist {
         let lines = String(decoding: r.body, as: UTF8.self).split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -332,9 +292,6 @@ enum LiveProbe {
         return p
     }
 
-    // MARK: Account
-
-    /// One player_api.php call, printed as categories only.
     static func account(_ login: Login) async -> String {
         guard let url = login.api() else { return "PROBE account error=other" }
         let r = await read(url, agent: agent(.app), cap: 30, keep: 1 << 20)
@@ -359,8 +316,6 @@ enum LiveProbe {
         let expires = number(info["exp_date"]).map { String(Int(floor((Double($0) - Date().timeIntervalSince1970) / 86400))) } ?? "none"
         return "PROBE account max_conn=\(max) active=\(active) ts=\(allows("ts")) m3u8=\(allows("m3u8")) status=\(status) expires_days=\(expires)"
     }
-
-    // MARK: Run
 
     /// `mpv`: what the app's player sends the stream server. The app sets no
     /// user agent, so it is libmpv's default, its version string; this one
@@ -438,15 +393,12 @@ enum LiveProbe {
               let uas = ["mpv": [Agent.mpv], "app": [.app], "both": [.mpv, .app]][value("OPENIPTV_PROBE_UA") ?? "mpv"]
         else { say("PROBE config bad_ext_or_ua"); return 1 }
         let mpvAgent = value("OPENIPTV_PROBE_MPV_UA")
-        // "<id>:<seconds>[,<id>:<seconds>…]"
         var sustained: [(String, Double)] = []
         for spec in (value("OPENIPTV_PROBE_SUSTAIN") ?? "").split(separator: ",") {
             let parts = spec.split(separator: ":")
             guard parts.count == 2, isId(parts[0]), let length = Double(parts[1]) else { say("PROBE config bad_sustain"); return 1 }
             sustained.append((String(parts[0]), length))
         }
-        // "<idA>,<idB>,<delay s>[,<delay s>…]": B after each delay from A's
-        // close, until B sends data.
         var pair: (a: String, b: String, delays: [Double])?
         if let spec = value("OPENIPTV_PROBE_PAIR") {
             let parts = spec.split(separator: ",")
@@ -462,8 +414,6 @@ enum LiveProbe {
             + " seconds=\(fixed(seconds, 1)) gap=\(fixed(gap, 1)) rounds=\(rounds) round_gap=\(fixed(roundGap, 1))"
             + " pause_every=\(pauseEvery) pause_seconds=\(fixed(pauseSeconds, 1))")
 
-        // Waits `wait` before the next `upcoming` requests, or the pause
-        // when they would pass `pauseEvery` since the last long wait.
         var started = false
         var sincePause = 0
         func pace(_ upcoming: Int, wait: Double, reason: String? = nil) async {
@@ -524,10 +474,6 @@ enum LiveProbe {
         return refusedLines == 0 ? 0 : 2
     }
 
-    // MARK: Self-test
-
-    /// OPENIPTV_PROBE_SELFTEST=1: `say` refuses what could leak and lets the
-    /// probe's own lines through. No network.
     static func selfTest() -> Int32 {
         let leaks = ["PROBE x=http://10.0.0.1", "PROBE a/b", "PROBE user@example", "PROBE x://y", "PROBE host=provider.example",
                      "PROBE ip=192.168.1.20", "PROBE port=host:8080", "PROBE ::1", "PROBE v=61.7.100",

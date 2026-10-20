@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""Checks the test server's live-channel switches (scripts/mock_server.py).
-
-    python3 scripts/test_mock_live.py
-
-Starts two private test servers on free ports: one streaming a small
-test film made with ffmpeg (the switches that shape a stream need it),
-one without (the plain answer UI tests get). Needs only Python and ffmpeg.
-"""
 
 import json
 import os
@@ -58,10 +50,6 @@ class Mock:
 
 
 class Open:
-    """One live request on its own connection, read for up to `seconds`:
-    status, headers, time to the headers and to the first body byte, the
-    body's arrival times, and how it ended ("eof", "reset" or "cap")."""
-
     def __init__(self, mock, path, seconds=0.0, agent="libmpv"):
         self.sock = socket.create_connection(("127.0.0.1", mock.port), timeout=30)
         start = time.monotonic()
@@ -106,7 +94,6 @@ class Open:
         return max((b - a for a, b in zip(times, times[1:])), default=0.0)
 
     def kbps(self, skip=0.0):
-        """The rate from `skip` seconds after the first byte to the last."""
         later = [(t, n) for t, n in self.arrivals if t >= self.first_data + skip]
         return sum(n for _, n in later[1:]) * 8 / 1000 / (later[-1][0] - later[0][0])
 
@@ -121,7 +108,6 @@ class LiveSwitches(unittest.TestCase):
             raise unittest.SkipTest("needs ffmpeg")
         cls.folder = tempfile.mkdtemp(prefix="openiptv-mock-test.")
         cls.film = os.path.join(cls.folder, "film.ts")
-        # About 3 Mbit/s, steady, like a live channel.
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25",
                         "-t", "8", "-c:v", "mpeg2video", "-b:v", "3M", "-minrate", "3M", "-maxrate", "3M",
                         "-bufsize", "1M", "-f", "mpegts", cls.film], check=True)

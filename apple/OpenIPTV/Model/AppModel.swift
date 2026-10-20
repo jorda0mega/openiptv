@@ -2146,9 +2146,6 @@ final class AppModel {
         return grouped.count > 1 ? grouped : []
     }
 
-    /// The feeds still worth trying, or the TV crossed out when none is:
-    /// every feed tried on this device, or the game on any device. Opened
-    /// again, it's tried again.
     func gameState(_ entry: LiveOrganizer.Entry) -> (badge: TileBadge?, notPlaying: Bool) {
         let feeds = groups(of: entry.channels).map { ([$0.option] + $0.others).map(\.id) }
         let working = feeds.filter { !liveFailures.failed($0) }.count
@@ -2194,7 +2191,6 @@ final class AppModel {
         endMarksOnTime()
     }
 
-    /// Rows change when a mark ends: a game tried before kickoff, at kickoff.
     private func endMarksOnTime() {
         marksEnd?.cancel()
         guard let end = liveFailures.nextEnd else { return }
@@ -2230,8 +2226,6 @@ final class AppModel {
         return [title(of: copy), WatchOn.quality(of: copy.name).label].compactMap(\.self).joined(separator: " ")
     }
 
-    /// A game that played on none of its channels: so on every device (the
-    /// app's record on the server).
     func noteGameNotPlaying(_ channel: LiveChannel) {
         let all = copies(of: channel)
         liveFailures.noteGame(all.map(\.id), kickoff: event(of: channel)?.start)
@@ -2247,8 +2241,6 @@ final class AppModel {
         }
     }
 
-    /// What other devices found not playing, on this device's game rows too
-    /// (asked while Sports is open).
     private func syncGamesNotPlaying() async {
         guard let emby, let record = await emby.notPlayingRecord(), !record.isEmpty else { return }
         let found = liveLibrary.feeds.keys.compactMap { id -> (channel: LiveChannel, at: Double)? in

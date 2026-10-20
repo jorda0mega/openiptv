@@ -722,7 +722,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(game.label.contains("channels"), "a channel count on a game that played nowhere: \(game.label)")
     }
 
-    /// Tried before kickoff: "not on yet", so the marks go at kickoff.
     func testMarkBeforeKickoffEndsAtKickoff() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["reset": "1"])
@@ -748,7 +747,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(game.label.contains("Not playing"), "a try before kickoff outlived it: \(game.label)")
         XCTAssertTrue(game.label.contains("5 channels"), "channels tried before kickoff still left out: \(game.label)")
 
-        // Another device: the server's record only.
         app.terminate()
         app.launch()
         openSports()
@@ -757,7 +755,6 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertFalse(game.label.contains("Not playing"), "the server's mark from before kickoff outlived it: \(game.label)")
     }
 
-    /// Another device found the game playing nowhere: shown for 15 min.
     func testSharedMarkLastsFifteenMinutes() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["reset": "1"])
@@ -824,9 +821,6 @@ final class LiveSportsTests: XCTestCase {
         app.buttons["Close player"].firstMatch.tap()
     }
 
-    /// The server's record that every channel of the test game played
-    /// nowhere, `minutesAgo` by the test server's clock (keys as
-    /// AppModel.sharedKey makes them).
     private func markNotPlaying(_ server: URL, minutesAgo: Double) throws {
         let at = Int(try markTime(server) - minutesAgo * 60)
         let place = try XCTUnwrap(server.host(), "the test server has no host")

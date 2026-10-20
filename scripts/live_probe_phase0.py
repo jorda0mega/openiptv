@@ -34,7 +34,6 @@ def fields(line):
 
 
 def leaks(line):
-    # live-pick's ids line for the shell is the probe's one exception.
     if re.fullmatch(r"OPENIPTV_PROBE_IDS=(?:\d{1,12}(?:,\d{1,12}){0,19})?", line):
         return False
     return bool(re.search(r"[^A-Za-z0-9_=.> -]", line) or any(
@@ -61,8 +60,6 @@ APP_VERSION = re.search(r'MARKETING_VERSION: "([^"]+)"', open(os.path.join(APPLE
 
 
 def pick(name, switches, extra, counts, ids):
-    """A live-pick row: its counts and ids, from exactly 2 lines, after
-    exactly the 2 list requests and no stream."""
     def check(_, rest, server):
         lines = rest["lines"]
         line = next((x for x in lines if x.startswith("PICK live=")), "")
@@ -79,9 +76,6 @@ def film_kb(seconds, kbps):
     return seconds * int(kbps) / 8 / 1.024
 
 
-# (name, switches, probe environment, check[, exit code]). check(opens,
-# other probe lines by kind, what the test server saw) gives (known,
-# measured, passed).
 ROWS = [
     ("live_delay=3", {"live_delay": 3}, {},
      lambda o, *_: ("ttfb ~ 3000", one(o, "ttfb"), near(o[0]["ttfb"], 3000, 300))),
@@ -179,9 +173,6 @@ ROWS = [
     ("none, login from the environment", {}, {"OPENIPTV_SMOKE_FEED": None},
      lambda o, *_: ("status=200, data", one(o, "status", "bytes", "ctype"),
                     o[0]["status"] == "200" and int(o[0]["bytes"]) > 0 and o[0]["ctype"] == "mp2t")),
-    # Twins first (Lakers in two services, Bills in two slots), then single
-    # games in start order to 6; ESPN's FHD and SD; TLC's and CNN's best. The
-    # account filter drops QVC's 4 copies and Account Info's ESPN first.
     pick("live-pick, pick=1", {"pick": 1}, {},
          "live=6 twins=2 always=4 requests=2", "3011,3031,3001,3002,3022,3023,3041,3043,3063,3051"),
     pick("live-pick, pick=1 sports=1 sports_dupes=1", {"pick": 1, "sports": 1, "sports_dupes": 1}, {},
@@ -193,7 +184,6 @@ ROWS = [
 
 
 def holder(port):
-    """The login holder's address, as the app's debug sign-in reads it."""
     source = json.dumps({"id": "00000000-0000-0000-0000-000000000001", "name": "Test server",
                          "kind": {"xtream": {"server": f"http://127.0.0.1:{port}/", "username": "u", "password": "p"}}}).encode()
 
@@ -213,8 +203,6 @@ def holder(port):
 
 
 def echo():
-    """A server that keeps each request's user agent and refuses it: what
-    the probe sends, exactly."""
     agents = []
 
     class Echo(BaseHTTPRequestHandler):
@@ -277,7 +265,6 @@ def main():
             env.update({"OPENIPTV_SMOKE_MODE": "live-probe", "OPENIPTV_SMOKE_FEED": feed, "OPENIPTV_PROBE_IDS": "1",
                         "OPENIPTV_PROBE_ROUNDS": "1", "OPENIPTV_PROBE_SECONDS": "10", "OPENIPTV_PROBE_GAP": "1"})
             for k, v in extra.items():
-                # The login from the environment, for the test server or the echo.
                 if v in (None, "echo"):
                     env.pop(k)
                     env.update({"OPENIPTV_XTREAM_URL": echoed if v else base, "OPENIPTV_XTREAM_USER": "u", "OPENIPTV_XTREAM_PASS": "p"})

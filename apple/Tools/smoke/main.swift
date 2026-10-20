@@ -55,9 +55,6 @@ func check(_ source: IPTVSource) async {
     }
 }
 
-// `live-probe` and `live-pick` (LiveProbe.swift, LivePick.swift) run before
-// the checks below: with a login in the environment, they print the
-// server's address.
 if value("OPENIPTV_SMOKE_MODE") == "live-probe" { exit(await LiveProbe.run(env)) }
 if value("OPENIPTV_SMOKE_MODE") == "live-pick" { exit(await LivePick.run(env)) }
 

@@ -1,26 +1,8 @@
 import Foundation
 
-/// `OPENIPTV_SMOKE_MODE=live-pick`: the stream ids for the live probe's
-/// rounds, picked for now from the provider's lineup. Two provider requests
-/// (the live categories and the live streams); the login as live-probe takes
-/// it. The "Account Info" channels go first, as XtreamProvider and AppModel
-/// drop them; the rest is the app's own Live TV (LiveOrganizer, GameTime):
-///
-/// - up to 6 slots of games live now, both slots of a game listed twice
-///   first, then one slot of each other game, in start order;
-/// - the FHD and SD copies of one always-on channel: the biggest copy group
-///   named with OPENIPTV_PICK_ALWAYS (a word, "ESPN" unless set), else that
-///   group's best and lowest copies;
-/// - the best copy of the 2 biggest other copy groups, the home region's
-///   (OPENIPTV_PICK_HOME, else the Mac's, as the app takes the device's)
-///   before those from abroad.
-///
-/// Prints `PICK live= twins= always= requests=` and the line for the shell,
-/// `OPENIPTV_PROBE_IDS=<id,…>`, through `LiveProbe.say`: numbers only.
 enum LivePick {
     static let slots = 6
 
-    /// As XtreamProvider decodes them; its own types are private.
     struct Category: Decodable {
         let id: String
         let name: String
@@ -55,7 +37,6 @@ enum LivePick {
         }
     }
 
-    /// One player_api.php list, whole, or nil after printing why.
     static func list(_ login: LiveProbe.Login, _ action: String) async -> Data? {
         guard let url = login.api(action) else { LiveProbe.say("PICK error=other"); return nil }
         let r = await LiveProbe.read(url, agent: LiveProbe.agent(.app), cap: 120, keep: 256 << 20)
@@ -118,8 +99,6 @@ enum LivePick {
             live.append(game.channels[0].nativeId)
         }
 
-        // Copy groups: the biggest first, the home region's before abroad,
-        // else as Live TV lists them.
         let international = LiveOrganizer.internationalID
         let groups = sections.filter { $0.section.id != "events" }
             .flatMap { place in place.section.entries.map { (abroad: place.shelf == international, entry: $0) } }

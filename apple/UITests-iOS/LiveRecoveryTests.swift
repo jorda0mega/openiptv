@@ -48,7 +48,6 @@ final class LiveRecoveryTests: XCTestCase {
         assertKeepsPlaying(server, "2", for: 12)
     }
 
-    /// Only the server cuts it: the start limit is far off.
     func testCutReconnectsInPlace() throws {
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "120"
         let server = try launch(["live_cut": "12"])
@@ -317,10 +316,6 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertFalse(row.label.contains("Didn’t play"), "no network marked the channel: \(row.label)")
     }
 
-    // MARK: Helpers
-
-    /// Still playing for `seconds`, and not asked for again: nothing took the
-    /// stream for a cut.
     private func assertKeepsPlaying(_ server: URL, _ id: String, for seconds: Double, file: StaticString = #filePath, line: UInt = #line) {
         guard let since = try? markTime(server) else { return XCTFail("no clock from the test server", file: file, line: line) }
         let deadline = Date().addingTimeInterval(seconds)
@@ -332,7 +327,6 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertEqual(again, 0, "the playing stream was asked for again", file: file, line: line)
     }
 
-    /// The test server as a Stalker portal (its test box address).
     @discardableResult
     private func launchPortal(_ switches: [String: String]) throws -> URL {
         let server = try XCTUnwrap(testServer(), "no test server")
@@ -369,7 +363,6 @@ final class LiveRecoveryTests: XCTestCase {
         return tapped
     }
 
-    /// Live TV → Sports → the game.
     private func openGame(_ team: String) {
         let sports = app.buttons["Sports"].firstMatch
         if sports.waitForExistence(timeout: 10) { sports.tap() }
@@ -431,8 +424,6 @@ final class LiveRecoveryTests: XCTestCase {
         return try XCTUnwrap(clock["t"], "the test server's clock has no time")
     }
 
-    /// The live streams asked for since `since`, in order: the channel's
-    /// stream id and the test server's time.
     private func liveRequests(_ server: URL, since: Double) throws -> [(id: String, t: Double, status: Int)] {
         let url = server.appending(path: "mock/live_requests").appending(queryItems: [.init(name: "since", value: String(since))])
         let requests: [String: [[String: Any]]] = try answer(url)
@@ -440,8 +431,6 @@ final class LiveRecoveryTests: XCTestCase {
         return try items.map { (try XCTUnwrap($0["id"] as? String), try XCTUnwrap($0["t"] as? Double), try XCTUnwrap($0["status"] as? Int)) }
     }
 
-    /// The account's streams open now, as the test server's account answer
-    /// counts them.
     private func activeConnections(_ server: URL) throws -> String {
         let url = server.appending(path: "player_api.php").appending(queryItems: [.init(name: "username", value: "u"), .init(name: "password", value: "p")])
         let account: [String: Any] = try answer(url)
