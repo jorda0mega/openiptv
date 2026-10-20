@@ -45,7 +45,12 @@ final class StreamFailureTests: XCTestCase {
         XCTAssertEqual(StreamFailure(lookup: .http(403)), .http_403)
         XCTAssertEqual(StreamFailure(lookup: .http(502)), .http_5xx)
         XCTAssertEqual(StreamFailure(lookup: .rejected), .http_401)
-        XCTAssertEqual(StreamFailure(lookup: .network("Couldn't connect to the server.")), .unknown)
+        XCTAssertEqual(StreamFailure(lookup: .network("Couldn't connect to the server.", .cannotConnectToHost)), .refused)
+        XCTAssertEqual(StreamFailure(lookup: .network("The server took too long to answer.", .timedOut)), .timeout)
+        XCTAssertEqual(StreamFailure(lookup: .network("That server address couldn't be found.", .cannotFindHost)), .dns)
+        XCTAssertEqual(StreamFailure(lookup: .network("The server's secure connection failed.", .secureConnectionFailed)), .tls)
+        XCTAssertEqual(StreamFailure(lookup: .network("Network error (-1005).", .networkConnectionLost)), .unknown)
+        XCTAssertEqual(StreamFailure(lookup: SourceError.wrap(URLError(.cannotConnectToHost))), .refused, "wrapping lost the kind")
         XCTAssertNil(StreamFailure(lookup: .cancelled), "a lookup the screen stopped counted as a failure")
     }
 
@@ -62,22 +67,27 @@ final class StreamFailureTests: XCTestCase {
         }
     }
 
-    func testFfmpegFailuresBelongToTheOnlyPlayerOpen() {
+    func testFfmpegFailuresBelongToTheOnlyLoadOpen() {
         var ledger = FailureLedger()
+        let a = FailureLedger.Load(player: 1, attempt: 1), b = FailureLedger.Load(player: 1, attempt: 2)
+        let film = FailureLedger.Load(player: 2, attempt: 0)
         ledger.record(.http_404, at: 1)
-        XCTAssertNil(ledger.failure(of: 1, since: 0), "a failure with no player open was kept")
-        ledger.began(1)
+        XCTAssertNil(ledger.failure(of: a, since: 0), "a failure with no load open was kept")
+        ledger.began(a)
         ledger.record(.http_404, at: 2)
-        XCTAssertEqual(ledger.failure(of: 1, since: 2), .http_404)
-        XCTAssertNil(ledger.failure(of: 1, since: 3), "a failure from before the load counted")
-        ledger.began(2)
-        ledger.record(.http_5xx, at: 4)
-        XCTAssertEqual(ledger.failure(of: 1, since: 2), .http_404, "a failure while two players were open went to one")
-        XCTAssertNil(ledger.failure(of: 2, since: 0))
-        ledger.closed(2)
-        ledger.began(1)
-        ledger.ended(1)
-        ledger.record(.http_403, at: 5)
-        XCTAssertEqual(ledger.failure(of: 1, since: 5), .http_403, "the replaced load's end closed the new one")
+        XCTAssertEqual(ledger.failure(of: a, since: 2), .http_404)
+        XCTAssertNil(ledger.failure(of: a, since: 3), "a failure from before the load counted")
+        ledger.began(b)
+        ledger.record(.http_403, at: 4)
+        XCTAssertNil(ledger.failure(of: b, since: 0), "a warning while two loads of one player were open went to one")
+        XCTAssertEqual(ledger.failure(of: a, since: 2), .http_404)
+        ledger.ended(a)
+        ledger.record(.http_5xx, at: 5)
+        XCTAssertEqual(ledger.failure(of: b, since: 5), .http_5xx)
+        ledger.began(film)
+        ledger.record(.timeout, at: 6)
+        XCTAssertEqual(ledger.failure(of: b, since: 5), .http_5xx, "a film's warning decided the channel's")
+        ledger.closed(player: 1)
+        XCTAssertNil(ledger.failure(of: b, since: 0))
     }
 }
