@@ -147,7 +147,7 @@ struct SportsContent: View {
                 }
             }
             GamesNoticeView(notice: model.gamesNotice, nothingListed: shown.isEmpty)
-            ForEach(Self.buckets(shown, now: now), id: \.title) { bucket in
+            ForEach(LiveOrganizer.gameSections(shown, now: now), id: \.title) { bucket in
                 Section(bucket.title) { EntryRows(entries: bucket.entries, playing: $playing) }
             }
         }
@@ -168,28 +168,6 @@ struct SportsContent: View {
             default: return counts[a, default: 0] != counts[b, default: 0] ? counts[a, default: 0] > counts[b, default: 0] : a < b
             }
         }
-    }
-
-    private static func buckets(_ events: [LiveOrganizer.Entry], now: Date) -> [(title: String, entries: [LiveOrganizer.Entry])] {
-        let calendar = Calendar.current
-        var live: [LiveOrganizer.Entry] = [], today: [LiveOrganizer.Entry] = [], tomorrow: [LiveOrganizer.Entry] = []
-        var later: [LiveOrganizer.Entry] = [], earlier: [LiveOrganizer.Entry] = [], undated: [LiveOrganizer.Entry] = []
-        for event in events {
-            guard let start = event.event?.start else { undated.append(event); continue }
-            // Started longer ago than such a game lasts: probably over (see
-            // GameTime), listed apart, not LIVE.
-            switch GameTime.state(start: start, league: event.event?.league ?? "", title: event.title, now: now) {
-            case .live: live.append(event)
-            case .over: earlier.append(event)
-            default:
-                if calendar.isDate(start, inSameDayAs: now) { today.append(event) }
-                else if calendar.isDateInTomorrow(start) { tomorrow.append(event) }
-                else { later.append(event) }
-            }
-        }
-        return [("Live now", live), ("Later today", today), ("Tomorrow", tomorrow), ("Coming up", later),
-                ("Earlier today", earlier), ("More events", undated)]
-            .filter { !$0.1.isEmpty }
     }
 }
 
