@@ -113,7 +113,7 @@ final class LiveSessionTests: XCTestCase {
         var session = playing()
         _ = session.handle(.paused(true), now: at(5))
         XCTAssertEqual(session.handle(.ended(session.attempt, .eof_before_frame), now: at(20)), [], "a cut while paused reopened")
-        XCTAssertEqual(session.phase, .cutWhilePaused(a))
+        XCTAssertEqual(session.phase, .stoppedWhilePaused(a, cut: true))
         XCTAssertEqual(session.handle(.paused(false), now: at(40)), [.clearTimeline, .load(a, session.attempt, after: 0)])
         XCTAssertEqual(session.readout, "reopening")
     }
@@ -210,7 +210,7 @@ final class LiveSessionTests: XCTestCase {
         _ = session.handle(.paused(true), now: at(5))
         XCTAssertEqual(session.handle(.ended(session.attempt, .offline), now: at(10)), [.stop, .waitForNetwork])
         XCTAssertEqual(session.handle(.online, now: at(20)), [], "the network coming back reopened paused live TV")
-        XCTAssertEqual(session.phase, .cutWhilePaused(a))
+        XCTAssertEqual(session.phase, .stoppedWhilePaused(a, cut: false))
         XCTAssertEqual(session.handle(.paused(false), now: at(30)), [.clearTimeline, .load(a, session.attempt, after: 0)])
     }
 
@@ -271,6 +271,18 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(front.handle(.paused(true), now: at(7)), [], "a pause back in the app closed the stream")
     }
 
+    func testAPausedRecordingIsLetGoAway() {
+        var session = playing()
+        _ = session.handle(.recording, now: at(5))
+        _ = session.handle(.started(session.attempt), now: at(6))
+        _ = session.handle(.paused(true), now: at(60))
+        XCTAssertEqual(session.handle(.away(keepsStream: false), now: at(61)), [.stop], "a paused recording kept its stream in the background")
+        XCTAssertEqual(session.readout, "away")
+        XCTAssertEqual(session.handle(.back, now: at(90)), [.unpause, .loadRecording(session.attempt, resume: true)],
+                       "the recording didn't open again where it was")
+        XCTAssertEqual(session.handle(.started(session.attempt), now: at(91)), [.picture])
+    }
+
     func testClosingDropsWhatComesAfter() {
         var session = playing()
         let last = session.attempt
@@ -284,7 +296,7 @@ final class LiveSessionTests: XCTestCase {
 
     func testRecording() {
         var session = playing()
-        XCTAssertEqual(session.handle(.recording, now: at(5)), [.clearTimeline, .unpause, .loadRecording(session.attempt)])
+        XCTAssertEqual(session.handle(.recording, now: at(5)), [.clearTimeline, .unpause, .loadRecording(session.attempt, resume: false)])
         XCTAssertEqual(session.handle(.opening(session.attempt), now: at(5.5)), [], "a recording got a start deadline")
         XCTAssertEqual(session.handle(.started(session.attempt), now: at(6)), [.picture])
         XCTAssertEqual(session.handle(.ended(session.attempt, .eof_before_frame), now: at(600)), [.goLive])

@@ -92,4 +92,17 @@ final class StreamFailureTests: XCTestCase {
         ledger.closed(player: 1)
         XCTAssertNil(ledger.failure(of: b, since: 0))
     }
+
+    func testAStartedLoadClosesItsPlayersOlderLoads() {
+        var ledger = FailureLedger()
+        let a = FailureLedger.Load(player: 1, attempt: 1), b = FailureLedger.Load(player: 1, attempt: 2)
+        let c = FailureLedger.Load(player: 1, attempt: 3)
+        ledger.began(a)
+        ledger.began(b)
+        ledger.began(c)
+        ledger.ended(a)
+        ledger.started(c)
+        ledger.record(.http_429, at: 1)
+        XCTAssertEqual(ledger.failure(of: c, since: 0), .http_429, "a load skipped by libmpv kept the started one's warnings ambiguous")
+    }
 }
