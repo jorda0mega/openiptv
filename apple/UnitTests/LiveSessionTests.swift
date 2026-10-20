@@ -224,6 +224,53 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(session.handle(.back, now: at(30)), [.unpause, .clearTimeline, .load(a, session.attempt, after: 0)])
     }
 
+    func testOfflineRecoveriesWhilePausedAreNotCuts() {
+        var session = playing([[a, b]])
+        var second = 10.0
+        for _ in 0..<4 {
+            _ = session.handle(.paused(true), now: at(second))
+            _ = session.handle(.ended(session.attempt, .offline), now: at(second + 1))
+            _ = session.handle(.online, now: at(second + 5))
+            XCTAssertEqual(session.handle(.paused(false), now: at(second + 10)), [.clearTimeline, .load(a, session.attempt, after: 0)],
+                           "a pause with no network was counted as a cut")
+            _ = session.handle(.started(session.attempt), now: at(second + 11))
+            second += 20
+        }
+        XCTAssertEqual(session.phase, .playing(a))
+    }
+
+    func testOnlyRealCutsCountTowardsGivingUp() {
+        var session = playing([[a, b]])
+        for second in [10.0, 20, 30] {
+            _ = session.handle(.ended(session.attempt, .eof_before_frame), now: at(second))
+            _ = session.handle(.started(session.attempt), now: at(second + 1))
+        }
+        _ = session.handle(.paused(true), now: at(35))
+        _ = session.handle(.ended(session.attempt, .offline), now: at(36))
+        _ = session.handle(.online, now: at(40))
+        XCTAssertEqual(session.handle(.paused(false), now: at(42)), [.clearTimeline, .load(a, session.attempt, after: 0)],
+                       "a pause with no network gave the copy up")
+        _ = session.handle(.started(session.attempt), now: at(43))
+        XCTAssertEqual(session.handle(.ended(session.attempt, .eof_before_frame), now: at(50)).prefix(1), [.switching(from: a)],
+                       "the fourth real cut kept the copy")
+    }
+
+    func testAPauseAfterLeavingStillFreesTheStream() {
+        var session = playing()
+        XCTAssertEqual(session.handle(.away(keepsStream: false), now: at(5)), [], "playing live TV closed in the background")
+        XCTAssertEqual(session.handle(.paused(true), now: at(5.5)), [.stop], "a pause that landed after leaving kept the stream")
+        XCTAssertEqual(session.phase, .away(a))
+        XCTAssertEqual(session.handle(.back, now: at(30)), [.unpause, .clearTimeline, .load(a, session.attempt, after: 0)])
+
+        var airPlay = playing()
+        _ = airPlay.handle(.away(keepsStream: true), now: at(5))
+        XCTAssertEqual(airPlay.handle(.paused(true), now: at(5.5)), [], "AirPlay's stream was closed")
+        var front = playing()
+        _ = front.handle(.away(keepsStream: false), now: at(5))
+        _ = front.handle(.back, now: at(6))
+        XCTAssertEqual(front.handle(.paused(true), now: at(7)), [], "a pause back in the app closed the stream")
+    }
+
     func testClosingDropsWhatComesAfter() {
         var session = playing()
         let last = session.attempt
