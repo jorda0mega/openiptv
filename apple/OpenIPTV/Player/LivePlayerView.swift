@@ -29,7 +29,6 @@ struct LivePlayerView: View {
     /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
     @State private var buffering = false
-    @State private var paused = false
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     /// Where playback is, in the stream's own seconds.
@@ -78,6 +77,7 @@ struct LivePlayerView: View {
 
     private var channel: LiveChannel { model.current(channels[index]) }
     private var started: Bool { session.hasPicture }
+    private var paused: Bool { session.paused }
     private var playingCopy: LiveChannel? { session.copy }
     private var error: String? {
         switch session.failure {
@@ -158,12 +158,12 @@ struct LivePlayerView: View {
             model.playerShown = true
         }
         .onDisappear {
+            send(.closed)
             PlaybackActivity.ended()
             model.playerShown = false
             ScreenAwake.set(awakeID, playing: false)
             hideTask?.cancel()
             loadTask?.cancel()
-            startWatch?.cancel()
             netWait?.cancel()
             cueTask?.cancel()
             #if DEBUG
@@ -548,6 +548,7 @@ struct LivePlayerView: View {
         case let .loadRecording(attempt): loadRecording(attempt)
         case .stop: stopStream()
         case let .deadline(attempt, limit): watchStart(attempt, limit: limit)
+        case .cancelDeadline: startWatch?.cancel()
         case .waitForNetwork: waitForNetwork()
         case .clearTimeline:
             position = nil
@@ -586,7 +587,6 @@ struct LivePlayerView: View {
         #if DEBUG
         perf.opening(copy, n: session.triedCount, of: feeds.map(\.count).reduce(0, +), delay: delay)
         #endif
-        startWatch?.cancel()
         loadTask?.cancel()
         loadTask = Task {
             if delay > 0 {
@@ -615,7 +615,6 @@ struct LivePlayerView: View {
     private func loadRecording(_ attempt: Int) {
         guard let recording else { return }
         let channel = channel
-        startWatch?.cancel()
         loadTask?.cancel()
         loadTask = Task {
             do {
@@ -637,7 +636,7 @@ struct LivePlayerView: View {
             #if DEBUG
             perf.timedOut()
             #endif
-            send(.failed(attempt, reading(.no_data), shown: .notPlaying))
+            send(.timedOut(attempt, reading(.no_data)))
         }
     }
 
@@ -645,7 +644,6 @@ struct LivePlayerView: View {
     /// was on its way to open one.
     private func stopStream() {
         loadTask?.cancel()
-        startWatch?.cancel()
         netWait?.cancel()
         #if DEBUG
         perf.closed()
@@ -748,9 +746,8 @@ struct LivePlayerView: View {
             perf.buffering(isBuffering)
             #endif
         case let .paused(isPaused):
-            paused = isPaused
-            if started { ScreenAwake.set(awakeID, playing: !isPaused) }
             send(.paused(isPaused))
+            if started { ScreenAwake.set(awakeID, playing: !isPaused) }
         case let .time(now, _):
             guard current, abs(now - (position ?? -10)) >= 0.25 else { return }
             position = now
