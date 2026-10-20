@@ -72,7 +72,7 @@ final class AppModel {
         #endif
         return failures
     }()
-    @ObservationIgnored private var marksEnd: Task<Void, Never>?
+    @ObservationIgnored private var nextMarkEnd: Task<Void, Never>?
     /// A provider category chosen from the full list (rather than a shelf):
     /// kept until the lineup next loads.
     var browsingProviderCategory = false
@@ -1680,7 +1680,7 @@ final class AppModel {
         while !Task.isCancelled {
             await updateLive(for: page)
             guard !Task.isCancelled else { return }
-            if page == LiveOrganizer.sportsID { await syncGamesNotPlaying() }
+            if page == LiveOrganizer.sportsID { await readGamesOtherDevicesFoundNotPlaying() }
             let maxAge = liveMaxAge(page)
             let next = sources.iptv.map { liveChecks[$0.id, default: LineupCheck()].nextAsk(maxAge: maxAge) }.min()
             let wait = min(max(next?.timeIntervalSinceNow ?? maxAge, 1), maxAge)
@@ -2148,9 +2148,10 @@ final class AppModel {
 
     func gameState(_ entry: LiveOrganizer.Entry) -> (badge: TileBadge?, notPlaying: Bool) {
         let feeds = groups(of: entry.channels).map { ([$0.option] + $0.others).map(\.id) }
-        let working = feeds.filter { !liveFailures.failed($0) }.count
-        let notPlaying = liveFailures.gameNotPlaying(entry.channels.map(\.id)) || (!feeds.isEmpty && working == 0)
-        return (notPlaying ? .notPlaying : TileBadge.count(working), notPlaying)
+        let feedsWorthTrying = feeds.filter { !liveFailures.failed($0) }.count
+        let everyFeedFailedHere = !feeds.isEmpty && feedsWorthTrying == 0
+        let notPlaying = liveFailures.gameNotPlaying(entry.channels.map(\.id)) || everyFeedFailedHere
+        return (notPlaying ? .notPlaying : TileBadge.count(feedsWorthTrying), notPlaying)
     }
 
     private static let unnamedFeed = WatchOn.Feed(service: LiveOrganizer.serviceName(""))
@@ -2188,17 +2189,17 @@ final class AppModel {
 
     func noteLiveFailure(_ channel: LiveChannel) {
         liveFailures.note(channel.id, kickoff: event(of: channel)?.start)
-        endMarksOnTime()
+        dropMarksAsTheyEnd()
     }
 
-    private func endMarksOnTime() {
-        marksEnd?.cancel()
+    private func dropMarksAsTheyEnd() {
+        nextMarkEnd?.cancel()
         guard let end = liveFailures.nextEnd else { return }
-        marksEnd = Task { [weak self] in
+        nextMarkEnd = Task { [weak self] in
             try? await Task.sleep(for: .seconds(max(0, end.timeIntervalSinceNow)))
             guard !Task.isCancelled, let self else { return }
             liveFailures.dropEnded()
-            endMarksOnTime()
+            dropMarksAsTheyEnd()
         }
     }
 
@@ -2226,13 +2227,13 @@ final class AppModel {
         return [title(of: copy), WatchOn.quality(of: copy.name).label].compactMap(\.self).joined(separator: " ")
     }
 
-    func noteGameNotPlaying(_ channel: LiveChannel) {
+    func shareGameNotPlaying(_ channel: LiveChannel) {
         let all = copies(of: channel)
-        liveFailures.noteGame(all.map(\.id), kickoff: event(of: channel)?.start)
-        endMarksOnTime()
+        liveFailures.noteSharedGame(all.map(\.id), kickoff: event(of: channel)?.start)
+        dropMarksAsTheyEnd()
         let keys = all.compactMap(sharedKey)
         guard let emby, !keys.isEmpty else { return }
-        let life = liveFailures.gameLife
+        let life = liveFailures.sharedGameLife
         Task(priority: .utility) {
             let now = Date().timeIntervalSince1970
             var record = (await emby.notPlayingRecord() ?? [:]).filter { now - $0.value < life }
@@ -2241,7 +2242,7 @@ final class AppModel {
         }
     }
 
-    private func syncGamesNotPlaying() async {
+    private func readGamesOtherDevicesFoundNotPlaying() async {
         guard let emby, let record = await emby.notPlayingRecord(), !record.isEmpty else { return }
         let found = liveLibrary.feeds.keys.compactMap { id -> (channel: LiveChannel, at: Double)? in
             guard let channel = channelById[id], let key = sharedKey(channel), let at = record[key] else { return nil }
@@ -2249,11 +2250,11 @@ final class AppModel {
         }
         var failures = liveFailures
         for (channel, at) in found {
-            failures.noteGame([channel.id], at: Date(timeIntervalSince1970: at), kickoff: event(of: channel)?.start)
+            failures.noteSharedGame([channel.id], at: Date(timeIntervalSince1970: at), kickoff: event(of: channel)?.start)
         }
         guard failures != liveFailures else { return }
         liveFailures = failures
-        endMarksOnTime()
+        dropMarksAsTheyEnd()
     }
 
     private func sayCleared(_ mark: LiveFailures.Mark?, game: Bool) {

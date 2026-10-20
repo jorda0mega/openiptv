@@ -55,8 +55,14 @@ func check(_ source: IPTVSource) async {
     }
 }
 
-if value("OPENIPTV_SMOKE_MODE") == "live-probe" { exit(await LiveProbe.run(env)) }
-if value("OPENIPTV_SMOKE_MODE") == "live-pick" { exit(await LivePick.run(env)) }
+func runLiveToolBeforeAnyCheckPrintsAHostname() async {
+    switch value("OPENIPTV_SMOKE_MODE") {
+    case "live-probe": exit(await LiveProbe.run(env))
+    case "live-pick": exit(await LivePick.run(env))
+    default: return
+    }
+}
+await runLiveToolBeforeAnyCheckPrintsAHostname()
 
 if let server = value("OPENIPTV_XTREAM_URL").flatMap({ XtreamProvider.parse($0.split(separator: " ").first.map(String.init) ?? $0) }),
    let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS") {

@@ -204,13 +204,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// used to re-render the player's screen for nothing.
     private var lastTimeEmit: CFAbsoluteTime = 0
     private var lastTimePosition: Double = 0
-    private let startLock = NSLock()
-    private var startedFlag = false
+    private let readableWhileQueueIsBusy = NSLock()
+    private var firstPictureShown = false
     /// The first frame is ready (a warmed-up player may already be there).
-    var hasStarted: Bool { startLock.withLock { startedFlag } }
-    private var failedFlag = false
+    var hasStarted: Bool { readableWhileQueueIsBusy.withLock { firstPictureShown } }
+    private var lastFileFailed = false
     /// The last file failed to play (a player opened ahead can't be used).
-    var hasFailed: Bool { startLock.withLock { failedFlag } }
+    var hasFailed: Bool { readableWhileQueueIsBusy.withLock { lastFileFailed } }
     private var duration: Double?
     private var buffered: Double = 0
     private var downloadSpeed: Double = 0
@@ -414,7 +414,7 @@ final class MPVPlayer: @unchecked Sendable {
             #endif
             reportsWindow = !file
             openedAfter = nil
-            startLock.withLock { startedFlag = false; failedFlag = false }
+            readableWhileQueueIsBusy.withLock { firstPictureShown = false; lastFileFailed = false }
             duration = nil
             mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
             mpv_set_property_string(mpv, "stream-lavf-o", file
@@ -1432,7 +1432,7 @@ final class MPVPlayer: @unchecked Sendable {
                                   shown - opened, subtitles, preroll, StreamRelay.shared.startReadsReadout)
                 stateLock.withLock { startTiming.note = note }
                 #endif
-                startLock.withLock { startedFlag = true }
+                readableWhileQueueIsBusy.withLock { firstPictureShown = true }
                 seekStarted = nil
                 if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
                 emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted), attempt: attempt)
@@ -1458,7 +1458,7 @@ final class MPVPlayer: @unchecked Sendable {
             // libmpv hands over the warnings that led to an end after the end
             // itself: the class is read once they're in.
             if end.reason == MPV_END_FILE_REASON_ERROR {
-                startLock.withLock { failedFlag = true }
+                readableWhileQueueIsBusy.withLock { lastFileFailed = true }
                 let message = String(cString: mpv_error_string(end.error))
                 queue.async { [self] in emit(.failed(message, failure(attempt: attempt, since: since)), attempt: attempt) }
             } else if end.reason == MPV_END_FILE_REASON_EOF {

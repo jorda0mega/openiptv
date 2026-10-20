@@ -59,23 +59,30 @@ enum LivePerf {
     }
 
     private static func log(_ text: String, refused: String) {
-        guard safe(text) else { return assertionFailure(refused) }
+        guard holdsNoAddress(text) else { return assertionFailure(refused) }
         NSLog("%@", text)
     }
 
-    static func safe(_ line: String) -> Bool {
-        let alphabet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.- ")
-        guard line.unicodeScalars.allSatisfy(alphabet.contains) else { return false }
+    private static let fieldCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_=.- ")
+    private static let longestWord = 32
+
+    /// The provider's stream addresses carry the login.
+    static func holdsNoAddress(_ line: String) -> Bool {
+        guard line.unicodeScalars.allSatisfy(fieldCharacters.contains) else { return false }
         return line.split(separator: " ").allSatisfy { word in
-            word.count <= 32 && (!word.contains(".") || word.wholeMatch(of: #/[A-Za-z0-9_]+=-?[0-9]+\.[0-9]+/#) != nil)
+            word.count <= longestWord && (!word.contains(".") || isDecimalField(word))
         }
+    }
+
+    private static func isDecimalField(_ word: Substring) -> Bool {
+        word.wholeMatch(of: #/[A-Za-z0-9_]+=-?[0-9]+\.[0-9]+/#) != nil
     }
 
     enum Mark: String { case channel, game }
 
     static func sayMarkCleared(_ kind: Mark, _ mark: LiveFailures.Mark, now: Date = Date()) {
         let age = Int(now.timeIntervalSince(mark.noted).rounded())
-        let text = "PERF mark cleared kind=\(kind.rawValue) age=\(age) before_kickoff=\(mark.beforeKickoff ? 1 : 0)"
+        let text = "PERF mark cleared kind=\(kind.rawValue) age=\(age) before_kickoff=\(mark.madeBeforeKickoff ? 1 : 0)"
         log(text, refused: "PERF mark line refused")
     }
 
