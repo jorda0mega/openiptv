@@ -23,19 +23,19 @@ enum FFmpegLog {
         }
     }
 
-    static func began(_ player: Int) {
-        lock.withLock { ledger.began(player) }
+    static func began(_ load: FailureLedger.Load) {
+        lock.withLock { ledger.began(load) }
     }
 
-    static func ended(_ player: Int) {
-        lock.withLock { ledger.ended(player) }
+    static func ended(_ load: FailureLedger.Load) {
+        lock.withLock { ledger.ended(load) }
     }
 
-    static func closed(_ player: Int) {
-        lock.withLock { ledger.closed(player) }
+    static func closed(player: Int) {
+        lock.withLock { ledger.closed(player: player) }
     }
 
-    static func failure(of player: Int, since time: CFAbsoluteTime) -> StreamFailure? {
-        lock.withLock { ledger.failure(of: player, since: time) }
+    static func failure(of load: FailureLedger.Load, since time: CFAbsoluteTime) -> StreamFailure? {
+        lock.withLock { ledger.failure(of: load, since: time) }
     }
 }

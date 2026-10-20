@@ -93,34 +93,38 @@ enum StreamFailure: String, CaseIterable {
     }
 }
 
-/// ffmpeg's warnings come from every player at once, with nothing saying
-/// whose: one counts for a player only while that player alone has a
-/// stream open.
+/// ffmpeg's warnings come from every player and every load at once, with
+/// nothing saying whose: one counts for a load only while that load alone
+/// is open.
 struct FailureLedger {
-    private var open: [Int: Int] = [:]
-    private var found: [Int: (failure: StreamFailure, at: Double)] = [:]
-
-    mutating func began(_ player: Int) {
-        open[player, default: 0] += 1
+    struct Load: Hashable {
+        let player: Int
+        let attempt: Int
     }
 
-    mutating func ended(_ player: Int) {
-        guard let count = open[player] else { return }
-        open[player] = count > 1 ? count - 1 : nil
+    private var open: Set<Load> = []
+    private var found: [Load: (failure: StreamFailure, at: Double)] = [:]
+
+    mutating func began(_ load: Load) {
+        open.insert(load)
     }
 
-    mutating func closed(_ player: Int) {
-        open[player] = nil
-        found[player] = nil
+    mutating func ended(_ load: Load) {
+        open.remove(load)
+    }
+
+    mutating func closed(player: Int) {
+        open = open.filter { $0.player != player }
+        found = found.filter { $0.key.player != player }
     }
 
     mutating func record(_ failure: StreamFailure, at time: Double) {
-        guard open.count == 1, let player = open.keys.first else { return }
-        found[player] = (failure, time)
+        guard open.count == 1, let load = open.first else { return }
+        found[load] = (failure, time)
     }
 
-    func failure(of player: Int, since time: Double) -> StreamFailure? {
-        guard let last = found[player], last.at >= time else { return nil }
+    func failure(of load: Load, since time: Double) -> StreamFailure? {
+        guard let last = found[load], last.at >= time else { return nil }
         return last.failure
     }
 }

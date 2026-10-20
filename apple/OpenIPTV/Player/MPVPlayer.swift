@@ -62,7 +62,7 @@ final class MPVPlayer: @unchecked Sendable {
                 defer { tracksUnheard = false; failureUnheard = nil }
                 return (tracksUnheard, failureUnheard)
             }
-            let attempt = stateLock.withLock { currentAttempt }
+            let attempt = stateLock.withLock { loads.current }
             if tracks { Task { @MainActor in handler(.tracksChanged, attempt) } }
             if let failure { Task { @MainActor in handler(.failed(failure.message, failure.class), failure.attempt) } }
         }
@@ -71,12 +71,8 @@ final class MPVPlayer: @unchecked Sendable {
     private var tracksUnheard = false
     /// A `.failed` that went out with no one listening.
     private var failureUnheard: (message: String, class: StreamFailure?, attempt: Int)?
-    private var logged: (failure: StreamFailure, at: CFAbsoluteTime)?
-    /// The attempt of the file libmpv plays now, and of each file asked for
-    /// (by libmpv's playlist entry): a file replaced still sends events
-    /// after the next is asked for.
-    private var currentAttempt = 0
-    private var entryAttempts: [Int64: Int] = [:]
+    private var logged: (failure: StreamFailure, at: CFAbsoluteTime, attempt: Int)?
+    private var loads = LoadEvents()
     private static let ids = NSLock()
     nonisolated(unsafe) private static var lastID = 0
     private let ledgerID: Int = MPVPlayer.ids.withLock {
@@ -100,7 +96,8 @@ final class MPVPlayer: @unchecked Sendable {
     private var perf = LivePerf.Opening()
     var livePerf: LivePerf.Opening {
         var opening = stateLock.withLock { perf }
-        if let loadfile = opening.loadfile, let failure = FFmpegLog.failure(of: ledgerID, since: loadfile) { opening.failure = failure }
+        let load = FailureLedger.Load(player: ledgerID, attempt: stateLock.withLock { loads.current })
+        if let loadfile = opening.loadfile, let failure = FFmpegLog.failure(of: load, since: loadfile) { opening.failure = failure }
         return opening
     }
     #endif
@@ -195,7 +192,6 @@ final class MPVPlayer: @unchecked Sendable {
     #endif
     /// When the file was open (headers read), for the start-up breakdown.
     private(set) var openedAfter: Double?
-    private var reportedStart = false
     /// When the last explicit jump was asked for (not scrubbing previews).
     private var seekStarted: CFAbsoluteTime?
     /// Choosing where to jump: when the picture's current jump was asked
@@ -212,7 +208,7 @@ final class MPVPlayer: @unchecked Sendable {
     /// used to re-render the player's screen for nothing.
     private var lastTimeEmit: CFAbsoluteTime = 0
     private var lastTimePosition: Double = 0
-    /// `reportedStart`, readable from the screen without waiting for the
+    /// The first picture, readable from the screen without waiting for the
     /// player's queue (busy starting up or opening a file).
     private let startLock = NSLock()
     private var startedFlag = false
@@ -424,7 +420,6 @@ final class MPVPlayer: @unchecked Sendable {
             #endif
             reportsWindow = !file
             openedAfter = nil
-            reportedStart = false
             startLock.withLock { startedFlag = false; failedFlag = false }
             duration = nil
             mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
@@ -445,13 +440,11 @@ final class MPVPlayer: @unchecked Sendable {
             if let clock { carry(to: clock, file: file) }
             stateLock.withLock { playingFile = file }
             emit(.opening, attempt: attempt)
-            FFmpegLog.began(ledgerID)
-            if let entry = loadfile(url.absoluteString) {
-                entryAttempts[entry] = attempt
-            } else {
-                FFmpegLog.ended(ledgerID)
-                stateLock.withLock { currentAttempt = attempt }
-            }
+            let load = FailureLedger.Load(player: ledgerID, attempt: attempt)
+            FFmpegLog.began(load)
+            let sent = loadfile(url.absoluteString)
+            if !sent.ok { FFmpegLog.ended(load) }
+            stateLock.withLock { loads.asked(attempt, entry: sent.entry) }
         }
     }
 
@@ -1341,7 +1334,7 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_set_wakeup_callback(mpv, nil, nil)
             mpv_terminate_destroy(mpv)
             self.mpv = nil
-            FFmpegLog.closed(ledgerID)
+            FFmpegLog.closed(player: ledgerID)
             FFmpegLog.listen()
         }
     }
@@ -1351,19 +1344,19 @@ final class MPVPlayer: @unchecked Sendable {
         mpv_set_option_string(mpv, name, value)
     }
 
-    private func loadfile(_ url: String) -> Int64? {
-        guard let mpv else { return nil }
+    private func loadfile(_ url: String) -> (ok: Bool, entry: Int64?) {
+        guard let mpv else { return (false, nil) }
         let words = ["loadfile", url, "replace"]
         var args: [UnsafePointer<CChar>?] = words.map { UnsafePointer(strdup($0)) } + [nil]
         defer { for pointer in args { free(UnsafeMutablePointer(mutating: pointer)) } }
         var result = mpv_node()
-        guard mpv_command_ret(mpv, &args, &result) >= 0 else { return nil }
+        guard mpv_command_ret(mpv, &args, &result) >= 0 else { return (false, nil) }
         defer { mpv_free_node_contents(&result) }
-        guard result.format == MPV_FORMAT_NODE_MAP, let map = result.u.list?.pointee else { return nil }
+        guard result.format == MPV_FORMAT_NODE_MAP, let map = result.u.list?.pointee else { return (true, nil) }
         for i in 0..<Int(map.num) where map.keys[i].map({ String(cString: $0) }) == "playlist_entry_id" {
-            if map.values[i].format == MPV_FORMAT_INT64 { return map.values[i].u.int64 }
+            if map.values[i].format == MPV_FORMAT_INT64 { return (true, map.values[i].u.int64) }
         }
-        return nil
+        return (true, nil)
     }
 
     private func command(_ args: [String]) {
@@ -1420,7 +1413,7 @@ final class MPVPlayer: @unchecked Sendable {
         case MPV_EVENT_START_FILE:
             guard let data = event.data else { return }
             let entry = data.assumingMemoryBound(to: mpv_event_start_file.self).pointee.playlist_entry_id
-            if let attempt = entryAttempts[entry] { stateLock.withLock { currentAttempt = attempt } }
+            stateLock.withLock { loads.started(entry: entry) }
         case MPV_EVENT_FILE_LOADED:
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
             #if DEBUG
@@ -1430,22 +1423,23 @@ final class MPVPlayer: @unchecked Sendable {
             #if DEBUG
             noteTracks()
             #endif
-        case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:
-            #if DEBUG
-            stopwatch.note(.firstFrame)
-            let opened = openedAfter ?? 0, shown = CFAbsoluteTimeGetCurrent() - loadStarted
-            let subtitles = shownSubtitle == nil ? "off" : subtitlesHidden ? "hidden" : "shown"
-            let preroll = stateLock.withLock { startTiming.preroll }
-            let note = String(format: "open %.2f s, first frame %.2f s after, subtitles %@, read before the start %@ | relay %@", opened,
-                              shown - opened, subtitles, preroll, StreamRelay.shared.startReadsReadout)
-            stateLock.withLock { startTiming.note = note }
-            #endif
-            reportedStart = true
-            startLock.withLock { startedFlag = true }
-            seekStarted = nil
-            if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
-            emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted))
         case MPV_EVENT_PLAYBACK_RESTART:
+            if let attempt = stateLock.withLock({ loads.restarted() }) {
+                #if DEBUG
+                stopwatch.note(.firstFrame)
+                let opened = openedAfter ?? 0, shown = CFAbsoluteTimeGetCurrent() - loadStarted
+                let subtitles = shownSubtitle == nil ? "off" : subtitlesHidden ? "hidden" : "shown"
+                let preroll = stateLock.withLock { startTiming.preroll }
+                let note = String(format: "open %.2f s, first frame %.2f s after, subtitles %@, read before the start %@ | relay %@", opened,
+                                  shown - opened, subtitles, preroll, StreamRelay.shared.startReadsReadout)
+                stateLock.withLock { startTiming.note = note }
+                #endif
+                startLock.withLock { startedFlag = true }
+                seekStarted = nil
+                if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
+                emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted), attempt: attempt)
+                return
+            }
             if followStarted != nil {
                 followStarted = nil
                 followShown = followTarget
@@ -1461,16 +1455,16 @@ final class MPVPlayer: @unchecked Sendable {
             guard let data = event.data else { return }
             let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
             let since = loadStarted
-            let attempt = entryAttempts.removeValue(forKey: end.playlist_entry_id) ?? stateLock.withLock { currentAttempt }
-            FFmpegLog.ended(ledgerID)
+            let attempt = stateLock.withLock { loads.ended(entry: end.playlist_entry_id) }
+            FFmpegLog.ended(FailureLedger.Load(player: ledgerID, attempt: attempt))
             // libmpv hands over the warnings that led to an end after the end
             // itself: the class is read once they're in.
             if end.reason == MPV_END_FILE_REASON_ERROR {
                 startLock.withLock { failedFlag = true }
                 let message = String(cString: mpv_error_string(end.error))
-                queue.async { [self] in emit(.failed(message, failure(since: since)), attempt: attempt) }
+                queue.async { [self] in emit(.failed(message, failure(attempt: attempt, since: since)), attempt: attempt) }
             } else if end.reason == MPV_END_FILE_REASON_EOF {
-                queue.async { [self] in emit(.ended(failure(since: since)), attempt: attempt) }
+                queue.async { [self] in emit(.ended(failure(attempt: attempt, since: since)), attempt: attempt) }
             }
         case MPV_EVENT_LOG_MESSAGE:
             guard let data = event.data else { return }
@@ -1478,7 +1472,7 @@ final class MPVPlayer: @unchecked Sendable {
             let failure = StreamFailure(logged: String(cString: message.text))
             let now = CFAbsoluteTimeGetCurrent()
             stateLock.withLock {
-                if let failure { logged = (failure, now) }
+                if let failure { logged = (failure, now, loads.current) }
                 #if DEBUG
                 perf.warnings += 1
                 if let failure { perf.failure = failure }
@@ -1548,8 +1542,9 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    private func failure(since time: CFAbsoluteTime) -> StreamFailure? {
-        FFmpegLog.failure(of: ledgerID, since: time) ?? stateLock.withLock { logged.flatMap { $0.at >= time ? $0.failure : nil } }
+    private func failure(attempt: Int, since time: CFAbsoluteTime) -> StreamFailure? {
+        FFmpegLog.failure(of: FailureLedger.Load(player: ledgerID, attempt: attempt), since: time)
+            ?? stateLock.withLock { logged.flatMap { $0.attempt == attempt && $0.at >= time ? $0.failure : nil } }
     }
 
     #if DEBUG
@@ -1573,7 +1568,7 @@ final class MPVPlayer: @unchecked Sendable {
         let asked = subtitleSwitchRequestedAt, fromHidden = switchedFromHidden || hidden && id != nil
         subtitleSwitchRequestedAt = nil
         switchedFromHidden = false
-        guard reportedStart, let mpv else { return }
+        guard hasStarted, let mpv else { return }
         let list = Self.trackList(mpv).filter { $0.kind == .subtitle }
         func kind(_ id: Int?) -> (word: SubtitleStopwatch.Word, language: String?) {
             guard let id else { return (.off, nil) }
@@ -1599,7 +1594,7 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     private func noteStall(_ stalled: Bool) {
-        guard reportedStart else { return }
+        guard hasStarted else { return }
         if stalled { return stalledSince = CFAbsoluteTimeGetCurrent() }
         guard let since = stalledSince else { return }
         stalledSince = nil
@@ -1693,7 +1688,7 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     private func emit(_ event: Event, attempt: Int? = nil) {
-        let attempt = attempt ?? stateLock.withLock { currentAttempt }
+        let attempt = attempt ?? stateLock.withLock { loads.current }
         let handler = onEvent
         if handler == nil {
             if case .tracksChanged = event { stateLock.withLock { tracksUnheard = true } }
