@@ -132,6 +132,30 @@ struct EmbyClient {
         _ = try await HTTP.data(request)
     }
 
+    /// Emby's websocket with one way of sending the key: refused, opened
+    /// but deaf to a watched change made meanwhile, or hearing it.
+    func debugProbeSocket(_ form: SocketProbe.Form, marking film: String) async -> String {
+        #if canImport(UIKit)
+        let device = UIDevice.current.model.replacingOccurrences(of: "\"", with: "")
+        #else
+        let device = "Mac"
+        #endif
+        let authorization = "MediaBrowser Client=\"Openreel\", Device=\"\(device)\", DeviceId=\"\(deviceId)\", "
+            + "Version=\"\(HTTP.appVersion)\", Token=\"\(account.accessToken)\""
+        switch await SocketProbe.open(account.serverURL, form, token: account.accessToken, deviceId: deviceId, authorization: authorization) {
+        case .unreachable:
+            return "unreachable"
+        case .refused:
+            return "refused"
+        case let .opened(socket):
+            try? await debugSetPlayed(film, true)
+            let heard = await socket.hears(film, within: .seconds(15))
+            try? await debugSetPlayed(film, false)
+            socket.close()
+            return heard ? "heard the change" : "opened, heard nothing"
+        }
+    }
+
     /// A film the viewer hasn't watched or started, to mark and unmark.
     func debugUnwatchedFilm() async -> String? {
         struct Page: Decodable { let Items: [Lenient<EmbyItem>]? }
