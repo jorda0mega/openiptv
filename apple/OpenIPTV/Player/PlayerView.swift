@@ -468,7 +468,6 @@ struct MoviePlayerView: View {
                     ZStack {
                         debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
                         debugReadout(player?.hlsKeys ?? "", "debug-hls-keys")
-                        debugReadout(model.websocketProbe, "debug-websocket")
                         debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
                         #if os(iOS)
                         debugReadout(player?.subtitleShift ?? "", "debug-subshift")
@@ -1248,9 +1247,6 @@ struct MoviePlayerView: View {
             buffering = false
             guard !startedOnce else { return }
             startedOnce = true
-            #if DEBUG
-            if UserDefaults.standard.bool(forKey: "debugWebsocketProbe") { Task { await model.probeWebsocket() } }
-            #endif
             // Whole start from the tap: server, then screen/player setup,
             // opening the file, and seeking + the first frame.
             let total = Date().timeIntervalSince(playback.requestedAt)
