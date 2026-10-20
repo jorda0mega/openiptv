@@ -32,8 +32,18 @@ enum PlaylistKeys {
         }
     }
 
+    /// The address without its key (the header carries it): a fetch that
+    /// fails is logged by the system, address and all.
+    static func keyless(_ url: URL) -> URL? {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        parts.queryItems = parts.queryItems?.filter { $0.name.lowercased() != "api_key" }
+        if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
+        return parts.url
+    }
+
     private static func read(_ url: URL, _ headers: [String]) async -> String? {
-        var request = HTTP.keyInHeader(URLRequest(url: url))
+        guard let address = keyless(url) else { return nil }
+        var request = URLRequest(url: address)
         request.timeoutInterval = 20
         for header in headers {
             let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
