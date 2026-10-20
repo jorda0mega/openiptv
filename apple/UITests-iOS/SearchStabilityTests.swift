@@ -140,6 +140,22 @@ final class SearchStabilityTests: XCTestCase {
         }
     }
 
+    /// VoiceOver finds the chosen filter, not the pill behind it.
+    /// Regression: the pill was an element of its own, with no name, where
+    /// the chosen filter is.
+    func testPillIsHiddenFromVoiceOver() {
+        openSearch("movie")
+        sleep(3)
+        let chosen = app.buttons["scope-All"].firstMatch.frame
+        let parts = app.otherElements["search-header"].firstMatch.descendants(matching: .any).allElementsBoundByIndex
+        let pill = parts.filter { part in
+            part.identifier.isEmpty && part.label.isEmpty
+                && abs(part.frame.minX - chosen.minX) < 1 && abs(part.frame.width - chosen.width) < 1
+        }
+        XCTAssertTrue(app.buttons["scope-All"].exists, "no filters")
+        XCTAssertEqual(pill.map(\.frame), [], "the pill behind “All” is an element of its own")
+    }
+
     /// What's on TV doesn't hold up the rest, and doesn't push it down: with
     /// the guide's answer late, the channels for "channel 1" are listed at
     /// once; when the answer comes with the list scrolled down, the rows

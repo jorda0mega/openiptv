@@ -6,8 +6,12 @@ import SwiftUI
 /// slid to the chosen filter.
 struct ScopeBar: View {
     @Binding var scope: SearchView.Scope
-    @Binding var shownScope: SearchView.Scope
     let dimmed: Set<SearchView.Scope>
+    /// Called as the pill starts for a new filter (SearchView's body doesn't
+    /// read the filter, so a tap doesn't redraw the page before the pill).
+    let chosen: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private static let slide = Spring.snappy(duration: 0.25)
 
     var body: some View {
         HStack(spacing: 8) {
@@ -31,13 +35,13 @@ struct ScopeBar: View {
         }
         .backgroundPreferenceValue(PillFrames.self) { frames in
             GeometryReader { proxy in
-                if let frame = frames[scope].map({ proxy[$0] }) { Pill(frame: frame) }
+                if let frame = frames[scope].map({ proxy[$0] }) {
+                    Pill(frame: frame, scope: scope, slide: reduceMotion ? nil : Self.slide)
+                }
             }
         }
-        .animation(.snappy(duration: 0.25), value: scope)
-        .onChange(of: scope) { _, chosen in
-            NextFrame.run { withTransaction(\.disablesAnimations, true) { shownScope = chosen } }
-        }
+        .animation(.spring(Self.slide), value: scope)
+        .onChange(of: scope) { chosen() }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
     }
@@ -45,17 +49,30 @@ struct ScopeBar: View {
 
 /// The white pill, slid by Core Animation rather than redrawn by SwiftUI
 /// each frame: it keeps moving while the results are rebuilt on the main
-/// thread.
+/// thread. It slides only to a newly chosen filter; moved for any other
+/// reason (the bar laid out again: a resize, larger text) it's there at
+/// once, never away from its words.
 private struct Pill: UIViewRepresentable {
     let frame: CGRect
+    let scope: SearchView.Scope
+    /// Nil: no slide (Reduce Motion).
+    let slide: Spring?
+
+    final class Coordinator {
+        var placed: SearchView.Scope?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> UIView {
         let bar = UIView()
         bar.isUserInteractionEnabled = false
+        bar.accessibilityElements = []
         let capsule = UIView(frame: frame)
         capsule.backgroundColor = .white
         capsule.layer.cornerRadius = frame.height / 2
         bar.addSubview(capsule)
+        context.coordinator.placed = scope
         return bar
     }
 
@@ -65,25 +82,35 @@ private struct Pill: UIViewRepresentable {
             capsule.frame = frame
             capsule.layer.cornerRadius = frame.height / 2
         }
-        guard context.transaction.animation != nil, !context.transaction.disablesAnimations else { return move() }
-        UIView.animate(springDuration: 0.25, bounce: 0.15, options: [.beginFromCurrentState, .allowUserInteraction],
+        let chosen = context.coordinator.placed != scope
+        context.coordinator.placed = scope
+        guard chosen, let slide else { return UIView.performWithoutAnimation(move) }
+        UIView.animate(springDuration: slide.duration, bounce: slide.bounce, options: [.beginFromCurrentState, .allowUserInteraction],
                        animations: move)
     }
 }
 
-/// Runs work at the next screen refresh: a hop on the main queue can
-/// still land in the frame being made now.
-private final class NextFrame: NSObject {
-    private let work: () -> Void
-    private init(_ work: @escaping () -> Void) { self.work = work }
+/// Runs the newest work given at the next screen refresh (work given
+/// before it and not run yet is dropped): a hop on the main queue can still
+/// land in the frame being made now.
+final class NextFrame: NSObject {
+    private var work: (() -> Void)?
+    private var link: CADisplayLink?
 
-    static func run(_ work: @escaping () -> Void) {
-        CADisplayLink(target: NextFrame(work), selector: #selector(fire)).add(to: .main, forMode: .common)
+    func run(_ work: @escaping () -> Void) {
+        self.work = work
+        guard link == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(fire))
+        link.add(to: .main, forMode: .common)
+        self.link = link
     }
 
-    @objc private func fire(_ link: CADisplayLink) {
-        link.invalidate()
-        work()
+    @objc private func fire() {
+        link?.invalidate()
+        link = nil
+        let work = self.work
+        self.work = nil
+        work?()
     }
 }
 
