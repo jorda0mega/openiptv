@@ -41,6 +41,7 @@
 		1B573875ED79BC2420B63AE6 /* HomeStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6E6C6920060C5CF3CC65EF /* HomeStabilityTests.swift */; };
 		1B688B589825F83E58DA4E1B /* hogweed.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4962C0F389044958A1E2BE4 /* hogweed.xcframework */; };
 		1CE08F6192353FDD760D3939 /* LibraryIndexFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */; };
+		1D20BD000D0CBA3F6E41E8E4 /* GuideMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08536B83CA34648635FBC30D /* GuideMatch.swift */; };
 		1D626F013984C6DFB17DDA92 /* TVLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B020D0F87B72E286D9A48D /* TVLiveView.swift */; };
 		1FFCAB2944137C5D0E16CC38 /* gmp.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 363AD3E84AD3778E05926FBC /* gmp.xcframework */; };
 		201B09174ED3CF5739821CA4 /* PersonPageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60039C18093C4A9478614C1B /* PersonPageTests.swift */; };
@@ -74,6 +75,7 @@
 		3C08CEF60D0EC57E6C0B56D7 /* RealFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */; };
 		3CF2A50D68BC65F97FF790C5 /* Libcrypto.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B41963718B2429F644A73CAD /* Libcrypto.xcframework */; };
 		3E9B707F4696C5845239813A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2DE48775D87FC33EDCE40F /* AppModel.swift */; };
+		4055D29782F28BDB22D3B292 /* GuideMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08536B83CA34648635FBC30D /* GuideMatch.swift */; };
 		40ED2C42BE6F50D41D3A415F /* LineupCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = C55BBD8ED2863316936CA1F3 /* LineupCheck.swift */; };
 		41A98F0B32F251A20091582A /* ShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63408BC25C1847C3DC54CDDE /* ShowView.swift */; };
 		4209B928261B700D9F0978FA /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */; };
@@ -94,6 +96,7 @@
 		4CF9404E0D9798C453F590CD /* LibraryIndexFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */; };
 		4DF87D3AF9E59E0E13CB106A /* GameTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E07979C91518955236F76395 /* GameTime.swift */; };
 		4E17F6DF6C837EC823DFF111 /* TrackChoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD17B24F165233943D636F8 /* TrackChoice.swift */; };
+		4E8DA249C900625E919428B9 /* GuideMatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2FECE2CA1AC614462D79D6 /* GuideMatchTests.swift */; };
 		4FA8FBF2F779CEEA8E158953 /* Libuchardet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFB6D6DB548DDB815D31C0FA /* Libuchardet.xcframework */; };
 		500CE028575089ED5DE60A5C /* MovieView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E895C7A337E5874B38A8020C /* MovieView.swift */; };
 		5034C8DD2F8EA94153B0F96C /* SubtitleTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90346A56D5B1978C6A08AB74 /* SubtitleTiming.swift */; };
@@ -191,6 +194,7 @@
 		A5425987EAFAFDFB7E8A546F /* SubtitleTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9890AD3F86A2EBFE6FDFAA /* SubtitleTimingTests.swift */; };
 		A836B9DAC9566FBE6B593F57 /* EmbyLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0103F884D3FCDC978ACBF582 /* EmbyLive.swift */; };
 		A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D066C9DD9FC2285C24EF35 /* LiveView.swift */; };
+		A899AE5B3A9008D5C18B2D09 /* GuideMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08536B83CA34648635FBC30D /* GuideMatch.swift */; };
 		A9C65C5F17860DFB1E3980B1 /* GameTimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE28D75F6B91327826DBEE9B /* GameTimeTests.swift */; };
 		AA86629D3DF58B7575BE0703 /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9236570FD5D04A7FE5B59AB8 /* Artwork.swift */; };
 		ADB139F687A97F2FB173E933 /* GameTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E07979C91518955236F76395 /* GameTime.swift */; };
@@ -312,6 +316,7 @@
 		063896B003501F3D99466FB4 /* EmbyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyClient.swift; sourceTree = "<group>"; };
 		071BD85601EB668FA8EC5B64 /* OpenIPTV TV UITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "OpenIPTV TV UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = lcms2.xcframework; path = Vendor/lcms2.xcframework; sourceTree = "<group>"; };
+		08536B83CA34648635FBC30D /* GuideMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideMatch.swift; sourceTree = "<group>"; };
 		0888A0AF0DE6B28F24365AE1 /* SpeechHeard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechHeard.swift; sourceTree = "<group>"; };
 		098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerOrientation.swift; sourceTree = "<group>"; };
 		0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVPlayerOverlay.swift; sourceTree = "<group>"; };
@@ -348,6 +353,7 @@
 		44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealFeedTests.swift; sourceTree = "<group>"; };
 		4842B481085D3917305982E1 /* libiconv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libiconv.tbd; path = usr/lib/libiconv.tbd; sourceTree = SDKROOT; };
 		4B0770E7215519F6AED0BA2C /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
+		4B2FECE2CA1AC614462D79D6 /* GuideMatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideMatchTests.swift; sourceTree = "<group>"; };
 		4F9890AD3F86A2EBFE6FDFAA /* SubtitleTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleTimingTests.swift; sourceTree = "<group>"; };
 		4FF14463A6C22E095CC94044 /* IOSurface.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOSurface.framework; path = System/Library/Frameworks/IOSurface.framework; sourceTree = SDKROOT; };
 		5183C151FC323F23D289CE6E /* Libfreetype.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libfreetype.xcframework; path = Vendor/Libfreetype.xcframework; sourceTree = "<group>"; };
@@ -710,6 +716,7 @@
 			isa = PBXGroup;
 			children = (
 				BE28D75F6B91327826DBEE9B /* GameTimeTests.swift */,
+				4B2FECE2CA1AC614462D79D6 /* GuideMatchTests.swift */,
 				034F3CF9DB71DCA6F534D85D /* LineupCheckTests.swift */,
 				73F945F999C40400846D4CCB /* QualityGovernorTests.swift */,
 				80EBE0612A764A40EB50A84D /* RelayRoutesTests.swift */,
@@ -823,6 +830,7 @@
 			children = (
 				E07979C91518955236F76395 /* GameTime.swift */,
 				B878EE2EE283C3772241FCF0 /* Guide.swift */,
+				08536B83CA34648635FBC30D /* GuideMatch.swift */,
 				C55BBD8ED2863316936CA1F3 /* LineupCheck.swift */,
 				6CBBDDA77B65B86BB26D8D65 /* LiveFailures.swift */,
 				5CF28B344CA01BCD1800A4E3 /* LiveModels.swift */,
@@ -1087,6 +1095,8 @@
 				C27C075C7367917C2BDBA55C /* Flex.swift in Sources */,
 				4DF87D3AF9E59E0E13CB106A /* GameTime.swift in Sources */,
 				A9C65C5F17860DFB1E3980B1 /* GameTimeTests.swift in Sources */,
+				4055D29782F28BDB22D3B292 /* GuideMatch.swift in Sources */,
+				4E8DA249C900625E919428B9 /* GuideMatchTests.swift in Sources */,
 				40ED2C42BE6F50D41D3A415F /* LineupCheck.swift in Sources */,
 				E91D24856162ECE33110314A /* LineupCheckTests.swift in Sources */,
 				F410FED3E8B163D9C58B0739 /* LiveFailures.swift in Sources */,
@@ -1125,6 +1135,7 @@
 				FF7EBF552AFC5BF778068FE1 /* GameTime.swift in Sources */,
 				0F17FC6D59F61D4C73D05371 /* GenreShelves.swift in Sources */,
 				028C183EB3E8EC859906DC4A /* Guide.swift in Sources */,
+				1D20BD000D0CBA3F6E41E8E4 /* GuideMatch.swift in Sources */,
 				58E6D3829366CA7178C840B0 /* Gzip.swift in Sources */,
 				14A08E4F734C8F088B866562 /* HomeFeed.swift in Sources */,
 				A49929AB5718F330A7BBDB8C /* HomeView.swift in Sources */,
@@ -1217,6 +1228,7 @@
 				ADB139F687A97F2FB173E933 /* GameTime.swift in Sources */,
 				957B94088B5D3887723013A3 /* GenreShelves.swift in Sources */,
 				6C46F5C97FF574089046DC42 /* Guide.swift in Sources */,
+				A899AE5B3A9008D5C18B2D09 /* GuideMatch.swift in Sources */,
 				5E075ACFCF2BDA408958FA86 /* Gzip.swift in Sources */,
 				04AE6345E43EBEAD9501E04E /* HomeFeed.swift in Sources */,
 				6159E6E161CF663D9A1C7E39 /* HomeView.swift in Sources */,

@@ -841,9 +841,10 @@ struct SearchView: View {
         let again = query == foundQuery
         library = again ? Self.keepingOrder(library, local.titles) : local.titles
         channels = again ? Self.keepingOrder(channels, local.channels) : local.channels
-        // Until the guide answers for new text, its last hits that still
-        // fit, so its section doesn't jump at each letter.
-        onTV = hits ?? (again ? onTV : AppModel.guideHits(onTV, fitting: query))
+        // Until the guide answers for new text, its last hits that it will
+        // find again, so its section doesn't jump at each letter.
+        let words = GuideMatch.words(query), now = Int64(Date().timeIntervalSince1970)
+        onTV = hits ?? (again ? onTV : onTV.filter { $0.found(by: words, at: now) })
         foundQuery = query
     }
 
