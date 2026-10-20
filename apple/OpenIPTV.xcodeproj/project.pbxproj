@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		01D06C60589A4B9F94F5D1DF /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C868DE1356883E3FDC24AC23 /* AVFoundation.framework */; };
 		028C183EB3E8EC859906DC4A /* Guide.swift in Sources */ = {isa = PBXBuildFile; fileRef = B878EE2EE283C3772241FCF0 /* Guide.swift */; };
+		02B875B8511079EEF26736B9 /* ScopeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */; };
 		02F218C7FAB20DC50F729108 /* Libavutil.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */; };
 		04AE6345E43EBEAD9501E04E /* HomeFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72303AAC600EF3DE6075EF7A /* HomeFeed.swift */; };
 		05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00376995EF16ADF89BDF9B03 /* PlayerView.swift */; };
@@ -157,6 +158,7 @@
 		790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */; };
 		7A93C02AC58F80FD759C2B7F /* WatchOnTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D84F47E29982BBE85D2E7A /* WatchOnTests.swift */; };
 		7B8DC9F9C3FBF3283A2935F7 /* SubtitleLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677CFF11775CD0F4EBE9ED9A /* SubtitleLanguage.swift */; };
+		7C3CDDB6E7ACD698F35165FE /* ScopeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */; };
 		7C9A83F73ABE022738B245F8 /* TVSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3030647E45661C4305A8F16 /* TVSearch.swift */; };
 		7E8E70B831C4BE5F7BEBC6F6 /* MPVPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4C4ECAD884618771521E44 /* MPVPlayer.swift */; };
 		7FD76CBB8EC351891CEEA1B6 /* Libbluray.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5D24524038DF8138B881F54 /* Libbluray.xcframework */; };
@@ -432,6 +434,7 @@
 		CF29F5EC9640222904218E1B /* LiveOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveOrganizer.swift; sourceTree = "<group>"; };
 		D1A9C8D5BE1D0FF094368580 /* LiveSportsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSportsTests.swift; sourceTree = "<group>"; };
 		D277F32EC509804119BFFFC4 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
+		D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeBar.swift; sourceTree = "<group>"; };
 		D5B1B94210411D81E015B0B6 /* Libass.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libass.xcframework; path = Vendor/Libass.xcframework; sourceTree = "<group>"; };
 		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
 		D7C7B40E07692829A697DF27 /* OpenIPTV UITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "OpenIPTV UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -690,6 +693,7 @@
 				8781972F0C4836EB0FCF2A63 /* Onboarding.swift */,
 				93CA7D96298A3EB224B5F0E0 /* PersonView.swift */,
 				9DF96B743FAE66F816DD9294 /* Platform.swift */,
+				D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */,
 				9272170531EC055784C91DD9 /* SearchView.swift */,
 				68BDF569FD33B278E6B18C1B /* SettingsView.swift */,
 				63408BC25C1847C3DC54CDDE /* ShowView.swift */,
@@ -1171,6 +1175,7 @@
 				B48DB7B4EA35EAD96E9169ED /* QualityGovernor.swift in Sources */,
 				B140B57F1529B03DB79CE0CC /* RelayRoutes.swift in Sources */,
 				6B39586645DDB16653343DFF /* RemoteSwipe.swift in Sources */,
+				02B875B8511079EEF26736B9 /* ScopeBar.swift in Sources */,
 				6A41782159CEB6B853714738 /* Scrubber.swift in Sources */,
 				668C89DA982BA85CB97A5AEE /* SearchIndex.swift in Sources */,
 				21673D3FCC00E6AAD2482428 /* SearchView.swift in Sources */,
@@ -1264,6 +1269,7 @@
 				972CFEF9670619E14A53FC6D /* QualityGovernor.swift in Sources */,
 				F21DC92D8A7B935E03245135 /* RelayRoutes.swift in Sources */,
 				A1804E83860F054CF4FDA4EC /* RemoteSwipe.swift in Sources */,
+				7C3CDDB6E7ACD698F35165FE /* ScopeBar.swift in Sources */,
 				60B2D8D9A75B0585552C69E7 /* Scrubber.swift in Sources */,
 				CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */,
 				4B7140CB6E5B116E80716522 /* SearchView.swift in Sources */,
