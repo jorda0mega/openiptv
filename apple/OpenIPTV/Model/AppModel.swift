@@ -2067,6 +2067,13 @@ final class AppModel {
             guard let start else { return false }
             return start <= now && (stop.map { now < $0 } ?? true)
         }
+        func foundAgain(by words: [String], at now: Int64) -> Bool {
+            if let league {
+                return SharedGuideRule.findsGame(words, text: SharedGuideRule.fold(title + " " + league), start: start, now: now)
+            }
+            return SharedGuideRule.findsProgramme(words, title: SharedGuideRule.fold(title), channel: SharedGuideRule.fold(channelTitle),
+                                                   stop: stop ?? .max, now: now)
+        }
     }
 
     /// What's on now or later that matches the query: programmes from the
