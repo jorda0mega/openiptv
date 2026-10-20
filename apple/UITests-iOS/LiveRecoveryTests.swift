@@ -46,12 +46,17 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertTrue(waitForState("playing", within: 15), "channel 7 didn't play")
         XCTAssertTrue(app.buttons["Close player"].firstMatch.waitForNonExistence(timeout: 8), "the controls didn't hide")
         let since = try markTime(server)
+        var seen: Set<String> = []
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
-            XCTAssertEqual(state(), "playing", "the stream started over after a cut")
+            let now = state()
+            seen.insert(now)
+            XCTAssertTrue(["playing", "reopening"].contains(now), "the stream started over after a cut: \(now)")
             XCTAssertFalse(app.buttons["Close player"].firstMatch.exists, "the controls came up after a cut")
             usleep(250_000)
         }
+        XCTAssertTrue(seen.contains("reopening"), "no cut was opened again in 30 s: \(seen)")
+        XCTAssertTrue(waitForState("playing", within: 15), "the stream opened again didn't play: \(state())")
         let opens = try liveRequests(server, since: since).filter { $0.id == "7" }.count
         XCTAssertGreaterThanOrEqual(opens, 2, "the stream wasn't cut and opened again: \(opens) opens")
     }
@@ -185,7 +190,119 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertEqual(state(), "playing", "live TV stopped in the background")
     }
 
+    func testFailureFreesTheConnection() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        app.launchEnvironment["OPENREEL_DEBUG_MPV"] = "network-timeout=5"
+        let server = try launch(["dead_live": "5", "live_max_connections": "1", "live_linger": "0"])
+        openChannel(5)
+        XCTAssertTrue(waitForState("failed", within: 15), "a channel that sends nothing didn't fail")
+        let since = try markTime(server)
+        XCTAssertTrue(activeConnections(server, become: "0", within: 1.5), "the stream given up on still holds the account's connection")
+        sleep(10)
+        XCTAssertEqual(state(), "failed", "the error went")
+        let again = try liveRequests(server, since: since).filter { $0.id == "5" }.count
+        XCTAssertEqual(again, 0, "the channel was asked for again behind the error")
+    }
+
+    func testSlowAddressLookupGetsItsTime() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        try launchPortal(["stalker_link_delay": "5"])
+        openChannel(6)
+        let deadline = Date().addingTimeInterval(20)
+        while state() != "playing", Date() < deadline {
+            XCTAssertNotEqual(state(), "failed", "gave up while the portal was still giving the address")
+            usleep(250_000)
+        }
+        XCTAssertEqual(state(), "playing", "the channel with a slow address didn't play")
+    }
+
+    func testReopenThatFailsMovesOn() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        let server = try launch(["hd_copy": "1", "live_cut": "6", "live_cut_ids": "951"])
+        openChannel(1)
+        XCTAssertTrue(waitForState("playing", within: 15), "Channel 1 didn't play")
+        XCTAssertTrue(liveCopy().hasSuffix("tok=951"), "Channel 1 didn't play on its HD copy: \(liveCopy())")
+        configure(server, ["dead_live": "951"])
+        let since = try markTime(server)
+        let deadline = Date().addingTimeInterval(20)
+        while !liveCopy().hasSuffix("tok=1"), Date() < deadline { usleep(250_000) }
+        XCTAssertTrue(liveCopy().hasSuffix("tok=1"), "still on the copy that stopped sending: \(liveCopy())")
+        let tries = try liveRequests(server, since: since).filter { $0.id == "951" }.count
+        XCTAssertLessThanOrEqual(tries, 1, "the copy that stopped sending was opened again \(tries) times")
+        XCTAssertTrue(waitForState("playing", within: 15), "the next copy didn't play")
+    }
+
+    func testLookupTooManyIsNotMarked() throws {
+        try launchPortal(["stalker_link_status": "429"])
+        openChannel(7)
+        XCTAssertTrue(waitForState("failed", within: 15), "a portal refusing the address didn't stop")
+        close()
+        let row = channelRow(7)
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the list went")
+        XCTAssertFalse(row.label.contains("Didn’t play"), "a busy portal marked the channel: \(row.label)")
+    }
+
+    func testQuickReturnAfterPausedClose() throws {
+        let server = try launch(["live_max_connections": "1", "live_linger": "3"])
+        openChannel(4)
+        XCTAssertTrue(waitForState("playing", within: 15), "channel 4 didn't play")
+        showControls()
+        app.buttons["Pause"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 3), "live TV didn't pause")
+        XCUIDevice.shared.press(.home)
+        let since = try markTime(server)
+        sleep(1)
+        app.activate()
+        let deadline = Date().addingTimeInterval(20)
+        var played = false
+        while !played, Date() < deadline {
+            XCTAssertNotEqual(state(), "failed", "a quick return ended on a refusal")
+            let opened = try liveRequests(server, since: since).contains { $0.id == "4" && $0.status == 200 }
+            played = opened && state() == "playing"
+            usleep(250_000)
+        }
+        XCTAssertTrue(played, "live TV didn't open again on a quick return: \(state())")
+    }
+
+    func testOfflineWaitsForTheNetwork() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        app.launchEnvironment["OPENREEL_DEBUG_ONLINE_URL"] = server.appending(path: "mock/online").absoluteString
+        try launch(["live_cut": "10"])
+        openChannel(7)
+        XCTAssertTrue(waitForState("playing", within: 15), "channel 7 didn't play")
+        configure(server, ["offline": "1"])
+        XCTAssertTrue(waitForState("waiting", within: 20), "the cut stream didn't wait for the network: \(state())")
+        let since = try markTime(server)
+        sleep(5)
+        XCTAssertEqual(state(), "waiting", "stopped waiting with no network")
+        XCTAssertTrue(try liveRequests(server, since: since).isEmpty, "asked for the stream with no network")
+        configure(server, ["offline": "0"])
+        XCTAssertTrue(waitForState("playing", within: 15), "didn't play once the network was back: \(state())")
+    }
+
+    func testOfflineMarksNothing() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        app.launchEnvironment["OPENREEL_DEBUG_ONLINE_URL"] = server.appending(path: "mock/online").absoluteString
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        try launch(["dead_live": "5", "offline": "1"])
+        openChannel(5)
+        XCTAssertTrue(waitForState("waiting", within: 15), "a channel that didn't start with no network didn't wait: \(state())")
+        close()
+        let row = channelRow(5)
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the list went")
+        XCTAssertFalse(row.label.contains("Didn’t play"), "no network marked the channel: \(row.label)")
+    }
+
     // MARK: Helpers
+
+    /// The test server as a Stalker portal (its test box address).
+    @discardableResult
+    private func launchPortal(_ switches: [String: String]) throws -> URL {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000002","name":"Portal","kind":"#
+            + #"{"stalker":{"portal":"\#(server.absoluteString)","mac":"00:1A:79:00:00:01"}}}"#
+        return try launch(switches)
+    }
 
     @discardableResult
     private func launch(_ switches: [String: String]) throws -> URL {
@@ -279,11 +396,11 @@ final class LiveRecoveryTests: XCTestCase {
 
     /// The live streams asked for since `since`, in order: the channel's
     /// stream id and the test server's time.
-    private func liveRequests(_ server: URL, since: Double) throws -> [(id: String, t: Double)] {
+    private func liveRequests(_ server: URL, since: Double) throws -> [(id: String, t: Double, status: Int)] {
         let url = server.appending(path: "mock/live_requests").appending(queryItems: [.init(name: "since", value: String(since))])
         let requests: [String: [[String: Any]]] = try answer(url)
         let items = try XCTUnwrap(requests["items"], "the test server's request list has no items")
-        return try items.map { (try XCTUnwrap($0["id"] as? String), try XCTUnwrap($0["t"] as? Double)) }
+        return try items.map { (try XCTUnwrap($0["id"] as? String), try XCTUnwrap($0["t"] as? Double), try XCTUnwrap($0["status"] as? Int)) }
     }
 
     /// The account's streams open now, as the test server's account answer

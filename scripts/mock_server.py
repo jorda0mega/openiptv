@@ -650,6 +650,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/mock/xtream_requests":
             since = float(q.get("since", "0"))
             return self.send({"items": [name for t, name in XTREAM_REQUESTS if t >= since]})
+        if path == "/mock/online":
+            # /mock/set?offline=1: debug builds told to read the network
+            # from here (OPENREEL_DEBUG_ONLINE_URL) take it as down.
+            return self.send({"online": CONTROL.get("offline") != "1"})
         if path == "/mock/live_requests":
             since = float(q.get("since", "0"))
             return self.send({"items": [r for r in LIVE_REQUESTS if r["t"] >= since]})
@@ -824,6 +828,11 @@ class Handler(BaseHTTPRequestHandler):
                  "cmd": f"ffmpeg http://localhost/ch/{i}", "tv_genre_id": "1" if i <= 30 else "2",
                  "xmltv_id": f"ch{i}.uk"} for i in range(1, CHANNELS + 1)]}})
         if action == "create_link":
+            # "stalker_link_delay" (seconds before the answer: a slow portal),
+            # "stalker_link_status" ("429": that status, empty).
+            time.sleep(float(CONTROL.get("stalker_link_delay", 0)))
+            if CONTROL.get("stalker_link_status"):
+                return self.refuse(int(CONTROL["stalker_link_status"]))
             ch = q.get("cmd", "").rsplit("/", 1)[-1]
             return self.send({"js": {"cmd": f"ffmpeg {base}/live/u/p/{ch}.ts"}})
         if action == "get_short_epg":
@@ -898,13 +907,18 @@ class Handler(BaseHTTPRequestHandler):
             if channel in CONTROL.get("slow_live", "").split(","):
                 time.sleep(4)
             # /mock/set?dead_live=2003,2005: those channels answer and never
-            # send a picture (an event feed that's over).
+            # send a picture (an event feed that's over), until the client
+            # hangs up.
             if channel in CONTROL.get("dead_live", "").split(","):
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp2t")
                 self.send_header("Connection", "close")
                 self.end_headers()
-                time.sleep(120)
+                ends = time.time() + 120
+                while time.time() < ends:
+                    readable, _, _ = select.select([self.connection], [], [], 0.5)
+                    if readable and not self.connection.recv(1, socket.MSG_PEEK):
+                        break
                 self.close_connection = True
                 return
             if ext == "ts" and os.environ.get("OPENIPTV_MOCK_VIDEO") and shutil.which("ffmpeg"):
