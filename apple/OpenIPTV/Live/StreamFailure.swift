@@ -53,6 +53,8 @@ enum StreamFailure: String, CaseIterable {
         case let .network(_, code):
             self = switch code {
             case .timedOut?: .timeout
+            case .networkConnectionLost?: .reset
+            case .dataNotAllowed?, .internationalRoamingOff?, .notConnectedToInternet?: .offline
             case .cannotFindHost?, .dnsLookupFailed?: .dns
             case .cannotConnectToHost?: .refused
             case .secureConnectionFailed?, .serverCertificateUntrusted?, .serverCertificateHasBadDate?, .serverCertificateNotYetValid?,
