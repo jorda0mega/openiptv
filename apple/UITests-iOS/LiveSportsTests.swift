@@ -558,27 +558,6 @@ final class LiveSportsTests: XCTestCase {
                           "a mark on the logo of a channel that wasn't tried")
     }
 
-    func testRecordingDoesNotClearTheMark() throws {
-        let server = try XCTUnwrap(testServer(), "no test server")
-        configure(server, ["dead_live": "5"])
-        addTeardownBlock { [self] in configure(server, ["dead_live": "none"]) }
-        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
-        app.launchArguments = ["-freshLineup", "YES", "-category", "6F9A1E52-0000-4000-8000-000000000001|1"]
-        app.launch()
-        let five = channelFive()
-        five.tap()
-        let state = app.staticTexts["debug-live-state"].firstMatch
-        let deadline = Date().addingTimeInterval(20)
-        while state.label != "failed", Date() < deadline { usleep(250_000) }
-        XCTAssertEqual(state.label, "failed", "the channel that sends nothing didn't fail")
-        startOver()
-        XCTAssertTrue(started(), "the recording didn't play")
-        showControls()
-        app.buttons["Close player"].firstMatch.tap()
-        XCTAssertTrue(five.waitForExistence(timeout: 10), "the list went")
-        XCTAssertTrue(five.label.contains("Didn’t play"), "the recording cleared the live channel's mark: \(five.label)")
-    }
-
     func testStartOverEndsTheCue() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         configure(server, ["hd_copy": "5", "dead_live": "955", "slow_live": "5"])

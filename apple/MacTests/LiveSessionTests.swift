@@ -295,6 +295,14 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .closed)
     }
 
+    func testARecordingLeavesTheMarkOfTheChannelThatDidntPlay() {
+        var session = opening([[a]])
+        XCTAssertEqual(session.handle(.timedOut(session.attempt, .no_data), now: at(16)), [.cancelDeadline, .markFailed(a), .markNotPlaying, .stop])
+        _ = session.handle(.recording, now: at(20))
+        _ = session.handle(.opening(session.attempt), now: at(20.5))
+        XCTAssertEqual(session.handle(.started(session.attempt), now: at(21)), [.picture], "the recording's picture cleared the live channel's mark")
+    }
+
     func testRecording() {
         var session = playing()
         XCTAssertEqual(session.handle(.recording, now: at(5)), [.clearTimeline, .unpause, .loadRecording(session.attempt, resume: false)])
