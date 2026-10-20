@@ -90,22 +90,27 @@ private struct Pill: UIViewRepresentable {
     }
 }
 
-/// Runs the newest work given at the next screen refresh (work given
-/// before it and not run yet is dropped): a hop on the main queue can still
-/// land in the frame being made now.
+/// Runs the newest work given (work given before it and not run yet is
+/// dropped) two screen refreshes on: by then the frame being made now is on
+/// screen, and with it the first frame of anything Core Animation started
+/// in it (a hop on the main queue, or one refresh, can land in that frame).
 final class NextFrame: NSObject {
     private var work: (() -> Void)?
     private var link: CADisplayLink?
+    private var refreshes = 0
 
     func run(_ work: @escaping () -> Void) {
         self.work = work
+        refreshes = 0
         guard link == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(fire))
+        let link = CADisplayLink(target: self, selector: #selector(refreshed))
         link.add(to: .main, forMode: .common)
         self.link = link
     }
 
-    @objc private func fire() {
+    @objc private func refreshed() {
+        refreshes += 1
+        guard refreshes == 2 else { return }
         link?.invalidate()
         link = nil
         let work = self.work
