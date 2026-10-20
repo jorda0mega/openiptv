@@ -58,7 +58,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
 
     /// A provider allowing one stream at a time can still count the stream
     /// let go for a moment, and refuse the next.
-    static let refusalWindow: TimeInterval = 3
+    static var refusalWindow: TimeInterval { 3 }
 
     /// On an Apple TV, AirPlay is its own speakers.
     static func keepsStreamAway(airPlay: Bool, onTV: Bool) -> Bool {
