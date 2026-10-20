@@ -1,8 +1,5 @@
 import XCTest
 
-/// One owner per server resource (Shelf): a fetch under way is joined, a
-/// result is kept for its lifetime, work ahead waits for its source's
-/// budget (Lane), a play never does, and a fetch no one waits for stops.
 @MainActor
 final class ShelfTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
@@ -14,8 +11,7 @@ final class ShelfTests: XCTestCase {
         return Lane(.files, atOnce: atOnce, bucket: bucket) { open }
     }
 
-    /// Lets the tasks already queued on the main actor reach their next wait.
-    private func settle() async {
+    private func yieldToQueuedTasks() async {
         for _ in 0..<10 { await Task.yield() }
     }
 
@@ -28,8 +24,6 @@ final class ShelfTests: XCTestCase {
         }
     }
 
-    /// Fetches that say when each starts, and finish only once let through
-    /// (at once when `held` is false). Stopped ones are told apart.
     private final class Fetches: @unchecked Sendable {
         private let lock = NSLock()
         private var count = 0
@@ -76,7 +70,6 @@ final class ShelfTests: XCTestCase {
             return number
         }
 
-        /// A fetch that runs until stopped.
         func endless(_ key: String) async throws -> Int {
             lock.withLock { count += 1 }
             startedSignal.yield(key)
@@ -88,12 +81,12 @@ final class ShelfTests: XCTestCase {
         }
     }
 
-    private func shelf(_ fetches: Fetches, lane: Lane? = nil, lifetime: Duration = .seconds(60), onLeave: Shelf<String, Int>.OnLeave = .finish,
+    private func shelf(_ fetches: Fetches, lane: Lane? = nil, lifetime: Duration = .seconds(60), whenUnused: Shelf<String, Int>.WhenUnused = .finish,
                        retries: [Duration] = [], retryable: @escaping @Sendable (Error) -> Bool = { _ in false },
                        now: @escaping @Sendable () -> Date = { Date() }, disk: Shelf<String, Int>.Disk? = nil,
                        stillThere: @escaping @MainActor (Int) -> Bool = { _ in true },
                        failing: @escaping @Sendable (Int) -> Error? = { _ in nil }) -> Shelf<String, Int> {
-        Shelf(.init(lane: lane ?? self.lane(), lifetime: lifetime, onLeave: onLeave, retries: retries, retryable: retryable,
+        Shelf(.init(lane: lane ?? self.lane(), lifetime: lifetime, whenUnused: whenUnused, retries: retries, retryable: retryable,
                     stillThere: stillThere), disk: disk, now: now) { key in
             try await fetches.fetch(key, failing: failing)
         }
@@ -106,7 +99,7 @@ final class ShelfTests: XCTestCase {
         async let second = shelf.value(for: "track 3")
         var started = fetches.started.makeAsyncIterator()
         _ = await started.next()
-        await settle()
+        await yieldToQueuedTasks()
         fetches.letThrough()
         let answers = try await [first, second]
         XCTAssertEqual(answers, [1, 1])
@@ -151,7 +144,7 @@ final class ShelfTests: XCTestCase {
         var started = fetches.started.makeAsyncIterator()
         _ = await started.next()
         async let played = shelf.value(for: "a")
-        await settle()
+        await yieldToQueuedTasks()
         fetches.letThrough()
         let (warmedValue, playedValue) = try await (warmed, played)
         XCTAssertEqual(playedValue, 1)
@@ -167,7 +160,7 @@ final class ShelfTests: XCTestCase {
         let shelf = shelf(fetches, lane: lane)
         let interest = Interest(at: .posterRow, .glance)
         let warmed = Task { await shelf.warm("a", for: interest) }
-        await settle()
+        await yieldToQueuedTasks()
         shelf.release("a", from: interest.id)
         lane.leave(busy)
         let warmedValue = await warmed.value
@@ -181,7 +174,7 @@ final class ShelfTests: XCTestCase {
         let fetches = Fetches()
         let shelf = shelf(fetches, lane: lane)
         let warmed = Task { await shelf.warm("a", for: Interest(at: .posterRow, .glance)) }
-        await settle()
+        await yieldToQueuedTasks()
         XCTAssertEqual(fetches.asked, 0)
         let played = try await shelf.value(for: "a")
         let warmedValue = await warmed.value
@@ -208,7 +201,7 @@ final class ShelfTests: XCTestCase {
 
     func testHeavyWarmUpStopsWhenItsInterestEnds() async throws {
         let fetches = Fetches()
-        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), onLeave: .cancel)) { try await fetches.endless($0) }
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), whenUnused: .cancel)) { try await fetches.endless($0) }
         let interest = Interest(at: .continueWatching, .next)
         let warmed = Task { await shelf.warm("a", for: interest) }
         var started = fetches.started.makeAsyncIterator(), stopped = fetches.stopped.makeAsyncIterator()
@@ -222,13 +215,13 @@ final class ShelfTests: XCTestCase {
 
     func testHeavyWarmUpJoinedByAPlayGoesOn() async throws {
         let fetches = Fetches(held: true)
-        let shelf = shelf(fetches, onLeave: .cancel)
+        let shelf = shelf(fetches, whenUnused: .cancel)
         let interest = Interest(at: .continueWatching, .next)
         let warmed = Task { await shelf.warm("a", for: interest) }
         var started = fetches.started.makeAsyncIterator()
         _ = await started.next()
         let played = Task { try await shelf.value(for: "a") }
-        await settle()
+        await yieldToQueuedTasks()
         shelf.release("a", from: interest.id)
         fetches.letThrough()
         let playedValue = try await played.value
@@ -240,7 +233,7 @@ final class ShelfTests: XCTestCase {
 
     func testAFetchNoOneWaitsForAnyMoreStops() async throws {
         let fetches = Fetches()
-        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), onLeave: .cancel)) { try await fetches.endless($0) }
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), whenUnused: .cancel)) { try await fetches.endless($0) }
         let played = Task { try await shelf.value(for: "a") }
         var started = fetches.started.makeAsyncIterator(), stopped = fetches.stopped.makeAsyncIterator()
         _ = await started.next()
@@ -258,7 +251,7 @@ final class ShelfTests: XCTestCase {
         let warmPlayers = (0..<4).map { n in Task { try await shelf.value(for: "warm \(n)", ahead: ahead) } }
         var started = fetches.started.makeAsyncIterator()
         let first = await started.next()
-        await settle()
+        await yieldToQueuedTasks()
         let played = Task { try await shelf.value(for: "played") }
         let next = await started.next()
         XCTAssertEqual(first?.hasPrefix("warm"), true)
@@ -274,7 +267,7 @@ final class ShelfTests: XCTestCase {
         let fetches = Fetches()
         let shelf = shelf(fetches, lane: lane)
         let warmPlayer = Task { try await shelf.value(for: "a", ahead: Interest(at: .page, .next)) }
-        await settle()
+        await yieldToQueuedTasks()
         XCTAssertEqual(fetches.asked, 0)
         shelf.hurry("a")
         let value = try await warmPlayer.value
@@ -287,7 +280,7 @@ final class ShelfTests: XCTestCase {
         _ = try await shelf.value(for: "a")
         _ = try await shelf.value(for: "b")
         let warmPlayer = Task { try await shelf.value(for: "c", ahead: Interest(at: .page, .next)) }
-        await settle()
+        await yieldToQueuedTasks()
         _ = try await shelf.value(for: "d")
         warmPlayer.cancel()
         _ = await warmPlayer.result
@@ -384,7 +377,6 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(ids.count, 1000)
     }
 
-    // MARK: Lane
 
     func testLaneRunsAtMostItsLimitAtOnce() async throws {
         let lane = lane(atOnce: 1)
@@ -395,7 +387,7 @@ final class ShelfTests: XCTestCase {
             try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
             entered.mutate { $0 = true }
         }
-        await settle()
+        await yieldToQueuedTasks()
         XCTAssertFalse(entered.value)
         lane.leave(first)
         try await second.value
@@ -416,7 +408,7 @@ final class ShelfTests: XCTestCase {
                 lane.leave(ticket)
             })
         }
-        await settle()
+        await yieldToQueuedTasks()
         lane.leave(busy)
         for waiter in waiters { try await waiter.value }
         XCTAssertEqual(order.value, ["newer likely", "older likely", "glance"])
@@ -449,7 +441,7 @@ final class ShelfTests: XCTestCase {
         let lane = Lane(.files, atOnce: 1) { conditions.value }
         try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
         let waiter = Task { try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance))) }
-        await settle()
+        await yieldToQueuedTasks()
         conditions.mutate { $0.playing = true }
         lane.conditionsChanged()
         do {
@@ -465,7 +457,7 @@ final class ShelfTests: XCTestCase {
         let busy = Lane.Ticket(Interest(at: .posterRow, .glance))
         try await lane.enter(busy)
         let waiter = Task { try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance))) }
-        await settle()
+        await yieldToQueuedTasks()
         waiter.cancel()
         do {
             try await waiter.value
@@ -476,7 +468,7 @@ final class ShelfTests: XCTestCase {
         lane.leave(busy)
         let next = Lane.Ticket(Interest(at: .posterRow, .glance))
         let entered = Task { try await lane.enter(next) }
-        await settle()
+        await yieldToQueuedTasks()
         try await entered.value
     }
 
@@ -486,12 +478,11 @@ final class ShelfTests: XCTestCase {
         try await lane.enter(Lane.Ticket(nil))
         let ticket = Lane.Ticket(Interest(at: .posterRow, .glance))
         let waiter = Task { try await lane.enter(ticket) }
-        await settle()
+        await yieldToQueuedTasks()
         lane.playNow(ticket)
         try await waiter.value
     }
 
-    // MARK: Conditions
 
     func testWhatEachConditionAllows() {
         let weights: [Weight] = [.light, .files, .heavy, .bytes, .images, .player, .iptv]

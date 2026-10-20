@@ -977,7 +977,7 @@ struct EmbyClient {
         (source.MediaStreams ?? []).compactMap { stream in
             guard stream.Type == "Subtitle", stream.IsExternal == true, let language = stream.Language,
                   ["en", "es"].contains(TrackChoice.normalized(language) ?? ""),
-                  let subtitle = subtitle(itemId, source, stream)
+                  let subtitle = serverSubtitle(itemId, source, stream)
             else { return nil }
             let kind = [stream.IsForced == true ? "Forced" : nil, stream.IsHearingImpaired == true ? "SDH" : nil, stream.Title]
             return EmbyPlayback.SubtitleFile(source: .server(subtitle), language: language, title: kind.compactMap(\.self).joined(separator: " "))
@@ -991,7 +991,7 @@ struct EmbyClient {
             guard stream.Type == "Subtitle", stream.IsExternal != true, stream.IsForced != true, let index = stream.Index,
                   let codec = stream.Codec?.lowercased(), Self.textSubtitles.contains(codec),
                   ["en", "es"].contains(stream.Language.flatMap(TrackChoice.normalized) ?? "") else { return nil }
-            return subtitle(itemId, source, stream).map { .init(streamIndex: index, subtitle: $0) }
+            return serverSubtitle(itemId, source, stream).map { .init(streamIndex: index, subtitle: $0) }
         }
     }
 
@@ -1003,13 +1003,12 @@ struct EmbyClient {
         let own = tracks.filter { $0.IsExternal != true }
         let files = tracks.filter { $0.IsExternal == true && $0.IsForced != true }
         let references = ((own.first { $0.IsForced != true } ?? own.first).map { [$0] } ?? []) + files
-        return references.prefix(8).compactMap { subtitle(itemId, source, $0) }.map { .init(subtitle: $0) }
+        return references.prefix(8).compactMap { serverSubtitle(itemId, source, $0) }.map { .init(subtitle: $0) }
     }
 
     private static let textSubtitles: Set<String> = ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text"]
 
-    /// One format per track, so a copy and a reference are one request.
-    private func subtitle(_ itemId: String, _ source: PlaybackInfo.Source, _ stream: PlaybackInfo.Stream) -> ServerSubtitle? {
+    private func serverSubtitle(_ itemId: String, _ source: PlaybackInfo.Source, _ stream: PlaybackInfo.Stream) -> ServerSubtitle? {
         guard let index = stream.Index else { return nil }
         let format = ["ass", "ssa"].contains(stream.Codec?.lowercased() ?? "") ? "ass" : "srt"
         let url = Self.api(account.serverURL, "Videos/\(itemId)/\(source.Id)/Subtitles/\(index)/Stream.\(format)")

@@ -1,7 +1,5 @@
 import XCTest
 
-/// Requests to the test server (scripts/mock_server.py, TEST_RUNNER_DEBUG_EMBY):
-/// skipped without it.
 final class ServerRequestsTests: XCTestCase {
     private func server() throws -> URL {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
@@ -36,10 +34,6 @@ final class ServerRequestsTests: XCTestCase {
         _ = try await get(server.appending(path: "mock/set").appending(queryItems: settings.map { .init(name: $0.key, value: $0.value) }))
     }
 
-    /// Two copies of a film's own tracks under way (the server takes 4 s
-    /// for each) leave the stretches of its sound their connections.
-    /// Regression: copies and stretches shared two connections, and the
-    /// stretches, re-timing's, waited behind the copies.
     func testCopiesLeaveTheSoundItsConnections() async throws {
         let server = try server()
         try await configure(server, ["reference_delay": "4"])
@@ -66,8 +60,6 @@ final class ServerRequestsTests: XCTestCase {
         XCTAssertLessThan(waited, .seconds(3), "a stretch of sound waited \(waited) behind the copies")
     }
 
-    /// Bytes of a film kept for one account are never given to the next:
-    /// signed out, the same film is fetched from the server again.
     func testSignOutLeavesNoBytesForTheNextAccount() async throws {
         let server = try server()
         let film = "r" + UUID().uuidString.prefix(8)

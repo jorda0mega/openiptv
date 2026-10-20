@@ -128,11 +128,8 @@ struct RootView: View {
             guard phase == .active else { return }
             model.forgetPlaybackPlans()
             Task { await model.prepareLibrary(checkingChanges: true) }
-            // Watched or put on My List on another device while away: both
-            // right when you look.
             if !model.rows.isEmpty { Task { await model.refreshContinueWatching(returning: true) } }
             Task { await model.refreshMyList() }
-            // What's usually watched, ready before it's chosen.
             model.prepareRotation()
         }
     }

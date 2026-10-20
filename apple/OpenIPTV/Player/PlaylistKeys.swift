@@ -1,9 +1,6 @@
 #if DEBUG
 import Foundation
 
-/// Real-feed checks (`-debugHLSCounts YES`): how many addresses in a
-/// converted stream's playlists carry the Emby key, as counts only
-/// ("master 0/1 variants 0/412"); never an address or the key.
 enum PlaylistKeys {
     static func count(_ master: URL, headers: [String]) async -> String {
         guard let top = await read(master, headers) else { return "master unread" }

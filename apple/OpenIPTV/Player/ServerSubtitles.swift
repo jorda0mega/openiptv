@@ -38,8 +38,6 @@ extension Lane {
                                      conditions: Conditions.current)
 }
 
-/// The one owner of the kept files: a download is published only if no
-/// sign-out came since it began, and launch pruning never meets a write.
 actor SubtitleStore {
     let folder: URL
     let perPlay: URL
@@ -75,23 +73,22 @@ actor SubtitleStore {
         }
     }
 
-    /// Ages count from the download, the cap from the last use.
     func prune(launchedAt: Date, cap: Int = 64 << 20) {
         let manager = FileManager.default
-        func files(in folder: URL) -> [(url: URL, made: Date, used: Date, size: Int)] {
+        func files(in folder: URL) -> [(url: URL, downloadedAt: Date, lastUsedAt: Date, size: Int)] {
             let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey, .fileSizeKey]
             return ((try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []).map { url in
                 let values = try? url.resourceValues(forKeys: Set(keys))
-                let used = values?.contentModificationDate ?? .distantPast
-                return (url, values?.creationDate ?? used, used, values?.fileSize ?? 0)
+                let lastUsedAt = values?.contentModificationDate ?? .distantPast
+                return (url, values?.creationDate ?? lastUsedAt, lastUsedAt, values?.fileSize ?? 0)
             }
         }
-        for file in files(in: perPlay) where file.used < launchedAt { try? manager.removeItem(at: file.url) }
+        for file in files(in: perPlay) where file.lastUsedAt < launchedAt { try? manager.removeItem(at: file.url) }
         try? manager.removeItem(at: folder.appending(path: "staging"))
-        var kept: [(url: URL, made: Date, used: Date, size: Int)] = []
+        var kept: [(url: URL, downloadedAt: Date, lastUsedAt: Date, size: Int)] = []
         for kind in [ServerSubtitle.Kind.beside, .inFile] {
             for file in files(in: folder.appending(path: kind.folder)) {
-                if launchedAt.timeIntervalSince(file.made) > kind.lifetime / .seconds(1) {
+                if launchedAt.timeIntervalSince(file.downloadedAt) > kind.lifetime / .seconds(1) {
                     try? manager.removeItem(at: file.url)
                 } else {
                     kept.append(file)
@@ -99,7 +96,7 @@ actor SubtitleStore {
             }
         }
         var total = kept.reduce(0) { $0 + $1.size }
-        for file in kept.sorted(by: { $0.used < $1.used }) where total > cap {
+        for file in kept.sorted(by: { $0.lastUsedAt < $1.lastUsedAt }) where total > cap {
             try? manager.removeItem(at: file.url)
             total -= file.size
         }
@@ -117,7 +114,7 @@ enum ServerSubtitles {
         try await download($0, on: HTTP.session)
     }
 
-    static let inFile = Shelf(.init(lane: .embyExtraction, lifetime: ServerSubtitle.Kind.inFile.lifetime, onLeave: .cancel,
+    static let inFile = Shelf(.init(lane: .embyExtraction, lifetime: ServerSubtitle.Kind.inFile.lifetime, whenUnused: .cancel,
                                     retries: retryWaits, retryable: worthRetrying, failureKept: .seconds(600), stillThere: present),
                               disk: disk) {
         try await download($0, on: HTTP.extraction)
@@ -130,7 +127,6 @@ enum ServerSubtitles {
         return [.seconds(15), .seconds(60)]
     }
 
-    /// `ahead`: for a player opened before a tap, which waits its turn.
     static func local(_ subtitle: ServerSubtitle, ahead interest: Interest? = nil) async -> URL? {
         guard let file = try? await shelf(subtitle.kind).value(for: subtitle, ahead: interest) else { return nil }
         Task.detached { await store.touch(file) }
@@ -171,13 +167,11 @@ enum ServerSubtitles {
         return folder.appending(path: subtitle.kind.folder).appending(path: "\(name).\(format)")
     }
 
-    /// A new file of the player's own (rewritten in time, or found and copied).
     nonisolated static func perPlayFile(_ format: String, in folder: URL = perPlay) -> URL {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder.appending(path: "\(UUID().uuidString).\(format)")
     }
 
-    /// Timeouts, lost connections and the server's own failures (5xx).
     nonisolated static func worthRetrying(_ error: Error) -> Bool {
         switch error as? SourceError {
         case let .http(code)?: code >= 500

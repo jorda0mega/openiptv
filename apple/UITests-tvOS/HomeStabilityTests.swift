@@ -1,14 +1,5 @@
 import XCTest
 
-/// Apple TV: Home doesn't change while you look at it, like Netflix's. The
-/// app runs with OPENREEL_DEBUG_HOME_VARY: each Home built comes with its
-/// cards in another order and its number after each row's name, so a build
-/// put on the page under your eyes would move things. A film is added on
-/// another device while the app is away: back in it, Home is built again
-/// in the background, and must stay exactly as it was until it's chosen
-/// again in the tab bar. Run on an Apple TV simulator signed in
-/// to the test server (scripts/mock_server.py) through
-/// TEST_RUNNER_DEBUG_EMBY; screenshots go to /tmp/openiptv/uitest-agent.
 final class HomeStabilityTests: XCTestCase {
     private let app = XCUIApplication()
     private let remote = XCUIRemote.shared
@@ -33,8 +24,6 @@ final class HomeStabilityTests: XCTestCase {
         // Past the first seconds after a launch, when a build may still go
         // straight on the page.
         wait(seconds: 10)
-        // A short trip away, meanwhile a film added elsewhere: Home is
-        // built again (another order, another number) once it's back.
         remote.press(.home)
         configure(server, ["added": "z9"])
         sleep(3)
@@ -108,7 +97,6 @@ final class HomeStabilityTests: XCTestCase {
         return URL(string: address)
     }
 
-    /// Sets how the test server behaves (see CONTROL in mock_server.py).
     private func configure(_ server: URL, _ settings: [String: String]) {
         let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
         let done = expectation(description: "configure")
