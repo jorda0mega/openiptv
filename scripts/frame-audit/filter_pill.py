@@ -2,10 +2,11 @@
 the white pill first. The film is of
 SearchStabilityTests/testFilterPillMovesFirst (record.sh), which taps the
 filters 6 times and writes where the pills and the results are (in points).
-For each slide of the pill: the results must change after its first frame,
-not before or in it, and it may miss at most one 60 Hz frame on the way.
-Exit 0: every slide; 1: a slide the results got ahead of, or that dropped
-frames; 2: fewer than 6 slides seen."""
+For each move of the pill: it must be a slide (4 frames or more, not a jump),
+miss at most one 60 Hz frame on the way, and the results must change, after
+its first frame (not before or in it, and not never).
+Exit 0: every move; 1: a jump, dropped frames, or results that changed
+first or not at all; 2: fewer than 6 moves seen."""
 import json, subprocess, sys
 import numpy as np
 
@@ -55,12 +56,11 @@ slides = [run for run in runs if slide(run)]
 failed = 0
 for slide in slides:
     start, end = times[slide[0]], times[slide[-1]]
-    listed = [times[n] for n in range(len(edges)) if start - 0.3 <= times[n] <= start + 0.3 and changes[n] > 2]
+    listed = [times[n] for n in range(len(edges)) if start - 0.3 <= times[n] <= start + 0.3 and changes[n] > 0.5]
     slots = round((end - start) / FRAME) + 1
     missed = max(0, slots - len(slide))
-    order = f"{(listed[0] - start) / FRAME:+.0f} frames" if listed else "no change"
-    ahead = bool(listed) and listed[0] <= start
-    print(f"{start:6.2f} s: pill moved in {len(slide)} of {slots} frames, results changed {order} after its first")
-    failed += ahead or missed > 1
-print(f"{len(slides)} slides, {failed} with the results first or frames dropped")
+    order = f"changed {(listed[0] - start) / FRAME:+.1f} frames after its first" if listed else "didn't change"
+    print(f"{start:6.2f} s: pill moved in {len(slide)} of {slots} frames, results {order}")
+    failed += len(slide) < 4 or missed > 1 or not listed or listed[0] <= start
+print(f"{len(slides)} moves, {failed} a jump, with frames dropped, or with results first or unchanged")
 sys.exit(2 if len(slides) < 6 else 1 if failed else 0)
