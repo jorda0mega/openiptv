@@ -78,7 +78,8 @@ struct SearchView: View {
     @State private var loadingCard: String?
     @State private var playError: String?
     #if DEBUG
-    /// UI tests: how long the last search took to list the device's results.
+    /// UI tests: the text of the last search, and how long it took to list
+    /// the device's results ("channel 1|23").
     @State private var debugLocalMs = ""
     #endif
 
@@ -692,7 +693,7 @@ struct SearchView: View {
         }
         #if DEBUG
         mark("local")
-        debugLocalMs = String(format: "%.0f", Date().timeIntervalSince(began) * 1000)
+        debugLocalMs = q + String(format: "|%.0f", Date().timeIntervalSince(began) * 1000)
         #endif
 
         // Results settled: treat the top title as intent and get it ready,

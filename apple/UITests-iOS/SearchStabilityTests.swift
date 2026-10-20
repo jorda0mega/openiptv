@@ -132,11 +132,13 @@ final class SearchStabilityTests: XCTestCase {
         ]
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: geometry).write(to: shots.appending(path: "filter-geometry.json"))
+        let listed = ["All": "Movies & Shows", "Movies": "Movies", "Shows": "No shows or episodes", "Live TV": "No channels"]
         for name in ["Movies", "Shows", "Live TV", "All", "Movies", "All"] {
             let filter = app.buttons["scope-\(name)"].firstMatch
             filter.tap()
             sleep(1)
             XCTAssertTrue(filter.isSelected, "\(name) isn't the chosen filter after its tap")
+            XCTAssertTrue(app.staticTexts[listed[name]!].exists, "the list didn't follow the tap on \(name): no “\(listed[name]!)”")
         }
     }
 
@@ -170,9 +172,11 @@ final class SearchStabilityTests: XCTestCase {
         let field = app.searchFields.firstMatch
         field.tap()
         field.typeText(" 1\n")
-        sleep(1)
-        let took = app.staticTexts["debug-search-local-ms"].firstMatch.label
-        XCTAssertLessThan(Int(took) ?? .max, 90, "the results took \(took) ms: they waited for the guide")
+        let timing = app.staticTexts["debug-search-local-ms"].firstMatch
+        let timed = expectation(for: NSPredicate(format: "label BEGINSWITH 'channel 1|'"), evaluatedWith: timing)
+        XCTAssertEqual(XCTWaiter().wait(for: [timed], timeout: 3), .completed, "no time for “channel 1”: \(timing.label)")
+        let took = Int(timing.label.split(separator: "|").last ?? "") ?? .max
+        XCTAssertLessThan(took, 90, "the results took \(took) ms: they waited for the guide")
         XCTAssertGreaterThanOrEqual(channelRows().count, 5, "the channels waited for the guide")
         XCTAssertFalse(app.staticTexts["On TV"].exists, "On TV before the guide answered")
         let top = channelRows()
