@@ -158,6 +158,11 @@ final class ServerSubtitlesTests: XCTestCase {
         XCTAssertTrue(exists(now))
     }
 
+    func testAPlaylistIsFetchedWithoutTheKeyInItsAddress() throws {
+        let variant = try XCTUnwrap(PlaylistKeys.keyless(URL(string: "http://emby.example/emby/videos/i1/main.m3u8?DeviceId=d&api_key=secretkey&API_KEY=other")!))
+        XCTAssertEqual(variant.absoluteString, "http://emby.example/emby/videos/i1/main.m3u8?DeviceId=d")
+    }
+
     func testRetriesOnlyWhatIsWorthAnotherTry() {
         XCTAssertTrue(ServerSubtitles.worthRetrying(SourceError.http(503)))
         XCTAssertTrue(ServerSubtitles.worthRetrying(SourceError.network("The server took too long to answer.")))

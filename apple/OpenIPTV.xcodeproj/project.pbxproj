@@ -190,6 +190,7 @@
 		972CFEF9670619E14A53FC6D /* QualityGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */; };
 		976B05916C747916000E1666 /* LivePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */; };
 		9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
+		99D89DA024A6D26966EF4EDD /* PlaylistKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEC4A175B06BF50066727F04 /* PlaylistKeys.swift */; };
 		99DE67411BE1E03903160C2B /* Libswresample.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D7286B5ED1C79D8A2625EBC /* Libswresample.xcframework */; };
 		9D020ADB81802B4D285D41DE /* Libswscale.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */; };
 		9D12F9249C18D8868CB560E6 /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BBE98FBA505A36A33CB129 /* libresolv.tbd */; };
@@ -1132,6 +1133,7 @@
 				E91D24856162ECE33110314A /* LineupCheckTests.swift in Sources */,
 				F410FED3E8B163D9C58B0739 /* LiveFailures.swift in Sources */,
 				DD78F2883EE29FF7CB1FCD11 /* NetworkStatus.swift in Sources */,
+				99D89DA024A6D26966EF4EDD /* PlaylistKeys.swift in Sources */,
 				2979896C40B2FB3C7AA811C0 /* QualityGovernor.swift in Sources */,
 				EDEA774CC2788DF4A6444F57 /* QualityGovernorTests.swift in Sources */,
 				269CC1336FC00D95B1765984 /* RelayRoutes.swift in Sources */,
