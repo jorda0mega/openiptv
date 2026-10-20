@@ -753,6 +753,28 @@ enum LiveOrganizer {
         }
     }
 
+    static func gameSections(_ events: [Entry], now: Date) -> [(title: String, entries: [Entry])] {
+        let calendar = Calendar.current
+        var live: [Entry] = [], today: [Entry] = [], tomorrow: [Entry] = []
+        var later: [Entry] = [], earlier: [Entry] = [], undated: [Entry] = []
+        for event in events {
+            guard let start = event.event?.start else { undated.append(event); continue }
+            // Started longer ago than such a game lasts: probably over (see
+            // GameTime), listed apart, not LIVE.
+            switch GameTime.state(start: start, league: event.event?.league ?? "", title: event.title, now: now) {
+            case .live: live.append(event)
+            case .over: earlier.append(event)
+            default:
+                if calendar.isDate(start, inSameDayAs: now) { today.append(event) }
+                else if calendar.isDateInTomorrow(start) { tomorrow.append(event) }
+                else { later.append(event) }
+            }
+        }
+        return [("Live now", live), ("Later today", today), ("Tomorrow", tomorrow), ("Coming up", later),
+                ("Earlier today", earlier), ("More events", undated)]
+            .filter { !$0.1.isEmpty }
+    }
+
     // MARK: Leagues, services, regions
 
     private static let leagues: [(keys: [String], name: String)] = [
