@@ -826,6 +826,36 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(keyed.label, "0", "addresses of the playback carry the key")
     }
 
+    /// The converted version is asked for as the real Emby serves it to a
+    /// header alone (a master playlist, its variant, the segments, none
+    /// with the key in its address), each request with the key in a
+    /// header, and it plays. Regression: the test server put the key in
+    /// every segment's address and asked for no header, unlike the real one.
+    func testConvertedVersionSendsTheKeyOnlyInAHeader() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "5"
+        openFilm()
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        var lowered = false
+        for _ in 0..<40 where !lowered {
+            sleep(1)
+            lowered = quality.exists && quality.label.hasPrefix("converted")
+        }
+        XCTAssertTrue(lowered, "the quality wasn't lowered: \(quality.exists ? quality.label : "no readout")")
+        sleep(3)
+        let from = position() ?? 0
+        sleep(6)
+        XCTAssertGreaterThan(position() ?? 0, from + 3, "the converted version doesn't play")
+        let asked = keyChecks(server, "items")
+        for kind in ["hls:", "playlist:", "segment:"] {
+            XCTAssertTrue(asked.contains { $0.hasPrefix(kind) }, "no \(kind) request: \(Set(asked.map { $0.split(separator: ":").first ?? "" }))")
+        }
+        XCTAssertEqual(keyChecks(server, "keyed"), [], "asked with the key in the address")
+        XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
+    }
+
     /// A film played again, after the app was closed, asks the server for
     /// none of its subtitles: the files beside it and the copies of its own
     /// tracks are kept on the device. Regression: every play fetched them
