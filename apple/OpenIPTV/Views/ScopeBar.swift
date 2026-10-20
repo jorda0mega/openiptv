@@ -94,7 +94,7 @@ private struct Pill: UIViewRepresentable {
 /// dropped) two screen refreshes on: by then the frame being made now is on
 /// screen, and with it the first frame of anything Core Animation started
 /// in it (a hop on the main queue, or one refresh, can land in that frame).
-final class NextFrame: NSObject {
+final class AfterNextFrame: NSObject {
     private var work: (() -> Void)?
     private var link: CADisplayLink?
     private var refreshes = 0
