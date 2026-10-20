@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 final class StreamFailureTests: XCTestCase {
     /// ffmpeg's and libmpv's warnings, the address made up.

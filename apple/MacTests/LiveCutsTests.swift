@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 final class LiveCutsTests: XCTestCase {
     private func at(_ seconds: Double) -> Date { Date(timeIntervalSince1970: seconds) }
