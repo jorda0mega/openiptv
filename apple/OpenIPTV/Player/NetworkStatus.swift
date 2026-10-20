@@ -1,6 +1,8 @@
 import Foundation
 import Network
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// Whether downloading generously is fine right now: an unmetered
 /// connection (not cellular / Low Data Mode) and room on disk.
@@ -77,11 +79,13 @@ extension Conditions {
 @MainActor
 enum MemoryWarnings {
     private static var last: ContinuousClock.Instant?
-    private static var observer: NSObjectProtocol?
 
     static var recent: Bool {
         last.map { ContinuousClock.now - $0 < .seconds(30) } ?? false
     }
+
+    #if canImport(UIKit)
+    private static var observer: NSObjectProtocol?
 
     static func watch() {
         guard observer == nil else { return }
@@ -90,10 +94,21 @@ enum MemoryWarnings {
             MainActor.assumeIsolated { last = .now }
         }
     }
+    #endif
 }
 
 /// Whether something is playing: work done ahead of time (pictures, pages,
 /// warm-ups) waits meanwhile, so the stream has the connection to itself.
+enum PlaybackActivity {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var count = 0
+
+    static var isPlaying: Bool { lock.withLock { count > 0 } }
+    static func began() { lock.withLock { count += 1 } }
+    static func ended() { lock.withLock { count = max(0, count - 1) } }
+}
+
+#if canImport(UIKit)
 /// The screen kept on while something plays, as Apple's player does by
 /// itself (libmpv doesn't): the Apple TV slept, and the phone locked, in
 /// the middle of a film. Off when paused or closed, so the screen saver
@@ -107,12 +122,4 @@ enum ScreenAwake {
         UIApplication.shared.isIdleTimerDisabled = !playing.isEmpty
     }
 }
-
-enum PlaybackActivity {
-    private static let lock = NSLock()
-    nonisolated(unsafe) private static var count = 0
-
-    static var isPlaying: Bool { lock.withLock { count > 0 } }
-    static func began() { lock.withLock { count += 1 } }
-    static func ended() { lock.withLock { count = max(0, count - 1) } }
-}
+#endif
