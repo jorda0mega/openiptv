@@ -29,5 +29,6 @@ If a login leaks:
 ## Tests
 
 - Every bug fix comes with a regression test that fails before the fix.
+- Logic checks are Mac tests: `cd apple/MacTests && swift test`, with no simulator. A simulator UI test is only for what needs the drawn app: layout, focus, scrolling, animation, real playback. Run one simulator at a time.
 - Most tests run against the test server (`scripts/mock_server.py`).
 - The final round before a release runs on the real feeds, with logins handled as above.
