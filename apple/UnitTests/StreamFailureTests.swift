@@ -25,30 +25,59 @@ final class StreamFailureTests: XCTestCase {
         }
     }
 
-    func testStepAtTheOpen() {
-        func step(_ failure: StreamFailure, triedAgain: Bool = false, sinceSwitch: Double = 60) -> StreamFailure.Step {
-            failure.step(played: false, triedAgain: triedAgain, sinceSwitch: sinceSwitch)
-        }
-        for failure in [StreamFailure.http_404, .no_data, .eof_before_frame, .probe_failed, .unknown] {
-            XCTAssertEqual(step(failure), .nextCopy, failure.rawValue)
-        }
-        for failure in [StreamFailure.http_5xx, .timeout, .reset] {
-            XCTAssertEqual(step(failure), .sameCopy(after: 1), failure.rawValue)
-            XCTAssertEqual(step(failure, triedAgain: true), .nextCopy, failure.rawValue)
-        }
-        XCTAssertEqual(step(.http_403, sinceSwitch: 0.5), .sameCopy(after: 1.5), "a refusal right after a switch")
-        XCTAssertEqual(step(.http_403, triedAgain: true, sinceSwitch: 2), .stop)
-        XCTAssertEqual(step(.http_401), .stop, "a refusal long after a switch")
-        XCTAssertEqual(step(.http_429), .stop)
-        for failure in [StreamFailure.offline, .dns, .refused, .tls] {
-            XCTAssertEqual(step(failure), .stop, failure.rawValue)
+    func testKinds() {
+        let kinds: [(StreamFailure, StreamFailure.Kind)] = [
+            (.http_404, .gone), (.no_data, .gone), (.eof_before_frame, .gone), (.probe_failed, .gone), (.unknown, .gone),
+            (.http_5xx, .flaky), (.timeout, .flaky), (.reset, .flaky),
+            (.http_401, .turnedAway), (.http_403, .turnedAway),
+            (.http_429, .tooMany),
+            (.dns, .unreachable), (.refused, .unreachable), (.tls, .unreachable),
+            (.offline, .offline),
+        ]
+        for (failure, kind) in kinds {
+            XCTAssertEqual(failure.kind, kind, failure.rawValue)
         }
     }
 
-    func testStepOnceItPlayed() {
-        for failure in StreamFailure.allCases where failure != .http_429 {
-            XCTAssertEqual(failure.step(played: true, triedAgain: true, sinceSwitch: 0), .reconnect, failure.rawValue)
+    func testClassOfAnAddressLookup() {
+        XCTAssertEqual(StreamFailure(lookup: .offline), .offline)
+        XCTAssertEqual(StreamFailure(lookup: .http(429)), .http_429)
+        XCTAssertEqual(StreamFailure(lookup: .http(403)), .http_403)
+        XCTAssertEqual(StreamFailure(lookup: .http(502)), .http_5xx)
+        XCTAssertEqual(StreamFailure(lookup: .rejected), .http_401)
+        XCTAssertEqual(StreamFailure(lookup: .network("Couldn't connect to the server.")), .unknown)
+        XCTAssertNil(StreamFailure(lookup: .cancelled), "a lookup the screen stopped counted as a failure")
+    }
+
+    /// ffmpeg's own format strings: only those that can say why a stream
+    /// failed are written out.
+    func testOnlyFailureLinesAreRead() {
+        for format in ["HTTP error %d %s\n", "Connection to %s failed: %s\n", "Failed to resolve hostname %s: %s\n",
+                       "Could not find codec parameters for stream %d (%s): %s\n"] {
+            XCTAssertTrue(StreamFailure.worthReading(format: format), format)
         }
-        XCTAssertEqual(StreamFailure.http_429.step(played: true, triedAgain: false, sinceSwitch: 60), .stop)
+        for format in ["error while decoding MB %d %d, bytestream %d\n", "Packet corrupt (stream = %d, dts = %s).\n",
+                       "PES packet size mismatch\n", "%s"] {
+            XCTAssertFalse(StreamFailure.worthReading(format: format), format)
+        }
+    }
+
+    func testFfmpegFailuresBelongToTheOnlyPlayerOpen() {
+        var ledger = FailureLedger()
+        ledger.record(.http_404, at: 1)
+        XCTAssertNil(ledger.failure(of: 1, since: 0), "a failure with no player open was kept")
+        ledger.began(1)
+        ledger.record(.http_404, at: 2)
+        XCTAssertEqual(ledger.failure(of: 1, since: 2), .http_404)
+        XCTAssertNil(ledger.failure(of: 1, since: 3), "a failure from before the load counted")
+        ledger.began(2)
+        ledger.record(.http_5xx, at: 4)
+        XCTAssertEqual(ledger.failure(of: 1, since: 2), .http_404, "a failure while two players were open went to one")
+        XCTAssertNil(ledger.failure(of: 2, since: 0))
+        ledger.closed(2)
+        ledger.began(1)
+        ledger.ended(1)
+        ledger.record(.http_403, at: 5)
+        XCTAssertEqual(ledger.failure(of: 1, since: 5), .http_403, "the replaced load's end closed the new one")
     }
 }
