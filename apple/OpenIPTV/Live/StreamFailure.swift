@@ -50,7 +50,16 @@ enum StreamFailure: String, CaseIterable {
             case 500..<600: .http_5xx
             default: .http_other
             }
-        case .network, .unexpected: self = .unknown
+        case let .network(_, code):
+            self = switch code {
+            case .timedOut?: .timeout
+            case .cannotFindHost?, .dnsLookupFailed?: .dns
+            case .cannotConnectToHost?: .refused
+            case .secureConnectionFailed?, .serverCertificateUntrusted?, .serverCertificateHasBadDate?, .serverCertificateNotYetValid?,
+                 .serverCertificateHasUnknownRoot?, .clientCertificateRejected?: .tls
+            default: .unknown
+            }
+        case .unexpected: self = .unknown
         }
     }
 

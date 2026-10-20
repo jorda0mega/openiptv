@@ -65,7 +65,7 @@ enum SourceError: LocalizedError {
     /// The app itself stopped the request (its task cancelled): nothing
     /// the server did.
     case cancelled
-    case network(String)
+    case network(String, URLError.Code? = nil)
     case unexpected(String)
 
     var errorDescription: String? {
@@ -75,7 +75,7 @@ enum SourceError: LocalizedError {
         case let .http(code): "The server answered with an error (HTTP \(code))."
         case .offline: "No internet connection."
         case .cancelled: "The request was stopped."
-        case let .network(message): message
+        case let .network(message, _): message
         case let .unexpected(message): message
         }
     }
@@ -88,11 +88,11 @@ enum SourceError: LocalizedError {
             switch error.code {
             case .notConnectedToInternet: return .offline
             case .cancelled: return .cancelled
-            case .timedOut: return .network("The server took too long to answer.")
-            case .cannotFindHost, .dnsLookupFailed: return .network("That server address couldn't be found.")
-            case .cannotConnectToHost: return .network("Couldn't connect to the server.")
-            case .secureConnectionFailed, .serverCertificateUntrusted: return .network("The server's secure connection failed.")
-            default: return .network("Network error (\(error.code.rawValue)).")
+            case .timedOut: return .network("The server took too long to answer.", error.code)
+            case .cannotFindHost, .dnsLookupFailed: return .network("That server address couldn't be found.", error.code)
+            case .cannotConnectToHost: return .network("Couldn't connect to the server.", error.code)
+            case .secureConnectionFailed, .serverCertificateUntrusted: return .network("The server's secure connection failed.", error.code)
+            default: return .network("Network error (\(error.code.rawValue)).", error.code)
             }
         }
         if error is DecodingError { return .unexpected("The server's answer wasn't in the expected format.") }
