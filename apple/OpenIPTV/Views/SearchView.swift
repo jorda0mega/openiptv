@@ -48,6 +48,7 @@ struct SearchView: View {
     }
     #if os(iOS)
     @FocusState private var fieldFocused: Bool
+    @State private var shownScopeChange = NextFrame()
     #endif
     /// The device's own title matches, in their order: what the server
     /// adds later goes after them, never between.
@@ -426,7 +427,9 @@ struct SearchView: View {
                 .padding(.top, 6)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("search-title")
-            ScopeBar(scope: $scope, shownScope: $shownScope, dimmed: emptyScopes)
+            ScopeBar(scope: $scope, dimmed: emptyScopes) {
+                shownScopeChange.run { withTransaction(\.disablesAnimations, true) { shownScope = scope } }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
