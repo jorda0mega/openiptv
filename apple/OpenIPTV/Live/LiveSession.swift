@@ -62,7 +62,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
 
     /// A provider allowing one stream at a time can still count the stream
     /// let go for a moment, and refuse the next.
-    static var refusalWindow: TimeInterval { 3 }
+    static let refusalWindow: TimeInterval = 3
 
     /// On an Apple TV, AirPlay is its own speakers.
     static func keepsStreamAway(airPlay: Bool, onTV: Bool) -> Bool {
@@ -211,17 +211,16 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     /// soon as both are true whichever came first.
     private mutating func leaveIfAway(_ now: Date) -> [Action] {
         guard paused, keepsStreamAway == false else { return [] }
+        let away: Phase
         switch phase {
         case let .playing(copy), let .stoppedWhilePaused(copy, _), let .offline(copy, hadPicture: true):
-            phase = .away(copy)
+            away = .away(copy)
         case .recording(started: true):
-            phase = .awayFromRecording
+            away = .awayFromRecording
         default:
             return []
         }
-        attempt += 1
-        releasedAt = now
-        return [.stop]
+        return release(away, now)
     }
 
     private mutating func started(_ now: Date) -> [Action] {
@@ -305,18 +304,16 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     private mutating func cut(_ copy: Copy, _ now: Date) -> [Action] {
         switch cuts.cut(copy.id, at: now) {
         case let .reopen(after: wait):
-            attempt += 1
-            phase = .reopening(copy)
-            return [.clearTimeline, .load(copy, attempt, after: wait)]
+            return reopen(copy, after: wait)
         case .giveUp:
             return nextCopy(after: copy, marking: false, .unknown, .notPlaying, now)
         }
     }
 
-    private mutating func reopen(_ copy: Copy) -> [Action] {
+    private mutating func reopen(_ copy: Copy, after wait: Double = 0) -> [Action] {
         attempt += 1
         phase = .reopening(copy)
-        return [.clearTimeline, .load(copy, attempt, after: 0)]
+        return [.clearTimeline, .load(copy, attempt, after: wait)]
     }
 
     private mutating func open(_ copy: Copy, after: Double) -> [Action] {
@@ -327,16 +324,17 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     }
 
     private mutating func waitForNetwork(_ copy: Copy, hadPicture: Bool, _ now: Date) -> [Action] {
-        attempt += 1
-        releasedAt = now
-        phase = .offline(copy, hadPicture: hadPicture)
-        return [.stop, .waitForNetwork]
+        release(.offline(copy, hadPicture: hadPicture), now, and: .waitForNetwork)
     }
 
     private mutating func stop(_ shown: Failure, _ now: Date) -> [Action] {
+        release(.failed(shown), now)
+    }
+
+    private mutating func release(_ phase: Phase, _ now: Date, and extra: Action...) -> [Action] {
         attempt += 1
         releasedAt = now
-        phase = .failed(shown)
-        return [.stop]
+        self.phase = phase
+        return [.stop] + extra
     }
 }

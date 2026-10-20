@@ -58,7 +58,11 @@ enum LivePerf {
 
     static func say(_ line: Line, _ fields: KeyValuePairs<StaticString, Value>) {
         let text = (["PERF", "live", line.rawValue] + fields.map { "\($0.key)=\($0.value.text)" }).joined(separator: " ")
-        guard safe(text) else { return assertionFailure("PERF live line refused") }
+        log(text, refused: "PERF live line refused")
+    }
+
+    private static func log(_ text: String, refused: StaticString) {
+        guard safe(text) else { return assertionFailure(refused) }
         NSLog("%@", text)
     }
 
@@ -78,8 +82,7 @@ enum LivePerf {
     static func sayMarkCleared(_ kind: Mark, _ mark: LiveFailures.Mark, now: Date = Date()) {
         let age = Int(now.timeIntervalSince(mark.noted).rounded())
         let text = "PERF mark cleared kind=\(kind.rawValue) age=\(age) before_kickoff=\(mark.beforeKickoff ? 1 : 0)"
-        guard safe(text) else { return assertionFailure("PERF mark line refused") }
-        NSLog("%@", text)
+        log(text, refused: "PERF mark line refused")
     }
 
     static func sayPath(_ path: NWPath) {
@@ -203,12 +206,12 @@ enum LivePerf {
         }
 
         func buffering(_ on: Bool) {
-            guard var current = copy, current.frameAt != nil else { return }
+            guard var current = copy, let frameAt = current.frameAt else { return }
             let now = CFAbsoluteTimeGetCurrent()
             if on, current.stallBegan == nil {
                 current.stallBegan = now
                 current.stalls += 1
-            } else if !on, let began = current.stallBegan, let frameAt = current.frameAt {
+            } else if !on, let began = current.stallBegan {
                 current.stallBegan = nil
                 current.stalled += now - began
                 say(.stall, ["tok": .token(current.token), "n": .count(current.stalls), "dur": .decimal(now - began, places: 1),

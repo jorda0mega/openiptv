@@ -30,8 +30,9 @@ struct LiveCuts {
         playingSince = nil
         cuts = cuts.filter { now.timeIntervalSince($0) < Self.span } + [now]
         guard cuts.count < Self.limit else { return .giveUp }
-        defer { backoff += 1 }
-        return .reopen(after: Self.waits[min(backoff, Self.waits.count - 1)])
+        let wait = Self.waits[min(backoff, Self.waits.count - 1)]
+        backoff += 1
+        return .reopen(after: wait)
     }
 
     private mutating func follow(_ id: String) {

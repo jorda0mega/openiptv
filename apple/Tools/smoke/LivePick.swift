@@ -57,10 +57,7 @@ enum LivePick {
 
     /// One player_api.php list, whole, or nil after printing why.
     static func list(_ login: LiveProbe.Login, _ action: String) async -> Data? {
-        var parts = URLComponents(url: login.server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = [.init(name: "username", value: login.username), .init(name: "password", value: login.password),
-                             .init(name: "action", value: action)]
-        guard let url = parts?.url else { LiveProbe.say("PICK error=other"); return nil }
+        guard let url = login.api(action) else { LiveProbe.say("PICK error=other"); return nil }
         let r = await LiveProbe.read(url, agent: LiveProbe.agent(.app), cap: 120, keep: 256 << 20)
         let http = r.response?.statusCode ?? 0
         guard http == 200, r.capped == nil, r.error == nil, r.bytes == r.body.count else {
@@ -74,7 +71,7 @@ enum LivePick {
     }
 
     static func run(_ env: [String: String]) async -> Int32 {
-        func value(_ key: String) -> String? { env[key].flatMap { $0.isEmpty ? nil : $0 } }
+        func value(_ key: String) -> String? { LiveProbe.envValue(key, env) }
         let word = (value("OPENIPTV_PICK_ALWAYS") ?? "ESPN").lowercased()
         let region = Locale.current.region?.identifier ?? "US"
         let home = value("OPENIPTV_PICK_HOME") ?? (region == "GB" ? "UK" : region)

@@ -32,6 +32,18 @@ enum LiveProbe {
             for segment in ["live", username, password, "\(id).\(ext.rawValue)"] { url.append(path: segment) }
             return url
         }
+
+        func api(_ action: String? = nil) -> URL? {
+            var parts = URLComponents(url: server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)
+            var items = [URLQueryItem(name: "username", value: username), URLQueryItem(name: "password", value: password)]
+            if let action { items.append(URLQueryItem(name: "action", value: action)) }
+            parts?.queryItems = items
+            return parts?.url
+        }
+    }
+
+    static func envValue(_ key: String, _ env: [String: String]) -> String? {
+        env[key].flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// One stream open, as printed.
@@ -324,9 +336,7 @@ enum LiveProbe {
 
     /// One player_api.php call, printed as categories only.
     static func account(_ login: Login) async -> String {
-        var parts = URLComponents(url: login.server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = [.init(name: "username", value: login.username), .init(name: "password", value: login.password)]
-        guard let url = parts?.url else { return "PROBE account error=other" }
+        guard let url = login.api() else { return "PROBE account error=other" }
         let r = await read(url, agent: agent(.app), cap: 30, keep: 1 << 20)
         let http = r.response?.statusCode ?? 0
         guard http == 200, let root = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
@@ -410,7 +420,7 @@ enum LiveProbe {
     }
 
     static func run(_ env: [String: String]) async -> Int32 {
-        func value(_ key: String) -> String? { env[key].flatMap { $0.isEmpty ? nil : $0 } }
+        func value(_ key: String) -> String? { envValue(key, env) }
         if value("OPENIPTV_PROBE_SELFTEST") == "1" { return selfTest() }
         func isId(_ s: Substring) -> Bool { (1...12).contains(s.count) && s.allSatisfy(\.isASCII) && s.allSatisfy(\.isNumber) }
         func ids(_ s: Substring) -> [String]? {

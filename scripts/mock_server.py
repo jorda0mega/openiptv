@@ -306,6 +306,10 @@ def live_stalls():
     return sorted(tuple(float(x) for x in spec.split(":")) for spec in CONTROL.get("live_stall", "").split(",") if spec)
 
 
+def live_chosen(key, channel):
+    return channel in (CONTROL.get(key) or channel).split(",")
+
+
 def known_item(entry, played=False):
     id_, name, kind, year, imdb, tmdb = entry
     # "imdb": "k8:tt0000001": that copy's IMDb id is another (a server's
@@ -881,20 +885,12 @@ class Handler(BaseHTTPRequestHandler):
         if ext == "ts" and (loop or (CONTROL.get("live_redirect") == "1" and path.startswith("/live/"))):
             time.sleep(float(CONTROL.get("live_redirect_delay", 0)))
             note(302)
-            self.send_response(302)
-            self.send_header("Location", f"/stream/{name}" if path.startswith("/live/") else f"/live/u/p/{name}")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
+            return self.redirect(f"/stream/{name}" if path.startswith("/live/") else f"/live/u/p/{name}")
         if ext == "ts" and CONTROL.get("live_refuse") == "1":
             note(302)
-            self.send_response(302)
-            self.send_header("Location", f"http://127.0.0.1:1/stream/{name}")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
+            return self.redirect(f"http://127.0.0.1:1/stream/{name}")
         status = int(CONTROL.get("live_status", 0))
-        if status and channel in (CONTROL.get("live_status_ids") or channel).split(","):
+        if status and live_chosen("live_status_ids", channel):
             note(status)
             return self.refuse(status)
         slot = live_take()
@@ -929,6 +925,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.live_answer(b"\x47" * 188 * 64, "video/mp2t", 0.15)
         finally:
             live_release(slot)
+
+    def redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def refuse(self, status):
         self.send_response(status)
@@ -977,7 +979,7 @@ class Handler(BaseHTTPRequestHandler):
         pauses, until live_cut. False when it reset the connection."""
         rate = float(CONTROL.get("live_rate", 0)) * 125
         stalls = live_stalls()
-        cuts = channel in (CONTROL.get("live_cut_ids") or channel).split(",")
+        cuts = live_chosen("live_cut_ids", channel)
         cut = float(CONTROL.get("live_cut", 0)) if cuts else 0
         start = sent = None
         while True:
@@ -999,10 +1001,11 @@ class Handler(BaseHTTPRequestHandler):
                     return False
                 return True
             # Small pieces keep a slow rate even.
-            for i in range(0, len(chunk), 16384 if rate else len(chunk)):
+            step = 16384 if rate else len(chunk)
+            for i in range(0, len(chunk), step):
                 if rate:
                     time.sleep(max(0.0, start + sent / rate - time.monotonic()))
-                piece = chunk[i:i + 16384] if rate else chunk
+                piece = chunk[i:i + step]
                 self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece) if chunked else piece)
                 sent += len(piece)
 

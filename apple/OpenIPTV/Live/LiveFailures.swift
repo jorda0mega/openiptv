@@ -26,7 +26,7 @@ struct LiveFailures: Equatable {
     private var games: [String: Mark] = [:]
 
     func ids(at now: Date = Date()) -> Set<String> {
-        Set(channels.keys.filter { contains($0, at: now) })
+        Set(channels.compactMap { id, mark in mark.end(after: channelLife) > now ? id : nil })
     }
 
     func contains(_ id: String, at now: Date = Date()) -> Bool {
@@ -41,12 +41,23 @@ struct LiveFailures: Equatable {
         channels.removeValue(forKey: id)
     }
 
+    mutating func playedIfCurrent(_ id: String, at now: Date = Date()) -> Mark? {
+        guard let mark = channels[id], mark.end(after: channelLife) > now else { return nil }
+        channels[id] = nil
+        return mark
+    }
+
     func failed(_ ids: [String], playingCopy: String? = nil, at now: Date = Date()) -> Bool {
         !ids.isEmpty && !ids.contains { $0 == playingCopy } && ids.allSatisfy { contains($0, at: now) }
     }
 
     func failedLast<Copy: Identifiable>(_ copies: [Copy], at now: Date = Date()) -> [Copy] where Copy.ID == String {
-        copies.filter { !contains($0.id, at: now) } + copies.filter { contains($0.id, at: now) }
+        var ready: [Copy] = []
+        var failed: [Copy] = []
+        for copy in copies {
+            if contains(copy.id, at: now) { failed.append(copy) } else { ready.append(copy) }
+        }
+        return ready + failed
     }
 
     mutating func noteGame(_ ids: [String], at date: Date = Date(), kickoff: Date? = nil, now: Date = Date()) {
@@ -63,7 +74,9 @@ struct LiveFailures: Equatable {
 
     mutating func gamePlayed(_ ids: [String]) -> [String: Mark] {
         var cleared: [String: Mark] = [:]
-        for id in ids { cleared[id] = games.removeValue(forKey: id) }
+        for id in ids {
+            if let mark = games.removeValue(forKey: id) { cleared[id] = mark }
+        }
         return cleared
     }
 
