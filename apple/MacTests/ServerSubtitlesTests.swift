@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 final class ServerSubtitlesTests: XCTestCase {
     private let folder = FileManager.default.temporaryDirectory.appending(path: "server-subtitles-\(UUID().uuidString)")

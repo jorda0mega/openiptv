@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// Subtitle files put in time part by part (SubtitleSync.match): a file made
 /// for another cut of the film is off by different amounts in different

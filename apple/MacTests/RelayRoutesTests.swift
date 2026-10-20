@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// The relay's local addresses (RelayRoutes): the film playing keeps its
 /// address however many others are made meanwhile.

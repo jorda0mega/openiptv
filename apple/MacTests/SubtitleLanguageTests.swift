@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// Subtitle files found by the server's providers: one written in another
 /// language than it's offered in is left out (the user: "deleting

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// Subtitle files put in time with the film by matching their lines against
 /// the film's own subtitle track (SubtitleSync).

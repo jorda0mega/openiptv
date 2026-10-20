@@ -105,7 +105,7 @@ targets:
   OpenIPTV:
     templates: [OpenIPTVApp]
     scheme:
-      testTargets: ["OpenIPTV UITests", "OpenIPTV UnitTests"]
+      testTargets: ["OpenIPTV UITests"]
     platform: iOS
     sources:
       - OpenIPTV
@@ -189,35 +189,6 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv.uitests
         TEST_TARGET_NAME: OpenIPTV
-        GENERATE_INFOPLIST_FILE: YES
-
-  # Logic with no app around it (the remote's swipes, subtitle timing), in
-  # seconds: xcodebuild test -scheme OpenIPTV -only-testing:"OpenIPTV UnitTests".
-  OpenIPTV UnitTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - UnitTests
-      - OpenIPTV/Player/RemoteSwipe.swift
-      - OpenIPTV/Player/SubtitleSync.swift
-      - OpenIPTV/Player/SubtitleTiming.swift
-      - OpenIPTV/Player/SubtitleLanguage.swift
-      - OpenIPTV/Player/QualityGovernor.swift
-      - OpenIPTV/Player/RelayRoutes.swift
-      - OpenIPTV/Live/WatchOn.swift
-      - OpenIPTV/Live/LiveFailures.swift
-      - OpenIPTV/Live/GameTime.swift
-      - OpenIPTV/Live/SharedGuideRule.swift
-      - OpenIPTV/Live/LineupCheck.swift
-      - OpenIPTV/Model/Flex.swift
-      - OpenIPTV/Model/Shelf.swift
-      - OpenIPTV/Player/ServerSubtitles.swift
-      - OpenIPTV/Player/NetworkStatus.swift
-      - OpenIPTV/Player/StreamRelay.swift
-      - OpenIPTV/Player/PlaylistKeys.swift
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jorda0mega.openiptv.unittests
         GENERATE_INFOPLIST_FILE: YES
 
   # The Siri Remote against the app on an Apple TV simulator (focus, the

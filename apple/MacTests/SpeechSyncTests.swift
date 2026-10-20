@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// Subtitle files put in time with the speech heard in the film, for films
 /// with no subtitle track of their own (SubtitleSync.fit(_:toSpeech:)).

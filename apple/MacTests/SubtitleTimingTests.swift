@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// Where a subtitle file's lines go, remembered on the device (SubtitleTiming).
 final class SubtitleTimingTests: XCTestCase {

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// How long a game counts as live (GameTime): its sport's usual length.
 final class GameTimeTests: XCTestCase {

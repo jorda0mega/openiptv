@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// Watch On: what each channel showing a game says about its feed, and
 /// which plays first.

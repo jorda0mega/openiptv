@@ -5,5 +5,6 @@ probe-report*.json
 /web/node_modules
 /web/dist
 /apple/build
+/apple/.build
 /apple/Vendor
 /apple/.downloads

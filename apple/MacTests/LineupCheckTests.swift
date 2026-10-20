@@ -1,4 +1,5 @@
 import XCTest
+@testable import OpenIPTV
 
 /// A source's record of being asked for its lineup (LineupCheck): only an
 /// answer makes the lineup newer, and a busy provider isn't asked again
