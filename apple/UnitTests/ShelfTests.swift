@@ -1,42 +1,121 @@
 import XCTest
 
 /// One owner per server resource (Shelf): a fetch under way is joined, a
-/// result is kept for its lifetime, and work ahead waits for its source's
-/// budget (Lane) while a play never does.
+/// result is kept for its lifetime, work ahead waits for its source's
+/// budget (Lane), a play never does, and a fetch no one waits for stops.
 @MainActor
 final class ShelfTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
     private let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
                                   memoryWarned: false, freeDisk: 10_000_000_000)
 
-    private func lane(atOnce: Int = 2) -> Lane {
+    private func lane(atOnce: Int = 2, bucket: Bucket? = nil) -> Lane {
         let open = open
-        return Lane(.files, atOnce: atOnce) { open }
+        return Lane(.files, atOnce: atOnce, bucket: bucket) { open }
     }
 
-    private func counting<Value: Sendable>(_ asked: Locked<Int>, after wait: Duration = .zero,
-                                           _ answer: @escaping @Sendable (Int) throws -> Value) -> @Sendable (String) async throws -> Value {
-        { _ in
-            asked.mutate { $0 += 1 }
-            let count = asked.value
-            if wait > .zero { try await Task.sleep(for: wait) }
-            return try answer(count)
+    /// Lets the tasks already queued on the main actor reach their next wait.
+    private func settle() async {
+        for _ in 0..<10 { await Task.yield() }
+    }
+
+    private func fails(_ work: () async throws -> Int) async -> Bool {
+        do {
+            _ = try await work()
+            return false
+        } catch {
+            return true
+        }
+    }
+
+    /// Fetches that say when each starts, and finish only once let through
+    /// (at once when `held` is false). Stopped ones are told apart.
+    private final class Fetches: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        private var gate: [CheckedContinuation<Void, Never>] = []
+        private var passing: Bool
+        let started: AsyncStream<String>
+        let stopped: AsyncStream<String>
+        private let startedSignal: AsyncStream<String>.Continuation
+        private let stoppedSignal: AsyncStream<String>.Continuation
+
+        init(held: Bool = false) {
+            passing = !held
+            (started, startedSignal) = AsyncStream.makeStream()
+            (stopped, stoppedSignal) = AsyncStream.makeStream()
+        }
+
+        var asked: Int { lock.withLock { count } }
+
+        func letThrough() {
+            let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                passing = true
+                defer { gate = [] }
+                return gate
+            }
+            waiting.forEach { $0.resume() }
+        }
+
+        func fetch(_ key: String, failing: @escaping @Sendable (Int) -> Error? = { _ in nil }) async throws -> Int {
+            let number = lock.withLock { count += 1; return count }
+            startedSignal.yield(key)
+            await withCheckedContinuation { continuation in
+                let pass = lock.withLock { () -> Bool in
+                    if passing { return true }
+                    gate.append(continuation)
+                    return false
+                }
+                if pass { continuation.resume() }
+            }
+            if Task.isCancelled {
+                stoppedSignal.yield(key)
+                throw CancellationError()
+            }
+            if let error = failing(number) { throw error }
+            return number
+        }
+
+        /// A fetch that runs until stopped.
+        func endless(_ key: String) async throws -> Int {
+            lock.withLock { count += 1 }
+            startedSignal.yield(key)
+            do { try await Task.sleep(for: .seconds(30)) } catch {
+                stoppedSignal.yield(key)
+                throw error
+            }
+            return 0
+        }
+    }
+
+    private func shelf(_ fetches: Fetches, lane: Lane? = nil, lifetime: Duration = .seconds(60), onLeave: Shelf<String, Int>.OnLeave = .finish,
+                       retries: [Duration] = [], retryable: @escaping @Sendable (Error) -> Bool = { _ in false },
+                       now: @escaping @Sendable () -> Date = { Date() }, disk: Shelf<String, Int>.Disk? = nil,
+                       stillThere: @escaping @MainActor (Int) -> Bool = { _ in true },
+                       failing: @escaping @Sendable (Int) -> Error? = { _ in nil }) -> Shelf<String, Int> {
+        Shelf(.init(lane: lane ?? self.lane(), lifetime: lifetime, onLeave: onLeave, retries: retries, retryable: retryable,
+                    stillThere: stillThere), disk: disk, now: now) { key in
+            try await fetches.fetch(key, failing: failing)
         }
     }
 
     func testTwoAsksAtOnceMakeOneFetch() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), fetch: counting(asked, after: .milliseconds(50)) { $0 })
+        let fetches = Fetches(held: true)
+        let shelf = shelf(fetches)
         async let first = shelf.value(for: "track 3")
         async let second = shelf.value(for: "track 3")
+        var started = fetches.started.makeAsyncIterator()
+        _ = await started.next()
+        await settle()
+        fetches.letThrough()
         let answers = try await [first, second]
         XCTAssertEqual(answers, [1, 1])
-        XCTAssertEqual(asked.value, 1)
+        XCTAssertEqual(fetches.asked, 1)
     }
 
     func testKeptForItsLifetime() async throws {
-        let asked = Locked(0), clock = Locked(start)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), now: { clock.value }, fetch: counting(asked) { $0 })
+        let fetches = Fetches(), clock = Locked(start)
+        let shelf = shelf(fetches, now: { clock.value })
         let first = try await shelf.value(for: "a")
         clock.mutate { $0 += 59 }
         let within = try await shelf.value(for: "a")
@@ -45,200 +124,264 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual([first, within, after], [1, 1, 2])
     }
 
+    func testAKeptValueThatIsGoneIsFetchedAgain() async throws {
+        let fetches = Fetches(), present = Locked(true)
+        let shelf = shelf(fetches, stillThere: { _ in present.value })
+        _ = try await shelf.value(for: "a")
+        present.mutate { $0 = false }
+        let again = try await shelf.value(for: "a")
+        XCTAssertEqual(again, 2)
+    }
+
     func testWarmedThenPlayedMakesOneFetch() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), fetch: counting(asked) { $0 })
+        let fetches = Fetches()
+        let shelf = shelf(fetches)
         let warmed = await shelf.warm("a", for: Interest(at: .posterRow, .likely))
         let played = try await shelf.value(for: "a")
         XCTAssertEqual(warmed, 1)
         XCTAssertEqual(played, 1)
-        XCTAssertEqual(asked.value, 1)
+        XCTAssertEqual(fetches.asked, 1)
     }
 
     func testPlayJoinsAWarmUpUnderWay() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), fetch: counting(asked, after: .milliseconds(100)) { $0 })
+        let fetches = Fetches(held: true)
+        let shelf = shelf(fetches)
         let interest = Interest(at: .posterRow, .likely)
         async let warmed = shelf.warm("a", for: interest)
-        try await Task.sleep(for: .milliseconds(20))
-        let played = try await shelf.value(for: "a")
-        let warmedValue = await warmed
-        XCTAssertEqual(played, 1)
+        var started = fetches.started.makeAsyncIterator()
+        _ = await started.next()
+        async let played = shelf.value(for: "a")
+        await settle()
+        fetches.letThrough()
+        let (warmedValue, playedValue) = try await (warmed, played)
+        XCTAssertEqual(playedValue, 1)
         XCTAssertEqual(warmedValue, 1)
-        XCTAssertEqual(asked.value, 1)
+        XCTAssertEqual(fetches.asked, 1)
     }
 
     func testWaitingWarmUpIsDroppedWhenItsInterestEnds() async throws {
         let lane = lane(atOnce: 1)
         let busy = Lane.Ticket(Interest(at: .posterRow, .glance))
         try await lane.enter(busy)
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane, lifetime: .seconds(60)), fetch: counting(asked) { $0 })
+        let fetches = Fetches()
+        let shelf = shelf(fetches, lane: lane)
         let interest = Interest(at: .posterRow, .glance)
-        async let warmed = shelf.warm("a", for: interest)
-        try await Task.sleep(for: .milliseconds(20))
+        let warmed = Task { await shelf.warm("a", for: interest) }
+        await settle()
         shelf.release("a", from: interest.id)
         lane.leave(busy)
-        let warmedValue = await warmed
-        try await Task.sleep(for: .milliseconds(20))
+        let warmedValue = await warmed.value
         XCTAssertNil(warmedValue)
-        XCTAssertEqual(asked.value, 0)
+        XCTAssertEqual(fetches.asked, 0)
     }
 
     func testPlayStartsAWaitingWarmUpAtOnce() async throws {
         let lane = lane(atOnce: 1)
         try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane, lifetime: .seconds(60)), fetch: counting(asked) { $0 })
-        let interest = Interest(at: .posterRow, .glance)
-        async let warmed = shelf.warm("a", for: interest)
-        try await Task.sleep(for: .milliseconds(20))
-        XCTAssertEqual(asked.value, 0)
+        let fetches = Fetches()
+        let shelf = shelf(fetches, lane: lane)
+        let warmed = Task { await shelf.warm("a", for: Interest(at: .posterRow, .glance)) }
+        await settle()
+        XCTAssertEqual(fetches.asked, 0)
         let played = try await shelf.value(for: "a")
-        let warmedValue = await warmed
+        let warmedValue = await warmed.value
         XCTAssertEqual(played, 1)
         XCTAssertEqual(warmedValue, 1)
-        XCTAssertEqual(asked.value, 1)
+        XCTAssertEqual(fetches.asked, 1)
     }
 
     func testCheapWarmUpFinishesAfterItsInterestEnds() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), fetch: counting(asked, after: .milliseconds(50)) { $0 })
+        let fetches = Fetches(held: true)
+        let shelf = shelf(fetches)
         let interest = Interest(at: .posterRow, .likely)
-        async let warmed = shelf.warm("a", for: interest)
-        try await Task.sleep(for: .milliseconds(10))
+        let warmed = Task { await shelf.warm("a", for: interest) }
+        var started = fetches.started.makeAsyncIterator()
+        _ = await started.next()
         shelf.release("a", from: interest.id)
-        let warmedValue = await warmed
+        fetches.letThrough()
+        let warmedValue = await warmed.value
         let played = try await shelf.value(for: "a")
         XCTAssertEqual(warmedValue, 1)
         XCTAssertEqual(played, 1)
-        XCTAssertEqual(asked.value, 1)
+        XCTAssertEqual(fetches.asked, 1)
     }
 
     func testHeavyWarmUpStopsWhenItsInterestEnds() async throws {
-        let stopped = Locked(false)
-        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), onLeave: .cancel)) { _ in
-            do { try await Task.sleep(for: .seconds(5)) } catch { stopped.mutate { $0 = true }; throw error }
-            return 1
-        }
+        let fetches = Fetches()
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), onLeave: .cancel)) { try await fetches.endless($0) }
         let interest = Interest(at: .continueWatching, .next)
-        async let warmed = shelf.warm("a", for: interest)
-        try await Task.sleep(for: .milliseconds(20))
+        let warmed = Task { await shelf.warm("a", for: interest) }
+        var started = fetches.started.makeAsyncIterator(), stopped = fetches.stopped.makeAsyncIterator()
+        _ = await started.next()
         shelf.release("a", from: interest.id)
-        let warmedValue = await warmed
+        let warmedValue = await warmed.value
+        let stoppedKey = await stopped.next()
         XCTAssertNil(warmedValue)
-        XCTAssertTrue(stopped.value)
+        XCTAssertEqual(stoppedKey, "a")
     }
 
     func testHeavyWarmUpJoinedByAPlayGoesOn() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60), onLeave: .cancel),
-                          fetch: counting(asked, after: .milliseconds(100)) { $0 })
+        let fetches = Fetches(held: true)
+        let shelf = shelf(fetches, onLeave: .cancel)
         let interest = Interest(at: .continueWatching, .next)
-        async let warmed = shelf.warm("a", for: interest)
-        try await Task.sleep(for: .milliseconds(20))
-        async let played = shelf.value(for: "a")
-        try await Task.sleep(for: .milliseconds(10))
+        let warmed = Task { await shelf.warm("a", for: interest) }
+        var started = fetches.started.makeAsyncIterator()
+        _ = await started.next()
+        let played = Task { try await shelf.value(for: "a") }
+        await settle()
         shelf.release("a", from: interest.id)
-        let playedValue = try await played
-        let warmedValue = await warmed
+        fetches.letThrough()
+        let playedValue = try await played.value
+        let warmedValue = await warmed.value
         XCTAssertEqual(playedValue, 1)
         XCTAssertEqual(warmedValue, 1)
-        XCTAssertEqual(asked.value, 1)
+        XCTAssertEqual(fetches.asked, 1)
     }
 
-    func testFailureStopsWarmUpsButNotAPlay() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), fetch: counting(asked) { count in
-            if count == 1 { throw SourceError.http(500) }
-            return count
-        })
-        let first = await shelf.warm("a", for: Interest(at: .posterRow, .likely))
-        let again = await shelf.warm("a", for: Interest(at: .posterRow, .likely))
-        XCTAssertNil(first)
-        XCTAssertNil(again)
-        XCTAssertEqual(asked.value, 1)
-        let played = try await shelf.value(for: "a")
-        XCTAssertEqual(played, 2)
+    func testAFetchNoOneWaitsForAnyMoreStops() async throws {
+        let fetches = Fetches()
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), onLeave: .cancel)) { try await fetches.endless($0) }
+        let played = Task { try await shelf.value(for: "a") }
+        var started = fetches.started.makeAsyncIterator(), stopped = fetches.stopped.makeAsyncIterator()
+        _ = await started.next()
+        played.cancel()
+        let result = await played.result
+        let stoppedKey = await stopped.next()
+        XCTAssertThrowsError(try result.get())
+        XCTAssertEqual(stoppedKey, "a")
+    }
+
+    func testAPlayIsNotQueuedBehindPlayersOpenedAhead() async throws {
+        let fetches = Fetches(held: true)
+        let shelf = shelf(fetches, lane: lane(atOnce: 1))
+        let ahead = Interest(at: .page, .next)
+        let warmPlayers = (0..<4).map { n in Task { try await shelf.value(for: "warm \(n)", ahead: ahead) } }
+        var started = fetches.started.makeAsyncIterator()
+        let first = await started.next()
+        await settle()
+        let played = Task { try await shelf.value(for: "played") }
+        let next = await started.next()
+        XCTAssertEqual(first?.hasPrefix("warm"), true)
+        XCTAssertEqual(next, "played")
+        warmPlayers.forEach { $0.cancel() }
+        played.cancel()
+        fetches.letThrough()
+    }
+
+    func testAPlayerOpenedAheadGoesAtOnceWhenPlayed() async throws {
+        let lane = lane(atOnce: 1)
+        try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
+        let fetches = Fetches()
+        let shelf = shelf(fetches, lane: lane)
+        let warmPlayer = Task { try await shelf.value(for: "a", ahead: Interest(at: .page, .next)) }
+        await settle()
+        XCTAssertEqual(fetches.asked, 0)
+        shelf.hurry("a")
+        let value = try await warmPlayer.value
+        XCTAssertEqual(value, 1)
+    }
+
+    func testEveryPlayCountsAgainstTheBudget() async throws {
+        let fetches = Fetches()
+        let shelf = shelf(fetches, lane: lane(atOnce: 4, bucket: Bucket(size: 2, refillEvery: .seconds(3600), reserve: 0)))
+        _ = try await shelf.value(for: "a")
+        _ = try await shelf.value(for: "b")
+        let warmPlayer = Task { try await shelf.value(for: "c", ahead: Interest(at: .page, .next)) }
+        await settle()
+        _ = try await shelf.value(for: "d")
+        warmPlayer.cancel()
+        _ = await warmPlayer.result
+        XCTAssertEqual(fetches.asked, 3, "a player opened ahead fetched past the budget the plays had spent")
+    }
+
+    func testFailureIsKeptForPlaysToo() async throws {
+        let fetches = Fetches()
+        let shelf = shelf(fetches, failing: { $0 == 1 ? SourceError.http(500) : nil })
+        let warmed = await shelf.warm("a", for: Interest(at: .posterRow, .likely))
+        let played = await fails { try await shelf.value(for: "a") }
+        XCTAssertNil(warmed)
+        XCTAssertTrue(played, "a play asked again within the failure's time")
+        XCTAssertEqual(fetches.asked, 1)
     }
 
     func testFailureIsForgottenAfterItsTime() async throws {
-        let asked = Locked(0), clock = Locked(start)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60), failureKept: .seconds(600)), now: { clock.value },
-                          fetch: counting(asked) { count in
-                              if count == 1 { throw SourceError.http(500) }
-                              return count
-                          })
+        let fetches = Fetches(), clock = Locked(start)
+        let shelf = shelf(fetches, now: { clock.value }, failing: { $0 == 1 ? SourceError.http(500) : nil })
         _ = await shelf.warm("a", for: Interest(at: .posterRow, .likely))
         clock.mutate { $0 += 601 }
-        let later = await shelf.warm("a", for: Interest(at: .posterRow, .likely))
+        let later = try await shelf.value(for: "a")
         XCTAssertEqual(later, 2)
     }
 
-    func testFailedFetchIsRetried() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60), retries: [.milliseconds(10), .milliseconds(10)]),
-                          fetch: counting(asked) { count in
-                              if count < 3 { throw SourceError.network("The server took too long to answer.") }
-                              return count
-                          })
+    func testFailuresWorthRetryingAreRetried() async throws {
+        let fetches = Fetches()
+        let shelf = shelf(fetches, retries: [.milliseconds(1), .milliseconds(1)], retryable: ServerSubtitles.worthRetrying,
+                          failing: { $0 < 3 ? ($0 == 1 ? SourceError.http(503) : SourceError.network("The server took too long to answer.")) : nil })
         let played = try await shelf.value(for: "a")
         XCTAssertEqual(played, 3)
-        XCTAssertEqual(asked.value, 3)
     }
 
-    func testRetriesThatAllFailEndInFailure() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60), retries: [.milliseconds(10)]),
-                                       fetch: counting(asked) { _ in throw SourceError.http(500) })
-        do {
-            _ = try await shelf.value(for: "a")
-            XCTFail("a fetch that always fails answered")
-        } catch {}
-        XCTAssertEqual(asked.value, 2)
+    func testAMissingTrackIsAskedForOnce() async throws {
+        let fetches = Fetches()
+        let shelf = shelf(fetches, retries: [.milliseconds(1), .milliseconds(1)], retryable: ServerSubtitles.worthRetrying,
+                          failing: { _ in SourceError.http(404) })
+        let failed = await fails { try await shelf.value(for: "a") }
+        XCTAssertTrue(failed)
+        XCTAssertEqual(fetches.asked, 1)
+    }
+
+    func testAStoppedRequestIsNotKeptAsAFailure() async throws {
+        let fetches = Fetches()
+        let shelf = shelf(fetches, failing: { $0 == 1 ? CancellationError() : nil })
+        let stopped = await fails { try await shelf.value(for: "a") }
+        let again = try await shelf.value(for: "a")
+        XCTAssertTrue(stopped)
+        XCTAssertEqual(again, 2)
     }
 
     func testFreshOnDiskIsReadWithoutAFetch() async throws {
-        let asked = Locked(0), clock = Locked(start)
+        let fetches = Fetches(), clock = Locked(start)
         let stored = clock.value - 30
-        let disk = Shelf<String, Int>.Disk(find: { _ in (value: 7, at: stored) }, removeAll: {})
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), disk: disk, now: { clock.value },
-                          fetch: counting(asked) { $0 })
+        let shelf = shelf(fetches, now: { clock.value }, disk: .init(find: { _ in (value: 7, at: stored) }))
         let played = try await shelf.value(for: "a")
         XCTAssertEqual(played, 7)
-        XCTAssertEqual(asked.value, 0)
+        XCTAssertEqual(fetches.asked, 0)
     }
 
     func testStaleOnDiskIsFetchedAgain() async throws {
-        let asked = Locked(0), clock = Locked(start)
+        let fetches = Fetches(), clock = Locked(start)
         let stored = clock.value - 61
-        let disk = Shelf<String, Int>.Disk(find: { _ in (value: 7, at: stored) }, removeAll: {})
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), disk: disk, now: { clock.value },
-                          fetch: counting(asked) { $0 })
+        let shelf = shelf(fetches, now: { clock.value }, disk: .init(find: { _ in (value: 7, at: stored) }))
         let played = try await shelf.value(for: "a")
         XCTAssertEqual(played, 1)
     }
 
     func testForgetAllDropsWhatWasKept() async throws {
-        let asked = Locked(0), removed = Locked(false)
-        let disk = Shelf<String, Int>.Disk(find: { _ in nil }, removeAll: { removed.mutate { $0 = true } })
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), disk: disk, fetch: counting(asked) { $0 })
+        let fetches = Fetches()
+        let shelf = shelf(fetches)
         _ = try await shelf.value(for: "a")
         shelf.forgetAll()
         let again = try await shelf.value(for: "a")
         XCTAssertEqual(again, 2)
-        XCTAssertTrue(removed.value)
     }
 
     func testForgetAllKeepsNothingFromAFetchUnderWay() async throws {
-        let asked = Locked(0)
-        let shelf = Shelf(.init(lane: lane(), lifetime: .seconds(60)), fetch: counting(asked, after: .milliseconds(50)) { $0 })
+        let fetches = Fetches(held: true)
+        let shelf = shelf(fetches)
         let first = Task { try await shelf.value(for: "a") }
-        try await Task.sleep(for: .milliseconds(10))
+        var started = fetches.started.makeAsyncIterator()
+        _ = await started.next()
         shelf.forgetAll()
-        _ = try? await first.value
+        _ = await first.result
+        fetches.letThrough()
         let again = try await shelf.value(for: "a")
         XCTAssertEqual(again, 2)
+    }
+
+    func testAnInterestIsNeverTakenForAnEarlierOne() {
+        var ids: Set<Interest.ID> = []
+        for _ in 0..<1000 { ids.insert(Interest(at: .posterRow, .glance).id) }
+        XCTAssertEqual(ids.count, 1000)
     }
 
     // MARK: Lane
@@ -252,7 +395,7 @@ final class ShelfTests: XCTestCase {
             try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
             entered.mutate { $0 = true }
         }
-        try await Task.sleep(for: .milliseconds(20))
+        await settle()
         XCTAssertFalse(entered.value)
         lane.leave(first)
         try await second.value
@@ -272,8 +415,8 @@ final class ShelfTests: XCTestCase {
                 order.mutate { $0.append(name) }
                 lane.leave(ticket)
             })
-            try await Task.sleep(for: .milliseconds(5))
         }
+        await settle()
         lane.leave(busy)
         for waiter in waiters { try await waiter.value }
         XCTAssertEqual(order.value, ["newer likely", "older likely", "glance"])
@@ -306,7 +449,7 @@ final class ShelfTests: XCTestCase {
         let lane = Lane(.files, atOnce: 1) { conditions.value }
         try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
         let waiter = Task { try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance))) }
-        try await Task.sleep(for: .milliseconds(20))
+        await settle()
         conditions.mutate { $0.playing = true }
         lane.conditionsChanged()
         do {
@@ -322,7 +465,7 @@ final class ShelfTests: XCTestCase {
         let busy = Lane.Ticket(Interest(at: .posterRow, .glance))
         try await lane.enter(busy)
         let waiter = Task { try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance))) }
-        try await Task.sleep(for: .milliseconds(20))
+        await settle()
         waiter.cancel()
         do {
             try await waiter.value
@@ -331,18 +474,20 @@ final class ShelfTests: XCTestCase {
             XCTAssertTrue(error is CancellationError)
         }
         lane.leave(busy)
-        let began = ContinuousClock.now
-        try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
-        XCTAssertLessThan(ContinuousClock.now - began, .milliseconds(100))
+        let next = Lane.Ticket(Interest(at: .posterRow, .glance))
+        let entered = Task { try await lane.enter(next) }
+        await settle()
+        try await entered.value
     }
 
-    func testAdmittedNowSkipsTheQueue() async throws {
+    func testAPlayGoesAtOnce() async throws {
         let lane = lane(atOnce: 1)
         try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
+        try await lane.enter(Lane.Ticket(nil))
         let ticket = Lane.Ticket(Interest(at: .posterRow, .glance))
         let waiter = Task { try await lane.enter(ticket) }
-        try await Task.sleep(for: .milliseconds(20))
-        lane.admitNow(ticket)
+        await settle()
+        lane.playNow(ticket)
         try await waiter.value
     }
 

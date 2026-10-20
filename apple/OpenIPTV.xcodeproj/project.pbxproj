@@ -78,6 +78,7 @@
 		3C08CEF60D0EC57E6C0B56D7 /* RealFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */; };
 		3CF2A50D68BC65F97FF790C5 /* Libcrypto.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B41963718B2429F644A73CAD /* Libcrypto.xcframework */; };
 		3E9B707F4696C5845239813A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2DE48775D87FC33EDCE40F /* AppModel.swift */; };
+		3FED65D2AD4D2AA66144C615 /* ServerRequestsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3046C01DD1FCF5361D19925 /* ServerRequestsTests.swift */; };
 		40DD71CACCF8EE67AC1688FD /* SharedGuideRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0618E144206850C96F3ABBC /* SharedGuideRuleTests.swift */; };
 		40ED2C42BE6F50D41D3A415F /* LineupCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = C55BBD8ED2863316936CA1F3 /* LineupCheck.swift */; };
 		41A98F0B32F251A20091582A /* ShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63408BC25C1847C3DC54CDDE /* ShowView.swift */; };
@@ -236,6 +237,7 @@
 		C48EE2D7F8B58042DF260BD4 /* hogweed.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4962C0F389044958A1E2BE4 /* hogweed.xcframework */; };
 		C4B8046237E84B860469F18F /* LocalArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */; };
 		C4E9E73C30E10837B94645CF /* StreamRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857825645808317F48AB50AA /* StreamRelay.swift */; };
+		C5CA985CF337227158DAB13F /* StreamRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857825645808317F48AB50AA /* StreamRelay.swift */; };
 		C60E11EE235D997A17AB0EFD /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */; };
 		C7655AEC73FDEB4B56A49695 /* Libdav1d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */; };
 		C833AF2FFF051FF67BD0B769 /* NetworkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */; };
@@ -450,6 +452,7 @@
 		CF29F5EC9640222904218E1B /* LiveOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveOrganizer.swift; sourceTree = "<group>"; };
 		D1A9C8D5BE1D0FF094368580 /* LiveSportsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSportsTests.swift; sourceTree = "<group>"; };
 		D277F32EC509804119BFFFC4 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
+		D3046C01DD1FCF5361D19925 /* ServerRequestsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRequestsTests.swift; sourceTree = "<group>"; };
 		D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeBar.swift; sourceTree = "<group>"; };
 		D5B1B94210411D81E015B0B6 /* Libass.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libass.xcframework; path = Vendor/Libass.xcframework; sourceTree = "<group>"; };
 		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
@@ -741,6 +744,7 @@
 				73F945F999C40400846D4CCB /* QualityGovernorTests.swift */,
 				80EBE0612A764A40EB50A84D /* RelayRoutesTests.swift */,
 				12232F30722138C0CC3DF129 /* RemoteSwipeTests.swift */,
+				D3046C01DD1FCF5361D19925 /* ServerRequestsTests.swift */,
 				0EB55E37980C6BFCE31C9AC7 /* ServerSubtitlesTests.swift */,
 				A0618E144206850C96F3ABBC /* SharedGuideRuleTests.swift */,
 				C15A59472615C7C403A33300 /* ShelfTests.swift */,
@@ -1130,6 +1134,7 @@
 				F2694E1C04B4CFD07036B428 /* RelayRoutesTests.swift in Sources */,
 				16434D81F4E19A43C2ADD7C5 /* RemoteSwipe.swift in Sources */,
 				76DF5AB929E63EC63FD2D25C /* RemoteSwipeTests.swift in Sources */,
+				3FED65D2AD4D2AA66144C615 /* ServerRequestsTests.swift in Sources */,
 				604AE8CBEF82AC9823484563 /* ServerSubtitles.swift in Sources */,
 				BD984E7A7EB425452DFE299E /* ServerSubtitlesTests.swift in Sources */,
 				844139032D9669A972329A3E /* SharedGuideRule.swift in Sources */,
@@ -1137,6 +1142,7 @@
 				DDFE22D43D4F700998F86D57 /* Shelf.swift in Sources */,
 				66C2EE2B8B590797D866BCCE /* ShelfTests.swift in Sources */,
 				0C705B3715316BFEBA0F5359 /* SpeechSyncTests.swift in Sources */,
+				C5CA985CF337227158DAB13F /* StreamRelay.swift in Sources */,
 				EE664F875BBAF8BE86A1D571 /* SubtitleLanguage.swift in Sources */,
 				ADF986DECA213CF34888F23A /* SubtitleLanguageTests.swift in Sources */,
 				2FE93B60D2A36FA10889FA29 /* SubtitleSectionTests.swift in Sources */,

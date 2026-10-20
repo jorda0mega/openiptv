@@ -515,6 +515,49 @@ final class RealFeedTests: XCTestCase {
         return readout.label.split(separator: " ").first.flatMap { Double($0) }
     }
 
+    /// How the server takes the Emby key in a header alone, as counts and
+    /// yes or no only (never an address or the key): (a) a film lowered
+    /// to the converted version plays; (b) how many addresses in that
+    /// version's playlists carry the key; (c) a watched change made through
+    /// the server's API (a film neither watched nor started is marked
+    /// watched, then not) comes back over the websocket within 30 s. The
+    /// film: TEST_RUNNER_REAL_FEED_FILM, else Asterix and Cleopatra.
+    func testFilmAuthAsSeenNow() throws {
+        let film = ProcessInfo.processInfo.environment["REAL_FEED_FILM"] ?? "Asterix and Cleopatra"
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "10"
+        app.launchArguments += ["-debugSearch", film, "-debugHLSCounts", "YES", "-debugWebsocketProbe", "YES"]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", film)).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 30), "the film isn't in the results")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
+        play.tap()
+        XCTAssertNotNil(waitForPosition(timeout: 45), "the film didn't open")
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        let lowered = Date()
+        while Date().timeIntervalSince(lowered) < 60, !(quality.exists && quality.label.hasPrefix("converted")) { sleep(1) }
+        let converted = quality.exists && quality.label.hasPrefix("converted")
+        sleep(5)
+        let from = position() ?? 0
+        sleep(10)
+        let plays = converted && (position() ?? 0) > from + 5
+        let keys = app.staticTexts["debug-hls-keys"].firstMatch
+        let probe = app.staticTexts["debug-websocket"].firstMatch
+        let probed = Date()
+        while Date().timeIntervalSince(probed) < 60, !["yes", "no", "skipped"].contains(probe.exists ? probe.label : "") { sleep(1) }
+        shot("film auth")
+        let counted = keys.exists && keys.label.hasPrefix("master") ? keys.label : "not counted"
+        print("REAL auth: converted version plays \(plays ? "yes" : "no") | playlist addresses with the key: \(counted) | watched change over the websocket: \(probe.exists ? probe.label : "no readout")")
+        XCTAssertTrue(converted, "the film wasn't lowered to the converted version")
+        XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
+        XCTAssertTrue(["yes", "no", "skipped"].contains(probe.label), "the websocket check didn't end")
+    }
+
     private func waitForPosition(timeout: TimeInterval) -> Double? {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

@@ -786,6 +786,46 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
     }
 
+    /// A film page opens a player out of sight (and its subtitles); the
+    /// next page's player takes its place, and the first one's request for
+    /// its own track (the server reads the whole film for it) is stopped.
+    /// Regression: those requests went on after their player closed, and
+    /// on Apple TV four of them held up the film then played. Needs the
+    /// multi-track test file.
+    func testPlayersOpenedAheadStopTheirSubtitlesWhenLeft() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["reference_delay": "10"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-debugSearch", "animals", "-forgetServerSubtitles", "YES"]
+        app.launch()
+        sleep(4)
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        (tab.exists ? tab : app.buttons["Search"].firstMatch).tap()
+        let films = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals' AND NOT label BEGINSWITH 'Animals.'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 8), "no search result")
+        for n in 0..<2 {
+            films.element(boundBy: n).tap()
+            sleep(3)
+            shot("film page \(n + 1)")
+            app.navigationBars.buttons.firstMatch.tap()
+            sleep(1)
+        }
+        sleep(12)
+        XCTAssertFalse(subtitleRequests(server, "cut").isEmpty, "a player left behind kept asking for its subtitles: \(subtitleRequests(server))")
+    }
+
+    /// No address of a playback carries the Emby key (its streams, its
+    /// subtitles, the stretches of its sound): the key goes in a header.
+    /// Regression: the stretches of sound carried it.
+    func testPlaybackAddressesHoldNoKey() throws {
+        openFilm()
+        let keyed = app.staticTexts["debug-keyed"].firstMatch
+        XCTAssertTrue(keyed.waitForExistence(timeout: 5), "no keyed-addresses readout")
+        XCTAssertEqual(keyed.label, "0", "addresses of the playback carry the key")
+    }
+
     /// A film played again, after the app was closed, asks the server for
     /// none of its subtitles: the files beside it and the copies of its own
     /// tracks are kept on the device. Regression: every play fetched them
@@ -1583,9 +1623,9 @@ final class PlayerLookTests: XCTestCase {
         listed(server, "mock/video_requests", since: since)
     }
 
-    /// "item:index" for each request for a subtitle track ("items"), or for
+    /// "item:index" for each request for a subtitle track ("items"), for
     /// those with the key in their address ("keyed") or without it in a
-    /// header ("headerless").
+    /// header ("headerless"), and those the app hung up on ("cut").
     private func subtitleRequests(_ server: URL, since: Double = 0, _ field: String = "items") -> [String] {
         listed(server, "mock/subtitle_requests", since: since, field)
     }

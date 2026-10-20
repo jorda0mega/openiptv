@@ -689,6 +689,40 @@ final class RemoteFocusTests: XCTestCase {
         press(.down, "next episode playing")
     }
 
+    /// Focus held on a Continue Watching card opens its player out of sight,
+    /// subtitles and all; focus moved on to the next card closes it, and
+    /// its request for the film's own track (the server reads the whole
+    /// film for it) stops. Regression: those requests went on, and the film
+    /// played next waited behind them. Needs the multi-track test file.
+    func testFocusMovedOnStopsTheCardsSubtitles() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["reference_delay": "10"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-forgetServerSubtitles", "YES"]
+        app.launch()
+        sleep(6)
+        for _ in 0..<5 where !focused().contains("id='continue-") { press(.down, "down to Continue Watching") }
+        sleep(2)
+        press(.right, "second card")
+        sleep(2)
+        press(.right, "third card")
+        sleep(12)
+        XCTAssertFalse(subtitleCuts(server).isEmpty, "a card's player left behind kept asking for its subtitles")
+    }
+
+    /// The subtitle requests the app hung up on (scripts/mock_server.py).
+    private func subtitleCuts(_ server: URL) -> [String] {
+        var cut: [String] = []
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: server.appending(path: "mock/subtitle_requests")) { data, _, _ in
+            cut = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?["cut"] ?? []
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 10)
+        return cut
+    }
+
     /// The test server's address, from the account passed in.
     private func testServer() -> URL? {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
