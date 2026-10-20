@@ -1,10 +1,6 @@
 import SwiftUI
 #if DEBUG
 import os
-
-/// Debug builds: Instruments' Points of Interest marks for search, so a
-/// trace shows each search run, each change to the results, and why it ran.
-let searchSignposter = OSSignposter(subsystem: "com.jorda0mega.openiptv", category: .pointsOfInterest)
 #endif
 
 /// One search for everything. Movies, shows and channels come from indexes
