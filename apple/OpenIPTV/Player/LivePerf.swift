@@ -58,7 +58,7 @@ enum LivePerf {
         log(text, refused: "PERF live line refused")
     }
 
-    private static func log(_ text: String, refused: StaticString) {
+    private static func log(_ text: String, refused: String) {
         guard safe(text) else { return assertionFailure(refused) }
         NSLog("%@", text)
     }
