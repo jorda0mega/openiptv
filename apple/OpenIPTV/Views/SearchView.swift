@@ -49,7 +49,7 @@ struct SearchView: View {
     }
     #if os(iOS)
     @FocusState private var fieldFocused: Bool
-    @State private var shownScopeChange = NextFrame()
+    @State private var shownScopeChange = AfterNextFrame()
     #endif
     /// The device's own title matches, in their order: what the server
     /// adds later goes after them, never between.
