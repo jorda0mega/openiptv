@@ -1,7 +1,4 @@
 import SwiftUI
-#if DEBUG
-import os
-#endif
 
 /// One search for everything. Movies, shows and channels come from indexes
 /// on the device and update on every keystroke, with completions on top;
@@ -180,7 +177,8 @@ struct SearchView: View {
     /// Rows waiting for the top count: they're there, just not drawn yet.
     private func isEmpty(_ scope: Scope) -> Bool {
         let results = held ?? shown
-        return results.titles(for: scope).isEmpty && (!scope.listsLive || results.channels.isEmpty && results.onTV.isEmpty)
+        return results.titles(for: scope).isEmpty
+            && (!scope.listsLive || (results.channels.isEmpty && results.onTV.isEmpty))
             && (!scope.listsEpisodes || results.episodes.isEmpty)
     }
 

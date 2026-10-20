@@ -132,13 +132,14 @@ final class SearchStabilityTests: XCTestCase {
         ]
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: geometry).write(to: shots.appending(path: "filter-geometry.json"))
-        let listed = ["All": "Movies & Shows", "Movies": "Movies", "Shows": "No shows or episodes", "Live TV": "No channels"]
-        for name in ["Movies", "Shows", "Live TV", "All", "Movies", "All"] {
+        let taps = [("Movies", "Movies"), ("Shows", "No shows or episodes"), ("Live TV", "No channels"),
+                    ("All", "Movies & Shows"), ("Movies", "Movies"), ("All", "Movies & Shows")]
+        for (name, title) in taps {
             let filter = app.buttons["scope-\(name)"].firstMatch
             filter.tap()
             sleep(1)
             XCTAssertTrue(filter.isSelected, "\(name) isn't the chosen filter after its tap")
-            XCTAssertTrue(app.staticTexts[listed[name]!].exists, "the list didn't follow the tap on \(name): no “\(listed[name]!)”")
+            XCTAssertTrue(app.staticTexts[title].exists, "the list didn't follow the tap on \(name): no “\(title)”")
         }
     }
 
