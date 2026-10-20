@@ -40,8 +40,19 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertTrue(waitForState("failed", within: 28), "a game channel that sends nothing never gave up")
     }
 
+    func testAPlayingStreamOutlivesTheStartLimit() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
+        let server = try launch([:])
+        openChannel(2)
+        XCTAssertTrue(waitForState("playing", within: 15), "channel 2 didn't play")
+        assertKeepsPlaying(server, "2", for: 12)
+    }
+
+    /// Only the server cuts it: the start limit is far off.
     func testCutReconnectsInPlace() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "120"
         let server = try launch(["live_cut": "12"])
+        let start = try markTime(server)
         openChannel(7)
         XCTAssertTrue(waitForState("playing", within: 15), "channel 7 didn't play")
         XCTAssertTrue(app.buttons["Close player"].firstMatch.waitForNonExistence(timeout: 8), "the controls didn't hide")
@@ -59,9 +70,14 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertTrue(waitForState("playing", within: 15), "the stream opened again didn't play: \(state())")
         let opens = try liveRequests(server, since: since).filter { $0.id == "7" }.count
         XCTAssertGreaterThanOrEqual(opens, 2, "the stream wasn't cut and opened again: \(opens) opens")
+        let times = try liveRequests(server, since: start).filter { $0.id == "7" }.map(\.t)
+        for (earlier, later) in zip(times, times.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(later - earlier, 11.5, "opened again \(later - earlier) s after the last open, before the server's cut at 12 s")
+        }
     }
 
     func testCutsAreCapped() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "120"
         let server = try launch(["hd_copy": "1", "live_chunked": "1", "live_cut": "3", "live_cut_reset": "1", "live_cut_ids": "951"])
         let since = try markTime(server)
         openChannel(1)
@@ -90,6 +106,7 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertTrue(waitForState("playing", within: 10), "Channel 1 didn't play")
         let dead = try liveRequests(server, since: since).filter { $0.id == "951" }.count
         XCTAssertEqual(dead, 0, "the copy that didn't play was asked for again")
+        assertKeepsPlaying(server, "1", for: 6)
     }
 
     func testLive404MovesOnAtOnce() throws {
@@ -206,7 +223,7 @@ final class LiveRecoveryTests: XCTestCase {
 
     func testSlowAddressLookupGetsItsTime() throws {
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
-        try launchPortal(["stalker_link_delay": "5"])
+        let server = try launchPortal(["stalker_link_delay": "5"])
         openChannel(6)
         let deadline = Date().addingTimeInterval(20)
         while state() != "playing", Date() < deadline {
@@ -214,11 +231,13 @@ final class LiveRecoveryTests: XCTestCase {
             usleep(250_000)
         }
         XCTAssertEqual(state(), "playing", "the channel with a slow address didn't play")
+        assertKeepsPlaying(server, "6", for: 6)
     }
 
     func testReopenThatFailsMovesOn() throws {
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "3"
         let server = try launch(["hd_copy": "1", "live_cut": "6", "live_cut_ids": "951"])
+        let start = try markTime(server)
         openChannel(1)
         XCTAssertTrue(waitForState("playing", within: 15), "Channel 1 didn't play")
         XCTAssertTrue(liveCopy().hasSuffix("tok=951"), "Channel 1 didn't play on its HD copy: \(liveCopy())")
@@ -229,7 +248,11 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertTrue(liveCopy().hasSuffix("tok=1"), "still on the copy that stopped sending: \(liveCopy())")
         let tries = try liveRequests(server, since: since).filter { $0.id == "951" }.count
         XCTAssertLessThanOrEqual(tries, 1, "the copy that stopped sending was opened again \(tries) times")
+        let opens = try liveRequests(server, since: start).filter { $0.id == "951" }.map(\.t)
+        XCTAssertGreaterThanOrEqual(opens.count, 2, "the copy wasn't opened again after its cut")
+        XCTAssertGreaterThanOrEqual(opens[1] - opens[0], 5.5, "opened again \(opens[1] - opens[0]) s after it was asked for, before the server's cut at 6 s")
         XCTAssertTrue(waitForState("playing", within: 15), "the next copy didn't play")
+        assertKeepsPlaying(server, "1", for: 5)
     }
 
     func testLookupTooManyIsNotMarked() throws {
@@ -267,6 +290,7 @@ final class LiveRecoveryTests: XCTestCase {
     func testOfflineWaitsForTheNetwork() throws {
         let server = try XCTUnwrap(testServer(), "no test server")
         app.launchEnvironment["OPENREEL_DEBUG_ONLINE_URL"] = server.appending(path: "mock/online").absoluteString
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "120"
         try launch(["live_cut": "10"])
         openChannel(7)
         XCTAssertTrue(waitForState("playing", within: 15), "channel 7 didn't play")
@@ -294,6 +318,19 @@ final class LiveRecoveryTests: XCTestCase {
     }
 
     // MARK: Helpers
+
+    /// Still playing for `seconds`, and not asked for again: nothing took the
+    /// stream for a cut.
+    private func assertKeepsPlaying(_ server: URL, _ id: String, for seconds: Double, file: StaticString = #filePath, line: UInt = #line) {
+        guard let since = try? markTime(server) else { return XCTFail("no clock from the test server", file: file, line: line) }
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            XCTAssertEqual(state(), "playing", "the playing stream was taken for a cut", file: file, line: line)
+            usleep(250_000)
+        }
+        let again = (try? liveRequests(server, since: since).filter { $0.id == id }.count) ?? -1
+        XCTAssertEqual(again, 0, "the playing stream was asked for again", file: file, line: line)
+    }
 
     /// The test server as a Stalker portal (its test box address).
     @discardableResult
