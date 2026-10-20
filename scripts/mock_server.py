@@ -53,8 +53,7 @@ SOCKETS = set()
 # unset: as normal), "xtream_empty" ("streams" or "categories": that list
 # for the whole lineup, get_live_streams or get_live_categories, answers an
 # empty list, HTTP 200, a provider that sent nothing; other requests as
-# normal), "library_hold" ("1": the library index's pages after the first
-# wait until it's set back to 0: a big library still loading).
+# normal).
 CONTROL = {}
 # A film's length (seconds; OPENIPTV_MOCK_RUNTIME): two hours unless the
 # test film is shorter and its length matters (stretches of its sound).

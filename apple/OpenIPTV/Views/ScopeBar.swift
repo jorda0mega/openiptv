@@ -1,14 +1,9 @@
 #if os(iOS)
 import SwiftUI
 
-/// All · Movies · Shows · Live TV, the chosen one in a white pill with
-/// black words, as everywhere in the app (the player's pills). One pill,
-/// slid to the chosen filter.
 struct ScopeBar: View {
     @Binding var scope: SearchView.Scope
     let dimmed: Set<SearchView.Scope>
-    /// Called as the pill starts for a new filter (SearchView's body doesn't
-    /// read the filter, so a tap doesn't redraw the page before the pill).
     let chosen: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private static let slide = Spring.snappy(duration: 0.25)
@@ -49,13 +44,10 @@ struct ScopeBar: View {
 
 /// The white pill, slid by Core Animation rather than redrawn by SwiftUI
 /// each frame: it keeps moving while the results are rebuilt on the main
-/// thread. It slides only to a newly chosen filter; moved for any other
-/// reason (the bar laid out again: a resize, larger text) it's there at
-/// once, never away from its words.
+/// thread.
 private struct Pill: UIViewRepresentable {
     let frame: CGRect
     let scope: SearchView.Scope
-    /// Nil: no slide (Reduce Motion).
     let slide: Spring?
 
     final class Coordinator {
@@ -95,8 +87,7 @@ private struct Pill: UIViewRepresentable {
     }
 }
 
-/// Runs the newest work given (work given before it and not run yet is
-/// dropped) two screen refreshes on: by then the frame being made now is on
+/// Two screen refreshes on: by then the frame being made now is on
 /// screen, and with it the first frame of anything Core Animation started
 /// in it (a hop on the main queue, or one refresh, can land in that frame).
 final class AfterNextFrame: NSObject {

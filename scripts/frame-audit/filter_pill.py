@@ -47,8 +47,6 @@ for n in moving:
 
 
 def slide(run):
-    """From one filter to another, the pill at rest for half a second before
-    (not the page appearing or the app quitting)."""
     before, after = edges[run[0] - 1], edges[run[-1]]
     rested = all(edges[n] == before for n in range(len(edges)) if times[run[0]] - 0.5 <= times[n] < times[run[0]])
     return bool(before and after) and rested and abs(after[0] - before[0]) > 20
