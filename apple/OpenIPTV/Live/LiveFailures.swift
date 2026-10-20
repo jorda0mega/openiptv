@@ -4,7 +4,7 @@ import Foundation
 /// this device's alone; a game's ("Not playing") is shared through the
 /// server. A mark made before the game's kickoff ends at kickoff: the
 /// channel wasn't on yet.
-struct LiveFailures {
+struct LiveFailures: Equatable {
     static let didNotPlay = "Didn’t play"
 
     struct Mark: Equatable {
@@ -49,9 +49,11 @@ struct LiveFailures {
         copies.filter { !contains($0.id, at: now) } + copies.filter { contains($0.id, at: now) }
     }
 
-    mutating func noteGame(_ ids: [String], at date: Date = Date(), kickoff: Date? = nil) {
+    mutating func noteGame(_ ids: [String], at date: Date = Date(), kickoff: Date? = nil, now: Date = Date()) {
+        let mark = Mark(noted: date, kickoff: kickoff)
+        guard mark.end(after: gameLife) > now else { return }
         for id in ids where games[id].map({ $0.noted < date }) ?? true {
-            games[id] = Mark(noted: date, kickoff: kickoff)
+            games[id] = mark
         }
     }
 

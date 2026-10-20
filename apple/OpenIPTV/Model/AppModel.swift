@@ -2146,13 +2146,14 @@ final class AppModel {
         return grouped.count > 1 ? grouped : []
     }
 
-    /// The feeds still worth trying, or the TV crossed out when none is.
-    func gameBadge(_ entry: LiveOrganizer.Entry) -> TileBadge? {
-        isNotPlaying(entry) ? .notPlaying : TileBadge.count(feeds(of: entry).filter { !liveFailures.failed($0) }.count)
-    }
-
-    private func feeds(of entry: LiveOrganizer.Entry) -> [[String]] {
-        groups(of: entry.channels).map { ([$0.option] + $0.others).map(\.id) }
+    /// The feeds still worth trying, or the TV crossed out when none is:
+    /// every feed tried on this device, or the game on any device. Opened
+    /// again, it's tried again.
+    func gameState(_ entry: LiveOrganizer.Entry) -> (badge: TileBadge?, notPlaying: Bool) {
+        let feeds = groups(of: entry.channels).map { ([$0.option] + $0.others).map(\.id) }
+        let working = feeds.filter { !liveFailures.failed($0) }.count
+        let notPlaying = liveFailures.gameNotPlaying(entry.channels.map(\.id)) || (!feeds.isEmpty && working == 0)
+        return (notPlaying ? .notPlaying : TileBadge.count(working), notPlaying)
     }
 
     private static let unnamedFeed = WatchOn.Feed(service: LiveOrganizer.serviceName(""))
@@ -2254,10 +2255,12 @@ final class AppModel {
             guard let channel = channelById[id], let key = sharedKey(channel), let at = record[key] else { return nil }
             return (channel, at)
         }
-        guard !found.isEmpty else { return }
+        var failures = liveFailures
         for (channel, at) in found {
-            liveFailures.noteGame([channel.id], at: Date(timeIntervalSince1970: at), kickoff: event(of: channel)?.start)
+            failures.noteGame([channel.id], at: Date(timeIntervalSince1970: at), kickoff: event(of: channel)?.start)
         }
+        guard failures != liveFailures else { return }
+        liveFailures = failures
         endMarksOnTime()
     }
 
@@ -2279,13 +2282,6 @@ final class AppModel {
         }
         let digest = SHA256.hash(data: Data("\(place)|\(channel.nativeId)".utf8))
         return digest.prefix(10).map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// No feed of the game played: every feed tried on this device, or the
-    /// game on any device. Opened again, it's tried again.
-    func isNotPlaying(_ entry: LiveOrganizer.Entry) -> Bool {
-        let feeds = feeds(of: entry)
-        return liveFailures.gameNotPlaying(entry.channels.map(\.id)) || (!feeds.isEmpty && feeds.allSatisfy { liveFailures.failed($0) })
     }
 
     func notePlaying(_ copy: LiveChannel) {
