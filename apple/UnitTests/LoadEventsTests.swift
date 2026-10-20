@@ -34,6 +34,21 @@ final class LoadEventsTests: XCTestCase {
         XCTAssertEqual(loads.ended(entry: 11), 2)
     }
 
+    func testAWarningReadAfterTheNextFileStartsIsNobodys() {
+        var loads = LoadEvents()
+        loads.asked(1, entry: 10)
+        loads.drainBegan()
+        loads.started(entry: 10)
+        loads.drainBegan()
+        XCTAssertEqual(loads.logAttempt, 1)
+        loads.asked(2, entry: 11)
+        loads.drainBegan()
+        XCTAssertEqual(loads.started(entry: 11), 2)
+        XCTAssertNil(loads.logAttempt, "a warning from the file before was given to the file that started")
+        loads.drainBegan()
+        XCTAssertEqual(loads.logAttempt, 2)
+    }
+
     func testWithoutAnEntryTheLoadIsCurrentAtOnce() {
         var loads = LoadEvents()
         loads.asked(3, entry: nil)
