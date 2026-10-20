@@ -545,7 +545,7 @@ struct LivePlayerView: View {
     private func run(_ action: LiveSession<LiveChannel>.Action) {
         switch action {
         case let .load(copy, attempt, delay): load(copy, attempt, after: delay)
-        case let .loadRecording(attempt): loadRecording(attempt)
+        case let .loadRecording(attempt, resume): loadRecording(attempt, from: resume ? position : nil)
         case .stop: stopStream()
         case let .deadline(attempt, limit): watchStart(attempt, limit: limit)
         case .cancelDeadline: startWatch?.cancel()
@@ -612,7 +612,7 @@ struct LivePlayerView: View {
         }
     }
 
-    private func loadRecording(_ attempt: Int) {
+    private func loadRecording(_ attempt: Int, from start: Double?) {
         guard let recording else { return }
         let channel = channel
         loadTask?.cancel()
@@ -620,7 +620,7 @@ struct LivePlayerView: View {
             do {
                 let stream = try await model.catchup(channel, programme: recording)
                 guard !Task.isCancelled, session.attempt == attempt else { return }
-                player?.load(stream.url, headers: stream.headers, sequential: true, attempt: attempt)
+                player?.load(stream.url, headers: stream.headers, start: start, sequential: true, attempt: attempt)
             } catch {
                 guard !Task.isCancelled, session.attempt == attempt else { return }
                 send(.failed(attempt, .unknown, shown: .message(SourceError.wrap(error).localizedDescription)))
