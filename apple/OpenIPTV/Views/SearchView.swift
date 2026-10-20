@@ -59,7 +59,7 @@ struct SearchView: View {
     @State private var serverQuery = ""
     @State private var foundQuery = ""
     @State private var shown = Shown()
-    @State private var held: Shown?
+    @State private var waitingForTop: Shown?
     @State private var atTop = true
     /// Filters a finished search found nothing for: their "no results"
     /// stays while the next letter's search runs, until results come,
@@ -96,7 +96,7 @@ struct SearchView: View {
             }
         }
 
-        func rows(for scope: Scope) -> [String] {
+        func listedRowIDs(for scope: Scope) -> [String] {
             var rows: [String] = []
             #if os(iOS)
             if scope == .all, !completions.isEmpty { rows.append("suggestions") }
@@ -126,23 +126,24 @@ struct SearchView: View {
         #if DEBUG
         searchSignposter.emitEvent("search results", "titles=\(all.count) episodes=\(server.count)")
         #endif
-        show(Shown(query: foundQuery, all: all, movies: all.filter { $0.kind != "Series" }, shows: all.filter { $0.kind == "Series" },
-                   episodes: server.filter { $0.kind == "Episode" }, channels: channels, onTV: onTV, completions: completions))
+        showNowOrAtTop(Shown(query: foundQuery, all: all, movies: all.filter { $0.kind != "Series" },
+                             shows: all.filter { $0.kind == "Series" }, episodes: server.filter { $0.kind == "Episode" },
+                             channels: channels, onTV: onTV, completions: completions))
     }
 
-    private func show(_ next: Shown) {
-        if !atTop, next.query == shown.query, !next.rows(for: shownScope).starts(with: shown.rows(for: shownScope)) {
-            held = next
+    private func showNowOrAtTop(_ next: Shown) {
+        if !atTop, next.query == shown.query, !next.listedRowIDs(for: shownScope).starts(with: shown.listedRowIDs(for: shownScope)) {
+            waitingForTop = next
         } else {
             shown = next
-            held = nil
+            waitingForTop = nil
         }
         resultsChanged()
     }
 
     private func reachedTop(_ top: Bool) {
         atTop = top
-        if top, let held { show(held) }
+        if top, let waitingForTop { showNowOrAtTop(waitingForTop) }
     }
 
     /// Cards the server found for `text`: all of them for what's typed
@@ -155,19 +156,19 @@ struct SearchView: View {
 
     private var emptyScopes: Set<Scope> {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return Set(Scope.allCases.filter { $0 != .all && isEmpty($0) })
+        return Set(Scope.allCases.filter { $0 != .all && nothingFound(for: $0) })
     }
 
-    private func isEmpty(_ scope: Scope) -> Bool {
-        let results = held ?? shown
-        return results.titles(for: scope).isEmpty
-            && (!scope.listsLive || (results.channels.isEmpty && results.onTV.isEmpty))
-            && (!scope.listsEpisodes || results.episodes.isEmpty)
+    private func nothingFound(for scope: Scope) -> Bool {
+        let found = waitingForTop ?? shown
+        return found.titles(for: scope).isEmpty
+            && (!scope.listsLive || (found.channels.isEmpty && found.onTV.isEmpty))
+            && (!scope.listsEpisodes || found.episodes.isEmpty)
     }
 
     /// Results came: a filter that has some again loses its "no results".
     private func resultsChanged() {
-        let still = finishedEmpty.filter(isEmpty)
+        let still = finishedEmpty.filter(nothingFound)
         if still != finishedEmpty { finishedEmpty = still }
     }
 
@@ -489,10 +490,10 @@ struct SearchView: View {
             ContentUnavailableView("Search everything", systemImage: "magnifyingglass",
                                    description: Text("Movies, shows, episodes, channels, and what's on TV now or later by its name. Results appear as you type."))
             #endif
-        } else if finishedEmpty.contains(.all), isEmpty(.all) {
+        } else if finishedEmpty.contains(.all), nothingFound(for: .all) {
             // Only once the search (the server's part too) has finished.
             ContentUnavailableView.search(text: q)
-        } else if shownScope != .all, finishedEmpty.contains(shownScope), isEmpty(shownScope) {
+        } else if shownScope != .all, finishedEmpty.contains(shownScope), nothingFound(for: shownScope) {
             let what = switch shownScope {
             case .movies: "movies"
             case .shows: "shows or episodes"
@@ -500,7 +501,7 @@ struct SearchView: View {
             }
             ContentUnavailableView("No \(what)", systemImage: "line.3.horizontal.decrease",
                                    description: Text("No \(what) match “\(q)”. Try All."))
-        } else if isEmpty(shownScope) {
+        } else if nothingFound(for: shownScope) {
             // Nothing yet, the server's part still on its way: said so
             // (over the list, so nothing moves), after a moment, so a quick
             // answer never flashes it.
@@ -664,7 +665,7 @@ struct SearchView: View {
         let asksServer = trimmed.count >= 2 && model.sources.emby != nil
         let showsNow = !local.titles.isEmpty || !local.channels.isEmpty || early?.isEmpty == false || !asksServer
         if showsNow {
-            take(local, onTV: early)
+            takeDeviceMatches(local, onTV: early)
             let titleNames = (hits.prefix(12) + typos.prefix(6)).map(\.entry.name)
             let channelIndices = Array(cm.ranked.prefix(6)) + Array(found.typoChannels.prefix(3))
             let channelNames = channelIndices.map { model.title(of: channelCorpus.items[$0]) }
@@ -706,7 +707,7 @@ struct SearchView: View {
             await searchServer(q, parsed: parsed, hits: found.hits, listed: hits + typos, held: (local, onTV))
         }
         guard !Task.isCancelled else { return }
-        finishedEmpty = Set(Scope.allCases.filter(isEmpty))
+        finishedEmpty = Set(Scope.allCases.filter(nothingFound))
         #if DEBUG
         mark("all")
         #endif
@@ -726,12 +727,12 @@ struct SearchView: View {
         let channels: [LiveChannel]
     }
 
-    private func take(_ local: Local, onTV hits: [AppModel.GuideHit]?) {
+    private func takeDeviceMatches(_ local: Local, onTV hits: [AppModel.GuideHit]?) {
         let again = query == foundQuery
         library = again ? Self.keepingOrder(library, local.titles) : local.titles
         channels = again ? Self.keepingOrder(channels, local.channels) : local.channels
-        let words = GuideMatch.words(query), now = Int64(Date().timeIntervalSince1970)
-        onTV = hits ?? (again ? onTV : onTV.filter { $0.found(by: words, at: now) })
+        let words = SharedGuideRule.words(in: query), now = Int64(Date().timeIntervalSince1970)
+        onTV = hits ?? (again ? onTV : onTV.filter { $0.foundAgain(by: words, at: now) })
         foundQuery = query
     }
 
@@ -777,7 +778,7 @@ struct SearchView: View {
                               held: (local: Local, onTV: [AppModel.GuideHit])?) async {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2, model.sources.emby != nil else {
-            if let held { take(held.local, onTV: held.onTV) }
+            if let held { takeDeviceMatches(held.local, onTV: held.onTV) }
             serverCards = []
             extras = []
             publish()
@@ -802,7 +803,7 @@ struct SearchView: View {
         let castMatches = confirmed.filter { titles.insert($0.entry.titleKey).inserted }
         let withPeople = people.filter { titles.insert($0.item.titleKey).inserted }
             .compactMap { model.card(for: $0.item, width: thumbWidth, with: $0.person) }
-        if let held { take(held.local, onTV: held.onTV) }
+        if let held { takeDeviceMatches(held.local, onTV: held.onTV) }
         extras = cards(castMatches) + withPeople
         extrasQuery = q
         if held != nil || !castMatches.isEmpty || !people.isEmpty {

@@ -46,16 +46,16 @@ for n in moving:
         runs.append([n])
 
 
-def slide(run):
+def rests_then_moves_to_another_filter(run):
     before, after = edges[run[0] - 1], edges[run[-1]]
     rested = all(edges[n] == before for n in range(len(edges)) if times[run[0]] - 0.5 <= times[n] < times[run[0]])
     return bool(before and after) and rested and abs(after[0] - before[0]) > 20
 
 
-slides = [run for run in runs if slide(run)]
+moves = [run for run in runs if rests_then_moves_to_another_filter(run)]
 
 failed = 0
-for move in slides:
+for move in moves:
     start, end = times[move[0]], times[move[-1]]
     listed = [times[n] for n in range(len(edges)) if start - 0.3 <= times[n] <= start + 0.3 and changes[n] > 0.5]
     slots = round((end - start) / FRAME) + 1
@@ -64,5 +64,5 @@ for move in slides:
     print(f"{start:6.2f} s: pill moved in {len(move)} of {slots} frames, results {order}")
     if len(move) < 4 or missed > 1 or not listed or listed[0] <= start:
         failed += 1
-print(f"{len(slides)} moves, {failed} a jump, with frames dropped, or with results first or unchanged")
-sys.exit(2 if len(slides) < 6 else 1 if failed else 0)
+print(f"{len(moves)} moves, {failed} a jump, with frames dropped, or with results first or unchanged")
+sys.exit(2 if len(moves) < 6 else 1 if failed else 0)

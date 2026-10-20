@@ -207,7 +207,7 @@ targets:
       - OpenIPTV/Live/WatchOn.swift
       - OpenIPTV/Live/LiveFailures.swift
       - OpenIPTV/Live/GameTime.swift
-      - OpenIPTV/Live/GuideMatch.swift
+      - OpenIPTV/Live/SharedGuideRule.swift
       - OpenIPTV/Live/LineupCheck.swift
       - OpenIPTV/Model/Flex.swift
     settings:

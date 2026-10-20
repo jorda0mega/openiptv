@@ -153,7 +153,7 @@ actor GuideStore {
 
     private nonisolated static func index(_ programmes: [String: [Programme]]) -> [(epgId: String, programme: Programme, folded: String)] {
         programmes.flatMap { id, list in
-            list.map { (epgId: id, programme: $0, folded: GuideMatch.fold($0.title)) }
+            list.map { (epgId: id, programme: $0, folded: SharedGuideRule.fold($0.title)) }
         }.sorted { $0.programme.start < $1.programme.start }
     }
 
@@ -171,7 +171,7 @@ actor GuideStore {
         var onNow: [(String, Programme)] = [], later: [(String, Programme)] = []
         for (offset, item) in (searchIndex ?? []).enumerated() {
             if offset & 4095 == 0, Task.isCancelled { return [] }
-            guard GuideMatch.programme(words, title: item.folded, channel: channelNames[item.epgId],
+            guard SharedGuideRule.findsProgramme(words, title: item.folded, channel: channelNames[item.epgId],
                                        stop: item.programme.stop, now: now) else { continue }
             if item.programme.start <= now { onNow.append((item.epgId, item.programme)) } else { later.append((item.epgId, item.programme)) }
             if onNow.count + later.count >= limit { break }
@@ -354,5 +354,15 @@ private final class XMLTVDelegate: NSObject, XMLParserDelegate {
             }
         }
         return Int64(date.timeIntervalSince1970) - offset
+    }
+}
+
+extension AppModel.GuideHit {
+    func foundAgain(by words: [String], at now: Int64) -> Bool {
+        if let league {
+            return SharedGuideRule.findsGame(words, text: SharedGuideRule.fold(title + " " + league), start: start, now: now)
+        }
+        return SharedGuideRule.findsProgramme(words, title: SharedGuideRule.fold(title), channel: SharedGuideRule.fold(channelTitle),
+                                               stop: stop ?? .max, now: now)
     }
 }

@@ -4,9 +4,9 @@ import SwiftUI
 struct ScopeBar: View {
     @Binding var scope: SearchView.Scope
     let dimmed: Set<SearchView.Scope>
-    let chosen: () -> Void
+    let onPillStart: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private static let slide = Spring.snappy(duration: 0.25)
+    fileprivate static let slide = Spring.snappy(duration: 0.25)
 
     var body: some View {
         HStack(spacing: 8) {
@@ -31,12 +31,12 @@ struct ScopeBar: View {
         .backgroundPreferenceValue(PillFrames.self) { frames in
             GeometryReader { proxy in
                 if let anchor = frames[scope] {
-                    Pill(frame: proxy[anchor], scope: scope, slide: reduceMotion ? nil : Self.slide)
+                    Pill(frame: proxy[anchor], scope: scope, slides: !reduceMotion)
                 }
             }
         }
         .animation(.spring(Self.slide), value: scope)
-        .onChange(of: scope) { chosen() }
+        .onChange(of: scope) { onPillStart() }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
     }
@@ -48,10 +48,10 @@ struct ScopeBar: View {
 private struct Pill: UIViewRepresentable {
     let frame: CGRect
     let scope: SearchView.Scope
-    let slide: Spring?
+    let slides: Bool
 
     final class Coordinator {
-        var placed: SearchView.Scope?
+        var placedFor: SearchView.Scope?
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -64,17 +64,17 @@ private struct Pill: UIViewRepresentable {
         capsule.backgroundColor = .white
         Self.place(capsule, in: frame)
         bar.addSubview(capsule)
-        context.coordinator.placed = scope
+        context.coordinator.placedFor = scope
         return bar
     }
 
     func updateUIView(_ bar: UIView, context: Context) {
         guard let capsule = bar.subviews.first, capsule.frame != frame else { return }
         let move = { Self.place(capsule, in: frame) }
-        let chosen = context.coordinator.placed != scope
-        context.coordinator.placed = scope
-        if chosen, let slide {
-            UIView.animate(springDuration: slide.duration, bounce: slide.bounce,
+        let newFilter = context.coordinator.placedFor != scope
+        context.coordinator.placedFor = scope
+        if newFilter, slides {
+            UIView.animate(springDuration: ScopeBar.slide.duration, bounce: ScopeBar.slide.bounce,
                            options: [.beginFromCurrentState, .allowUserInteraction], animations: move)
         } else {
             UIView.performWithoutAnimation(move)
