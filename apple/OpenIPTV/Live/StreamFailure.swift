@@ -36,30 +36,82 @@ enum StreamFailure: String, CaseIterable {
         self = match.1
     }
 
-    enum Step: Equatable {
-        case nextCopy
-        case sameCopy(after: Double)
-        case reconnect
-        case stop
+    init?(lookup error: SourceError) {
+        switch error {
+        case .cancelled: return nil
+        case .offline: self = .offline
+        case .rejected: self = .http_401
+        case let .http(code):
+            self = switch code {
+            case 401: .http_401
+            case 403: .http_403
+            case 404: .http_404
+            case 429: .http_429
+            case 500..<600: .http_5xx
+            default: .http_other
+            }
+        case .network, .unexpected: self = .unknown
+        }
     }
 
-    /// `played`: the copy showed a picture. `sinceSwitch`: seconds since
-    /// another stream was let go, which a provider allowing one stream at a
-    /// time can still count for a moment.
-    func step(played: Bool, triedAgain: Bool, sinceSwitch: TimeInterval) -> Step {
+    /// The words of the warnings classed here, in ffmpeg's format strings:
+    /// its decoders warn hundreds of times a second on a damaged stream, and
+    /// those lines are dropped before they're written out.
+    private static let formatWords: [StaticString] = [
+        "HTTP error", "Server returned", "Connection to", "Connection reset", "Failed to resolve", "timed out",
+        "TLS", "SSL", "certificate", "edirect", "codec parameters", "Could not open codec", "Failed to initialize",
+        "Invalid data",
+    ]
+
+    static func worthReading(format: UnsafePointer<CChar>) -> Bool {
+        let length = strlen(format)
+        return formatWords.contains { memmem(format, length, $0.utf8Start, $0.utf8CodeUnitCount) != nil }
+    }
+
+    enum Kind: Equatable {
+        case gone, flaky, turnedAway, tooMany, unreachable, offline
+    }
+
+    var kind: Kind {
         switch self {
-        case .http_429:
-            .stop
-        case _ where played:
-            .reconnect
-        case .offline, .dns, .refused, .tls:
-            .stop
-        case .http_401, .http_403:
-            !triedAgain && sinceSwitch < 3 ? .sameCopy(after: 1.5) : .stop
-        case .http_5xx, .timeout, .reset:
-            triedAgain ? .nextCopy : .sameCopy(after: 1)
-        case .http_404, .http_other, .redirect_loop, .probe_failed, .decode, .no_data, .no_frame, .eof_before_frame, .unknown:
-            .nextCopy
+        case .http_429: .tooMany
+        case .offline: .offline
+        case .dns, .refused, .tls: .unreachable
+        case .http_401, .http_403: .turnedAway
+        case .http_5xx, .timeout, .reset: .flaky
+        case .http_404, .http_other, .redirect_loop, .probe_failed, .decode, .no_data, .no_frame, .eof_before_frame, .unknown: .gone
         }
+    }
+}
+
+/// ffmpeg's warnings come from every player at once, with nothing saying
+/// whose: one counts for a player only while that player alone has a
+/// stream open.
+struct FailureLedger {
+    private var open: [Int: Int] = [:]
+    private var found: [Int: (failure: StreamFailure, at: Double)] = [:]
+
+    mutating func began(_ player: Int) {
+        open[player, default: 0] += 1
+    }
+
+    mutating func ended(_ player: Int) {
+        guard let count = open[player] else { return }
+        open[player] = count > 1 ? count - 1 : nil
+    }
+
+    mutating func closed(_ player: Int) {
+        open[player] = nil
+        found[player] = nil
+    }
+
+    mutating func record(_ failure: StreamFailure, at time: Double) {
+        guard open.count == 1, let player = open.keys.first else { return }
+        found[player] = (failure, time)
+    }
+
+    func failure(of player: Int, since time: Double) -> StreamFailure? {
+        guard let last = found[player], last.at >= time else { return nil }
+        return last.failure
     }
 }

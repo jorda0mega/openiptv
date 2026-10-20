@@ -1090,7 +1090,7 @@ struct MoviePlayerView: View {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
             PlaybackAudio.activate()
-            warmPlayer.onEvent = { event in handle(event) }
+            warmPlayer.onEvent = { event, _ in handle(event) }
             self.player = warmPlayer
             #if DEBUG
             warmPlayer.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
@@ -1104,7 +1104,7 @@ struct MoviePlayerView: View {
             // the connection.
             model.coolDown()
             let player = makePlayer(prefs: prefs)
-            player.onEvent = { event in handle(event) }
+            player.onEvent = { event, _ in handle(event) }
             self.player = player
             #if DEBUG
             player.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
@@ -1133,7 +1133,7 @@ struct MoviePlayerView: View {
         started = true
         startedOnce = true
         warmStart = true
-        back.player.onEvent = { event in handle(event) }
+        back.player.onEvent = { event, _ in handle(event) }
         player = back.player
         trackSwitched()
         back.player.drawOnScreen()

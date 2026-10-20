@@ -23,18 +23,13 @@ struct LivePlayerView: View {
     @State private var loadTask: Task<Void, Never>?
     @State private var player: MPVPlayer?
     @State private var timing = "Starting…"
-    @State private var started = false
-    @State private var reopening = false
-    @State private var cuts = LiveCuts()
-    /// When another stream was let go: a provider allowing one stream at a
-    /// time can still count it for a moment and refuse the next.
-    @State private var switchedAt = Date.distantPast
-    @State private var closedAway = false
+    @State private var session = LiveSession<LiveChannel>()
+    @State private var frameSeconds = 0.0
+    @State private var netWait: Task<Void, Never>?
     /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
     @State private var buffering = false
     @State private var paused = false
-    @State private var error: String?
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     /// Where playback is, in the stream's own seconds.
@@ -56,10 +51,9 @@ struct LivePlayerView: View {
     @State private var lastStep = Date.distantPast
     /// "Started in 0.6 s" shows until then.
     @State private var timingUntil = Date.distantPast
-    @State private var attempt: Attempt?
+    /// The copy picked, while the cue says it didn't play.
+    @State private var cue: LiveChannel?
     @State private var cueTask: Task<Void, Never>?
-    /// The copy open now.
-    @State private var playingCopy: LiveChannel?
     /// Gives up on a copy that sends no picture (see startLimit).
     @State private var startWatch: Task<Void, Never>?
     /// A game: every channel showing it, the one to play first at the top
@@ -76,19 +70,6 @@ struct LivePlayerView: View {
     @State private var perf = LivePerf.Watch()
     #endif
 
-    /// The provider often lists a channel several times; if one won't start, the next is tried.
-    struct Attempt {
-        let picked: LiveChannel
-        var tried: Set<String>
-        var triedAgain: Set<String> = []
-        var cue = false
-
-        init(_ picked: LiveChannel) {
-            self.picked = picked
-            tried = [picked.id]
-        }
-    }
-
     struct Window: Equatable {
         var start: Double
         var end: Double
@@ -96,7 +77,17 @@ struct LivePlayerView: View {
     }
 
     private var channel: LiveChannel { model.current(channels[index]) }
-    private var loading: Bool { (buffering || !started || reopening) && error == nil }
+    private var started: Bool { session.hasPicture }
+    private var playingCopy: LiveChannel? { session.copy }
+    private var error: String? {
+        switch session.failure {
+        case .notPlaying: notPlaying
+        case .ended: "The channel stopped before it started."
+        case let .message(text): text
+        case nil: nil
+        }
+    }
+    private var loading: Bool { (buffering || session.isLoading) && error == nil }
     private var playingID: String? { error == nil ? playingCopy?.id : nil }
     /// "TLC" rather than "US: TLC HD".
     private var displayName: String { model.title(of: channel) }
@@ -125,10 +116,10 @@ struct LivePlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if controlsVisible { controls.transition(.opacity) }
-            if let attempt, attempt.cue, let playingCopy { switchCue(attempt.picked, playingCopy) }
+            if let cue, let playingCopy { switchCue(cue, playingCopy) }
             #if DEBUG
             debugReadout(playingCopy.map { "\($0.name) tok=\(LivePerf.Token($0).text)" } ?? "", "debug-live-copy")
-            debugReadout(error != nil ? "failed" : started ? "playing" : "starting", "debug-live-state")
+            debugReadout(session.readout, "debug-live-state")
             debugReadout(perf.failure?.rawValue ?? "none", "debug-live-fail")
             #endif
         }
@@ -158,8 +149,8 @@ struct LivePlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { closeIfPausedAway() }
-            if phase == .active, closedAway { play(copy: playingCopy) }
+            if phase == .background { send(.away(keepsStream: keepsStreamAway)) }
+            if phase == .active { send(.back) }
         }
         .task { start() }
         .onAppear {
@@ -173,6 +164,7 @@ struct LivePlayerView: View {
             hideTask?.cancel()
             loadTask?.cancel()
             startWatch?.cancel()
+            netWait?.cancel()
             cueTask?.cancel()
             #if DEBUG
             perf.closed()
@@ -405,10 +397,9 @@ struct LivePlayerView: View {
             return showControls()
         }
         pendingPick = league.map { (choice, $0) }
-        reset()
+        resetScreen()
         recording = nil
-        attempt = Attempt(choice.channel)
-        open(choice.channel)
+        send(.play(choice.channel, feeds: feeds, after: 0, startLimit: startLimit))
         showControls()
     }
 
@@ -517,7 +508,7 @@ struct LivePlayerView: View {
         model.coolDown()
         StreamRelay.shared.stopAhead(keeping: nil)
         let player = makePlayer(prefs: prefs)
-        player.onEvent = { event in handle(event) }
+        player.onEvent = { event, attempt in handle(event, attempt) }
         self.player = player
         #if DEBUG
         perf.player = player
@@ -536,29 +527,66 @@ struct LivePlayerView: View {
         #if DEBUG
         perf.began()
         #endif
-        reset()
+        resetScreen()
         recording = nil
         pendingPick = nil
         choices = model.watchChoices(for: channel)
         let first = copy ?? choices.first?.channel ?? model.liveOrder(of: channel).first ?? channel
-        attempt = Attempt(first)
         model.noteChannel(channel.id)
-        open(first, after: delay)
+        send(.play(first, feeds: feeds, after: delay, startLimit: startLimit))
         showAround()
         showControls()
     }
 
-    /// Opens one copy of the channel. One that hasn't sent a picture by the
-    /// start limit counts as failed: the next copy is tried, or the screen
-    /// says nothing is playing. Regression: a game listed LIVE whose feed
-    /// was over (the slot still there) spun forever.
-    private func open(_ copy: LiveChannel, after delay: Double = 0) {
-        if copy.id != playingCopy?.id { switchedAt = Date() }
-        playingCopy = copy
+    private func send(_ input: LiveSession<LiveChannel>.Input) {
+        for action in session.handle(input) { run(action) }
+    }
+
+    private func run(_ action: LiveSession<LiveChannel>.Action) {
+        switch action {
+        case let .load(copy, attempt, delay): load(copy, attempt, after: delay)
+        case let .loadRecording(attempt): loadRecording(attempt)
+        case .stop: stopStream()
+        case let .deadline(attempt, limit): watchStart(attempt, limit: limit)
+        case .waitForNetwork: waitForNetwork()
+        case .clearTimeline:
+            position = nil
+            window = nil
+            following = true
+            liveGap = 0
+            scrubbing = nil
+        case .unpause: if paused { player?.setPaused(false) }
+        case .picture: pictureShown()
+        case .goLive: play()
+        case let .markFailed(copy): model.noteLiveFailure(copy)
+        case .markNotPlaying: if model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
+        case let .played(copy):
+            model.notePlaying(copy)
+            if let pendingPick, pendingPick.choice.shows(copy.id) {
+                model.pickWatchChoice(pendingPick.choice, league: pendingPick.league)
+            }
+            pendingPick = nil
+        case let .switching(from):
+            cue = from
+            announce(WatchOn.switchSentence(from: model.name(of: from), to: nil))
+        case let .switched(from, to):
+            announce(WatchOn.switchSentence(from: model.name(of: from), to: model.name(of: to)))
+            cueTask?.cancel()
+            cueTask = Task {
+                try? await Task.sleep(for: .seconds(Self.cueSeconds))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.4)) { cue = nil }
+            }
+        }
+    }
+
+    /// Opens one copy of the channel. Regression: a game listed LIVE whose
+    /// feed was over (the slot still there) spun forever (see startLimit).
+    private func load(_ copy: LiveChannel, _ attempt: Int, after delay: Double) {
         #if DEBUG
-        perf.opening(copy, n: attempt?.tried.count ?? 1, of: feeds.map(\.count).reduce(0, +), delay: delay)
+        perf.opening(copy, n: session.triedCount, of: feeds.map(\.count).reduce(0, +), delay: delay)
         #endif
-        watchStart(of: copy, after: delay)
+        startWatch?.cancel()
         loadTask?.cancel()
         loadTask = Task {
             if delay > 0 {
@@ -570,93 +598,88 @@ struct LivePlayerView: View {
                 let asked = CFAbsoluteTimeGetCurrent()
                 #endif
                 let stream = try await model.playable(copy)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, session.attempt == attempt else { return }
                 #if DEBUG
                 perf.addressed(in: CFAbsoluteTimeGetCurrent() - asked)
                 #endif
-                player?.load(stream.url, headers: stream.headers)
+                player?.load(stream.url, headers: stream.headers, attempt: attempt)
             } catch {
-                guard !Task.isCancelled else { return }
-                if started { return reconnect() }
-                if !fallBack() { fail(SourceError.wrap(error).localizedDescription) }
+                guard !Task.isCancelled, session.attempt == attempt else { return }
+                let wrapped = SourceError.wrap(error)
+                guard let failure = StreamFailure(lookup: wrapped) else { return }
+                send(.failed(attempt, reading(failure), shown: .message(wrapped.localizedDescription)))
             }
         }
     }
 
-    private func watchStart(of copy: LiveChannel, after delay: Double = 0) {
-        startWatch?.cancel()
-        let limit = startLimit
-        startWatch = Task {
-            try? await Task.sleep(for: .seconds(delay + limit))
-            guard !Task.isCancelled, !started || reopening, error == nil, recording == nil, playingCopy?.id == copy.id else { return }
-            #if DEBUG
-            perf.timedOut()
-            #endif
-            failed(.no_data, message: notPlaying)
-        }
-    }
-
-    private func failed(_ failure: StreamFailure, message: String) {
-        guard recording == nil, let copy = playingCopy, var attempt else { return fail(message) }
-        let failure = NetworkStatus.shared.online ? failure : .offline
-        switch failure.step(played: started, triedAgain: attempt.triedAgain.contains(copy.id),
-                            sinceSwitch: Date().timeIntervalSince(switchedAt)) {
-        case .nextCopy:
-            guard !fallBack() else { return }
-            if failure == .no_data, model.event(of: channel) != nil { model.noteGameNotPlaying(channel) }
-            fail(message)
-        case let .sameCopy(after: wait):
-            attempt.triedAgain.insert(copy.id)
-            self.attempt = attempt
-            open(copy, after: wait)
-        case .reconnect:
-            reconnect()
-        case .stop:
-            fail(message)
-        }
-    }
-
-    private func reconnect() {
-        guard let copy = playingCopy else { return }
-        reopening = true
-        guard NetworkStatus.shared.online else { return reconnectOnceOnline() }
-        switch cuts.cut(copy.id) {
-        case let .reopen(after: wait):
-            if paused { player?.setPaused(false) }
-            window = nil
-            position = nil
-            following = true
-            liveGap = 0
-            scrubbing = nil
-            open(copy, after: wait)
-        case .giveUp:
-            reset()
-            if !fallBack() { fail(notPlaying) }
-        }
-    }
-
-    private func reconnectOnceOnline() {
+    private func loadRecording(_ attempt: Int) {
+        guard let recording else { return }
+        let channel = channel
         startWatch?.cancel()
         loadTask?.cancel()
         loadTask = Task {
+            do {
+                let stream = try await model.catchup(channel, programme: recording)
+                guard !Task.isCancelled, session.attempt == attempt else { return }
+                player?.load(stream.url, headers: stream.headers, sequential: true, attempt: attempt)
+            } catch {
+                guard !Task.isCancelled, session.attempt == attempt else { return }
+                send(.failed(attempt, .unknown, shown: .message(SourceError.wrap(error).localizedDescription)))
+            }
+        }
+    }
+
+    private func watchStart(_ attempt: Int, limit: Double) {
+        startWatch?.cancel()
+        startWatch = Task {
+            try? await Task.sleep(for: .seconds(limit))
+            guard !Task.isCancelled, session.attempt == attempt else { return }
+            #if DEBUG
+            perf.timedOut()
+            #endif
+            send(.failed(attempt, reading(.no_data), shown: .notPlaying))
+        }
+    }
+
+    /// Closes the stream (many accounts allow one at a time) and drops what
+    /// was on its way to open one.
+    private func stopStream() {
+        loadTask?.cancel()
+        startWatch?.cancel()
+        netWait?.cancel()
+        #if DEBUG
+        perf.closed()
+        #endif
+        let background = UIApplication.shared.beginBackgroundTask()
+        player?.stop { UIApplication.shared.endBackgroundTask(background) }
+        guard error != nil else { return }
+        cue = nil
+        showControls()
+    }
+
+    private func waitForNetwork() {
+        netWait?.cancel()
+        netWait = Task {
             while !NetworkStatus.shared.online {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled else { return }
             }
-            reconnect()
+            send(.online)
         }
     }
 
-    private func fallBack() -> Bool {
-        guard recording == nil, !started, var attempt else { return false }
-        if let playingCopy { model.noteLiveFailure(playingCopy) }
-        guard let next = WatchOn.next(after: attempt.picked.id, feeds: feeds, tried: attempt.tried) else { return false }
-        attempt.tried.insert(next.id)
-        if !attempt.cue { announce(WatchOn.switchSentence(from: model.name(of: attempt.picked), to: nil)) }
-        attempt.cue = true
-        self.attempt = attempt
-        open(next)
-        return true
+    private func reading(_ failure: StreamFailure) -> StreamFailure {
+        NetworkStatus.shared.online ? failure : .offline
+    }
+
+    private var keepsStreamAway: Bool {
+        #if os(tvOS)
+        let onTV = true
+        #else
+        let onTV = false
+        #endif
+        let airPlay = AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
+        return LiveSession<LiveChannel>.keepsStreamAway(airPlay: airPlay, onTV: onTV)
     }
 
     private var feeds: [[LiveChannel]] {
@@ -678,98 +701,48 @@ struct LivePlayerView: View {
         #if DEBUG
         perf.closed()
         #endif
-        reset()
+        resetScreen()
         recording = programme
-        let channel = channel
-        loadTask?.cancel()
-        loadTask = Task {
-            do {
-                let stream = try await model.catchup(channel, programme: programme)
-                guard !Task.isCancelled else { return }
-                player?.load(stream.url, headers: stream.headers, sequential: true)
-            } catch {
-                guard !Task.isCancelled else { return }
-                fail(SourceError.wrap(error).localizedDescription)
-            }
-        }
+        send(.recording)
         showControls()
-    }
-
-    /// Many accounts allow one stream at a time: live TV paused in the
-    /// background lets it go, unless AirPlay plays it, and opens live again
-    /// on return.
-    private func closeIfPausedAway() {
-        guard paused, started, error == nil, recording == nil, !closedAway, !airPlaying else { return }
-        closedAway = true
-        startWatch?.cancel()
-        loadTask?.cancel()
-        #if DEBUG
-        perf.closed()
-        #endif
-        let background = UIApplication.shared.beginBackgroundTask()
-        player?.stop { UIApplication.shared.endBackgroundTask(background) }
-    }
-
-    private var airPlaying: Bool {
-        AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
     }
 
     private func retry() {
         if let recording { watch(recording) } else { play() }
     }
 
-    private func reset() {
+    private func resetScreen() {
         cueTask?.cancel()
-        attempt?.cue = false
-        if paused { player?.setPaused(false) }
+        cue = nil
         timing = "Starting…"
-        started = false
-        reopening = false
-        closedAway = false
         buffering = false
-        error = nil
-        position = nil
-        window = nil
-        following = true
-        liveGap = 0
-        scrubbing = nil
     }
 
-    private func handle(_ event: MPVPlayer.Event) {
+    private func pictureShown() {
+        buffering = false
+        ScreenAwake.set(awakeID, playing: !paused)
+        #if DEBUG
+        perf.started(frame: frameSeconds)
+        #endif
+        // Development builds with the stats on.
+        if prefs.performanceStats {
+            timing = String(format: "Started in %.1f s", frameSeconds)
+            timingUntil = Date().addingTimeInterval(3)
+        }
+        if controlsVisible { showControls() }
+    }
+
+    private func handle(_ event: MPVPlayer.Event, _ attempt: Int) {
+        let current = attempt == session.attempt
         switch event {
         case .opening:
-            if let playingCopy, !started || reopening, error == nil, recording == nil { watchStart(of: playingCopy) }
+            send(.opening(attempt))
         case let .started(seconds):
-            started = true
-            reopening = false
-            buffering = false
-            startWatch?.cancel()
-            if let playingCopy { cuts.played(playingCopy.id) }
-            if recording == nil { model.notePlaying(playingCopy ?? channel) }
-            if let pendingPick, pendingPick.choice.shows(playingCopy?.id) {
-                model.pickWatchChoice(pendingPick.choice, league: pendingPick.league)
-            }
-            pendingPick = nil
-            if let attempt, attempt.cue, let playingCopy {
-                announce(WatchOn.switchSentence(from: model.name(of: attempt.picked), to: model.name(of: playingCopy)))
-                cueTask?.cancel()
-                cueTask = Task {
-                    try? await Task.sleep(for: .seconds(Self.cueSeconds))
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: 0.4)) { self.attempt?.cue = false }
-                }
-            }
-            ScreenAwake.set(awakeID, playing: !paused)
-            #if DEBUG
-            perf.started(frame: seconds)
-            #endif
-            // Development builds with the stats on.
-            if prefs.performanceStats {
-                timing = String(format: "Started in %.1f s", seconds)
-                timingUntil = Date().addingTimeInterval(3)
-            }
-            if controlsVisible { showControls() }
+            guard current else { return }
+            frameSeconds = seconds
+            send(.started(attempt))
         case let .buffering(isBuffering):
+            guard current else { return }
             buffering = isBuffering
             #if DEBUG
             perf.buffering(isBuffering)
@@ -777,28 +750,30 @@ struct LivePlayerView: View {
         case let .paused(isPaused):
             paused = isPaused
             if started { ScreenAwake.set(awakeID, playing: !isPaused) }
+            send(.paused(isPaused))
         case let .time(now, _):
-            guard abs(now - (position ?? -10)) >= 0.25 else { return }
+            guard current, abs(now - (position ?? -10)) >= 0.25 else { return }
             position = now
             track()
         case let .window(start, end, seekable):
+            guard current else { return }
             window = Window(start: start, end: end, seekable: seekable)
             track()
         case let .failed(message, logged):
+            guard current else { return }
             #if DEBUG
             perf.failed()
             #endif
-            failed(logged ?? .unknown, message: "Couldn't play: \(message)")
+            send(.failed(attempt, reading(logged ?? .unknown), shown: .message("Couldn't play: \(message)")))
         case let .ended(logged):
+            guard current else { return }
             #if DEBUG
             perf.ended()
             #endif
-            // The provider closes a stream it stops holding (a long pause, a
-            // cut, a reset libmpv reads as an end).
-            if started, recording != nil { return play() }
-            failed(logged ?? .eof_before_frame, message: "The channel stopped before it started.")
+            send(.ended(attempt, reading(logged ?? .eof_before_frame)))
         #if DEBUG
         case let .network(buffer, bytesPerSecond):
+            guard current else { return }
             perf.network(buffer: buffer, bytesPerSecond: bytesPerSecond, gap: liveGap)
         #endif
         default:
@@ -835,7 +810,7 @@ struct LivePlayerView: View {
     }
 
     private func togglePause() {
-        guard started, !reopening else { return }
+        guard started, !session.isLoading else { return }
         if !paused, recording == nil { following = false }
         player?.togglePause()
         showControls()
@@ -863,13 +838,6 @@ struct LivePlayerView: View {
         guard let span else { return }
         scrubbing = nil
         jump(to: span.lower + value)
-        showControls()
-    }
-
-    private func fail(_ message: String) {
-        startWatch?.cancel()
-        attempt?.cue = false
-        error = message
         showControls()
     }
 

@@ -26,6 +26,7 @@
 		0AC8209D974EFC73A6E478AA /* IMDbCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C97593A755F65E9694219D4 /* IMDbCatalog.swift */; };
 		0C2EB465C9AB5093C0AA8603 /* libbz2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 7A1F2D0451F66503C9B600AF /* libbz2.tbd */; };
 		0CB6B5B6FB4155FCF4EEA746 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5EDE0462D2DCE22124164E8 /* Metal.framework */; };
+		0CC19420BA131A926D18CD34 /* LiveSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E89B6CEFC2EA7DE2C9606D /* LiveSession.swift */; };
 		0D646AB8C8A7382117611F70 /* TMDbPopularity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9007B25996DDA88FE40D727B /* TMDbPopularity.swift */; };
 		0DE6D69F6DA84444642E07C3 /* OpenIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */; };
 		0E87FB9A008BD21779D3A16E /* Libmpv.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4832E45A4684E44B1F5A384 /* Libmpv.xcframework */; };
@@ -175,6 +176,7 @@
 		8BF183511B31859CFD77CBAB /* IMDbCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C97593A755F65E9694219D4 /* IMDbCatalog.swift */; };
 		8CFD892BCDF7775B3D0C8754 /* Libavcodec.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */; };
 		8D38B6155496E8A53B744167 /* libexpat.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A9E566E295D6785A720DEA83 /* libexpat.tbd */; };
+		8DAA34D3406EDD46D1A21D4E /* LiveSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E89B6CEFC2EA7DE2C9606D /* LiveSession.swift */; };
 		8ED22EEDAFCE31116298BFA4 /* LiveRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1EC37B63ED8CD9B42434CF /* LiveRecoveryTests.swift */; };
 		8F11EF6FC4C1E86511E114A3 /* TileBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE93F836A970124A83C81EB8 /* TileBadge.swift */; };
 		8F2742F08E2D8AAE9A1BC3AA /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
@@ -406,6 +408,7 @@
 		A2871C16F0BDAE894782F88F /* SharedGuideRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedGuideRule.swift; sourceTree = "<group>"; };
 		A4962C0F389044958A1E2BE4 /* hogweed.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = hogweed.xcframework; path = Vendor/hogweed.xcframework; sourceTree = "<group>"; };
 		A651DA02BA6A980C42B2EE28 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		A8E89B6CEFC2EA7DE2C9606D /* LiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSession.swift; sourceTree = "<group>"; };
 		A9E566E295D6785A720DEA83 /* libexpat.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libexpat.tbd; path = usr/lib/libexpat.tbd; sourceTree = SDKROOT; };
 		AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libdovi.xcframework; path = Vendor/Libdovi.xcframework; sourceTree = "<group>"; };
 		AA8AA4353609B682F3F99884 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -838,6 +841,7 @@
 				6CBBDDA77B65B86BB26D8D65 /* LiveFailures.swift */,
 				5CF28B344CA01BCD1800A4E3 /* LiveModels.swift */,
 				CF29F5EC9640222904218E1B /* LiveOrganizer.swift */,
+				A8E89B6CEFC2EA7DE2C9606D /* LiveSession.swift */,
 				58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */,
 				9F9B9AD0C2539A2BABA83C97 /* M3UProvider.swift */,
 				A2871C16F0BDAE894782F88F /* SharedGuideRule.swift */,
@@ -1108,6 +1112,7 @@
 				6D5968936DF5594E32D6D529 /* LiveOrganizer.swift in Sources */,
 				FE2901D1F54752302A2507AB /* LivePerf.swift in Sources */,
 				976B05916C747916000E1666 /* LivePlayerView.swift in Sources */,
+				0CC19420BA131A926D18CD34 /* LiveSession.swift in Sources */,
 				244127A393B955C4418AEB4A /* LiveShelfViews.swift in Sources */,
 				A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */,
 				C4B8046237E84B860469F18F /* LocalArea.swift in Sources */,
@@ -1214,6 +1219,7 @@
 				6AAED15590593E71877BC43A /* LiveOrganizer.swift in Sources */,
 				98FA019033809EFDE43A037C /* LivePerf.swift in Sources */,
 				9F06D59EE7F81D0590BE65AE /* LivePlayerView.swift in Sources */,
+				8DAA34D3406EDD46D1A21D4E /* LiveSession.swift in Sources */,
 				0F5DA94E3A68E664F7B7DDFD /* LiveShelfViews.swift in Sources */,
 				9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */,
 				10E6DBCB2E85AE6FC761AF98 /* LocalArea.swift in Sources */,
