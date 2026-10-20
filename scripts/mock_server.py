@@ -78,8 +78,9 @@ SUBTITLE_REQUESTS = []
 PLAYBACKINFO_REQUESTS = []
 # Requests that need the Emby key, which must come in a header: a film's
 # stream ("stream:item", through the relay or the player), the speed check's
-# 4 MiB reads of it ("speed:item"), a converted stream's playlist
-# ("hls:item") and the websocket, as (time, kind, the key in the address,
+# 4 MiB reads of it ("speed:item"), a converted stream's master playlist
+# ("hls:item"), its variant ("playlist:item") and segments ("segment:name"),
+# and the websocket, as (time, kind, the key in the address,
 # the key in a header); and those the app hung up on mid-answer, (time,
 # kind). GET /mock/key_checks?since= lists them ("items", "keyed",
 # "headerless", "cancelled").
@@ -507,7 +508,10 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         path = url.path
         if path == "/embywebsocket":
-            if self.key_check("websocket", q):
+            # The token header, or Emby's own authorization header with it;
+            # not the plain Authorization header, nor the key in the address.
+            headed = self.key_check("websocket", q)
+            if headed or 'Token="tok"' in self.headers.get("X-Emby-Authorization", ""):
                 return self.websocket()
             return self.send({"error": "unauthorized"}, status=401)
         if path == "/mock/mark":
@@ -895,14 +899,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"error": "unauthorized"}, status=401)
         if hls and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             time.sleep(float(CONTROL.get("hls_delay", 0)))
-            # Server-converted HLS like Emby's: the whole film listed from
-            # 0:00 whatever StartTimeTicks asks (the player has to jump).
+            # As the real Emby answers a master asked with the key in a
+            # header: one variant, no address with the key in it.
+            variant = f"main.m3u8?MediaSourceId={q.get('MediaSourceId', '')}&PlaySessionId={q.get('PlaySessionId', '')}"
+            return self.send(f"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=640x360\n{variant}\n".encode(),
+                             ctype="application/vnd.apple.mpegurl")
+        if hls and path.startswith("/Videos/") and path.endswith("/main.m3u8"):
+            if not self.key_check(f"playlist:{path.split('/')[2]}", q):
+                return self.send({"error": "unauthorized"}, status=401)
+            # The whole film listed from 0:00 whatever StartTimeTicks asks
+            # (the player has to jump).
             with open(os.path.join(hls, "index.m3u8")) as f:
-                # Segment addresses carry the token, as Emby's do.
-                playlist = f.read().replace("seg", "/emby/hls/seg").replace(".ts", ".ts?api_key=tok")
+                playlist = f.read().replace("seg", "/emby/hls/seg")
             return self.send(playlist.encode(), ctype="application/vnd.apple.mpegurl")
         if hls and path.startswith("/hls/seg") and path.endswith(".ts"):
             name = os.path.basename(path)
+            if not self.key_check(f"segment:{name}", q):
+                return self.send({"error": "unauthorized"}, status=401)
             with open(os.path.join(hls, name), "rb") as f:
                 return self.send(f.read(), ctype="video/mp2t")
         if path.startswith("/Videos/") and path.endswith("/master.m3u8"):

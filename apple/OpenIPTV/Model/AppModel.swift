@@ -1137,30 +1137,25 @@ final class AppModel {
     func disconnectLive() { live.disconnect() }
 
     #if DEBUG
-    /// Real-feed checks (`-debugWebsocketProbe YES`): a watched change made
-    /// through the API came back over the websocket ("yes", "no"), or
-    /// nothing could be tried ("skipped").
+    /// Real-feed checks (`-debugWebsocketProbe YES`): for each way of
+    /// sending the key, whether Emby's websocket refused it, opened but
+    /// missed a watched change made meanwhile, or heard it; "skipped" when
+    /// no film could be marked.
     var websocketProbe = ""
-    @ObservationIgnored private var heardWatched: Set<String> = []
 
     func probeWebsocket() async {
         guard websocketProbe.isEmpty, let emby else { return }
         websocketProbe = "trying"
         guard let film = await emby.debugUnwatchedFilm() else { return websocketProbe = "skipped" }
-        heardWatched.remove(film)
-        guard (try? await emby.debugSetPlayed(film, true)) != nil else { return websocketProbe = "skipped" }
-        let asked = Date()
-        while Date().timeIntervalSince(asked) < 30, !heardWatched.contains(film) { try? await Task.sleep(for: .milliseconds(500)) }
-        let heard = heardWatched.contains(film)
-        try? await emby.debugSetPlayed(film, false)
-        websocketProbe = heard ? "yes" : "no"
+        var heard: [String] = []
+        for form in SocketProbe.Form.allCases {
+            heard.append("\(form.name): \(await emby.debugProbeSocket(form, marking: film))")
+        }
+        websocketProbe = "done " + heard.joined(separator: "; ")
     }
     #endif
 
     private func apply(_ change: EmbyLive.Change) {
-        #if DEBUG
-        if case let .watched(list) = change { heardWatched.formUnion(list.map(\.itemId)) }
-        #endif
         switch change {
         case let .watched(list):
             for change in list {
