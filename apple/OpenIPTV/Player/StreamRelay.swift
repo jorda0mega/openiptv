@@ -1040,7 +1040,9 @@ enum Matroska {
 
     #if DEBUG
     /// As fetched before (`-oldReadyStart YES`): the first 256 KB, the Cues
-    /// alone, and 8 MB from the cluster where the player starts.
+    /// alone, and 8 MB from the cluster where the whole second starts. One
+    /// difference: a film started from its beginning got none of that
+    /// cluster then, and gets it here.
     static func fetchStartAsBefore(at seconds: Double, fetch: (Int64, Int64) async -> (data: Data, total: Int64)?) async -> Bool {
         guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total,
               let first = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](first.data.prefix(16))),
