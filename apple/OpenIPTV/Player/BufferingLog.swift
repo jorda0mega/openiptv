@@ -1,7 +1,7 @@
 #if DEBUG
 import Foundation
 
-/// UI tests: how a film buffered since it opened. Counts and times only.
+/// Counts and times only.
 struct BufferingLog {
     private(set) var rebuffers: [Double] = []
     private(set) var opens: [(converted: Bool, firstFrame: Double, waits: ServerWaits?)] = []
@@ -65,9 +65,7 @@ struct BufferingLog {
     }
 }
 
-/// UI tests: the requests of a converted version's open, each from asking
-/// to the server's first line back (its wait for the server). The rest of
-/// the open is the app's and the player's own.
+/// From the ask to the server's first line back.
 struct ServerWaits {
     enum Kind: String { case playlist = "p", segment = "s" }
     private(set) var waits: [(kind: Kind, from: Double, to: Double)] = []
@@ -104,8 +102,6 @@ struct ServerWaits {
         return total
     }
 
-    /// ": server 6020 ms client 3090 ms (p3 p2 s6012)": each wait in the
-    /// order asked, p a playlist, s a segment.
     func split(of open: Double) -> String {
         let each = waits.sorted { $0.from < $1.from }.map { "\($0.kind.rawValue)\(Int((($0.to - $0.from) * 1000).rounded()))" }
         return String(format: ": server %.0f ms client %.0f ms (%@)", server * 1000, max(0, open - server) * 1000,
@@ -113,8 +109,7 @@ struct ServerWaits {
     }
 }
 
-/// The converted open under way: ffmpeg's lines about its requests (any
-/// player's, so one open at a time) and the app's own playlist fetches.
+/// ffmpeg's log is every player's, so only one open is timed at a time.
 enum OpenRequests {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var current: ServerWaits?
@@ -125,8 +120,9 @@ enum OpenRequests {
 
     static func note(_ change: (inout ServerWaits) -> Void) {
         lock.withLock {
-            guard current != nil else { return }
-            change(&current!)
+            guard var waits = current else { return }
+            change(&waits)
+            current = waits
         }
     }
 

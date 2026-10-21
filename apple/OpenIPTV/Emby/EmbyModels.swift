@@ -368,8 +368,7 @@ struct EmbyPlayback: Hashable, Identifiable {
         var title = ""
     }
 
-    /// English or Spanish heard only in another copy of the title.
-    var languagesOnlyInOtherCopies: [String] {
+    var englishOrSpanishOnlyInOtherCopies: [String] {
         let here = Set((tracks?.basis?.audio ?? []).compactMap { $0.flatMap(TrackChoice.normalized) })
         var languages: [String] = []
         for code in otherCopies.flatMap(\.languages) where ["en", "es"].contains(code) && !here.contains(code) && !languages.contains(code) {

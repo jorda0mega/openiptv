@@ -96,8 +96,6 @@ struct RootView: View {
             guard UserDefaults.standard.bool(forKey: "debugPlayCopyFilm"), let film = await model.debugFilmHeardOnlyInAnotherCopy() else { return }
             playing = .vod(film)
         }
-        #endif
-        #if DEBUG
         // UI tests: when the last stop reached the page (see noteStop).
         .overlay(alignment: .topTrailing) {
             Text(model.debugStop)

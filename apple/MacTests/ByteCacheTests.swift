@@ -1,14 +1,12 @@
 import XCTest
 @testable import OpenIPTV
 
-/// What the relay keeps of a file (ByteCache): read past what it keeps, it
-/// still has the bytes just behind where the player reads. mpv reads them
-/// again for subtitles or audio it hasn't been reading (from ten seconds
-/// back), and from the server that stopped the film for seconds.
+/// mpv reads a file again from ten seconds back for a track it hasn't
+/// been reading. Those bytes have to stay near the read, or the server
+/// sends them again and the film stops.
 final class ByteCacheTests: XCTestCase {
     private let megabyte = 1 << 20
 
-    /// Megabyte `n` of the made-up film.
     private func megabyte(_ n: Int) -> Data { Data(repeating: UInt8(n % 251), count: megabyte) }
 
     private func read(_ megabytes: ClosedRange<Int>, into cache: ByteCache) {
@@ -35,8 +33,6 @@ final class ByteCacheTests: XCTestCase {
         XCTAssertEqual(cache.available(from: 0), 0, "the first bytes are still kept, over the limit")
     }
 
-    /// A jump back past the limit: the bytes read at the new place are
-    /// kept, those left farthest away go.
     func testAJumpBackKeepsTheBytesReadThere() throws {
         let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
         read(50...55, into: cache)

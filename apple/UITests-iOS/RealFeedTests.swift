@@ -697,15 +697,6 @@ final class RealFeedTests: XCTestCase {
         XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
     }
 
-    /// Films as they buffer, the old way and now, in one run (diagnostic,
-    /// about 19 min, films only). Counts and times only: Continue Watching's
-    /// first three cards started cold (nothing got ready ahead), ready the
-    /// old way and ready now (3 s on screen); the first played from its
-    /// resume point the old way and now (FILM_BUFFERING_SECONDS each, 240 s),
-    /// then a jump of +5 min and one of -30 s, another audio track and each
-    /// kind of subtitles; a film heard in English or Spanish only in another
-    /// copy, switched to it; and a start of the converted version the old
-    /// way and now.
     func testFilmBufferingAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
@@ -759,9 +750,6 @@ final class RealFeedTests: XCTestCase {
         for old in [true, false] { try sayConvertedStart(ids[0], launch: shipped, old: old) }
     }
 
-    /// The first card played from its resume point for `seconds`, every
-    /// 30 s, then a jump of +5 min and one of -30 s, another audio track and
-    /// each kind of subtitles; `way` names the old way.
     private func playAndSwitch(_ id: String, launch arguments: [String], for seconds: Double, way: String) throws {
         app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = String(Int(seconds) + 15)
         app.launchArguments = arguments
@@ -814,11 +802,9 @@ final class RealFeedTests: XCTestCase {
         app.terminate()
     }
 
-    /// A lower quality 10 s into the first Continue Watching card, the
-    /// server converting from there: its open the old way (-oldConvertedStart)
-    /// and now, in turn, each split into the server's waits and the rest
-    /// (TEST_RUNNER_CONVERTED_RUNS pairs, 1 unless set; the film from
-    /// TEST_RUNNER_CONVERTED_AT seconds when set).
+    /// Shell: TEST_RUNNER_CONVERTED_RUNS (pairs, 1 unless set) and
+    /// TEST_RUNNER_CONVERTED_AT (the film's second). The test sees them
+    /// without the TEST_RUNNER_ prefix.
     func testConvertedStartAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = ProcessInfo.processInfo.environment["CONVERTED_AT"]
@@ -850,10 +836,8 @@ final class RealFeedTests: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
     }
 
-    /// The card brought on screen as a viewer does: once Home stops moving
-    /// (it draws in parts), the page scrolled until the card sits above the
-    /// tab bar, then the row moved along to it, until 60% of it shows (the
-    /// app's own rule); up to 30 s.
+    /// Home draws in parts, so a card still moving is left alone. How much
+    /// of a card counts as on screen is the app's own rule (PreparesAhead).
     private func bringOnScreen(_ id: String, at index: Int) throws {
         let card = app.buttons[id]
         XCTAssertTrue(card.waitForExistence(timeout: 45), "no Continue Watching card")
@@ -898,7 +882,6 @@ final class RealFeedTests: XCTestCase {
                                      index + 1, frame.minY, frame.maxY, frame.minX, frame.maxX, area.minY, area.maxY))
     }
 
-    /// The tap to the first frame and its parts, once it started.
     private func startParts() -> String {
         let start = app.staticTexts["debug-start"].firstMatch
         var parts: [Substring] = []
@@ -912,7 +895,6 @@ final class RealFeedTests: XCTestCase {
         return "tap to first frame \(parts[1]) s (\(player)) | \(split.exists ? split.label : "no parts")"
     }
 
-    /// From the relay readout: "from the device 9.7 MB" → 9.7.
     private func relayMB(_ part: String) -> Double {
         let relay = app.staticTexts["debug-relay"].firstMatch
         guard relay.exists, let range = relay.label.range(of: part + #" ([0-9.]+) MB"#, options: .regularExpression) else { return 0 }
@@ -926,13 +908,11 @@ final class RealFeedTests: XCTestCase {
         return Double(relay.label[range].split(separator: " ").dropLast().last ?? "") ?? 0
     }
 
-    /// From the buffering readout: "rebuffers 2: …" → 2.
     private func count(_ part: String, in readout: String) -> Int {
         let field = readout.components(separatedBy: " | ").first { $0.hasPrefix(part) } ?? ""
         return Int(field.split(separator: " ").dropFirst().first?.trimmingCharacters(in: [":", ","]) ?? "") ?? 0
     }
 
-    /// From the buffering readout: "jumps: 400 ms 12.3 MB, 1200 ms 0.0 MB" → its two entries.
     private func field(_ part: String, in readout: String) -> [String] {
         guard let field = readout.components(separatedBy: " | ").first(where: { $0.hasPrefix(part + ":") }) else { return [] }
         return field.dropFirst(part.count + 2).components(separatedBy: ", ")
@@ -944,8 +924,7 @@ final class RealFeedTests: XCTestCase {
         return field.split(separator: " ").dropLast().last.map { "\($0) ms" } ?? "none"
     }
 
-    /// The Audio and Subtitles menu, opened (false when it didn't open):
-    /// tapped where it is, the controls brought up again when they hid.
+    /// Tapped where it is. The controls are brought up again when they hid.
     private func openTrackMenu() -> Bool {
         let menu = app.buttons["Audio and Subtitles"].firstMatch
         let off = app.buttons["Off"].firstMatch
@@ -963,10 +942,8 @@ final class RealFeedTests: XCTestCase {
         return off.exists
     }
 
-    /// The `entry`th subtitles in the menu, picked: its switch, its first
-    /// line and any stall; nil when there's no such entry. The menu is read
-    /// from one snapshot and tapped where its entry was: it's built again
-    /// when a track arrives.
+    /// The menu is read from one snapshot and tapped where its entry was:
+    /// it's built again when a track arrives.
     private func pickSubtitles(_ entry: Int) -> String? {
         let timing = app.staticTexts["debug-subs-timing"].firstMatch
         let events = { timing.exists ? timing.label.components(separatedBy: " | ") : [] }
