@@ -223,14 +223,14 @@ enum Matroska {
                 header = to
             }
         }
-        let tailAt = layout.pastClusters.flatMap { total - $0 <= largest ? $0 : nil } ?? total
-        var tail: Data?
+        let tailAt = layout.pastClusters ?? total
+        var tail = Data()
         if tailAt < total {
-            guard let fetched = await fetch(tailAt, total - tailAt) else { return false }
+            guard let fetched = await fetch(tailAt, min(largest, total - tailAt)) else { return false }
             tail = fetched.data
         }
         let index: [UInt8]
-        if let tail, cues >= tailAt {
+        if cues >= tailAt, cues < tailAt + Int64(tail.count) {
             index = [UInt8](tail.dropFirst(Int(cues - tailAt)))
         } else {
             guard let fetched = await fetchIndex(at: cues, total: total, fetch: fetch) else { return false }
