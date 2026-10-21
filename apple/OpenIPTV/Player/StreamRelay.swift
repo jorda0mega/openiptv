@@ -177,8 +177,6 @@ final class StreamRelay: @unchecked Sendable {
     private(set) var readsBack = 0
     private var lastRead: [String: Int64] = [:]
 
-    /// UI tests: how the player's reads were served since the film began
-    /// to open (counts, sizes and waits only).
     private var startReads = (requests: 0, cached: Int64(0), fetches: 0, fetched: Int64(0), firstByte: 0.0)
 
     func beginStartReads() {
@@ -336,8 +334,6 @@ final class StreamRelay: @unchecked Sendable {
     /// waited for the server three times before its first frame (the
     /// header, the index at the end of the file, the part where it
     /// resumes); one from the beginning, once.
-    /// False when it stopped short (something started playing, the server
-    /// failed, not a Matroska file).
     func fetchStart(url: URL, headers: [String], at seconds: Double) async -> Bool {
         await withCheckedContinuation { done in fetchStart(url: url, headers: headers, at: seconds) { done.resume(returning: $0) } }
     }
@@ -904,8 +900,6 @@ enum Matroska {
     }
 }
 
-/// A film's start in the relay's cache, by the title and the second it
-/// opens at.
 struct FileStart: Hashable, Sendable {
     let itemId: String
     let second: Int
@@ -943,7 +937,6 @@ enum FileStarts {
         await StreamRelay.shared.fetchStart(url: start.url, headers: start.headers, at: Double(start.second))
     }
 
-    /// One that stopped short is asked again by the next warm-up.
     static func shelf(lane: Lane, fetch: @escaping @Sendable (FileStart) async -> Bool) -> Shelf<FileStart, Bool> {
         Shelf(.init(lane: lane, lifetime: .seconds(300), failureKept: .zero)) { start in
             guard await fetch(start) else { throw SourceError.unexpected("The film's start wasn't fetched.") }

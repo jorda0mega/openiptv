@@ -1,7 +1,5 @@
 import XCTest
 
-/// Apple TV on the test server (scripts/mock_server.py, signed in through
-/// TEST_RUNNER_DEBUG_EMBY): what a focused title gets ready before Select.
 final class PrepareAheadTests: XCTestCase {
     private let app = XCUIApplication()
     private let remote = XCUIRemote.shared
@@ -13,9 +11,6 @@ final class PrepareAheadTests: XCTestCase {
         }
     }
 
-    /// Focus resting on a Continue Watching card gets its plan, the start
-    /// of its file and its likeliest subtitles (the server's copy of its own
-    /// English track) before Select; Select asks for none of them again.
     func testContinueWatchingFocusGetsTheFilmReady() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -25,7 +20,6 @@ final class PrepareAheadTests: XCTestCase {
                                "-cacheFolder", "prepare-ahead-\(UUID())"]
         app.launch()
         sleep(8)
-        // The show's card plays its episode S2 E3 (the test server's e203).
         let item = "e203"
         let plannedBefore = playbackInfoRequests(server).filter { $0 == item }.count
         for _ in 0..<5 where !focused().contains("id='continue-") {

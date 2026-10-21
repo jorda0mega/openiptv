@@ -167,8 +167,6 @@ struct HomeView: View {
         }
     }
 
-    /// Every show in Continue Watching, and the first few below, open fully
-    /// drawn (saved ones are only checked for changes).
     private func prefetchFirstShows() {
         let resuming = model.rows.first { $0.title == "Continue Watching" }?.cards ?? []
         let below = model.rows.filter { $0.title != "Continue Watching" }.prefix(1).flatMap { $0.cards.prefix(3) }
@@ -516,8 +514,6 @@ private struct ContinueRow: View {
             }
             .scrollIndicators(.hidden)
         }
-        // The title most likely resumed: ready while Home is open, though
-        // the hero leaves its row half on screen at launch.
         .preparesAhead(row.cards.first?.playTarget, at: .homeForecast)
     }
 

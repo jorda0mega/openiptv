@@ -212,7 +212,6 @@ struct Card: Codable, Hashable, Identifiable {
     /// "S1, E1 · 33m", as in the Apple TV app).
     var episodeName: String? = nil
 
-    /// What a tap on it plays: the episode it's on, else the title.
     var playTarget: Target { .playable(id: episodeId ?? id, kind: episodeId == nil ? kind : "Episode") }
     var pageTarget: Target { .title(id: id, kind: kind) }
 }
@@ -366,13 +365,9 @@ struct EmbyPlayback: Hashable, Identifiable {
         let streamIndex: Int
         let subtitle: ServerSubtitle
         var language: String? = nil
-        /// "SDH" and the track's name: words the player reads the kind from.
         var title = ""
     }
 
-    /// The server's subtitles the viewer most likely turns on: the plan's
-    /// (their pick for the title, or the languages its sound calls for),
-    /// else the sound's own language.
     var likelySubtitle: ServerSubtitle? {
         guard let plan = tracks?.refreshed() else { return nil }
         let own = subtitleCopies.map { copy in

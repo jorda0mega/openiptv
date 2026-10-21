@@ -418,7 +418,6 @@ struct TVContinueRow: View {
         // Up and Down reach the row from anywhere across the screen (they
         // skipped it when no card was straight above or below).
         .focusSection()
-        // Browsing: a Home built from now on waits for the next moment.
         .task(id: focused) {
             if focused != nil { model.homeBrowsed() }
         }
@@ -483,7 +482,6 @@ struct TVPosterRow: View {
         // Up and Down reach the row from anywhere across the screen (they
         // went nowhere when no poster was straight above or below).
         .focusSection()
-        // Browsing: a Home built from now on waits for the next moment.
         .task(id: focused) {
             if focused != nil { model.homeBrowsed() }
         }

@@ -100,7 +100,6 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("debug-stop")
         }
-        // UI tests: what was fetched so far (see AppModel.aheadCounts).
         .overlay(alignment: .bottomTrailing) {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Text(model.aheadCounts)

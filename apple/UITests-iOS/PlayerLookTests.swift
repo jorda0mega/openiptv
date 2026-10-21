@@ -1120,9 +1120,6 @@ final class PlayerLookTests: XCTestCase {
         app.launch()
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Movie 5'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "Movie 5 isn't in Continue Watching")
-        // On screen whole (under the hero at launch, and the second card),
-        // so it gets ready meanwhile; then a server 1.5 s from every video
-        // request.
         let hero = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
         hero.press(forDuration: 0.1, thenDragTo: hero.withOffset(CGVector(dx: 0, dy: -300)))
         sleep(1)
@@ -1233,20 +1230,14 @@ final class PlayerLookTests: XCTestCase {
         shot("episode 5 playing")
     }
 
-    /// A film's start fetched ahead that failed (the connection lost
-    /// meanwhile) doesn't hold up the tap: the title opens afresh.
-    /// Regression: a player opened ahead that had failed was handed over,
-    /// its error heard by no one, and the spinner stayed for good.
     func testFailedWarmPlayerIsNotHandedOver() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
         configure(server, ["video_fail": "1"])
         app.launch()
-        // Continue Watching's first card: its start is fetched ahead.
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
-        // That fails meanwhile; then the server answers again.
         sleep(8)
         configure(server, ["video_fail": "0"])
         card.tap()

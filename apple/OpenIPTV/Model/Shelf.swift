@@ -115,7 +115,6 @@ final class Lane {
         }
     }
 
-    /// Work ahead with no shelf of its own: run in a turn, or not at all.
     func whenAllowed(for interest: Interest, _ work: () async -> Void) async {
         let ticket = Ticket(interest)
         guard (try? await enter(ticket)) != nil else { return }
@@ -243,7 +242,6 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     private var entries: [Key: Entry] = [:]
     #if DEBUG
-    /// Fetches sent, for the UI tests' readout.
     private(set) var fetched = 0
     #endif
     private let policy: Policy

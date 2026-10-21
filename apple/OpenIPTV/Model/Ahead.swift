@@ -1,14 +1,9 @@
 import Foundation
 
-/// What a screen shows that may be opened next.
 enum Target: Hashable, Sendable {
-    /// A poster: a tap opens its page.
     case title(id: String, kind: String)
-    /// A tap plays it (Continue Watching, a page's Play).
     case playable(id: String, kind: String?)
 
-    /// What a show page's main button plays: the episode the viewer is up
-    /// to, else the show (the server picks the episode).
     static func showMain(_ show: String, upNext episode: String?) -> Target {
         episode.map { .playable(id: $0, kind: "Episode") } ?? .playable(id: show, kind: "Series")
     }
@@ -32,8 +27,6 @@ extension Place {
         let likelihood: Likelihood
     }
 
-    /// iPhone: on screen at least 60 %. Apple TV: in focus. A fast scroll or
-    /// a sweep across posters never reaches the first step.
     func ladder(on platform: Platform) -> [Step] {
         switch (self, platform) {
         case (.continueWatching, .phone): return [.init(after: .milliseconds(600), likelihood: .likely), .init(after: .seconds(2), likelihood: .next)]
@@ -54,19 +47,13 @@ extension Place {
         }
     }
 
-    /// Held while its screen is open, whatever is on screen: an open page,
-    /// a forecast.
     var heldWhileOpen: Bool { self == .page || self == .homeForecast }
 }
 
-/// What a target gets ready. A higher likelihood only adds, and the work
-/// for playing waits for the plan.
 enum Need: Hashable, Sendable {
     case page
     case plan
-    /// The file's start at the resume point (or at 0), in the relay's cache.
     case fileStart
-    /// The likeliest subtitles, when they are a file beside the film.
     case subtitleFile
     /// The likeliest subtitles, when they are one of the film's own tracks:
     /// the server's copy (it reads the whole film for it).
@@ -86,7 +73,6 @@ final class Ahead {
 
     private let work: Work
     #if DEBUG
-    /// Targets held so far, for the UI tests' readout.
     private(set) var held = 0
     #endif
     private let platform: Platform
@@ -109,8 +95,6 @@ final class Ahead {
         }
     }
 
-    /// Climbs the place's ladder while the caller's task lives; what hasn't
-    /// started stops when it ends (the target left the screen or focus).
     func holding(_ target: Target, at place: Place) async {
         #if DEBUG
         held += 1
