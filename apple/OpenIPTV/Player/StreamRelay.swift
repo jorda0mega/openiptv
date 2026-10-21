@@ -439,7 +439,7 @@ final class StreamRelay: @unchecked Sendable {
     }
 
     #if DEBUG
-    private static var oldReadyStart: Bool { UserDefaults.standard.bool(forKey: "oldReadyStart") }
+    static var oldReadyStart: Bool { UserDefaults.standard.bool(forKey: "oldReadyStart") }
     #endif
 
     private func fetcher(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, ahead key: String? = nil) -> Matroska.Fetch {
@@ -683,7 +683,7 @@ struct FileStart: Hashable, Sendable {
     /// seek_with_cues). 0: no subtitles planned.
     let subtitlePreroll: Double
     #if DEBUG
-    /// -oldReadyStart: the whole second the old fetch took.
+    /// -oldReadyStart: the whole second the old fetch took, and kept it by.
     let second: Int
     #endif
     let url: URL
@@ -713,11 +713,17 @@ struct FileStart: Hashable, Sendable {
     #endif
 
     static func == (a: FileStart, b: FileStart) -> Bool {
-        a.itemId == b.itemId && a.seconds == b.seconds && a.subtitlePreroll == b.subtitlePreroll
+        #if DEBUG
+        if StreamRelay.oldReadyStart { return a.itemId == b.itemId && a.second == b.second }
+        #endif
+        return a.itemId == b.itemId && a.seconds == b.seconds && a.subtitlePreroll == b.subtitlePreroll
     }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(itemId)
+        #if DEBUG
+        if StreamRelay.oldReadyStart { return hasher.combine(second) }
+        #endif
         hasher.combine(seconds)
         hasher.combine(subtitlePreroll)
     }
