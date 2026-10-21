@@ -111,6 +111,7 @@
 		53650932E226B2B55FA992A1 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */; };
 		53C4FE41A43696DEC32E2768 /* LiveSportsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A9C8D5BE1D0FF094368580 /* LiveSportsTests.swift */; };
 		543405E7B500CEF0E0F6971B /* Signposts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1EBDEA2DAED98E26A044D2 /* Signposts.swift */; };
+		559A50CB8044DF026615C087 /* BufferingLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 054309E9F5F6C53E9B0548BC /* BufferingLog.swift */; };
 		5633E2B7128DB4B72E585CD4 /* XtreamProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B14B5E25BA30ECE2BD6E701 /* XtreamProvider.swift */; };
 		56FC834D455E6F4164EC0918 /* Libavformat.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */; };
 		58E6D3829366CA7178C840B0 /* Gzip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1500ACB77AA629F7F047BF /* Gzip.swift */; };
@@ -268,6 +269,7 @@
 		E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C786F389C51A2833D4205BE /* TitleHero.swift */; };
 		E46D2D4F358B026B53225FC1 /* LiveFailures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBBDDA77B65B86BB26D8D65 /* LiveFailures.swift */; };
 		E5362F0D86095D2F863749C7 /* Shelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03687A5122C40ADC0462D4BE /* Shelf.swift */; };
+		E79797576A5367AA203CF4BE /* BufferingLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 054309E9F5F6C53E9B0548BC /* BufferingLog.swift */; };
 		E837BD64EFB5556EF182B830 /* TVWatchOnRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8109F8BC5559C9CA077C2CBE /* TVWatchOnRow.swift */; };
 		EA8F7A63FFC991764504B776 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
 		EAA9E81F338896A834778400 /* libxml2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 12D689360F95FEEBC85A1443 /* libxml2.tbd */; };
@@ -323,6 +325,7 @@
 		036E1882E4281173C09E8777 /* TabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStrip.swift; sourceTree = "<group>"; };
 		04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePipeline.swift; sourceTree = "<group>"; };
 		050F50A01718229F1DF48EE0 /* SearchStabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchStabilityTests.swift; sourceTree = "<group>"; };
+		054309E9F5F6C53E9B0548BC /* BufferingLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BufferingLog.swift; sourceTree = "<group>"; };
 		063896B003501F3D99466FB4 /* EmbyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyClient.swift; sourceTree = "<group>"; };
 		071BD85601EB668FA8EC5B64 /* OpenIPTV TV UITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "OpenIPTV TV UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = lcms2.xcframework; path = Vendor/lcms2.xcframework; sourceTree = "<group>"; };
@@ -589,6 +592,7 @@
 		03EBA60F67C7DE2879FBE5FA /* Player */ = {
 			isa = PBXGroup;
 			children = (
+				054309E9F5F6C53E9B0548BC /* BufferingLog.swift */,
 				8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */,
 				CDBCDEA1B3FDB76BBFA31935 /* FFmpegLog.swift */,
 				2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */,
@@ -1098,6 +1102,7 @@
 				3E9B707F4696C5845239813A /* AppModel.swift in Sources */,
 				6174F7217B1972C035E19B29 /* AreaPicker.swift in Sources */,
 				F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */,
+				E79797576A5367AA203CF4BE /* BufferingLog.swift in Sources */,
 				D74D0C1558A8A17859D625AE /* ChannelGuideSheet.swift in Sources */,
 				5274B2DEB0C7389DA1D68536 /* EmbyClient.swift in Sources */,
 				E40A99A7F0AB7CF0C2BEC24E /* EmbyModels.swift in Sources */,
@@ -1207,6 +1212,7 @@
 				B641DA8A97E206CE72401932 /* AppModel.swift in Sources */,
 				C296F7829BEFC8DEE6E19B75 /* AreaPicker.swift in Sources */,
 				AA86629D3DF58B7575BE0703 /* Artwork.swift in Sources */,
+				559A50CB8044DF026615C087 /* BufferingLog.swift in Sources */,
 				2174A08ABD27777FA42CA50C /* ChannelGuideSheet.swift in Sources */,
 				70DBA9993C5650094FE7CCDD /* EmbyClient.swift in Sources */,
 				FFA65B87FDAD93B66C25DE91 /* EmbyModels.swift in Sources */,

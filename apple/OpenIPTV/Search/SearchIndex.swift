@@ -676,6 +676,10 @@ final class LibraryIndex {
     }
 
     /// Every copy of the title with this id (just the id when there's one).
+    func entry(_ id: String) -> LibraryEntry? {
+        entryById[id]
+    }
+
     func versions(of id: String) -> [String] {
         versions[id] ?? [id]
     }

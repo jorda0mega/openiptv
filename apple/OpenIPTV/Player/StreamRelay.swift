@@ -183,6 +183,8 @@ final class StreamRelay: @unchecked Sendable {
         lock.withLock { startReads = (0, 0, 0, 0, 0) }
     }
 
+    var serverBytes: Int64 { lock.withLock { startReads.fetched } }
+
     var startReadsReadout: String {
         let reads = lock.withLock { startReads }
         return String(format: "reads %d, from the device %.1f MB, from the server %d reads %.1f MB first byte up to %.0f ms",

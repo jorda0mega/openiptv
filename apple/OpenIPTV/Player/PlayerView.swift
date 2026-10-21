@@ -95,10 +95,12 @@ struct TrackMenuButton: View, Equatable {
                 Section("Audio") {
                     ForEach(audio) { track in
                         Button { pick(track) } label: { item(track) }
+                            .accessibilityIdentifier(track.selected ? "audio-playing" : "audio-track")
                     }
                     // Picked, that copy plays from here.
                     ForEach(otherLanguages, id: \.self) { code in
                         Button(MoviePlayerView.languageName(code)) { pickOther(code) }
+                            .accessibilityIdentifier("audio-other-copy")
                     }
                 }
             }
@@ -474,6 +476,9 @@ struct MoviePlayerView: View {
                         debugReadout(player?.subtitleShift ?? "", "debug-subshift")
                         debugReadout(player?.subtitleLine ?? "", "debug-subtext")
                         debugReadout(player?.stopwatch.readout ?? "", "debug-subs-timing")
+                        debugReadout(player?.bufferingReadout ?? "", "debug-buffering")
+                        debugReadout(StreamRelay.shared.startReadsReadout, "debug-relay")
+                        debugReadout(model.debugCopySwitch, "debug-copy-switch")
                         #endif
                     }
                 }
@@ -876,13 +881,22 @@ struct MoviePlayerView: View {
         guard let switchTo, switching == nil else { return }
         switching = language
         let lead = paused ? 0.0 : 6.0
+        #if DEBUG
+        let tapped = Date()
+        #endif
         Task {
             defer { switching = nil }
             do {
                 let next = try await model.playback(heardIn: language, instead: playback, from: position + lead)
+                #if DEBUG
+                let planned = Date()
+                #endif
                 let hidden = model.warmSwitch(next, options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
                 let ready = Date().addingTimeInterval(30)
                 while !hidden.hasStarted, !hidden.hasFailed, Date() < ready { try await Task.sleep(for: .milliseconds(50)) }
+                #if DEBUG
+                let opened = Date()
+                #endif
                 guard hidden.hasStarted else {
                     model.coolDown()
                     return note("Couldn't play it in \(Self.languageName(language))")
@@ -897,6 +911,11 @@ struct MoviePlayerView: View {
                     quiet.disablesAnimations = true
                     withTransaction(quiet) { model.noteStop(playback, seconds: position) }
                 }
+                #if DEBUG
+                model.debugCopySwitch = String(format: "plan %.2f s, its picture ready %.2f s after, on screen %.2f s after the tap (%.0f s lead)",
+                                               planned.timeIntervalSince(tapped), opened.timeIntervalSince(planned),
+                                               Date().timeIntervalSince(tapped), lead)
+                #endif
                 switchTo(next)
             } catch {
                 note("Couldn't play it in \(Self.languageName(language))")
@@ -1077,6 +1096,16 @@ struct MoviePlayerView: View {
         #if DEBUG
         // UI tests (OPENREEL_DEBUG_LOWER_AFTER=seconds): a converted version
         // then, as for a slow connection.
+        // UI tests (OPENREEL_DEBUG_JUMPS_AFTER=seconds): a jump of +5 min
+        // then, and one of -30 s 20 s later.
+        if let after = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_JUMPS_AFTER"].flatMap(Double.init) {
+            Task {
+                try? await Task.sleep(for: .seconds(after))
+                skip(300)
+                try? await Task.sleep(for: .seconds(20))
+                skip(-30)
+            }
+        }
         if let after = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_LOWER_AFTER"].flatMap(Double.init) {
             Task {
                 try? await Task.sleep(for: .seconds(after))
