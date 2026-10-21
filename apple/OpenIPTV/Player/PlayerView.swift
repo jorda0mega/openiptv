@@ -471,6 +471,7 @@ struct MoviePlayerView: View {
                         #if os(iOS)
                         debugReadout(player?.subtitleShift ?? "", "debug-subshift")
                         debugReadout(player?.subtitleLine ?? "", "debug-subtext")
+                        debugReadout(player?.stopwatch.readout ?? "", "debug-subs-timing")
                         #endif
                     }
                 }
@@ -1087,6 +1088,9 @@ struct MoviePlayerView: View {
             PlaybackAudio.activate()
             warmPlayer.onEvent = { event in handle(event) }
             self.player = warmPlayer
+            #if DEBUG
+            warmPlayer.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
+            #endif
             if warmPlayer.hasStarted { handle(.started(0)) }
             // Now it's being watched: download the rest of it.
             warmPlayer.setReadahead(NetworkStatus.shared.fileReadahead)
@@ -1098,6 +1102,9 @@ struct MoviePlayerView: View {
             let player = makePlayer(prefs: prefs)
             player.onEvent = { event in handle(event) }
             self.player = player
+            #if DEBUG
+            player.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
+            #endif
             // Always the original file first: it's on screen in about a
             // second, while a server-converted version takes 5-15 s to
             // begin (and every seek restarts it). Quality only drops if the
