@@ -1,15 +1,7 @@
 import Foundation
 
-/// What a film's player plays, and so where its clock starts. It goes
-/// wherever the player goes (Picture in Picture, kept after closing):
-/// apart from it, a jump back after Picture in Picture stopped at a lower
-/// quality's first segment.
 enum FilmStream: Sendable {
-    /// The file, or a converted version as Emby lists it: the whole film,
-    /// the player's clock the film's.
     case whole
-    /// A converted version listed from the segment starting at `clockStart`
-    /// (see ConvertedPlaylist), where the player's clock starts.
     case listed(URL, ConvertedPlaylist, clockStart: Double)
 
     var clockStart: Double {
@@ -27,9 +19,6 @@ enum FilmStream: Sendable {
 }
 
 extension MPVPlayer {
-    /// The film's converted version from its `second`, listed from the
-    /// segment holding it when Emby's playlist allows; else as Emby lists
-    /// it. What plays now.
     func openConverted(_ url: URL, _ list: ConvertedPlaylist?, at second: Double, for playback: EmbyPlayback) -> FilmStream {
         if let list, case let listed = list.listed(from: second), let local = StreamRelay.shared.localURL(serving: listed.playlist) {
             // From the segment's start, at most a segment before `second`: a
@@ -43,9 +32,7 @@ extension MPVPlayer {
         return .whole
     }
 
-    /// Every jump to the film's `second`: `seek` there by the stream's own
-    /// clock or, before a listed version's first segment, the version opened
-    /// again from there (Emby converts from there either way). What plays now.
+    /// Before its first segment, open the listed version again. Emby converts from the second asked either way.
     func jump(in stream: FilmStream, to second: Double, for playback: EmbyPlayback, seek: (Double) -> Void) -> FilmStream {
         guard case let .listed(url, list, clockStart) = stream, second < clockStart else {
             seek(max(0, second - stream.clockStart))

@@ -4,9 +4,7 @@ import XCTest
 /// cards started cold and ready, a film played on (its jumps, another
 /// audio track, each kind of subtitles), a film heard in a language only
 /// another copy has, and the converted version's start. Counts and times
-/// only. Elements are read from snapshots: the player's controls hide and
-/// Home draws in parts, and an element gone between two reads of it
-/// failed the run.
+/// only.
 final class RealFeedFilmTests: RealFeedCase {
     func testFilmBufferingAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
@@ -253,7 +251,6 @@ final class RealFeedFilmTests: RealFeedCase {
         return field.split(separator: " ").dropLast().last.map { "\($0) ms" } ?? "none"
     }
 
-    /// The buttons on screen, from one snapshot.
     private func buttonsOnScreen(_ keep: (XCUIElementSnapshot) -> Bool = { _ in true }) -> [XCUIElementSnapshot] {
         var found: [XCUIElementSnapshot] = []
         func collect(_ element: XCUIElementSnapshot) {
@@ -268,9 +265,7 @@ final class RealFeedFilmTests: RealFeedCase {
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
     }
 
-    /// Tapped where its button is in one snapshot. Regression: the controls
-    /// hid between finding the button and reading where it was, and the run
-    /// failed. When they're down, a tap on the picture brings them up.
+    /// One snapshot, then a tap there. The controls can hide between two reads.
     private func openTrackMenu() -> Bool {
         let menu = app.buttons["Audio and Subtitles"].firstMatch
         let off = app.buttons["Off"].firstMatch

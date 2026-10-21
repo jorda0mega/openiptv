@@ -2,8 +2,6 @@
 import XCTest
 @testable import OpenIPTV
 
-/// Debug builds log each read a film's start makes (the REAL lines and the
-/// debug-relay readout).
 final class StartReadLogTests: XCTestCase {
     func testAReadOfTheLastStartCountsNothingForTheNext() {
         let relay = StreamRelay()
