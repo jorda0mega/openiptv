@@ -1120,7 +1120,14 @@ final class PlayerLookTests: XCTestCase {
         app.launch()
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Movie 5'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "Movie 5 isn't in Continue Watching")
-        // Fetched ahead meanwhile; then a server 1.5 s from every video request.
+        // On screen whole (under the hero at launch, and the second card),
+        // so it gets ready meanwhile; then a server 1.5 s from every video
+        // request.
+        let hero = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        hero.press(forDuration: 0.1, thenDragTo: hero.withOffset(CGVector(dx: 0, dy: -300)))
+        sleep(1)
+        let row = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 300, dy: card.frame.midY))
+        row.press(forDuration: 0.1, thenDragTo: row.withOffset(CGVector(dx: -150, dy: 0)))
         sleep(8)
         configure(server, ["video_delay": "1.5"])
         card.tap()
