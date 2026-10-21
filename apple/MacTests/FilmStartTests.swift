@@ -15,6 +15,8 @@ final class FilmStartTests: XCTestCase {
             let cluster: Int
             var into: Int64 = 0
             var durationMS: Int?
+            /// A CueClusterPosition written as is.
+            var raw: UInt64?
         }
 
         struct Point {
@@ -40,7 +42,7 @@ final class FilmStartTests: XCTestCase {
             let index = Self.element(0x1C53BB6B, points.flatMap { point in
                 Self.element(0xBB, Self.element(0xB3, Self.uint(UInt64(point.ms))) + point.positions.flatMap { position in
                     let at = firstCluster + Int64(position.cluster) * Self.clusterSize + position.into - segmentStart
-                    return Self.element(0xB7, Self.element(0xF7, Self.uint(position.track)) + Self.element(0xF1, Self.uint(UInt64(at)))
+                    return Self.element(0xB7, Self.element(0xF7, Self.uint(position.track)) + Self.element(0xF1, Self.uint(position.raw ?? UInt64(at)))
                         + (position.durationMS.map { Self.element(0xB2, Self.uint(UInt64($0))) } ?? []))
                 })
             })
@@ -162,5 +164,14 @@ final class FilmStartTests: XCTestCase {
         let (ok, fetched) = await fetchedAhead(film, for: playback(at: nil))
         XCTAssertTrue(ok, "the film's start wasn't fetched")
         assertAllFetched(opening(film, start: film.cluster(at: 0)), fetched)
+    }
+
+    func testOffsetsPastAnyFileAreLeftOutAndTheStartIsStillFetched() async {
+        var points = Film.points()
+        points.insert(Film.Point(ms: 300_400, positions: [Film.Position(cluster: 150, raw: .max)]), at: 151)
+        let film = Film(points: points, seeks: [(0x1043A770, 1 << 63), (0x1941A469, UInt64(Int64.max))])
+        let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.5))
+        XCTAssertTrue(ok, "the film's start wasn't fetched")
+        assertAllFetched(opening(film, start: film.cluster(150)), fetched)
     }
 }
