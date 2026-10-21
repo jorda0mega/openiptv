@@ -368,6 +368,16 @@ struct EmbyPlayback: Hashable, Identifiable {
         var title = ""
     }
 
+    /// English or Spanish heard only in another copy of the title.
+    var languagesOnlyInOtherCopies: [String] {
+        let here = Set((tracks?.basis?.audio ?? []).compactMap { $0.flatMap(TrackChoice.normalized) })
+        var languages: [String] = []
+        for code in otherCopies.flatMap(\.languages) where ["en", "es"].contains(code) && !here.contains(code) && !languages.contains(code) {
+            languages.append(code)
+        }
+        return languages
+    }
+
     var likelySubtitle: ServerSubtitle? {
         guard let plan = tracks?.refreshed() else { return nil }
         let own = subtitleCopies.map { copy in

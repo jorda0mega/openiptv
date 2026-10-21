@@ -92,6 +92,12 @@ struct RootView: View {
         .onChange(of: shown?.id) { if shown == nil, playing != nil { playing = nil } }
         .task { await model.loadLive() }
         #if DEBUG
+        .task {
+            guard UserDefaults.standard.bool(forKey: "debugPlayCopyFilm"), let film = await model.debugFilmHeardOnlyInAnotherCopy() else { return }
+            playing = .vod(film)
+        }
+        #endif
+        #if DEBUG
         // UI tests: when the last stop reached the page (see noteStop).
         .overlay(alignment: .topTrailing) {
             Text(model.debugStop)
@@ -107,6 +113,11 @@ struct RootView: View {
                     .opacity(0.02)
                     .allowsHitTesting(false)
                     .accessibilityIdentifier("debug-ahead")
+                Text(model.debugCopyFilm)
+                    .font(.caption2)
+                    .opacity(0.02)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("debug-copy-film")
             }
         }
         #endif

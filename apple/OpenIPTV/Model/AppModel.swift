@@ -1231,6 +1231,30 @@ final class AppModel {
 
     #if DEBUG
     @ObservationIgnored var lastPlanKept = false
+    /// UI tests: the last switch to another copy's language, timed.
+    var debugCopySwitch = ""
+    /// UI tests: the search for a film heard in English or Spanish only in
+    /// another copy, counts only.
+    var debugCopyFilm = ""
+
+    /// UI tests (`-debugPlayCopyFilm YES`): the first film among the
+    /// library's titles with copies whose English or Spanish only another
+    /// copy has, asked as its play would be, at most `limit` of them.
+    func debugFilmHeardOnlyInAnotherCopy(limit: Int = 12) async -> EmbyPlayback? {
+        for _ in 0..<90 where library.versions.isEmpty { try? await Task.sleep(for: .seconds(1)) }
+        let films = Set(library.versions.values.filter { $0.count > 1 }.map { $0.sorted() })
+            .filter { $0.contains { library.entry($0)?.kind == "Movie" } }
+            .sorted { $0[0] < $1[0] }
+        var checked = 0
+        for copies in films.prefix(limit) {
+            checked += 1
+            guard let playback = try? await playback(itemId: copies[0], kind: "Movie"), !playback.languagesOnlyInOtherCopies.isEmpty else { continue }
+            debugCopyFilm = "films with copies \(films.count), checked \(checked), found yes"
+            return playback
+        }
+        debugCopyFilm = "films with copies \(films.count), checked \(checked), found no"
+        return nil
+    }
     #endif
 
     var playerShown = false

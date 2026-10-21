@@ -35,6 +35,7 @@ let package = Package(
                 "Model/Plans.swift",
                 "Model/Preferences.swift",
                 "Model/Sources.swift",
+                "Player/BufferingLog.swift",
                 "Player/FoundSubtitles.swift",
                 "Player/LoadEvents.swift",
                 "Player/NetworkStatus.swift",

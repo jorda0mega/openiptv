@@ -183,6 +183,9 @@ final class MPVPlayer: @unchecked Sendable {
     private var startTiming = (loadedAt: CFAbsoluteTime(0), note: "", preroll: "")
     var startLoadedAt: CFAbsoluteTime { stateLock.withLock { startTiming.loadedAt } }
     var startNote: String { stateLock.withLock { startTiming.note } }
+    private var bufferingLog = BufferingLog()
+    private var serverBytesAtSeek: Int64 = 0
+    var bufferingReadout: String { stateLock.withLock { bufferingLog.readout } }
     private var awaitingSubtitleLine: (n: Int, since: CFAbsoluteTime)?
     private var stalledSince: CFAbsoluteTime?
     #endif
@@ -408,7 +411,10 @@ final class MPVPlayer: @unchecked Sendable {
             loadStarted = CFAbsoluteTimeGetCurrent()
             #if DEBUG
             awaitingSubtitleLine = (subtitleSwitchCount, loadStarted)
-            stateLock.withLock { startTiming = (loadStarted, "", startTiming.preroll) }
+            stateLock.withLock {
+                startTiming = (loadStarted, "", startTiming.preroll)
+                bufferingLog.opening(converted: !file)
+            }
             if file { StreamRelay.shared.beginStartReads() }
             perfLoad(waited: waited)
             #endif
@@ -569,6 +575,10 @@ final class MPVPlayer: @unchecked Sendable {
             #endif
             stopFollowing()
             seekStarted = CFAbsoluteTimeGetCurrent()
+            #if DEBUG
+            let read = StreamRelay.shared.serverBytes
+            stateLock.withLock { serverBytesAtSeek = read }
+            #endif
             command(["seek", String(seconds), exact ? "relative+exact" : "relative+keyframes"])
         }
     }
@@ -1104,6 +1114,9 @@ final class MPVPlayer: @unchecked Sendable {
     func selectAudio(_ id: Int) {
         queue.async { [self] in
             guard let mpv else { return }
+            #if DEBUG
+            stateLock.withLock { bufferingLog.audioAsked(at: CFAbsoluteTimeGetCurrent()) }
+            #endif
             mpv_set_property_string(mpv, "aid", String(id))
         }
     }
@@ -1430,7 +1443,10 @@ final class MPVPlayer: @unchecked Sendable {
                 let preroll = stateLock.withLock { startTiming.preroll }
                 let note = String(format: "open %.2f s, first frame %.2f s after, subtitles %@, read before the start %@ | relay %@", opened,
                                   shown - opened, subtitles, preroll, StreamRelay.shared.startReadsReadout)
-                stateLock.withLock { startTiming.note = note }
+                stateLock.withLock {
+                    startTiming.note = note
+                    bufferingLog.firstFrame(after: shown)
+                }
                 #endif
                 readableWhileQueueIsBusy.withLock { firstPictureShown = true }
                 seekStarted = nil
@@ -1447,8 +1463,16 @@ final class MPVPlayer: @unchecked Sendable {
             }
             if let asked = seekStarted {
                 seekStarted = nil
+                #if DEBUG
+                let read = Double(StreamRelay.shared.serverBytes - stateLock.withLock { serverBytesAtSeek }) / 1e6
+                stateLock.withLock { bufferingLog.seeked(after: CFAbsoluteTimeGetCurrent() - asked, megabytes: read) }
+                #endif
                 emit(.seeked(CFAbsoluteTimeGetCurrent() - asked))
             }
+        #if DEBUG
+        case MPV_EVENT_AUDIO_RECONFIG:
+            stateLock.withLock { bufferingLog.audioReconfigured(at: CFAbsoluteTimeGetCurrent()) }
+        #endif
         case MPV_EVENT_END_FILE:
             guard let data = event.data else { return }
             let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
@@ -1486,6 +1510,7 @@ final class MPVPlayer: @unchecked Sendable {
                 emit(.buffering(stalled))
                 #if DEBUG
                 noteStall(stalled)
+                stateLock.withLock { bufferingLog.stalled(stalled, at: CFAbsoluteTimeGetCurrent()) }
                 #endif
             case "pause" where property.format == MPV_FORMAT_FLAG:
                 emit(.paused(value.assumingMemoryBound(to: Int32.self).pointee != 0))
@@ -1501,9 +1526,15 @@ final class MPVPlayer: @unchecked Sendable {
                 emit(.time(position: position, duration: duration))
             case "demuxer-cache-duration" where property.format == MPV_FORMAT_DOUBLE:
                 buffered = value.assumingMemoryBound(to: Double.self).pointee
+                #if DEBUG
+                stateLock.withLock { bufferingLog.cacheSeconds = buffered }
+                #endif
                 reportNetwork()
             case "cache-speed" where property.format == MPV_FORMAT_INT64:
                 downloadSpeed = Double(value.assumingMemoryBound(to: Int64.self).pointee)
+                #if DEBUG
+                stateLock.withLock { bufferingLog.bytesPerSecond = downloadSpeed }
+                #endif
                 reportNetwork()
             #if DEBUG
             case "sub-text" where property.format == MPV_FORMAT_STRING:
