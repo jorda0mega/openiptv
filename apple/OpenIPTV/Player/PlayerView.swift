@@ -1245,6 +1245,7 @@ struct MoviePlayerView: View {
             ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false
+            governor?.notePlaying()
             guard !startedOnce else { return }
             startedOnce = true
             // Whole start from the tap: server, then screen/player setup,

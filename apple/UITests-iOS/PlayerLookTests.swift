@@ -577,6 +577,38 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(stream, film, accuracy: 2, "the stream and the film's place differ")
     }
 
+    /// A lower quality forty minutes into a film plays on. The test server
+    /// converts as Emby does: the whole film listed, converted from where
+    /// it's asked, a slow first segment, and the conversion started again
+    /// wherever the player asks for a part it hasn't reached. Needs the
+    /// two-hour test film (OPENIPTV_MOCK_VIDEO=…/long.mkv; TEST_RUNNER_LONG_FILM=1).
+    func testLowerQualityDeepInAFilmPlaysOn() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["LONG_FILM"] != nil, "needs the two-hour test film")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["emby_convert": "1", "convert_delay": "8"])
+        try resume(server, "a9", at: 2400)
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
+        openFilm(titled: "Oppenheimer")
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        var lowered = false
+        for _ in 0..<40 where !lowered {
+            sleep(1)
+            lowered = quality.exists && quality.label.hasPrefix("converted")
+        }
+        XCTAssertTrue(lowered, "the quality wasn't lowered: \(quality.exists ? quality.label : "no readout")")
+        let from = try XCTUnwrap(position(), "no position")
+        XCTAssertGreaterThan(from, 2400, "the film didn't resume forty minutes in")
+        var seen: [Double] = []
+        for _ in 0..<40 {
+            sleep(1)
+            seen.append(position() ?? -1)
+        }
+        print("DEEP lowered at \(from): \(seen.map { Int($0) })")
+        XCTAssertGreaterThan(seen.last ?? -1, from + 15, "the film stopped after the quality dropped: \(seen.map { Int($0) })")
+    }
+
     /// Subtitles showing stay, in time, when a slow connection lowers the
     /// film to the server's converted version (a new stream, with none of
     /// them, its clock from 0 where it starts), and its audio is said in
@@ -1656,6 +1688,20 @@ final class PlayerLookTests: XCTestCase {
               let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               let address = json["serverURL"] as? String else { return nil }
         return URL(string: address)
+    }
+
+    /// The test server's resume point for `item`, as if it was stopped there.
+    private func resume(_ server: URL, _ item: String, at seconds: Double) throws {
+        let raw = try XCTUnwrap(ProcessInfo.processInfo.environment["DEBUG_EMBY"])
+        let account = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        var request = URLRequest(url: server.appending(path: "emby/Sessions/Playing/Stopped"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(account["accessToken"] as? String, forHTTPHeaderField: "X-Emby-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["ItemId": item, "PositionTicks": Int64(seconds * 10_000_000)])
+        let done = expectation(description: "resume")
+        URLSession.shared.dataTask(with: request) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
     }
 
     /// Sets how the test server behaves (see CONTROL in mock_server.py).

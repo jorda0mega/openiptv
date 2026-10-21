@@ -33,4 +33,36 @@ final class QualityGovernorTests: XCTestCase {
         }
         XCTAssertFalse(decisions.compactMap(\.self).isEmpty, "a short buffer mid-film didn't lower the quality")
     }
+
+    /// After a drop, the converted version waits for the server (it
+    /// converts from that second, deep in a film after starting again at
+    /// the film's start): nothing buffered, a few slow bytes, a stall or two.
+    /// That's the server, not the connection. Regression: 10 s on, that
+    /// lowered the quality again, which asked the server to start over,
+    /// and the film never played on.
+    func testAVersionWaitingForTheServerIsNotJudged() {
+        var governor = QualityGovernor(original: 8_000_000)
+        let start = Date()
+        XCTAssertNotNil(governor.observe(buffer: 0, bytesPerSecond: 0, stalled: true, left: 4000, now: start), "the stall didn't lower the quality")
+        var decisions: [QualityGovernor.Decision?] = []
+        for second in 1...60 {
+            let now = start.addingTimeInterval(Double(second))
+            if second == 20 { governor.noteProbe(bitsPerSecond: 50_000_000) }
+            decisions.append(governor.observe(buffer: 0, bytesPerSecond: second % 7 == 0 ? 40_000 : 0, stalled: second == 25,
+                                              left: 4000, now: now))
+        }
+        XCTAssertEqual(decisions.compactMap(\.self), [], "the quality changed again before the converted version played")
+    }
+
+    /// Once the converted version has played 10 s, a stall lowers it again.
+    func testAVersionIsJudgedOnceItPlays() {
+        var governor = QualityGovernor(original: 8_000_000)
+        let start = Date()
+        XCTAssertEqual(governor.observe(buffer: 0, bytesPerSecond: 0, stalled: true, left: 4000, now: start), .converted(3_000_000))
+        governor.notePlaying(now: start.addingTimeInterval(20))
+        XCTAssertNil(governor.observe(buffer: 0, bytesPerSecond: 0, stalled: true, left: 4000, now: start.addingTimeInterval(25)),
+                     "judged in its first seconds of playing")
+        XCTAssertEqual(governor.observe(buffer: 0, bytesPerSecond: 0, stalled: true, left: 4000, now: start.addingTimeInterval(31)),
+                       .converted(1_500_000), "a stall after it had played didn't lower it")
+    }
 }
