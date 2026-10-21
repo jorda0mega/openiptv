@@ -244,14 +244,31 @@ enum Matroska {
     }
 
     #if DEBUG
-    /// The old ranges, but the cluster is the new choice. A film from the
-    /// start gets its first cluster, which the old fetch skipped.
+    /// The old fetch, for -oldReadyStart.
     static func fetchStartAsBefore(at seconds: Double, fetch: Fetch) async -> Bool {
         guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head), total: total), let cues = layout.cues,
               let index = await fetchIndex(at: cues, total: total, fetch: fetch),
-              let at = start(in: index, at: seconds, subtitlePreroll: 0, layout: layout)?.keyframe
+              let at = clusterPositionAsBefore(in: index, at: seconds, layout: layout)
         else { return false }
         return await fetch(at, min(StreamRelay.readSize, total - at)) != nil
+    }
+
+    /// The old choice: the first entry of the last cue point at or before
+    /// `seconds` by the index's tick, none before the first.
+    private static func clusterPositionAsBefore(in d: [UInt8], at seconds: Double, layout: Layout) -> Int64? {
+        guard let (element, el) = id(d, 0), element == cuesID, let (_, sl) = size(d, el) else { return nil }
+        let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(layout.timecodeScale))
+        var best: (time: UInt64, position: Int64)?
+        for (child, point) in children(d, from: el + sl, to: d.count) where child == cuePointID {
+            let fields = children(d, from: point.startIndex, to: point.endIndex)
+            guard let time = value(cueTimeID, in: fields), time <= target,
+                  let positions = fields.first(where: { $0.0 == cueTrackPositionsID }),
+                  let position = value(cueClusterPositionID, in: children(d, from: positions.1.startIndex, to: positions.1.endIndex))
+                      .flatMap({ inFile($0, from: layout.segmentStart, total: layout.total) })
+            else { continue }
+            if best.map({ time >= $0.time }) ?? true { best = (time, position) }
+        }
+        return best?.position
     }
     #endif
 

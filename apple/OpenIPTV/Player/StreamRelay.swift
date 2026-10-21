@@ -668,6 +668,10 @@ struct FileStart: Hashable, Sendable {
     /// durations: the larger of the two it is told (demux_mkv.c,
     /// seek_with_cues). 0: no subtitles planned.
     let subtitlePreroll: Double
+    #if DEBUG
+    /// -oldReadyStart: the whole second the old fetch took.
+    let second: Int
+    #endif
     let url: URL
     let headers: [String]
 
@@ -675,6 +679,9 @@ struct FileStart: Hashable, Sendable {
         itemId = playback.itemId
         seconds = Double(Self.mpvStart(playback.startSeconds ?? 0)) ?? 0
         subtitlePreroll = TrackChoice.subtitlePreroll(playback.tracks, reopening: false).compactMap { Double($0.value) }.max() ?? 0
+        #if DEBUG
+        second = Int(exactly: (playback.startSeconds ?? 0).rounded(.towardZero)) ?? 0
+        #endif
         url = playback.url
         headers = playback.headers
     }
@@ -688,9 +695,8 @@ struct FileStart: Hashable, Sendable {
     }
 
     #if DEBUG
-    /// -oldReadyStart: the old fetch took the whole second below.
     func fetchAsBefore(through fetch: Matroska.Fetch) async -> Bool {
-        await Matroska.fetchStartAsBefore(at: seconds.rounded(.down), fetch: fetch)
+        await Matroska.fetchStartAsBefore(at: Double(second), fetch: fetch)
     }
     #endif
 
