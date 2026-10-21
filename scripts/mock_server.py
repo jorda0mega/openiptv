@@ -67,6 +67,8 @@ CONNECTIONS = set()
 # "resume_movies" ("1,2,3": those films in Continue Watching after the
 # rest, each stopped 5 minutes in).
 CONTROL = {}
+# Switches set at start, as /mock/set takes them ("sports=1&xtream_post_only=1").
+CONTROL.update({k: v[0] for k, v in parse_qs(os.environ.get("OPENIPTV_MOCK_SET", "")).items()})
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
 DOWN_UNTIL = [0.0]
@@ -625,6 +627,12 @@ class Handler(BaseHTTPRequestHandler):
             if q.get("fresh") == "1":
                 FAKE_LOGIN.update({"username": "lu" + secrets.token_hex(8), "password": "lp" + secrets.token_hex(8)})
             return self.send({"set": bool(FAKE_LOGIN)})
+        if path == "/mock/feed/emby":
+            return self.send({"serverURL": f"http://{self.headers.get('Host')}", "serverName": "Mock", "userId": "U1",
+                              "userName": "tester", "accessToken": TOKEN})
+        if path == "/mock/feed/iptv":
+            return self.send({"id": "6F9A1E52-0000-4000-8000-000000000004", "name": "Test feed", "kind": {"xtream": {
+                "server": f"http://{self.headers.get('Host')}/", "username": "u", "password": "p"}}})
         if path == "/mock/iptv_source":
             if not FAKE_LOGIN:
                 return self.send({"error": "no login"}, status=404)
@@ -708,6 +716,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/player_api.php", "/xmltv.php", "/get.php"):
             IPTV_ADDRESSES.append((time.time(), self.path))
             time.sleep(float(CONTROL.get("xtream_latency", 0)))
+            # "xtream_post_only": "1": a panel that reads its fields only from a POST.
+            if CONTROL.get("xtream_post_only") == "1":
+                return self.send({"error": "post only"}, status=405)
         if path == "/player_api.php":
             return self.xtream(q)
         if path in ("/get.php", "/playlist.m3u"):

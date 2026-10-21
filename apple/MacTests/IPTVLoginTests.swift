@@ -39,6 +39,7 @@ final class IPTVLoginTests: XCTestCase {
     func testXtreamKeepsTheLoginOutOfEveryAPIAddress() async throws {
         let server = try server()
         let source = try await madeUpSource(server)
+        _ = try await control(server, "mock/set", ["xtream_post_only": "1"])
         let provider = XtreamProvider(source: source)
         let since = try await mark(server)
         let lineup = try await provider.load()
@@ -51,7 +52,13 @@ final class IPTVLoginTests: XCTestCase {
         _ = await stopped.value
         let guide = GuideStore()
         await guide.refresh(from: lineup.guides, keep: Set(lineup.channels.compactMap(\.epgId)))
+        let guideRead = await guide.state
         await guide.clear()
+        if case let .ready(programmes, _) = guideRead {
+            XCTAssertGreaterThan(programmes, 0, "the guide had no programmes")
+        } else {
+            XCTFail("the guide wasn't read: \(guideRead)")
+        }
         let found = try await loginInAddresses(server, since: since)
         XCTAssertGreaterThanOrEqual(found.requests, 7, "not every API request reached the test server")
         XCTAssertEqual(found.username, 0, "the username was in \(found.username) API addresses")
@@ -65,11 +72,18 @@ final class IPTVLoginTests: XCTestCase {
         let playlist = server.appending(path: "get.php").appending(queryItems: [.init(name: "username", value: username),
                                                                                 .init(name: "password", value: password)])
         let provider = M3UProvider(source: IPTVSource(name: "Playlist", kind: .m3u(playlist: playlist, guide: nil)))
+        _ = try await control(server, "mock/set", ["xtream_post_only": "1"])
         let since = try await mark(server)
         let lineup = try await provider.load()
         let guide = GuideStore()
         await guide.refresh(from: lineup.guides, keep: Set(lineup.channels.compactMap(\.epgId)))
+        let guideRead = await guide.state
         await guide.clear()
+        if case let .ready(programmes, _) = guideRead {
+            XCTAssertGreaterThan(programmes, 0, "the guide had no programmes")
+        } else {
+            XCTFail("the guide wasn't read: \(guideRead)")
+        }
         let found = try await loginInAddresses(server, since: since)
         XCTAssertEqual(found.requests, 2, "the playlist and its guide weren't both asked for")
         XCTAssertEqual(found.username, 0, "the username was in \(found.username) addresses")
