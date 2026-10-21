@@ -1161,6 +1161,8 @@ final class RemoteFocusTests: XCTestCase {
         let corner = badgeCorner(right: card.frame.maxX, top: card.frame.minY, width: 30)
         XCTAssertGreaterThan(brightest(picture, in: corner), 200, "no count badge on the game's card")
         XCTAssertGreaterThan(luminance(picture, in: corner), 120, "no count badge on the game's card")
+        XCTAssertGreaterThan(luminance(picture, in: leftOfDisc(corner)), 120,
+                             "the count badge isn't wider than the crossed-out TV (mean \(Int(luminance(picture, in: leftOfDisc(corner)))))")
     }
 
     func testAppleTVCountLeavesOutAFeedThatDidntPlay() throws {
@@ -1211,6 +1213,12 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 10), "the game's card went")
         XCTAssertTrue(card.label.contains("Not playing"), "no word that nothing played: \(card.label)")
         XCTAssertFalse(card.label.contains("channels"), "a channel count on a game that played nowhere: \(card.label)")
+        press(.up, "off the card")
+        let picture = XCUIScreen.main.screenshot()
+        let disc = badgeCorner(right: card.frame.maxX, top: card.frame.minY, width: 30)
+        XCTAssertGreaterThan(brightest(picture, in: disc), 200, "no crossed-out TV on the game's card")
+        XCTAssertLessThan(luminance(picture, in: leftOfDisc(disc)), 90,
+                          "a channel count on the card of a game that played nowhere (mean \(Int(luminance(picture, in: leftOfDisc(disc)))))")
     }
 
     func testAppleTVChannelThatDidntPlayIsMarked() throws {
@@ -1273,6 +1281,10 @@ final class RemoteFocusTests: XCTestCase {
         let game = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Jaguars'")).firstMatch
         XCTAssertTrue(game.waitForExistence(timeout: 15), "the game didn't show once the provider answered again")
         XCTAssertFalse(notice.exists, "the notice stayed after a good check")
+    }
+
+    private func leftOfDisc(_ disc: CGRect) -> CGRect {
+        CGRect(x: disc.minX - 12, y: disc.minY, width: 10, height: disc.height)
     }
 
     private func badgeCorner(right: CGFloat, top: CGFloat, width: CGFloat = 22) -> CGRect {
