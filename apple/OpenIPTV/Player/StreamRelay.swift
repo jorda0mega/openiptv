@@ -201,7 +201,7 @@ final class StreamRelay: @unchecked Sendable {
     private struct StartRead {
         let at: Double
         let range: String?
-        let cache: ByteCache?
+        weak var cache: ByteCache?
         let device: Int64
         var server: Int64 = 0
 
@@ -215,12 +215,20 @@ final class StreamRelay: @unchecked Sendable {
         }
     }
 
+    /// A read in the log, and the start it was made for.
+    struct StartReadKey {
+        let start: Int
+        let index: Int
+    }
+
     private var startLog: [StartRead] = []
-    private var startReadOf: [ObjectIdentifier: Int] = [:]
+    private var startReadOf: [ObjectIdentifier: StartReadKey] = [:]
     private var startBegan = CFAbsoluteTimeGetCurrent()
+    private var starts = 0
 
     func beginStartReads() {
         lock.withLock {
+            starts += 1
             startReads = (0, 0, 0, 0, 0)
             startLog = []
             startReadOf = [:]
@@ -228,12 +236,12 @@ final class StreamRelay: @unchecked Sendable {
         }
     }
 
-    func noteStartRead(_ range: String?, cache: ByteCache?, device: Int64) -> Int {
+    func noteStartRead(_ range: String?, cache: ByteCache?, device: Int64) -> StartReadKey {
         lock.withLock {
             startReads.requests += 1
             startReads.cached += device
             startLog.append(StartRead(at: CFAbsoluteTimeGetCurrent() - startBegan, range: range, cache: cache, device: device))
-            return startLog.count - 1
+            return StartReadKey(start: starts, index: startLog.count - 1)
         }
     }
 
@@ -247,21 +255,23 @@ final class StreamRelay: @unchecked Sendable {
             + (each.isEmpty ? "" : " | " + each)
     }
 
-    fileprivate func startRead(for connection: NWConnection) -> Int? {
+    fileprivate func startRead(for connection: NWConnection) -> StartReadKey? {
         lock.withLock { startReadOf[ObjectIdentifier(connection)] }
     }
 
-    func noteFetch(firstByteAfter seconds: Double, for read: Int?) {
+    func noteFetch(firstByteAfter seconds: Double, for read: StartReadKey?) {
         lock.withLock {
+            guard read?.start == starts else { return }
             startReads.fetches += 1
             startReads.firstByte = max(startReads.firstByte, seconds)
         }
     }
 
-    func noteFetched(_ count: Int, for read: Int?) {
+    func noteFetched(_ count: Int, for read: StartReadKey?) {
         lock.withLock {
+            guard let read, read.start == starts else { return }
             startReads.fetched += Int64(count)
-            if let read, startLog.indices.contains(read) { startLog[read].server += Int64(count) }
+            startLog[read.index].server += Int64(count)
         }
     }
 
@@ -555,7 +565,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private var offset: Int64?
     #if DEBUG
     weak var relay: StreamRelay?
-    var read: Int?
+    var read: StreamRelay.StartReadKey?
     private let asked = CFAbsoluteTimeGetCurrent()
     #endif
 
