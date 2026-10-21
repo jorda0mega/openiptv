@@ -62,7 +62,9 @@ CONNECTIONS = set()
 # empty list, HTTP 200, a provider that sent nothing; other requests as
 # normal), "emby_convert" ("1": the converted version made from the film
 # as Emby makes it, see converted_segment), "convert_delay" (seconds before
-# a conversion's first segment), "convert_clock" (see converted_segment).
+# a conversion's first segment), "convert_clock" (see converted_segment),
+# "resume_movies" ("1,2,3": those films in Continue Watching after the
+# rest, each stopped 5 minutes in).
 CONTROL = {}
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
@@ -1102,6 +1104,8 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(float(CONTROL.get("home_delay", os.environ.get("OPENIPTV_MOCK_HOME_DELAY", "0"))))
             progress = 5 + int(time.time()) % 90
             items = [ep(2, current), twin, movie(5) | {"UserData": {"PlayedPercentage": progress}}, ep(1, 4), ep(1, 2)]
+            items += [movie(int(i)) | {"UserData": {"PlaybackPositionTicks": 3000000000, "PlayedPercentage": 10}}
+                      for i in CONTROL.get("resume_movies", "").split(",") if i]
             # "watched_elsewhere": "m7": that film just played on another
             # device, first in the list.
             if CONTROL.get("watched_elsewhere"):
