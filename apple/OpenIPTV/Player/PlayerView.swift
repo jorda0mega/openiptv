@@ -1450,7 +1450,7 @@ struct MoviePlayerView: View {
             // With the position itself: the network reports (about once a
             // second, none once the buffer is full) left it a second behind.
             playClock.readout = String(format: "%.1f %@", newPosition, paused ? "paused" : "playing")
-            playClock.streamReadout = String(format: "%.1f", rawPosition)
+            playClock.streamReadout = String(format: "%.1f", rawPosition + (player?.streamStartTime ?? 0))
             #endif
             // Into the last fifth of an episode: the next one, ready.
             if !preparedNext, playback.seriesId != nil, total > 0, newPosition >= total * 0.8 {
