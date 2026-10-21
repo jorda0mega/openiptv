@@ -891,9 +891,8 @@ struct EmbyClient {
     }
 
     private func assemble(_ item: EmbyItem, info prefetchedInfo: PlaybackInfo?, resume: Double?, keys: [String] = []) async -> EmbyPlayback {
-        var resume = resume
         #if DEBUG
-        if let forced = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_START_AT"].flatMap(Double.init) { resume = forced }
+        let resume = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_START_AT"].flatMap(Double.init) ?? resume
         #endif
         let (title, subtitle) = Self.titles(item)
         var playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle,

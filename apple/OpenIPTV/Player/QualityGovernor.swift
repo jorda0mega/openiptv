@@ -52,7 +52,7 @@ struct QualityGovernor {
     /// `left`: seconds from here to the end of the file, when known.
     mutating func observe(buffer: Double, bytesPerSecond: Double, stalled: Bool, left: Double? = nil,
                           now: Date = Date()) -> Decision? {
-        guard settled(now) else { return nil }
+        guard lastSwitch == .distantPast || playingSince.map({ now.timeIntervalSince($0) >= 10 }) ?? false else { return nil }
         // With plenty buffered the player only tops up as fast as it plays,
         // so slow samples then say nothing about the connection: let the
         // estimate rise but not fall. With little buffered it downloads flat
@@ -113,10 +113,6 @@ struct QualityGovernor {
               originalBlocked || (original.map({ step < $0 }) ?? true)
         else { return nil }
         return .converted(step)
-    }
-
-    private func settled(_ now: Date) -> Bool {
-        lastSwitch == .distantPast || playingSince.map { now.timeIntervalSince($0) >= 10 } ?? false
     }
 
     mutating func notePlaying(now: Date = Date()) {
