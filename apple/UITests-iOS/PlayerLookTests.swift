@@ -791,7 +791,9 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
     }
 
-    func testPlayersOpenedAheadStopTheirSubtitlesWhenLeft() throws {
+    /// A film's page got its likeliest subtitles ready (the server's copy of
+    /// its own track, the whole film read for it): left, the copy stops.
+    func testPagesLeftStopTheirSubtitleCopies() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -812,7 +814,7 @@ final class PlayerLookTests: XCTestCase {
             sleep(1)
         }
         sleep(12)
-        XCTAssertFalse(subtitleRequests(server, "cut").isEmpty, "a player left behind kept asking for its subtitles: \(subtitleRequests(server))")
+        XCTAssertFalse(subtitleRequests(server, "cut").isEmpty, "a page left behind kept asking for its subtitles: \(subtitleRequests(server))")
     }
 
     func testPlaybackAddressesHoldNoKey() throws {
@@ -1224,21 +1226,20 @@ final class PlayerLookTests: XCTestCase {
         shot("episode 5 playing")
     }
 
-    /// A player opened ahead that failed before the tap (the connection
-    /// lost meanwhile) isn't the one that plays: the title opens afresh.
-    /// Regression: the failed player was handed over, its error heard by
-    /// no one, and the spinner stayed for good (Apple TV opens one ahead
-    /// for every card the focus rests on).
+    /// A film's start fetched ahead that failed (the connection lost
+    /// meanwhile) doesn't hold up the tap: the title opens afresh.
+    /// Regression: a player opened ahead that had failed was handed over,
+    /// its error heard by no one, and the spinner stayed for good.
     func testFailedWarmPlayerIsNotHandedOver() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
         configure(server, ["video_fail": "1"])
         app.launch()
-        // Continue Watching's first card: Home opens a player ahead for it.
+        // Continue Watching's first card: its start is fetched ahead.
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
-        // That player fails meanwhile; then the server answers again.
+        // That fails meanwhile; then the server answers again.
         sleep(8)
         configure(server, ["video_fail": "0"])
         card.tap()

@@ -38,6 +38,56 @@ final class PrepareAheadTests: XCTestCase {
         configure(server, ["reset": "1"])
     }
 
+    /// Continue Watching on iPhone. The first card, on screen past its
+    /// dwell, gets its plan, the start of its file and its likeliest
+    /// subtitles (the server's copy of its own English track) before any
+    /// tap; cards a fast scroll passes get nothing. The card it stops on is
+    /// tapped: nothing is asked again, and English, picked while the
+    /// server's copy is still coming, shows its line at once without the
+    /// player reading back into the film.
+    func testContinueWatchingGetsReadyOnlyWhatStays() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["resume_movies": "1,2,3,4,6,7,8,9", "reference_delay": "90"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"]
+        app.launch()
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 20), "no Continue Watching")
+        sleep(3)
+        // The show's card plays its episode S2 E3 (the test server's e203).
+        let firstItem = "e203"
+        XCTAssertTrue(playbackInfoRequests(server).contains(firstItem), "the first card got no plan: \(playbackInfoRequests(server))")
+        XCTAssertTrue(videoRequests(server).contains(firstItem), "the first card's file start wasn't fetched: \(videoRequests(server))")
+        XCTAssertTrue(subtitleRequests(server).contains("\(firstItem):4"), "its English track wasn't asked for: \(subtitleRequests(server))")
+
+        let row = app.scrollViews.containing(.button, identifier: first.identifier).firstMatch
+        let last = app.buttons["continue-m9"]
+        for _ in 0..<3 where !(last.exists && last.isHittable) { row.swipeLeft(velocity: .fast) }
+        XCTAssertTrue(last.waitForExistence(timeout: 5) && last.isHittable, "Continue Watching didn't reach its last card")
+        sleep(3)
+        let planned = playbackInfoRequests(server)
+        for passed in ["m1", "m2", "m3", "m4"] {
+            XCTAssertFalse(planned.contains(passed), "\(passed), scrolled past, got a plan: \(planned)")
+        }
+        XCTAssertEqual(planned.filter { $0 == "m9" }.count, 1, "the card it stopped on got no plan: \(planned)")
+        XCTAssertTrue(videoRequests(server).contains("m9"), "its file start wasn't fetched")
+        XCTAssertEqual(subtitleRequests(server).filter { $0 == "m9:4" }.count, 1, "its English track wasn't asked for once")
+
+        last.tap()
+        XCTAssertTrue(app.staticTexts["debug-position"].firstMatch.waitForExistence(timeout: 20), "the film didn't open")
+        sleep(4)
+        XCTAssertEqual(playbackInfoRequests(server).filter { $0 == "m9" }.count, 1, "the tap asked again how to play it")
+        XCTAssertEqual(subtitleRequests(server).filter { $0 == "m9:4" }.count, 1, "the tap asked again for the English track")
+        let readsBack = app.staticTexts["debug-reads-back"].firstMatch
+        let before = Int(readsBack.label) ?? -1
+        let pick = timePick("English")
+        print("PREP subs after a dwell, pick English: " + pick)
+        let after = try XCTUnwrap(field("after", in: pick.components(separatedBy: " ; ")[1]).flatMap(Int.init), "no line: \(pick)")
+        XCTAssertLessThan(after, 300, "English took \(after) ms to show")
+        XCTAssertEqual(Int(readsBack.label) ?? -1, before, "showing English read back into the film")
+    }
+
     private func playFilm(_ film: String) {
         let tab = app.tabBars.buttons["Search"].firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
@@ -116,6 +166,21 @@ final class PrepareAheadTests: XCTestCase {
         guard !app.buttons["Close player"].firstMatch.isHittable else { return }
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
         _ = app.buttons["Close player"].firstMatch.waitForExistence(timeout: 3)
+    }
+
+    private func playbackInfoRequests(_ server: URL) -> [String] { listed(server, "mock/playbackinfo_requests") }
+    private func videoRequests(_ server: URL) -> [String] { listed(server, "mock/video_requests") }
+    private func subtitleRequests(_ server: URL) -> [String] { listed(server, "mock/subtitle_requests") }
+
+    private func listed(_ server: URL, _ path: String) -> [String] {
+        var items: [String] = []
+        let done = expectation(description: path)
+        URLSession.shared.dataTask(with: server.appending(path: path)) { data, _, _ in
+            items = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String]] })?["items"] ?? []
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return items
     }
 
     private func testServer() -> URL? {

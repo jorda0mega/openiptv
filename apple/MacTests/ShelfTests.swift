@@ -169,6 +169,21 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(fetches.asked, 0)
     }
 
+    func testACancelledWarmUpLetsGoOfItsInterest() async throws {
+        let lane = lane(atOnce: 1)
+        let busy = Lane.Ticket(Interest(at: .posterRow, .glance))
+        try await lane.enter(busy)
+        let fetches = Fetches()
+        let shelf = shelf(fetches, lane: lane)
+        let warmed = Task { await shelf.warm("a", for: Interest(at: .continueWatching, .likely)) }
+        await yieldToQueuedTasks()
+        warmed.cancel()
+        _ = await warmed.value
+        lane.leave(busy)
+        await yieldToQueuedTasks()
+        XCTAssertEqual(fetches.asked, 0, "a warm-up whose card left still fetched")
+    }
+
     func testPlayStartsAWaitingWarmUpAtOnce() async throws {
         let lane = lane(atOnce: 1)
         try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
@@ -245,47 +260,17 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(stoppedKey, "a")
     }
 
-    func testAPlayIsNotQueuedBehindPlayersOpenedAhead() async throws {
-        let fetches = Fetches(held: true)
-        let shelf = shelf(fetches, lane: lane(atOnce: 1))
-        let ahead = Interest(at: .page, .next)
-        let warmPlayers = (0..<4).map { n in Task { try await shelf.value(for: "warm \(n)", ahead: ahead) } }
-        var started = fetches.started.makeAsyncIterator()
-        let first = await started.next()
-        await yieldToQueuedTasks()
-        let played = Task { try await shelf.value(for: "played") }
-        let next = await started.next()
-        XCTAssertEqual(first?.hasPrefix("warm"), true)
-        XCTAssertEqual(next, "played")
-        warmPlayers.forEach { $0.cancel() }
-        played.cancel()
-        fetches.letThrough()
-    }
-
-    func testAPlayerOpenedAheadGoesAtOnceWhenPlayed() async throws {
-        let lane = lane(atOnce: 1)
-        try await lane.enter(Lane.Ticket(Interest(at: .posterRow, .glance)))
-        let fetches = Fetches()
-        let shelf = shelf(fetches, lane: lane)
-        let warmPlayer = Task { try await shelf.value(for: "a", ahead: Interest(at: .page, .next)) }
-        await yieldToQueuedTasks()
-        XCTAssertEqual(fetches.asked, 0)
-        shelf.hurry("a")
-        let value = try await warmPlayer.value
-        XCTAssertEqual(value, 1)
-    }
-
     func testEveryPlayCountsAgainstTheBudget() async throws {
         let fetches = Fetches()
         let shelf = shelf(fetches, lane: lane(atOnce: 4, bucket: Bucket(size: 2, refillEvery: .seconds(3600), reserve: 0)))
         _ = try await shelf.value(for: "a")
         _ = try await shelf.value(for: "b")
-        let warmPlayer = Task { try await shelf.value(for: "c", ahead: Interest(at: .page, .next)) }
+        let warmUp = Task { await shelf.warm("c", for: Interest(at: .continueWatching, .next)) }
         await yieldToQueuedTasks()
         _ = try await shelf.value(for: "d")
-        warmPlayer.cancel()
-        _ = await warmPlayer.result
-        XCTAssertEqual(fetches.asked, 3, "a player opened ahead fetched past the budget the plays had spent")
+        warmUp.cancel()
+        _ = await warmUp.value
+        XCTAssertEqual(fetches.asked, 3, "a warm-up fetched past the budget the plays had spent")
     }
 
     func testFailureIsKeptForPlaysToo() async throws {

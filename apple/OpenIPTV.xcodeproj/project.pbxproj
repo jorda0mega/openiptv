@@ -190,6 +190,7 @@
 		A49929AB5718F330A7BBDB8C /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
 		A4C285B27BC4A5193F7D2399 /* SmartSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D955785FF1529F49B082EE5 /* SmartSearch.swift */; };
 		A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D066C9DD9FC2285C24EF35 /* LiveView.swift */; };
+		A91B46915C3AAA41EBA1400B /* PrepareAheadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B217D5609554E1FC63908BD0 /* PrepareAheadTests.swift */; };
 		AA86629D3DF58B7575BE0703 /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9236570FD5D04A7FE5B59AB8 /* Artwork.swift */; };
 		ADB139F687A97F2FB173E933 /* GameTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E07979C91518955236F76395 /* GameTime.swift */; };
 		AE3EC24F82B97699B659A41B /* libxml2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 12D689360F95FEEBC85A1443 /* libxml2.tbd */; };
@@ -392,6 +393,7 @@
 		A9E566E295D6785A720DEA83 /* libexpat.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libexpat.tbd; path = usr/lib/libexpat.tbd; sourceTree = SDKROOT; };
 		AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libdovi.xcframework; path = Vendor/Libdovi.xcframework; sourceTree = "<group>"; };
 		AA8AA4353609B682F3F99884 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B217D5609554E1FC63908BD0 /* PrepareAheadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrepareAheadTests.swift; sourceTree = "<group>"; };
 		B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QualityGovernor.swift; sourceTree = "<group>"; };
 		B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libdav1d.xcframework; path = Vendor/Libdav1d.xcframework; sourceTree = "<group>"; };
 		B41963718B2429F644A73CAD /* Libcrypto.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libcrypto.xcframework; path = Vendor/Libcrypto.xcframework; sourceTree = "<group>"; };
@@ -763,6 +765,7 @@
 			isa = PBXGroup;
 			children = (
 				1C6E6C6920060C5CF3CC65EF /* HomeStabilityTests.swift */,
+				B217D5609554E1FC63908BD0 /* PrepareAheadTests.swift */,
 				44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */,
 				890075B848C59F9A66DD756E /* RemoteFocusTests.swift */,
 			);
@@ -1134,6 +1137,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1B573875ED79BC2420B63AE6 /* HomeStabilityTests.swift in Sources */,
+				A91B46915C3AAA41EBA1400B /* PrepareAheadTests.swift in Sources */,
 				3C08CEF60D0EC57E6C0B56D7 /* RealFeedTests.swift in Sources */,
 				764C48551392DEFB47995D89 /* RemoteFocusTests.swift in Sources */,
 			);
