@@ -2,14 +2,12 @@ import XCTest
 @testable import OpenIPTV
 
 final class FilmStartTests: XCTestCase {
-    /// A film laid out as mkvmerge writes one: its header, a cluster every
-    /// 3.5 MB (14 Mbit/s), each starting on a keyframe every 2.002 s (23.976
-    /// frames a second, the first 21 ms in), for two hours, its index (Cues,
-    /// past the first 64 KB read of it), then its tags at the very end.
     private struct Film {
         static let firstCluster: Int64 = 4096
-        static let clusterSize: Int64 = 3_500_000
-        static let clusters = 3600
+        static let clusterSize: Int64 = 3_500_000 // 14 Mbit/s across one keyframe gap
+        static let clusters = 3600 // two hours; the Cues then exceed a 64 KB read
+        static let firstKeyframeMS = 21 // half a frame at 23.976 fps, so 0 s is before it
+        static let keyframeEveryMS = 2002 // 48 frames at 24000/1001
         let parts: [(at: Int64, bytes: [UInt8])]
         let cues: Range<Int64>
         let tags: Range<Int64>
@@ -36,6 +34,7 @@ final class FilmStartTests: XCTestCase {
             head += Self.element(0x1549A966, Self.element(0x2AD7B1, Self.uint(1_000_000))) + Self.element(0x1654AE6B, [])
             head += Self.element(0xEC, [UInt8](repeating: 0, count: Int(Self.firstCluster) - head.count - 9))
             head += [0x1F, 0x43, 0xB6, 0x75] + Self.size(Int(Self.clusterSize) - 12)
+            // Tags follow the Cues, as mkvmerge writes them.
             parts = [(0, head), (cuesAt, index), (tagsAt, tagged)]
             cues = cuesAt..<tagsAt
             tags = tagsAt..<total
@@ -43,11 +42,8 @@ final class FilmStartTests: XCTestCase {
 
         var total: Int64 { tags.upperBound }
 
-        /// The keyframe's time (ms) that cluster `n` starts with.
-        static func keyframe(_ n: Int) -> Int { 21 + n * 2002 }
+        static func keyframe(_ n: Int) -> Int { firstKeyframeMS + n * keyframeEveryMS }
 
-        /// Where the cluster mpv resumes in starts: the one whose keyframe
-        /// is the last at or before `seconds`, else the first.
         func cluster(at seconds: Double) -> Int64 {
             let n = (0..<Self.clusters).last { Double(Self.keyframe($0)) <= seconds * 1000 } ?? 0
             return Self.firstCluster + Int64(n) * Self.clusterSize
@@ -77,12 +73,7 @@ final class FilmStartTests: XCTestCase {
         }
     }
 
-    /// What libmpv reads opening the film to start at `seconds` (nil: from
-    /// the beginning), before its first frame, as the relay saw it on the
-    /// test server: its first 512 KB; its index and its tags, in one read
-    /// from the index on; 512 KB again from its first cluster; then, where
-    /// it starts, 512 KB and 8 MB after them (each jump opens a new request,
-    /// whose first read is 512 KB).
+    /// A jump opens a new request, so its first read is `firstRead` again.
     private func opening(_ film: Film, at seconds: Double?) -> [(String, Range<Int64>)] {
         let first = StreamRelay.firstRead, resume = film.cluster(at: seconds ?? 0)
         return [("first read", 0..<first), ("index and tags", film.cues.lowerBound..<film.total),
@@ -126,23 +117,16 @@ final class FilmStartTests: XCTestCase {
                      startSeconds: seconds, durationSeconds: 480)
     }
 
-    /// Resumed 300.46 s in (the player is told 300.5, a keyframe 0.2 s
-    /// before), everything opening it reads comes from the device once its
-    /// start was fetched ahead. Regression: the first read was half fetched,
-    /// the tags not at all, the read from the first cluster only in part,
-    /// the cluster where it resumes from the keyframe before the whole
-    /// second (300, 2 s earlier), and 8 MB of it where the player reads 8.5,
-    /// so a ready start still waited for the server.
     func testOpeningAResumedFilmReadsOnlyWhatWasFetchedAhead() async {
         let film = Film()
-        let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.46))
+        let item = playback(at: 300.46)
+        let told = FileStart(item).seconds
+        XCTAssertEqual(told, 300.5)
+        let (ok, fetched) = await fetchedAhead(film, for: item)
         XCTAssertTrue(ok, "the film's start wasn't fetched")
-        assertAllFetched(opening(film, at: 300.5), fetched)
+        assertAllFetched(opening(film, at: told), fetched)
     }
 
-    /// A film started from its beginning, whose first keyframe is a moment
-    /// in (21 ms), gets its first 8.5 MB fetched ahead too. Regression: no
-    /// keyframe at or before 0 s, so nothing past the header was.
     func testOpeningAFilmFromItsBeginningReadsOnlyWhatWasFetchedAhead() async {
         let film = Film()
         let (ok, fetched) = await fetchedAhead(film, for: playback(at: nil))
