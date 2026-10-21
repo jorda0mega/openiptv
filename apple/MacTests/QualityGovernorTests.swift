@@ -34,12 +34,6 @@ final class QualityGovernorTests: XCTestCase {
         XCTAssertFalse(decisions.compactMap(\.self).isEmpty, "a short buffer mid-film didn't lower the quality")
     }
 
-    /// After a drop, the converted version waits for the server (it
-    /// converts from that second, deep in a film after starting again at
-    /// the film's start): nothing buffered, a few slow bytes, a stall or two.
-    /// That's the server, not the connection. Regression: 10 s on, that
-    /// lowered the quality again, which asked the server to start over,
-    /// and the film never played on.
     func testAVersionWaitingForTheServerIsNotJudged() {
         var governor = QualityGovernor(original: 8_000_000)
         let start = Date()
@@ -54,8 +48,7 @@ final class QualityGovernorTests: XCTestCase {
         XCTAssertEqual(decisions.compactMap(\.self), [], "the quality changed again before the converted version played")
     }
 
-    /// Once the converted version has played 10 s, a stall lowers it again.
-    func testAVersionIsJudgedOnceItPlays() {
+    func testAVersionIsJudgedAfterTenSecondsOfPlayback() {
         var governor = QualityGovernor(original: 8_000_000)
         let start = Date()
         XCTAssertEqual(governor.observe(buffer: 0, bytesPerSecond: 0, stalled: true, left: 4000, now: start), .converted(3_000_000))

@@ -126,9 +126,6 @@ final class RealFeedTests: XCTestCase {
         XCTAssertEqual(stream, film, accuracy: 3, "the stream and the film's place differ")
     }
 
-    /// A film opened forty minutes in, lowered to the server's converted
-    /// version 15 s later, plays on without a note. Prints only yes or no
-    /// and seconds.
     func testLowerQualityDeepInAFilmPlaysOn() throws {
         let film = ProcessInfo.processInfo.environment["REAL_FEED_FILM"] ?? "Asterix and Cleopatra"
         let start = 2400.0
@@ -146,8 +143,6 @@ final class RealFeedTests: XCTestCase {
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
         play.tap()
-        // From the keyframe at or before the second asked for: a real film's
-        // are up to about 10 s apart.
         let opened = try XCTUnwrap(openedAt(timeout: 45), "the film didn't open")
         let deep = (start - 30...start + 2).contains(opened)
         print("REAL deep: opened at \(Int(opened)) s | forty minutes in \(deep ? "yes" : "no")")
@@ -162,17 +157,15 @@ final class RealFeedTests: XCTestCase {
         }
         let lowered = quality.exists && quality.label.hasPrefix("converted")
         let dropped = Date()
-        let from = position() ?? 0
-        // The player holds the second it was asked for until the first new
-        // frame, which can be a keyframe a moment earlier.
+        let positionBeforeFirstFrame = position() ?? 0
         var firstFrame: TimeInterval?
         var at20: Double?
         var playsAt20: Bool?
         while Date().timeIntervalSince(dropped) < 60, playsAt20 == nil || firstFrame == nil {
             let elapsed = Date().timeIntervalSince(dropped)
-            let now = position() ?? from
+            let now = position() ?? positionBeforeFirstFrame
             noted = noted || note.exists
-            if firstFrame == nil, abs(now - from) > 0.5 { firstFrame = elapsed }
+            if firstFrame == nil, abs(now - positionBeforeFirstFrame) > 0.5 { firstFrame = elapsed }
             if elapsed >= 20, at20 == nil { at20 = now }
             if let at20, elapsed >= 22.5, playsAt20 == nil { playsAt20 = now > at20 + 1 }
             usleep(500_000)
@@ -607,8 +600,6 @@ final class RealFeedTests: XCTestCase {
         XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
     }
 
-    /// The film's second at its first frame, from the player's start
-    /// readout ("cold 4.2 at 2392").
     private func openedAt(timeout: TimeInterval) -> Double? {
         let readout = app.staticTexts["debug-start"].firstMatch
         let deadline = Date().addingTimeInterval(timeout)

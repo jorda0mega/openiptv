@@ -343,7 +343,7 @@ struct MoviePlayerView: View {
     @State private var lastSeek = Date.distantPast
     /// Picks original vs a server-converted lower bitrate to avoid stalls.
     @State private var governor: QualityGovernor?
-    @State private var message: String?
+    @State private var temporaryMessage: String?
     /// The converted bitrate playing before a switch back to the original,
     /// to return to if the original won't open.
     @State private var revertTo: Int?
@@ -435,8 +435,8 @@ struct MoviePlayerView: View {
                     .accessibilityIdentifier("Skip Intro")
             }
             #endif
-            if let message, !controlsVisible {
-                Text(message)
+            if let temporaryMessage, !controlsVisible {
+                Text(temporaryMessage)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -928,10 +928,9 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// An error, a short message, or how fast it started (briefly).
     private var note: (text: String, color: Color)? {
         if let error { return (error, .red) }
-        if let message { return (message, .yellow) }
+        if let temporaryMessage { return (temporaryMessage, .yellow) }
         if let timing { return (timing, .white.opacity(0.6)) }
         #if DEBUG
         if prefs.performanceStats, !stats.isEmpty { return (stats, .white.opacity(0.6)) }
@@ -1219,13 +1218,11 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// A small note at the top for a few seconds (not the controls: they
-    /// came up for four seconds mid-film).
     private func note(_ text: String) {
-        withAnimation(.easeOut(duration: 0.2)) { message = text }
+        withAnimation(.easeOut(duration: 0.2)) { temporaryMessage = text }
         Task {
             try? await Task.sleep(for: .seconds(4))
-            if message == text { withAnimation(.easeIn(duration: 0.3)) { message = nil } }
+            if temporaryMessage == text { withAnimation(.easeIn(duration: 0.3)) { temporaryMessage = nil } }
         }
     }
 

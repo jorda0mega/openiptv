@@ -25,10 +25,7 @@ struct QualityGovernor {
     private(set) var probeSpeed: Double = 0
 
     private var lastSwitch: Date
-    /// When the version last switched to began to play. Until it has played
-    /// a while, what it reports is the server converting it (from deep in a
-    /// film, twice: from the start, then from there), not the connection.
-    private var playingSince: Date?
+    private var qualityPlaybackStartedAt: Date?
     /// The original wouldn't play here; stay on converted versions.
     private var originalBlocked = false
     private var lowSince: Date?
@@ -52,7 +49,7 @@ struct QualityGovernor {
     /// `left`: seconds from here to the end of the file, when known.
     mutating func observe(buffer: Double, bytesPerSecond: Double, stalled: Bool, left: Double? = nil,
                           now: Date = Date()) -> Decision? {
-        guard lastSwitch == .distantPast || playingSince.map({ now.timeIntervalSince($0) >= 10 }) ?? false else { return nil }
+        guard lastSwitch == .distantPast || qualityPlaybackStartedAt.map({ now.timeIntervalSince($0) >= 10 }) ?? false else { return nil }
         // With plenty buffered the player only tops up as fast as it plays,
         // so slow samples then say nothing about the connection: let the
         // estimate rise but not fall. With little buffered it downloads flat
@@ -116,7 +113,7 @@ struct QualityGovernor {
     }
 
     mutating func notePlaying(now: Date = Date()) {
-        playingSince = playingSince ?? now
+        qualityPlaybackStartedAt = qualityPlaybackStartedAt ?? now
     }
 
     /// Going back to the original failed: return to `bitrate` and don't
@@ -125,7 +122,7 @@ struct QualityGovernor {
         originalBlocked = true
         current = bitrate
         lastSwitch = now
-        playingSince = nil
+        qualityPlaybackStartedAt = nil
         headroomSince = nil
     }
 
@@ -140,7 +137,7 @@ struct QualityGovernor {
     private mutating func switchTo(_ decision: Decision, now: Date) -> Decision {
         if case let .converted(bitrate) = decision { current = bitrate } else { current = nil }
         lastSwitch = now
-        playingSince = nil
+        qualityPlaybackStartedAt = nil
         lowSince = nil
         headroomSince = nil
         probeSpeed = 0
