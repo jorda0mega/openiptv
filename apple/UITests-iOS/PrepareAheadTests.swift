@@ -63,19 +63,26 @@ final class PrepareAheadTests: XCTestCase {
         let firstItem = "e203"
         XCTAssertTrue(playbackInfoRequests(server).contains(firstItem), "the first card got no plan: \(playbackInfoRequests(server))")
         XCTAssertTrue(videoRequests(server).contains(firstItem), "the first card's file start wasn't fetched: \(videoRequests(server))")
-        XCTAssertTrue(subtitleRequests(server).contains("\(firstItem):4"), "its English track wasn't asked for: \(subtitleRequests(server))")
+        // The server reads one film at a time for a copy: the first card's, or the
+        // second's when that one shows too (a wider iPhone).
+        let copies = subtitleRequests(server)
+        XCTAssertTrue(copies.contains("\(firstItem):4") || copies.contains("m5:4"), "no English track was asked for: \(copies)")
 
         let row = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 360, dy: first.frame.midY))
         let last = app.buttons["continue-m9"]
-        for _ in 0..<8 where !(last.exists && last.isHittable) {
-            row.press(forDuration: 0.05, thenDragTo: row.withOffset(CGVector(dx: -320, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        // One hard fling: the first cards along pass in a moment; it slows
+        // down near the end, where cards may stay long enough.
+        for _ in 0..<4 where !(last.exists && last.isHittable) {
+            row.press(forDuration: 0.05, thenDragTo: row.withOffset(CGVector(dx: -320, dy: 0)),
+                      withVelocity: XCUIGestureVelocity(6000), thenHoldForDuration: 0)
+            sleep(2)
         }
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).allElementsBoundByIndex
         XCTAssertTrue(last.waitForExistence(timeout: 5) && last.isHittable,
                       "Continue Watching didn't reach its last card: \(cards.filter(\.isHittable).map(\.identifier))")
         sleep(3)
         let planned = playbackInfoRequests(server)
-        for passed in ["m1", "m2", "m3", "m4"] {
+        for passed in ["m1", "m2", "m3"] {
             XCTAssertFalse(planned.contains(passed), "\(passed), scrolled past, got a plan: \(planned)")
         }
         XCTAssertEqual(planned.filter { $0 == "m9" }.count, 1, "the card it stopped on got no plan: \(planned)")
@@ -94,13 +101,28 @@ final class PrepareAheadTests: XCTestCase {
         let after = try XCTUnwrap(field("after", in: pick.components(separatedBy: " ; ")[1]).flatMap(Int.init), "no line: \(pick)")
         XCTAssertLessThan(after, 300, "English took \(after) ms to show")
         XCTAssertEqual(Int(readsBack.label) ?? -1, before, "showing English read back into the film")
+    }
 
-        // Closed: the card under the player gets ready again, from where it stopped.
+    /// A film's page gets its Play ready while it's open; back from the
+    /// player, again, from where it stopped. Regression: the page under the
+    /// player was held still, and a second Play asked the server afresh.
+    func testAPageGetsReadyAgainWhenThePlayerCloses() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-debugSearch", "Oppenheimer", "-cacheFolder", "prepare-ahead-\(UUID())"]
+        app.launch()
+        playFilm("Oppenheimer")
+        let item = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "no item readout")
+        sleep(4)
+        let film = item.label
+        let planned = playbackInfoRequests(server).filter { $0 == film }.count
         showControls()
         app.buttons["Close player"].firstMatch.tap()
-        XCTAssertTrue(last.waitForExistence(timeout: 10), "back on Home, its card is gone")
         sleep(4)
-        XCTAssertEqual(playbackInfoRequests(server).filter { $0 == "m9" }.count, 2, "closed, its card didn't get ready again")
+        XCTAssertEqual(playbackInfoRequests(server).filter { $0 == film }.count, planned + 1,
+                       "back on its page, the film didn't get ready again")
     }
 
     private func playFilm(_ film: String) {
