@@ -48,6 +48,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     private var timebase: CMTimebase?
     private var stream: FilmStream = .whole
     private var position: Double = 0
+    /// Just after a jump the player still reports where it was for a
+    /// moment: until then, the window's clock stays put.
+    private var jumpUntil: Date?
     private var total: Double = 0
     private var paused = false {
         didSet { facts.set(total: total, paused: paused) }
@@ -214,6 +217,10 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     private func handle(_ event: MPVPlayer.Event) {
         switch event {
         case let .time(raw, _):
+            if let until = jumpUntil {
+                guard Date() >= until else { return }
+                jumpUntil = nil
+            }
             position = total > 0 ? min(raw + stream.clockStart, total) : raw + stream.clockStart
             if let timebase, abs(CMTimebaseGetTime(timebase).seconds - position) > 0.5 {
                 CMTimebaseSetTime(timebase, time: CMTime(seconds: position, preferredTimescale: 600))
@@ -330,7 +337,14 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
 
     private func skip(by seconds: Double) {
         guard let player, let playback else { return }
-        stream = player.jump(in: stream, to: max(0, position + seconds), for: playback) { _ in player.seek(by: seconds) }
+        let target = max(0, total > 0 ? min(position + seconds, total) : position + seconds)
+        stream = player.jump(in: stream, to: target, for: playback) { _ in player.seek(by: seconds) }
+        position = target
+        jumpUntil = Date().addingTimeInterval(1.5)
+        if let timebase { CMTimebaseSetTime(timebase, time: CMTime(seconds: target, preferredTimescale: 600)) }
+        #if DEBUG
+        probe()
+        #endif
     }
 }
 
