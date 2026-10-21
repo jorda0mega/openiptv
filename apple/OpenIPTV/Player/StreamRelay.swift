@@ -46,8 +46,6 @@ final class StreamRelay: @unchecked Sendable {
     /// other file is fetched ahead.
     private var playingFile: String?
     private static let keptFiles = 6
-    /// How much the player asks for at once (see MPVPlayer.load): its first
-    /// read after it opens the file or jumps in it, then each one after.
     static let firstRead: Int64 = 512 << 10
     static let readSize: Int64 = 8 << 20
 
@@ -205,8 +203,6 @@ final class StreamRelay: @unchecked Sendable {
 
     private var startReads = (requests: 0, cached: Int64(0), fetches: 0, fetched: Int64(0), firstByte: 0.0)
 
-    /// One of the player's reads since the file opened: when, what it asked
-    /// for, and how much came from the device and from the server.
     private struct StartRead {
         let at: Double
         let range: String?
@@ -214,8 +210,6 @@ final class StreamRelay: @unchecked Sendable {
         let device: Int64
         var server: Int64 = 0
 
-        /// "120 ms at 62.51% 8.39 MB: device 8.39, server 0.00", where in
-        /// the file by its size.
         var readout: String {
             let parts = (range ?? "bytes=0-").dropFirst(6).split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
             let from = Int64(parts.first ?? "") ?? 0, to = parts.count == 2 ? Int64(parts[1]) : nil
@@ -406,12 +400,6 @@ final class StreamRelay: @unchecked Sendable {
 
     // MARK: Ahead of a tap
 
-    /// The start of a film likely to be played next (Continue Watching):
-    /// what opening it reads before its first frame (Matroska.fetchStart),
-    /// fetched into the cache ahead, so it all comes from the device. A
-    /// resumed film waited for the server three times before its first
-    /// frame (the header, the index at the end of the file, the part where
-    /// it resumes); one from the beginning, once.
     func fetchStart(url: URL, headers: [String], at seconds: Double) async -> Bool {
         start()
         let key = cacheKey(url)
@@ -430,13 +418,14 @@ final class StreamRelay: @unchecked Sendable {
         let fetch = { [self] (from: Int64, count: Int64) in
             await withCheckedContinuation { done in
                 queue.async { [self] in
-                    ensure(route, cache, from: from, count: count, ahead: key) { data, total in
-                        done.resume(returning: data.flatMap { data in total.map { (data, $0) } })
+                    ensure(route, cache, from: from, count: count, ahead: key) { bytes, total in
+                        done.resume(returning: bytes.flatMap { data in total.map { (data, $0) } })
                     }
                 }
             }
         }
         #if DEBUG
+        // The old fetch took the whole second below the resume point.
         let fetched = Self.oldReadyStart
             ? await Matroska.fetchStartAsBefore(at: seconds.rounded(.down), fetch: fetch) : await Matroska.fetchStart(at: seconds, fetch: fetch)
         #else
@@ -451,8 +440,6 @@ final class StreamRelay: @unchecked Sendable {
     }
 
     #if DEBUG
-    /// `-oldReadyStart YES`: a film's start fetched ahead as before, for a
-    /// before-and-after run.
     private static var oldReadyStart: Bool { UserDefaults.standard.bool(forKey: "oldReadyStart") }
     #endif
 
@@ -869,15 +856,12 @@ enum Matroska {
     private static let cueTrackPositionsID: UInt32 = 0xB7
     private static let cueClusterPositionID: UInt32 = 0xF1
 
-    /// Where things are in a file, from its start: where the segment's
-    /// contents start, its first cluster, its Cues, where what the
-    /// SeekHead lists past the clusters begins (the Cues, tags, chapters,
-    /// read on opening), and its time unit (ns).
     struct Layout {
         let segmentStart: Int64
         let firstCluster: Int64?
         let cues: Int64?
-        let end: Int64?
+        /// Earliest SeekHead offset after the clusters. libmpv reads that tail on open.
+        let pastClusters: Int64?
         let timecodeScale: UInt64
     }
 
@@ -906,15 +890,15 @@ enum Matroska {
             i = body + Int(length)
         }
         let positions = (listed ?? []).map { (target: $0.0, at: Int64(segmentStart) + Int64($0.1)) }
-        let end = firstCluster.flatMap { first in positions.filter { $0.target != clusterID && $0.at > first }.map(\.at).min() }
+        let pastClusters = firstCluster.flatMap { first in
+            positions.filter { $0.target != clusterID && $0.at > first }.map(\.at).min()
+        }
         return Layout(segmentStart: Int64(segmentStart), firstCluster: firstCluster, cues: positions.first { $0.target == cuesID }?.at,
-                      end: end, timecodeScale: scale)
+                      pastClusters: pastClusters, timecodeScale: scale)
     }
 
-    /// From the Cues (`d` starts with the element): where the cluster mpv
-    /// starts in for `seconds` starts, from the start of the segment's
-    /// contents: the one holding the last keyframe at or before it, else
-    /// the first (a film whose first keyframe is a moment in, from 0 s).
+    /// libmpv's CueClusterPosition for `seconds`, counted from the segment:
+    /// the last keyframe at or before it, else the next.
     static func clusterPosition(in d: [UInt8], at seconds: Double, scale: UInt64) -> Int64? {
         guard let (element, el) = id(d, 0), element == cuesID, let (length, sl) = size(d, el), let length else { return nil }
         let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(scale))
@@ -995,16 +979,8 @@ enum Matroska {
         return found
     }
 
-    /// The most of a file's header or of its end fetched ahead.
     private static let largest: Int64 = 32 << 20
 
-    /// What libmpv reads opening a film to start at `seconds`, before its
-    /// first frame, fetched once each through `fetch` (from where, how
-    /// many; the bytes and the file's size, nil: failed): its first read;
-    /// the file's end from what the SeekHead lists past the clusters (the
-    /// Cues, then the tags, in one read); the first read again from its
-    /// first cluster, once it has the header; and where it starts, the first
-    /// read after the jump and the one after it.
     static func fetchStart(at seconds: Double, fetch: (Int64, Int64) async -> (data: Data, total: Int64)?) async -> Bool {
         let first = StreamRelay.firstRead
         guard let (head, total) = await fetch(0, first), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total
@@ -1017,15 +993,15 @@ enum Matroska {
                 header = to
             }
         }
-        let end = layout.end.flatMap { total - $0 <= largest ? $0 : nil } ?? total
+        let tailAt = layout.pastClusters.flatMap { total - $0 <= largest ? $0 : nil } ?? total
         var tail: Data?
-        if end < total {
-            guard let fetched = await fetch(end, total - end) else { return false }
+        if tailAt < total {
+            guard let fetched = await fetch(tailAt, total - tailAt) else { return false }
             tail = fetched.data
         }
         let index: [UInt8]
-        if let tail, cues >= end {
-            index = [UInt8](tail.dropFirst(Int(cues - end)))
+        if let tail, cues >= tailAt {
+            index = [UInt8](tail.dropFirst(Int(cues - tailAt)))
         } else {
             guard let probe = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](probe.data.prefix(16))),
                   let whole = await fetch(cues, min(length, min(largest, total - cues))) else { return false }
@@ -1033,16 +1009,14 @@ enum Matroska {
         }
         guard let cluster = clusterPosition(in: index, at: seconds, scale: layout.timecodeScale) else { return false }
         let at = layout.segmentStart + cluster
-        let from = max(at, header), to = min(at + first + StreamRelay.readSize, end)
+        let from = max(at, header), to = min(at + first + StreamRelay.readSize, tailAt)
         guard from < to else { return true }
         return await fetch(from, to - from) != nil
     }
 
     #if DEBUG
-    /// As fetched before (`-oldReadyStart YES`): the first 256 KB, the Cues
-    /// alone, and 8 MB from the cluster where the whole second starts. One
-    /// difference: a film started from its beginning got none of that
-    /// cluster then, and gets it here.
+    /// The old ranges, but the cluster is the new choice. A film from the
+    /// start gets its first cluster, which the old fetch skipped.
     static func fetchStartAsBefore(at seconds: Double, fetch: (Int64, Int64) async -> (data: Data, total: Int64)?) async -> Bool {
         guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total,
               let first = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](first.data.prefix(16))),
@@ -1087,10 +1061,8 @@ enum Matroska {
 
 struct FileStart: Hashable, Sendable {
     let itemId: String
-    /// Where the player is told to start, to a tenth of a second as
-    /// MPVPlayer.load tells it, so the keyframe it starts at is the one
-    /// fetched. Regression: the whole second, the keyframe before when one
-    /// fell in between.
+    /// The tenth of a second MPVPlayer.load tells mpv. A whole second is the
+    /// keyframe before, when one falls between.
     let seconds: Double
     let url: URL
     let headers: [String]

@@ -1,9 +1,10 @@
 #!/bin/zsh
-# make_real_film.sh [out-dir]: a two-hour test film laid out like a real one on Emby (about 510 MB): 720p at 23.976
-# frames a second, keyframes 24 frames apart as on a Blu-ray (so they fall between whole seconds), 5.1 and stereo sound,
-# English and Spanish subtitles with a line over most seconds, its index (Cues, about 230 KB) at the end, and its tags
-# after the index, where mkvmerge writes them. From 3 to 10 minutes it runs at about 9 Mbit/s (8 MB is 7 s of it), where
-# Continue Watching resumes it; elsewhere it's one colour, to keep it small:
+# make_real_film.sh [out-dir]: a two-hour film for Continue Watching (about 510 MB).
+# Keyframes are 24 frames apart at 24000/1001, as on a Blu-ray, so they fall
+# between whole seconds. Minutes 3 to 10 are busy, so 8 MB there is about 7 s,
+# which is where a resume lands. The rest is one colour so the file stays small.
+# ffmpeg leaves the tags in the header. The rewrite moves them to after the
+# index, where mkvmerge writes them.
 #   OPENIPTV_MOCK_VIDEO=<out>/real.mkv and /mock/set?watched_elsewhere=m1 (3:36 in; the next card, an episode, 8:48 in)
 set -e
 out=${1:-/tmp/openreel-media/real}

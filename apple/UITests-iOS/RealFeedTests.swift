@@ -825,11 +825,7 @@ final class RealFeedTests: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
     }
 
-    /// Films' starts as seen now (diagnostic, about 2 min a round): Continue
-    /// Watching's first two cards started as in testFilmBufferingAsSeenNow,
-    /// FILM_START_ROUNDS times (2), each with the reads before its first frame.
-    /// FILM_START_AT: each resumes there instead (a real server's places
-    /// fall between whole seconds).
+    /// FILM_START_AT is the resume point. A server's place falls between whole seconds.
     func testFilmStartsAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = ProcessInfo.processInfo.environment["FILM_START_AT"]
@@ -844,15 +840,13 @@ final class RealFeedTests: XCTestCase {
         for _ in 0..<rounds { try startCards(ids, shipped) }
     }
 
-    /// Each card started cold (nothing got ready ahead), ready (3 s on
-    /// screen) and ready the old way, before its whole start was got ready
-    /// (`-oldReadyStart YES`), in turns so no kind always goes first.
     private func startCards(_ ids: [String], _ shipped: [String]) throws {
         let kinds: [(name: String, arguments: [String])] = [
             ("cold", ["-noPrepareAhead", "YES"]), ("ready", []), ("ready (old way)", ["-oldReadyStart", "YES"]),
         ]
         for (n, id) in ids.enumerated() {
-            for kind in n % 2 == 0 ? kinds : kinds.reversed() {
+            // Swap the order each card, so one kind is not always first.
+            for kind in n.isMultiple(of: 2) ? kinds : kinds.reversed() {
                 app.launchArguments = shipped + kind.arguments
                 app.launch()
                 try bringOnScreen(id, at: n)
