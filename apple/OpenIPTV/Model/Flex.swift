@@ -193,7 +193,7 @@ enum HTTP {
         var elsewhere = request
         elsewhere.setValue(nil, forHTTPHeaderField: "X-Emby-Token")
         if var parts = URLComponents(url: target, resolvingAgainstBaseURL: false), parts.queryItems != nil {
-            parts.queryItems = parts.queryItems?.filter { $0.name != "api_key" }
+            parts.queryItems = parts.queryItems?.filter { $0.name.lowercased() != "api_key" }
             if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
             elsewhere.url = parts.url ?? target
         }
@@ -201,7 +201,11 @@ enum HTTP {
     }
 
     static func sameServer(_ a: URL, _ b: URL) -> Bool {
-        a.scheme == b.scheme && a.host() == b.host() && a.port == b.port
+        a.scheme == b.scheme && a.host() == b.host() && port(a) == port(b)
+    }
+
+    private static func port(_ url: URL) -> Int? {
+        url.port ?? ["http": 80, "https": 443][url.scheme ?? ""]
     }
 
     static let keyOutOfRedirects = KeyOutOfRedirects()
