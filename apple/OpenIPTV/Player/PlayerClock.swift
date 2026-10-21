@@ -14,7 +14,8 @@ final class PlayerClock {
     #if DEBUG
     /// UI tests: "72.4 playing".
     var readout = ""
-    /// UI tests: the stream's own second (its clock, before `offset`).
+    /// UI tests: the stream's own second, by its timestamps (the player's
+    /// clock starts at 0 where the stream begins).
     var streamReadout = ""
     #endif
 

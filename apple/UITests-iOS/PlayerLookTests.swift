@@ -565,7 +565,7 @@ final class PlayerLookTests: XCTestCase {
     /// the start, as Emby makes it, whatever second it's asked from), so
     /// it's played from where the film was. Regression: it was played from
     /// its start (the user: "it stops loading and then starts playing from
-    /// the beginning"); the stream's own clock tells.
+    /// the beginning"); the stream's own second, by its timestamps, tells.
     func testLowerQualityPlaysOnFromTheSameSecond() throws {
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
         openFilm()
@@ -614,6 +614,34 @@ final class PlayerLookTests: XCTestCase {
         }
         print("DEEP lowered at \(from): \(seen.map { Int($0) })")
         XCTAssertGreaterThan(seen.last ?? -1, from + 15, "the film stopped after the quality dropped: \(seen.map { Int($0) })")
+    }
+
+    /// A jump back past where a lower quality began plays from where it
+    /// lands, its pictures where the bar says. The server's converted
+    /// version is listed from the segment the film was at, so the jump
+    /// opens it again from there; else the jump stopped at the version's
+    /// start. The test server converts as Emby does.
+    func testJumpBackPastALowerQualitysStartPlaysFromThere() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["emby_convert": "1", "convert_delay": "2"])
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
+        openFilm()
+        let buffering = app.staticTexts["debug-buffering"].firstMatch
+        for _ in 0..<60 where !buffering.label.contains("converted ") { usleep(500_000) }
+        XCTAssertTrue(buffering.label.contains("converted "), "the lower quality didn't start: \(buffering.label)")
+        let from = try XCTUnwrap(position(), "no position")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        let back = app.buttons["Back 10 seconds"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "no Back 10 seconds")
+        back.tap()
+        sleep(8)
+        let film = try XCTUnwrap(position(), "no position")
+        let stream = Double(app.staticTexts["debug-stream-time"].firstMatch.label) ?? -1
+        print("JUMP BACK from \(from) s: the film at \(film) s, the stream's own second \(stream)")
+        XCTAssertLessThan(film, from - 2, "the jump back stopped at the lower quality's start")
+        XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
     }
 
     /// Subtitles showing stay, in time, when a slow connection lowers the

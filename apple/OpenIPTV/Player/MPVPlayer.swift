@@ -185,6 +185,9 @@ final class MPVPlayer: @unchecked Sendable {
     var startNote: String { stateLock.withLock { startTiming.note } }
     private var bufferingLog = BufferingLog()
     private var convertedAskedAt: CFAbsoluteTime?
+    /// The stream's first timestamp: libmpv's clock is 0 there.
+    private var streamStart = 0.0
+    var streamStartTime: Double { stateLock.withLock { streamStart } }
     private var serverBytesAtSeek: Int64 = 0
     var bufferingReadout: String { stateLock.withLock { bufferingLog.readout } }
     private var awaitingSubtitleLine: (n: Int, since: CFAbsoluteTime)?
@@ -1450,6 +1453,9 @@ final class MPVPlayer: @unchecked Sendable {
             restoreCarried()
             #if DEBUG
             noteTracks()
+            var start = 0.0
+            if let mpv, mpv_get_property(mpv, "demuxer-start-time", MPV_FORMAT_DOUBLE, &start) < 0 { start = 0 }
+            stateLock.withLock { streamStart = start }
             #endif
         case MPV_EVENT_PLAYBACK_RESTART:
             if let attempt = stateLock.withLock({ loads.restarted() }) {
