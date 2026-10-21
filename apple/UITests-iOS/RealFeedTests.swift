@@ -710,18 +710,7 @@ final class RealFeedTests: XCTestCase {
         shot("home at launch")
         app.terminate()
 
-        let starts = [("cold", ["-noPrepareAhead", "YES"]), ("ready (old way)", ["-oldReadyStart", "YES"]), ("ready", [])]
-        for (n, id) in ids.enumerated() {
-            for (name, arguments) in n % 2 == 0 ? starts : starts.reversed() {
-                app.launchArguments = shipped + arguments
-                app.launch()
-                try bringOnScreen(id, at: n)
-                if name != "cold" { sleep(3) }
-                app.buttons[id].tap()
-                say("REAL start card \(n + 1) \(name): " + startParts())
-                app.terminate()
-            }
-        }
+        try startCards(ids, shipped)
 
         for old in [true, false] {
             try playAndSwitch(ids[0], launch: shipped + (old ? ["-oldRelayCache", "YES"] : []), for: playFor, way: old ? " (old way)" : "")
@@ -834,6 +823,42 @@ final class RealFeedTests: XCTestCase {
         say("REAL converted start\(old ? " (old way)" : ""): \(last("opens", in: buffering.label)) | \(app.staticTexts["debug-quality"].firstMatch.label)")
         app.terminate()
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
+    }
+
+    /// Films' starts as seen now (diagnostic, about 2 min a round): Continue
+    /// Watching's first two cards started as in testFilmBufferingAsSeenNow,
+    /// FILM_START_ROUNDS times (2), each with the reads before its first frame.
+    func testFilmStartsAsSeenNow() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
+        app.launchArguments = shipped
+        app.launch()
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'"))
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 45), "no Continue Watching")
+        let ids = Array(cards.allElementsBoundByIndex.prefix(2).map(\.identifier))
+        app.terminate()
+        let rounds = ProcessInfo.processInfo.environment["FILM_START_ROUNDS"].flatMap(Int.init) ?? 2
+        for _ in 0..<rounds { try startCards(ids, shipped) }
+    }
+
+    /// Each card started cold (nothing got ready ahead), ready (3 s on
+    /// screen) and ready as before its whole start was got ready
+    /// (`-oldReadyStart YES`), in turns so no kind always goes first.
+    private func startCards(_ ids: [String], _ shipped: [String]) throws {
+        let kinds: [(name: String, arguments: [String])] = [
+            ("cold", ["-noPrepareAhead", "YES"]), ("ready", []), ("ready as before", ["-oldReadyStart", "YES"]),
+        ]
+        for (n, id) in ids.enumerated() {
+            for kind in n % 2 == 0 ? kinds : kinds.reversed() {
+                app.launchArguments = shipped + kind.arguments
+                app.launch()
+                try bringOnScreen(id, at: n)
+                if kind.name != "cold" { sleep(3) }
+                app.buttons[id].tap()
+                say("REAL start card \(n + 1) \(kind.name): " + startParts())
+                app.terminate()
+            }
+        }
     }
 
     /// Home draws in parts, so a card still moving is left alone. How much
