@@ -1111,10 +1111,9 @@ struct MoviePlayerView: View {
             }
         }
         #endif
-        if let (warmPlayer, _, warmStream) = model.takeWarm(playback.itemId, at: playback.startSeconds) {
+        if let (warmPlayer, _) = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
-            stream = warmStream
             PlaybackAudio.activate()
             warmPlayer.onEvent = { event, _ in handle(event) }
             self.player = warmPlayer
@@ -1518,9 +1517,11 @@ struct MoviePlayerView: View {
         #endif
         // Kept, paused here, for a moment: chosen again, it carries on at
         // once (it closed, and the next tap waited for the server and a
-        // new stream, then started where the server last heard).
+        // new stream, then started where the server last heard). Not a
+        // version listed from a segment: the quality chooser would take it
+        // for the original.
         if let player {
-            if started, error == nil { model.park(player, playback.resuming(at: seconds), stream: stream) } else { player.shutdown() }
+            if started, error == nil, case .whole = stream { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
         }
         player = nil
         let noted = closedAt != nil
