@@ -116,6 +116,39 @@ extension PlayerLookTests {
         XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
     }
 
+    /// The window's skip back past the version's start opens it again from
+    /// there: the window's clock goes there at once, as the screen's bar
+    /// does, and its next skip counts from there.
+    func testASkipBackInTheWindowPastALowerQualitysStartGoesThereAtOnce() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        openLowered(server)
+        waitForTheLowerQuality()
+        controlsUp()
+        let pip = app.buttons["Picture in Picture"].firstMatch
+        XCTAssertTrue(pip.waitForExistence(timeout: 3), "no Picture in Picture button")
+        pip.tap()
+        let asked = Date()
+        while Date().timeIntervalSince(asked) < 8, pipState() == nil { usleep(200_000) }
+        let before = try XCTUnwrap(pipState()?.seconds, "Picture in Picture didn't start")
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        board.otherElements["Video"].firstMatch.tap()
+        let back = board.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'back'")).firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 3), "no skip back in the window")
+        back.tap()
+        var seen: [Int] = []
+        let tapped = Date()
+        while Date().timeIntervalSince(tapped) < 2 {
+            if let seconds = pipState()?.seconds { seen.append(Int(seconds)) }
+            usleep(100_000)
+        }
+        print("PIP SKIP BACK from \(Int(before)) s: the window's clock \(seen)")
+        XCTAssertFalse(seen.isEmpty, "no window clock after the skip")
+        XCTAssertTrue(seen.allSatisfy { Double($0) < before - 5 }, "the window's clock wasn't where it skipped to: \(seen)")
+    }
+
     func testAJumpBackAfterPictureInPicturePlaysFromThere() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
