@@ -472,18 +472,25 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertFalse(main.label.hasPrefix("Play"), "the page still says \(main.label)")
     }
 
-    /// A quality change mid-film: a small note at the top, the controls
-    /// stay hidden. Regression: every control came up for four seconds.
-    func testQualityNoteKeepsControlsHidden() {
-        app.launchEnvironment["OPENREEL_DEBUG_NOTE_AFTER"] = "12"
+    /// The quality drops without a word while the film plays on.
+    func testQualityDropsWithoutANote() {
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
         openFilm()
-        // The controls hide again after the start (openFilm tapped once).
-        sleep(5)
-        XCTAssertFalse(app.buttons["Close player"].isHittable, "the controls are still up before the note")
+        let quality = app.staticTexts["debug-quality"].firstMatch
         let note = app.descendants(matching: .any)["player-note"].firstMatch
-        XCTAssertTrue(note.waitForExistence(timeout: 8), "no note")
-        shot("quality note")
-        XCTAssertFalse(app.buttons["Close player"].isHittable, "the note brought up the controls")
+        var lowered = false, noted: String?
+        for _ in 0..<80 where !lowered {
+            usleep(500_000)
+            if note.exists { noted = note.label }
+            lowered = quality.exists && quality.label.hasPrefix("converted")
+        }
+        XCTAssertTrue(lowered, "the quality wasn't lowered: \(quality.exists ? quality.label : "no readout")")
+        for _ in 0..<12 where noted == nil {
+            usleep(500_000)
+            if note.exists { noted = note.label }
+        }
+        print("NOTE \(noted ?? "none")")
+        XCTAssertNil(noted, "a note showed when the quality dropped")
     }
 
     /// The sound button at the top right, as in the Apple TV app: Mute, then

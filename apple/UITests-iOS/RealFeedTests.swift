@@ -127,7 +127,8 @@ final class RealFeedTests: XCTestCase {
     }
 
     /// A film opened forty minutes in, lowered to the server's converted
-    /// version 15 s later, plays on. Prints only yes or no and seconds.
+    /// version 15 s later, plays on without a note. Prints only yes or no
+    /// and seconds.
     func testLowerQualityDeepInAFilmPlaysOn() throws {
         let film = ProcessInfo.processInfo.environment["REAL_FEED_FILM"] ?? "Asterix and Cleopatra"
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
@@ -176,6 +177,7 @@ final class RealFeedTests: XCTestCase {
               + " | note shown \(noted ? "yes" : "no")")
         XCTAssertTrue(lowered, "the film wasn't lowered to the converted version")
         XCTAssertNotNil(firstFrame, "the film stopped after the quality dropped")
+        XCTAssertFalse(noted, "a note showed when the quality dropped")
     }
 
     /// Sentimental Destinies: French sound, and on the server only French
