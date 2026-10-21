@@ -699,6 +699,7 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
         XCTAssertTrue(game.label.contains("Not playing"), "no word that nothing played: \(game.label)")
         XCTAssertFalse(game.label.contains("channels"), "a channel count on a game that played nowhere: \(game.label)")
+        try assertTileCrossedOut(game)
     }
 
     func testMarkBeforeKickoffEndsAtKickoff() throws {
@@ -749,6 +750,7 @@ final class LiveSportsTests: XCTestCase {
         let shown = Date().addingTimeInterval(10)
         while !game.label.contains("Not playing"), Date() < shown { usleep(250_000) }
         XCTAssertTrue(game.label.contains("Not playing"), "another device's finding 14 min ago isn't shown: \(game.label)")
+        try assertTileCrossedOut(game)
         app.terminate()
 
         try markNotPlaying(server, minutesAgo: 16)
@@ -782,6 +784,18 @@ final class LiveSportsTests: XCTestCase {
         XCTAssertTrue(game.waitForExistence(timeout: 10), "the game left Sports")
         XCTAssertTrue(game.label.contains("LIVE") && !game.label.contains("Not playing"), "playing didn't clear the mark: \(game.label)")
         XCTAssertFalse(game.label.contains("5 channels"), "the feeds that didn't play are counted: \(game.label)")
+    }
+
+    private func assertTileCrossedOut(_ game: XCUIElement, file: StaticString = #filePath, line: UInt = #line) throws {
+        sleep(1)
+        let shot = XCUIScreen.main.screenshot()
+        let logo = try XCTUnwrap(tile(of: game, in: shot), "no logo tile on the game's row", file: file, line: line)
+        let corner = badge(on: logo).insetBy(dx: 2, dy: 2)
+        let countCapsule = CGRect(x: corner.maxX - 24, y: corner.minY, width: 24, height: corner.height)
+        XCTAssertGreaterThan(brightest(shot, in: corner), 200, "no crossed-out TV on the game's tile", file: file, line: line)
+        XCTAssertLessThan(luminance(shot, in: countCapsule), 120,
+                          "a channel count on the tile of a game that played nowhere (mean \(Int(luminance(shot, in: countCapsule))))",
+                          file: file, line: line)
     }
 
     private func gameRow() -> XCUIElement {

@@ -214,6 +214,51 @@ final class LiveFailuresTests: XCTestCase {
         XCTAssertFalse(failures.failed([]))
     }
 
+    private let twoFeeds = [["golf-a"], ["golf-b"]]
+
+    func testAnotherDevicesFindingCrossesOutTheGame() {
+        var failures = LiveFailures()
+        failures.noteSharedGame(["golf-a", "golf-b"], at: at(0), now: at(0))
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(60)), .notPlaying, "no channel mark here, the game's mark from the server")
+    }
+
+    func testGameMarkOutlivesTheChannelMarks() {
+        var failures = LiveFailures()
+        failures.note("golf-a", at: at(0))
+        failures.note("golf-b", at: at(0))
+        failures.noteSharedGame(["golf-a", "golf-b"], at: at(0), now: at(0))
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(599)), .notPlaying)
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(600)), .notPlaying, "the channel marks ended at 10 min, the game's lasts 15")
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(900)), .feedsLeft(2))
+    }
+
+    func testOneFeedFailedAndOneUntried() {
+        var failures = LiveFailures()
+        failures.note("golf-a", at: at(0))
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(60)), .feedsLeft(1))
+        failures.note("golf-b", at: at(0))
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(60)), .notPlaying, "every feed failed here, no game mark yet")
+    }
+
+    func testSameFeedOnTwoChannelsCountsOnce() {
+        var failures = LiveFailures()
+        let feeds = [["golf-a", "golf-a2"], ["golf-b"]]
+        failures.note("golf-a", at: at(0))
+        failures.note("golf-b", at: at(0))
+        XCTAssertEqual(failures.gameState(feeds: feeds, at: at(60)), .feedsLeft(1), "the feed's other channel wasn't tried")
+        failures.note("golf-a2", at: at(0))
+        XCTAssertEqual(failures.gameState(feeds: feeds, at: at(60)), .notPlaying)
+    }
+
+    func testGameTriedBeforeKickoffIsBackAtKickoff() {
+        var failures = LiveFailures()
+        failures.note("golf-a", at: at(0), kickoff: at(120))
+        failures.note("golf-b", at: at(0), kickoff: at(120))
+        failures.noteSharedGame(["golf-a", "golf-b"], at: at(0), kickoff: at(120), now: at(0))
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(119)), .notPlaying)
+        XCTAssertEqual(failures.gameState(feeds: twoFeeds, at: at(120)), .feedsLeft(2))
+    }
+
     func testFailedCopiesGoLast() {
         struct Copy: Identifiable, Equatable { let id: String }
         let copies = ["fhd", "hd", "sd", "lbw"].map(Copy.init)
