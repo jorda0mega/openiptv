@@ -87,7 +87,7 @@ struct MovieView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         #endif
         .task { await load() }
-        .task(id: route.id) { await model.ahead.holding(.playable(id: route.id, kind: "Movie"), at: .page) }
+        .preparesAhead(.playable(id: route.id, kind: "Movie"), at: .page)
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}

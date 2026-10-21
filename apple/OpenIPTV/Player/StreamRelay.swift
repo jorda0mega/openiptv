@@ -302,11 +302,13 @@ final class StreamRelay: @unchecked Sendable {
     /// waited for the server three times before its first frame (the
     /// header, the index at the end of the file, the part where it
     /// resumes); one from the beginning, once.
-    func fetchStart(url: URL, headers: [String], at seconds: Double) async {
-        await withCheckedContinuation { done in fetchStart(url: url, headers: headers, at: seconds) { done.resume() } }
+    /// False when it stopped short (something started playing, the server
+    /// failed, not a Matroska file).
+    func fetchStart(url: URL, headers: [String], at seconds: Double) async -> Bool {
+        await withCheckedContinuation { done in fetchStart(url: url, headers: headers, at: seconds) { done.resume(returning: $0) } }
     }
 
-    private func fetchStart(url: URL, headers: [String], at seconds: Double, finished: @escaping @Sendable () -> Void) {
+    private func fetchStart(url: URL, headers: [String], at seconds: Double, finished: @escaping @Sendable (Bool) -> Void) {
         start()
         let key = cacheKey(url)
         // Asked a moment after something started playing: not now.
@@ -316,32 +318,32 @@ final class StreamRelay: @unchecked Sendable {
             aheadFiles.insert(key)
             return true
         }
-        guard allowed else { return finished() }
+        guard allowed else { return finished(false) }
         let route = Self.route(url, headers)
         queue.async { [weak self] in
-            guard let self, let cache = self.cache(for: route.url) else { return finished() }
+            guard let self, let cache = self.cache(for: route.url) else { return finished(false) }
             #if DEBUG
             let started = CFAbsoluteTimeGetCurrent()
             #endif
             self.ensure(route, cache, from: 0, count: 1 << 18, ahead: key) { [weak self] head, total in
-                guard let self, let head, let total else { return finished() }
+                guard let self, let head, let total else { return finished(false) }
                 cache.noteFile(total: total, contentType: nil)
-                guard let layout = Matroska.layout(in: [UInt8](head)), let cues = layout.cues, cues < total else { return finished() }
+                guard let layout = Matroska.layout(in: [UInt8](head)), let cues = layout.cues, cues < total else { return finished(false) }
                 self.ensure(route, cache, from: cues, count: min(1 << 16, total - cues), ahead: key) { [weak self] first, _ in
-                    guard let self, let first, let length = Matroska.elementLength([UInt8](first.prefix(16))) else { return finished() }
+                    guard let self, let first, let length = Matroska.elementLength([UInt8](first.prefix(16))) else { return finished(false) }
                     let size = min(length, min(Int64(32 << 20), total - cues))
                     self.ensure(route, cache, from: cues, count: size, ahead: key) { [weak self] index, _ in
                         guard let self, let index,
                               let cluster = Matroska.clusterPosition(in: [UInt8](index), at: seconds, scale: layout.timecodeScale)
-                        else { return finished() }
+                        else { return finished(false) }
                         let at = layout.segmentStart + cluster
-                        guard at < total else { return finished() }
-                        self.ensure(route, cache, from: at, count: min(Int64(8 << 20), total - at), ahead: key) { _, _ in
+                        guard at < total else { return finished(false) }
+                        self.ensure(route, cache, from: at, count: min(Int64(8 << 20), total - at), ahead: key) { cluster, _ in
                             #if DEBUG
                             NSLog("%@", String(format: "PERF relay start fetched ahead at %.0f s in %.0f ms", seconds,
                                                (CFAbsoluteTimeGetCurrent() - started) * 1000))
                             #endif
-                            finished()
+                            finished(cluster != nil)
                         }
                     }
                 }
@@ -893,8 +895,15 @@ extension Lane {
 
 @MainActor
 enum FileStarts {
-    static let shelf = Shelf<FileStart, Bool>(.init(lane: .fileStarts, lifetime: .seconds(300))) { start in
+    static let shelf = shelf(lane: .fileStarts) { start in
         await StreamRelay.shared.fetchStart(url: start.url, headers: start.headers, at: Double(start.second))
-        return true
+    }
+
+    /// One that stopped short is asked again by the next warm-up.
+    static func shelf(lane: Lane, fetch: @escaping @Sendable (FileStart) async -> Bool) -> Shelf<FileStart, Bool> {
+        Shelf(.init(lane: lane, lifetime: .seconds(300), failureKept: .zero)) { start in
+            guard await fetch(start) else { throw SourceError.unexpected("The film's start wasn't fetched.") }
+            return true
+        }
     }
 }

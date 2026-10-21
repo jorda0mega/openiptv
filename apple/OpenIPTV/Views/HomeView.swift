@@ -516,6 +516,9 @@ private struct ContinueRow: View {
             }
             .scrollIndicators(.hidden)
         }
+        // The title most likely resumed: ready while Home is open, though
+        // the hero leaves its row half on screen at launch.
+        .preparesAhead(row.cards.first?.playTarget, at: .homeForecast)
     }
 
     /// As in the Apple TV app (measured at 3x from it): the picture fills
