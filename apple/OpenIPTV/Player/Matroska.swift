@@ -34,6 +34,12 @@ enum Matroska {
         let pastClusters: Int64?
         let timecodeScale: UInt64
         let videoTrack: UInt64?
+
+        /// What libmpv reads after the clusters on open, to 32 MB.
+        var tail: Range<Int64> {
+            let at = pastClusters ?? total
+            return at..<min(total, at + Matroska.largest)
+        }
     }
 
     static func layout(in d: [UInt8], total: Int64) -> Layout? {
@@ -219,10 +225,10 @@ enum Matroska {
                 header = to
             }
         }
-        let tailAt = layout.pastClusters ?? total
+        let tailAt = layout.tail.lowerBound
         var tail = Data()
-        if tailAt < total {
-            guard let fetched = await fetch(tailAt, min(largest, total - tailAt)) else { return false }
+        if !layout.tail.isEmpty {
+            guard let fetched = await fetch(tailAt, Int64(layout.tail.count)) else { return false }
             tail = fetched.data
         }
         let index: [UInt8]

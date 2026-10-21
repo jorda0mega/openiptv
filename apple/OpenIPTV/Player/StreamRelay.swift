@@ -461,6 +461,7 @@ final class StreamRelay: @unchecked Sendable {
     private func ensure(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, from: Int64, count: Int64,
                         ahead key: String? = nil, then: @escaping @Sendable (Data?, Int64?) -> Void) {
         if count > 0, cache.available(from: from) >= count, let kept = cache.read(from, Int(count)) {
+            cache.keep(from..<from + count)
             return then(kept, cache.total)
         }
         if let key, lock.withLock({ stoppedAhead.contains(key) }) { return then(nil, nil) }
@@ -526,7 +527,8 @@ final class StreamRelay: @unchecked Sendable {
             if tries > 0 { queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache, tries: tries - 1) } }
             return
         }
-        guard let cues = Matroska.layout(in: [UInt8](head), total: total)?.cues, cache.available(from: cues) == 0 else { return }
+        guard let layout = Matroska.layout(in: [UInt8](head), total: total), let cues = layout.cues else { return }
+        cache.keep(layout.tail)
         #if DEBUG
         let started = CFAbsoluteTimeGetCurrent()
         #endif

@@ -79,7 +79,11 @@ final class ByteCache: @unchecked Sendable {
         }
     }
 
-    func keep(_ bytes: Range<Int64>) {}
+    /// Never let go, whoever fetched them: the index and tags, once known.
+    func keep(_ bytes: Range<Int64>) {
+        guard !bytes.isEmpty else { return }
+        lock.withLock { fetchedAhead = Self.adding(bytes, to: fetchedAhead) }
+    }
 
     private static func adding(_ new: Range<Int64>, to ranges: [Range<Int64>]) -> [Range<Int64>] {
         var merged = new
