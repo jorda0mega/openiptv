@@ -189,10 +189,7 @@ enum HTTP {
 
     /// The address a server redirects to is the server's choice.
     static func redirected(_ request: URLRequest, from original: URL?) -> URLRequest {
-        guard let target = request.url, let original,
-              target.host() != original.host() || target.port != original.port || target.scheme != original.scheme else {
-            return keyInHeader(request)
-        }
+        guard let target = request.url, let original, !sameServer(target, original) else { return keyInHeader(request) }
         var elsewhere = request
         elsewhere.setValue(nil, forHTTPHeaderField: "X-Emby-Token")
         if var parts = URLComponents(url: target, resolvingAgainstBaseURL: false), parts.queryItems != nil {
@@ -201,6 +198,10 @@ enum HTTP {
             elsewhere.url = parts.url ?? target
         }
         return elsewhere
+    }
+
+    static func sameServer(_ a: URL, _ b: URL) -> Bool {
+        a.scheme == b.scheme && a.host() == b.host() && a.port == b.port
     }
 
     static let keyOutOfRedirects = KeyOutOfRedirects()
