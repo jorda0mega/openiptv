@@ -51,7 +51,7 @@ final class RealFeedTests: XCTestCase {
         // (the first scene): three sections in the end.
         func sections() -> Int { shift.exists && shift.label.hasPrefix("sections") ? shift.label.split(separator: " ").count - 1 : 0 }
         while Date().timeIntervalSince(opened) < 300, sections() < 3 { sleep(2) }
-        print("REAL tracks: \(tracks.exists ? tracks.label : "none") | shift \(shift.exists ? shift.label : "none") after \(Int(Date().timeIntervalSince(opened))) s")
+        say("REAL tracks: \(tracks.exists ? tracks.label : "none") | shift \(shift.exists ? shift.label : "none") after \(Int(Date().timeIntervalSince(opened))) s")
         shot("asterix subtitles")
         // "sections 0:+0.70 538:+6.50 2390:+7.30" (from, in the file's seconds: shift).
         let label = shift.label
@@ -85,7 +85,7 @@ final class RealFeedTests: XCTestCase {
         let shift = app.staticTexts["debug-subshift"].firstMatch
         let opened = Date()
         while Date().timeIntervalSince(opened) < 150, !(shift.exists && shift.label.split(separator: " ").count >= 4) { sleep(2) }
-        print("REAL as played before: \(shift.exists ? shift.label : "none")")
+        say("REAL as played before: \(shift.exists ? shift.label : "none")")
         XCTAssertEqual(shift.label.split(separator: " ").count - 1, 3, "not three sections: \(shift.label)")
     }
 
@@ -121,7 +121,7 @@ final class RealFeedTests: XCTestCase {
             film = position() ?? -1
             if stream > opened + 20 { break }
         }
-        print("REAL lowered: opened at \(opened) s, now the film at \(film) s, the stream's clock at \(stream) s")
+        say("REAL lowered: opened at \(opened) s, now the film at \(film) s, the stream's clock at \(stream) s")
         XCTAssertGreaterThan(stream, opened + 20, "the converted version plays from the film's start")
         XCTAssertEqual(stream, film, accuracy: 3, "the stream and the film's place differ")
     }
@@ -202,7 +202,7 @@ final class RealFeedTests: XCTestCase {
         let tracks = app.staticTexts["debug-tracks"].firstMatch
         let opened = Date()
         while Date().timeIntervalSince(opened) < 90, !(tracks.exists && tracks.label.hasSuffix("subtitles=eng")) { sleep(2) }
-        print("REAL found subtitles: \(tracks.exists ? tracks.label : "none") after \(Int(Date().timeIntervalSince(opened))) s")
+        say("REAL found subtitles: \(tracks.exists ? tracks.label : "none") after \(Int(Date().timeIntervalSince(opened))) s")
         shot("found subtitles")
         XCTAssertTrue(tracks.label.hasSuffix("subtitles=eng"), "no English subtitles found: \(tracks.label)")
     }
@@ -217,7 +217,7 @@ final class RealFeedTests: XCTestCase {
         shot("home")
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 10), "no Continue Watching card to play")
-        print("REAL playing: \(card.label)")
+        say("REAL playing: \(card.label)")
         card.tap()
         // The title's page (or the player at once): Play.
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
@@ -236,7 +236,7 @@ final class RealFeedTests: XCTestCase {
             usleep(500_000)
         }
         let start = try XCTUnwrap(moving, "the title didn't start in 60 s").timeIntervalSince(opened)
-        print("REAL title started \(String(format: "%.1f", start)) s after the player opened")
+        say("REAL title started \(String(format: "%.1f", start)) s after the player opened")
         let at = position() ?? 0
         sleep(6)
         let later = position() ?? 0
@@ -328,8 +328,8 @@ final class RealFeedTests: XCTestCase {
         sleep(3)
         shot("sports now")
         let labels = games.allElementsBoundByIndex.map(\.label)
-        print("REAL rows: \(labels.count) live or started, \(labels.filter { $0.contains("channels") }.count) with N channels, \(labels.filter { $0.contains("Not playing") }.count) not playing")
-        for label in labels.prefix(40) { print("REAL row: \(label)") }
+        say("REAL rows: \(labels.count) live or started, \(labels.filter { $0.contains("channels") }.count) with N channels, \(labels.filter { $0.contains("Not playing") }.count) not playing")
+        for label in labels.prefix(40) { say("REAL row: \(label)") }
         for index in 0..<min(games.count, 10) {
             let game = games.element(boundBy: index)
             guard game.isHittable else { continue }
@@ -339,25 +339,25 @@ final class RealFeedTests: XCTestCase {
             let state = waitForState(timeout: 25)
             showControls()
             let offered = app.buttons["Watch On"].firstMatch.waitForExistence(timeout: 2)
-            print("REAL tried \(label): \(state), copy \(liveCopy()), \(offered ? "Watch On" : "no Watch On")")
+            say("REAL tried \(label): \(state), copy \(liveCopy()), \(offered ? "Watch On" : "no Watch On")")
             app.buttons["Close player"].firstMatch.tap()
             sleep(2)
         }
         shot("sports after")
-        print("REAL rows after: " + games.allElementsBoundByIndex.prefix(12).map(\.label).joined(separator: " | "))
+        say("REAL rows after: " + games.allElementsBoundByIndex.prefix(12).map(\.label).joined(separator: " | "))
         // Games named in REAL_FEED_GAMES ("LSU,Boston College"), found by
         // scrolling, then tried.
         for name in (ProcessInfo.processInfo.environment["REAL_FEED_GAMES"] ?? "").split(separator: ",").map(String.init) {
             let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
             for _ in 0..<12 where !(row.exists && row.isHittable) { app.swipeUp() }
-            guard row.exists, row.isHittable else { print("REAL \(name): no row"); continue }
+            guard row.exists, row.isHittable else { say("REAL \(name): no row"); continue }
             let label = row.label
             row.tap()
             _ = waitForCopy(timeout: 10)
             let state = waitForState(timeout: 25)
             showControls()
             let offered = app.buttons["Watch On"].firstMatch.waitForExistence(timeout: 2)
-            print("REAL tried \(label): \(state), copy \(liveCopy()), \(offered ? "Watch On" : "no Watch On")")
+            say("REAL tried \(label): \(state), copy \(liveCopy()), \(offered ? "Watch On" : "no Watch On")")
             app.buttons["Close player"].firstMatch.tap()
             sleep(2)
         }
@@ -386,11 +386,11 @@ final class RealFeedTests: XCTestCase {
             field.typeText(word + "\n")
             let listed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", word + "|"), object: counts)
             guard XCTWaiter().wait(for: [listed], timeout: 60) == .completed else {
-                print("REAL search \(word): no results in 60 s")
+                say("REAL search \(word): no results in 60 s")
                 continue
             }
             sleep(5)
-            print("REAL search \(word): \(sections(counts))")
+            say("REAL search \(word): \(sections(counts))")
 
             var chosen = 0, followed = 0
             let taps = ["Movies", "Shows", "Live TV", "All"] + ["Movies", "Shows", "Live TV", "All"]
@@ -401,7 +401,7 @@ final class RealFeedTests: XCTestCase {
                 if filter.isSelected { chosen += 1 }
                 if listFollows(name) { followed += 1 }
             }
-            print("REAL search \(word) filters: \(taps.count) taps, chosen \(chosen), list followed \(followed); "
+            say("REAL search \(word) filters: \(taps.count) taps, chosen \(chosen), list followed \(followed); "
                 + "the frame-by-frame pill check needs a screen recording, not made on the real feeds")
 
             var moved = 0, stayed = 0
@@ -414,12 +414,16 @@ final class RealFeedTests: XCTestCase {
                 sleep(4)
                 if top != nil, topRow() == top { stayed += 1 }
             }
-            print("REAL search \(word) 3 screens down: the list moved \(moved) of 3, the top row then stayed put "
+            say("REAL search \(word) 3 screens down: the list moved \(moved) of 3, the top row then stayed put "
                 + "\(stayed == 3 ? "yes" : "no") (\(stayed) of 3); " + sections(counts))
             for _ in 0..<8 { drag(from: 0.25, to: 0.9) }
             sleep(2)
-            print("REAL search \(word) back at the top: \(sections(counts))")
+            say("REAL search \(word) back at the top: \(sections(counts))")
         }
+    }
+
+    private func say(_ line: String) {
+        print(line.replacing(#/tok=\w+/#, with: "tok=#"))
     }
 
     /// The counts readout without the text it's for.
@@ -480,10 +484,15 @@ final class RealFeedTests: XCTestCase {
 
         // The first live game that plays and is shown on more than one
         // channel (a game long started can be over: none of its play).
+        let several = games.matching(NSPredicate(format: "label MATCHES %@", "(?s).*\\b\\d+ channels\\b.*"))
+        guard several.count > 0 else {
+            say("REAL no game on 2+ channels")
+            throw XCTSkip("no game on 2+ channels")
+        }
         var title: String?
         var started = ""
-        for index in 0..<min(games.count, 12) {
-            let game = games.element(boundBy: index)
+        for index in 0..<min(several.count, 12) {
+            let game = several.element(boundBy: index)
             guard game.isHittable else { continue }
             let label = game.label
             game.tap()
@@ -491,7 +500,7 @@ final class RealFeedTests: XCTestCase {
             let state = waitForState(timeout: 25)
             showControls()
             let offered = app.buttons["Watch On"].firstMatch.waitForExistence(timeout: 2)
-            print("REAL tried \(label): \(state), \(offered ? "Watch On" : "one channel")")
+            say("REAL tried \(label): \(state), \(offered ? "Watch On" : "one channel")")
             if state == "playing", offered {
                 title = label
                 started = liveCopy()
@@ -500,16 +509,16 @@ final class RealFeedTests: XCTestCase {
             app.buttons["Close player"].firstMatch.tap()
             sleep(1)
         }
-        let game = try XCTUnwrap(title, "no live game that plays on more than one channel")
-        print("REAL game: \(game)")
-        print("REAL first channel: \(started)")
+        let game = try XCTUnwrap(title, "no live game on 2+ channels played")
+        say("REAL game: \(game)")
+        say("REAL first channel: \(started)")
 
         showControls()
         app.buttons["Watch On"].firstMatch.tap()
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.card.'"))
         XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 5), "Watch On listed nothing")
         XCTAssertGreaterThanOrEqual(cards.count, 2, "Watch On has one channel")
-        for card in cards.allElementsBoundByIndex { print("REAL choice: \(card.label)") }
+        for card in cards.allElementsBoundByIndex { say("REAL choice: \(card.label)") }
         shot("watch on")
         // Each feed once (a provider lists one feed in two slots; the user
         // saw "Football · Soccer, OneSoccer Feed" twice).
@@ -527,9 +536,9 @@ final class RealFeedTests: XCTestCase {
             card.tap()
             let deadline = Date().addingTimeInterval(10)
             while liveCopy() == before, Date() < deadline { usleep(250_000) }
-            XCTAssertNotEqual(liveCopy(), before, "picking \(label) didn't switch")
+            XCTAssertTrue(liveCopy() != before, "picking \(label) didn't switch")
             let state = waitForState(timeout: 20)
-            print("REAL picked \(label): \(state) (\(liveCopy()))")
+            say("REAL picked \(label): \(state) (\(liveCopy()))")
             if state == "playing" {
                 picked = liveCopy()
                 break
@@ -539,7 +548,7 @@ final class RealFeedTests: XCTestCase {
         shot("picked")
         // Every other one over or failing: the app fell back to the first.
         guard pick != started else {
-            print("REAL no other channel played; the app fell back to \(pick)")
+            say("REAL no other channel played; the app fell back to \(pick)")
             return
         }
 
@@ -548,7 +557,7 @@ final class RealFeedTests: XCTestCase {
         let again = app.buttons.matching(NSPredicate(format: "label == %@", game)).firstMatch
         XCTAssertTrue(again.waitForExistence(timeout: 10), "the game left the list")
         again.tap()
-        XCTAssertEqual(waitForCopy(timeout: 10), pick, "the league's pick didn't play first")
+        XCTAssertTrue(waitForCopy(timeout: 10) == pick, "the league's pick didn't play first")
         XCTAssertEqual(waitForState(timeout: 30), "playing", "the pick didn't start the second time")
         shot("pick first")
     }
@@ -577,7 +586,7 @@ final class RealFeedTests: XCTestCase {
         // A real server lists the tracks a few seconds after the picture.
         let listed = Date().addingTimeInterval(20)
         while tracks.label.isEmpty, Date() < listed { usleep(250_000) }
-        print("REAL Dragon Ball Z: item \(item.label), \(tracks.label)")
+        say("REAL Dragon Ball Z: item \(item.label), \(tracks.label)")
         XCTAssertEqual(item.label, "6327691", "not the copy with English sound")
         XCTAssertTrue(tracks.label.hasPrefix("audio=eng"), "not in English: \(tracks.label)")
 
@@ -599,7 +608,7 @@ final class RealFeedTests: XCTestCase {
             if loading.exists { loaded = true }
             usleep(100_000)
         }
-        print("REAL switched to \(item.label), start \(app.staticTexts["debug-start"].firstMatch.label)")
+        say("REAL switched to \(item.label), start \(app.staticTexts["debug-start"].firstMatch.label)")
         XCTAssertEqual(item.label, "7085005", "the Spanish copy didn't take over")
         XCTAssertFalse(loaded, "the picture loaded while the audio switched")
         shot("dragon ball z spanish")
@@ -663,7 +672,7 @@ final class RealFeedTests: XCTestCase {
         let keys = app.staticTexts["debug-hls-keys"].firstMatch
         shot("film auth")
         let counted = keys.exists && keys.label.hasPrefix("master") ? keys.label : "not counted"
-        print("REAL auth: converted version plays \(plays ? "yes" : "no") | playlist addresses with the key: \(counted)")
+        say("REAL auth: converted version plays \(plays ? "yes" : "no") | playlist addresses with the key: \(counted)")
         XCTAssertTrue(converted, "the film wasn't lowered to the converted version")
         XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
     }
