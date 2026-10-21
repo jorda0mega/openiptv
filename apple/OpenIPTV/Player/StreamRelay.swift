@@ -47,7 +47,7 @@ final class StreamRelay: @unchecked Sendable {
     private var playingFile: String?
     private static let keptFiles = 6
     /// How much the player asks for at once (see MPVPlayer.load): its first
-    /// read of a file, then each one after.
+    /// read after it opens the file or jumps in it, then each one after.
     static let firstRead: Int64 = 512 << 10
     static let readSize: Int64 = 8 << 20
 
@@ -407,11 +407,11 @@ final class StreamRelay: @unchecked Sendable {
     // MARK: Ahead of a tap
 
     /// The start of a film likely to be played next (Continue Watching):
-    /// its header, its index and the part where it resumes, fetched into
-    /// the cache ahead, so opening it reads from the device. A resumed film
-    /// waited for the server three times before its first frame (the
-    /// header, the index at the end of the file, the part where it
-    /// resumes); one from the beginning, once.
+    /// what opening it reads before its first frame (Matroska.fetchStart),
+    /// fetched into the cache ahead, so it all comes from the device. A
+    /// resumed film waited for the server three times before its first
+    /// frame (the header, the index at the end of the file, the part where
+    /// it resumes); one from the beginning, once.
     func fetchStart(url: URL, headers: [String], at seconds: Double) async -> Bool {
         start()
         let key = cacheKey(url)
@@ -427,7 +427,7 @@ final class StreamRelay: @unchecked Sendable {
         #if DEBUG
         let started = CFAbsoluteTimeGetCurrent()
         #endif
-        let fetched = await Matroska.fetchStart(at: seconds) { from, count in
+        let fetch = { [self] (from: Int64, count: Int64) in
             await withCheckedContinuation { done in
                 queue.async { [self] in
                     ensure(route, cache, from: from, count: count, ahead: key) { data, total in
@@ -437,12 +437,24 @@ final class StreamRelay: @unchecked Sendable {
             }
         }
         #if DEBUG
+        let fetched = Self.oldReadyStart
+            ? await Matroska.fetchStartAsBefore(at: seconds.rounded(.down), fetch: fetch) : await Matroska.fetchStart(at: seconds, fetch: fetch)
+        #else
+        let fetched = await Matroska.fetchStart(at: seconds, fetch: fetch)
+        #endif
+        #if DEBUG
         if fetched {
             NSLog("%@", String(format: "PERF relay start fetched ahead at %.0f s in %.0f ms", seconds, (CFAbsoluteTimeGetCurrent() - started) * 1000))
         }
         #endif
         return fetched
     }
+
+    #if DEBUG
+    /// `-oldReadyStart YES`: a film's start fetched ahead as before, for a
+    /// before-and-after run.
+    private static var oldReadyStart: Bool { UserDefaults.standard.bool(forKey: "oldReadyStart") }
+    #endif
 
     /// These bytes of the file in the cache (fetched unless already there),
     /// then `then` with them and the file's size (nil: failed). `ahead`:
@@ -858,10 +870,14 @@ enum Matroska {
     private static let cueClusterPositionID: UInt32 = 0xF1
 
     /// Where things are in a file, from its start: where the segment's
-    /// contents start, where the Cues are, and its time unit (ns).
+    /// contents start, its first cluster, its Cues, where what the
+    /// SeekHead lists past the clusters begins (the Cues, tags, chapters,
+    /// read on opening), and its time unit (ns).
     struct Layout {
         let segmentStart: Int64
+        let firstCluster: Int64?
         let cues: Int64?
+        let end: Int64?
         let timecodeScale: UInt64
     }
 
@@ -871,15 +887,17 @@ enum Matroska {
         guard let (segment, gl) = id(d, i), segment == segmentID, let (_, zl) = self.size(d, i + gl) else { return nil }
         let segmentStart = i + gl + zl
         i = segmentStart
-        var cues: Int64?
+        var listed: [(UInt32, UInt64)]?
+        var firstCluster: Int64?
         var scale: UInt64 = 1_000_000
-        while let (element, el) = id(d, i), let (length, ll) = self.size(d, i + el), let length, length < 1 << 31 {
-            let body = i + el + ll
-            if element == clusterID { break }
-            if element == seekHeadID, cues == nil {
-                cues = seeks(d, from: body, to: min(body + Int(length), d.count)).first { $0.0 == cuesID }
-                    .map { Int64(segmentStart) + Int64($0.1) }
+        while let (element, el) = id(d, i) {
+            if element == clusterID {
+                firstCluster = Int64(i)
+                break
             }
+            guard let (length, ll) = self.size(d, i + el), let length, length < 1 << 31 else { break }
+            let body = i + el + ll
+            if element == seekHeadID, listed == nil { listed = seeks(d, from: body, to: min(body + Int(length), d.count)) }
             if element == infoID {
                 for (child, value) in children(d, from: body, to: min(body + Int(length), d.count)) where child == timecodeScaleID {
                     if let unit = uint(value), unit > 0 { scale = unit }
@@ -887,26 +905,31 @@ enum Matroska {
             }
             i = body + Int(length)
         }
-        return Layout(segmentStart: Int64(segmentStart), cues: cues, timecodeScale: scale)
+        let positions = (listed ?? []).map { (target: $0.0, at: Int64(segmentStart) + Int64($0.1)) }
+        let end = firstCluster.flatMap { first in positions.filter { $0.target != clusterID && $0.at > first }.map(\.at).min() }
+        return Layout(segmentStart: Int64(segmentStart), firstCluster: firstCluster, cues: positions.first { $0.target == cuesID }?.at,
+                      end: end, timecodeScale: scale)
     }
 
-    /// From the Cues (`d` starts with the element): where the cluster
-    /// holding the keyframe at or before `seconds` starts, from the start
-    /// of the segment's contents.
+    /// From the Cues (`d` starts with the element): where the cluster mpv
+    /// starts in for `seconds` starts, from the start of the segment's
+    /// contents: the one holding the last keyframe at or before it, else
+    /// the first (a film whose first keyframe is a moment in, from 0 s).
     static func clusterPosition(in d: [UInt8], at seconds: Double, scale: UInt64) -> Int64? {
-        guard let (element, el) = id(d, 0), element == cuesID, let (_, sl) = size(d, el) else { return nil }
+        guard let (element, el) = id(d, 0), element == cuesID, let (size, sl) = size(d, el), let size else { return nil }
         let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(scale))
-        var best: (time: UInt64, position: UInt64)?
-        for (child, point) in children(d, from: el + sl, to: d.count) where child == cuePointID {
+        var before: (time: UInt64, position: UInt64)?, after: (time: UInt64, position: UInt64)?
+        for (child, point) in children(d, from: el + sl, to: min(d.count, el + sl + Int(size))) where child == cuePointID {
             let fields = children(d, from: point.startIndex, to: point.endIndex)
-            guard let time = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }), time <= target,
+            guard let time = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }),
                   let positions = fields.first(where: { $0.0 == cueTrackPositionsID }),
                   let position = children(d, from: positions.1.startIndex, to: positions.1.endIndex)
                       .first(where: { $0.0 == cueClusterPositionID }).flatMap({ uint($0.1) })
             else { continue }
-            if best.map({ time >= $0.time }) ?? true { best = (time, position) }
+            if time <= target, before.map({ time >= $0.time }) ?? true { before = (time, position) }
+            if time > target, after.map({ time < $0.time }) ?? true { after = (time, position) }
         }
-        return best.map { Int64($0.position) }
+        return (before ?? after).map { Int64($0.position) }
     }
 
     /// The elements inside `from..<to`, each with its contents.
@@ -972,20 +995,63 @@ enum Matroska {
         return found
     }
 
-    /// What opening a film at `seconds` reads before its first frame,
-    /// fetched in turn through `fetch` (from where, how many; the bytes and
-    /// the file's size, nil: failed): its header, its index, and the part
-    /// where it resumes.
+    /// The most of a file's header or of its end fetched ahead.
+    private static let largest: Int64 = 32 << 20
+
+    /// What libmpv reads opening a film to start at `seconds`, before its
+    /// first frame, fetched once each through `fetch` (from where, how
+    /// many; the bytes and the file's size, nil: failed): its first read;
+    /// the file's end from what the SeekHead lists past the clusters (the
+    /// Cues, then the tags, in one read); the first read again from its
+    /// first cluster, once it has the header; and where it starts, the first
+    /// read after the jump and the one after it.
     static func fetchStart(at seconds: Double, fetch: (Int64, Int64) async -> (data: Data, total: Int64)?) async -> Bool {
+        let first = StreamRelay.firstRead
+        guard let (head, total) = await fetch(0, first), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total
+        else { return false }
+        var header = min(first, total)
+        if let cluster = layout.firstCluster, cluster < largest {
+            let to = min(cluster + first, total)
+            if to > header {
+                guard await fetch(header, to - header) != nil else { return false }
+                header = to
+            }
+        }
+        let end = layout.end.flatMap { total - $0 <= largest ? $0 : nil } ?? total
+        var tail: Data?
+        if end < total {
+            guard let fetched = await fetch(end, total - end) else { return false }
+            tail = fetched.data
+        }
+        let index: [UInt8]
+        if let tail, cues >= end {
+            index = [UInt8](tail.dropFirst(Int(cues - end)))
+        } else {
+            guard let probe = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](probe.data.prefix(16))),
+                  let whole = await fetch(cues, min(length, min(largest, total - cues))) else { return false }
+            index = [UInt8](whole.data)
+        }
+        guard let cluster = clusterPosition(in: index, at: seconds, scale: layout.timecodeScale) else { return false }
+        let at = layout.segmentStart + cluster
+        let from = max(at, header), to = min(at + first + StreamRelay.readSize, end)
+        guard from < to else { return true }
+        return await fetch(from, to - from) != nil
+    }
+
+    #if DEBUG
+    /// As fetched before (`-oldReadyStart YES`): the first 256 KB, the Cues
+    /// alone, and 8 MB from the cluster where the player starts.
+    static func fetchStartAsBefore(at seconds: Double, fetch: (Int64, Int64) async -> (data: Data, total: Int64)?) async -> Bool {
         guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total,
               let first = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](first.data.prefix(16))),
-              let index = await fetch(cues, min(length, min(32 << 20, total - cues))),
+              let index = await fetch(cues, min(length, min(largest, total - cues))),
               let cluster = clusterPosition(in: [UInt8](index.data), at: seconds, scale: layout.timecodeScale)
         else { return false }
         let at = layout.segmentStart + cluster
         guard at < total else { return false }
         return await fetch(at, min(StreamRelay.readSize, total - at)) != nil
     }
+    #endif
 
     /// The whole length (header and contents) of the element at the start.
     static func elementLength(_ d: [UInt8]) -> Int64? {
@@ -1019,32 +1085,33 @@ enum Matroska {
 
 struct FileStart: Hashable, Sendable {
     let itemId: String
-    let second: Int
+    /// Where the player is told to start, to a tenth of a second as
+    /// MPVPlayer.load tells it, so the keyframe it starts at is the one
+    /// fetched. Regression: the whole second, the keyframe before when one
+    /// fell in between.
+    let seconds: Double
     let url: URL
     let headers: [String]
 
     init(_ playback: EmbyPlayback) {
         itemId = playback.itemId
-        second = Int(playback.startSeconds ?? 0)
+        seconds = Double(String(format: "%.1f", playback.startSeconds ?? 0)) ?? 0
         url = playback.url
         headers = playback.headers
     }
 
-    /// Where it's fetched from.
-    var seconds: Double { Double(second) }
-
-    static func == (a: FileStart, b: FileStart) -> Bool { a.itemId == b.itemId && a.second == b.second }
+    static func == (a: FileStart, b: FileStart) -> Bool { a.itemId == b.itemId && a.seconds == b.seconds }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(itemId)
-        hasher.combine(second)
+        hasher.combine(seconds)
     }
 }
 
 extension FileStart: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     var description: String { "file start" }
     var debugDescription: String { description }
-    var customMirror: Mirror { Mirror(self, children: ["second": second]) }
+    var customMirror: Mirror { Mirror(self, children: ["seconds": seconds]) }
 }
 
 extension Lane {
