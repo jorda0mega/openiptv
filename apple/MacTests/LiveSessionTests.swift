@@ -9,9 +9,9 @@ final class LiveSessionTests: XCTestCase {
 
     private func at(_ seconds: Double) -> Date { Date(timeIntervalSince1970: 1000 + seconds) }
 
-    private func opening(_ feeds: [[C]]? = nil, after: Double = 0) -> Session {
+    private func opening(_ feeds: [[C]]? = nil) -> Session {
         var session = Session()
-        _ = session.handle(.play(a, feeds: feeds ?? [[a, b], [c]], after: after, startLimit: 15), now: at(0))
+        _ = session.handle(.play(a, feeds: feeds ?? [[a, b], [c]], after: 0, startLimit: 15), now: at(0))
         _ = session.handle(.opening(session.attempt), now: at(0.5))
         return session
     }
