@@ -58,6 +58,9 @@ final class AppModel {
     }
     private(set) var nowNext: [String: NowNext] = [:]
     private(set) var guideState: GuideStore.State = .idle
+    #if DEBUG
+    @ObservationIgnored let launchedAt = Date()
+    #endif
     /// Live TV by what's on (Sports, News, Movies…), one entry per channel;
     /// see LiveOrganizer.
     private(set) var liveLibrary = LiveOrganizer.Library()
@@ -1853,7 +1856,7 @@ final class AppModel {
 
         let keep = Set(channels.compactMap(\.epgId))
         let stale = await guide.isStale()
-        if !guides.isEmpty, force || stale {
+        if !guides.isEmpty, force || stale || Self.freshGuide {
             guideState = .loading
             let guide = guide
             Task.detached {
@@ -2637,8 +2640,10 @@ extension AppModel {
     /// UI tests: `-freshLineup YES` asks the provider for its lineup at
     /// launch, and keeps it for this run only (the saved one stays).
     private nonisolated static var freshLineup: Bool { UserDefaults.standard.bool(forKey: "freshLineup") }
+    private nonisolated static var freshGuide: Bool { UserDefaults.standard.bool(forKey: "freshGuide") }
     #else
     private nonisolated static let freshLineup = false
+    private nonisolated static let freshGuide = false
     #endif
 
     #if DEBUG

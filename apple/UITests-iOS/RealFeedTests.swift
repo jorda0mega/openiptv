@@ -315,7 +315,9 @@ final class RealFeedTests: XCTestCase {
     /// Sports as the viewer sees it now (diagnostic): every game row, then
     /// the first ten live ones tried in turn, playing or not.
     func testSportsAsSeenNow() throws {
+        let listOnly = ProcessInfo.processInfo.environment["REAL_FEED_LIST_ONLY"] == "1"
         app.launchArguments += ["-forgetWatchOnPicks", "YES", "-freshLineup", "YES"]
+        if listOnly { app.launchArguments += ["-freshGuide", "YES", "-noStreamAhead", "YES"] }
         app.launch()
         let tab = app.tabBars.buttons["Live TV"].firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Live TV tab")
@@ -328,6 +330,11 @@ final class RealFeedTests: XCTestCase {
         sleep(3)
         shot("sports now")
         let labels = games.allElementsBoundByIndex.map(\.label)
+        if listOnly {
+            say("REAL rows: \(labels.count) live or started")
+            say("REAL lineup: \(lineupCounts())")
+            return
+        }
         say("REAL rows: \(labels.count) live or started, \(labels.filter { $0.contains("channels") }.count) with N channels, \(labels.filter { $0.contains("Not playing") }.count) not playing")
         for label in labels.prefix(40) { say("REAL row: \(label)") }
         for index in 0..<min(games.count, 10) {
@@ -420,6 +427,19 @@ final class RealFeedTests: XCTestCase {
             sleep(2)
             say("REAL search \(word) back at the top: \(sections(counts))")
         }
+    }
+
+    private func lineupCounts() -> String {
+        let readout = app.staticTexts["debug-live-lineup"].firstMatch
+        let deadline = Date().addingTimeInterval(600)
+        while Date() < deadline, !(readout.exists && (readout.label.contains("guide=fresh") || readout.label.contains("guide=failed"))) {
+            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "the guide loads")], timeout: 5)
+        }
+        let pairs = (readout.exists ? readout.label : "").split(separator: " ").map { $0.split(separator: "=", maxSplits: 1).map(String.init) }
+        let fields = Dictionary(pairs.filter { $0.count == 2 }.map { ($0[0], $0[1]) }, uniquingKeysWith: { first, _ in first })
+        let guide = fields["guide"] ?? "no readout"
+        let entries = guide == "fresh" ? fields["entries"] ?? "?" : "0 (guide \(guide))"
+        return "channels \(fields["channels"] ?? "?") | guide entries \(entries)"
     }
 
     private func say(_ line: String) {
