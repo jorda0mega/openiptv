@@ -174,4 +174,16 @@ final class FilmStartTests: XCTestCase {
         XCTAssertTrue(ok, "the film's start wasn't fetched")
         assertAllFetched(opening(film, start: film.cluster(150)), fetched)
     }
+
+    func testATenthOfASecondStartsAtTheKeyframeMpvPicks() async {
+        // mpv seeks to 5 ms past what it is told (demux_mkv.c, demux_mkv_seek).
+        var keyframes = (0..<3600).map { $0 * 2050 }
+        keyframes[3] = 6204
+        let film = Film(points: Film.points(keyframes))
+        for (seconds, keyframe) in [(4.1, 2), (6.2, 3)] {
+            let (ok, fetched) = await fetchedAhead(film, for: playback(at: seconds))
+            XCTAssertTrue(ok, "the film's start wasn't fetched")
+            assertAllFetched(opening(film, start: film.cluster(keyframe)), fetched)
+        }
+    }
 }
