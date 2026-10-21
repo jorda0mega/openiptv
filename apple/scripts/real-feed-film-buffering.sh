@@ -5,7 +5,7 @@ DD=${DD:-/tmp/openiptv/dd-prepfilms}
 PHONE=${PHONE:-8D05A43B-1F37-4121-86D6-1E95520EC19B}
 LOCK=/tmp/openiptv/sim.lock
 export TEST_RUNNER_REAL_FEED=${FEED:-http://127.0.0.1:8799}
-export TEST_RUNNER_FILM_BUFFERING_SECONDS=${SECONDS_PLAYED:-480}
+export TEST_RUNNER_FILM_BUFFERING_SECONDS=${SECONDS_PLAYED:-240}
 
 curl -sf -o /dev/null $TEST_RUNNER_REAL_FEED/emby || { echo "the logins helper isn't running on $TEST_RUNNER_REAL_FEED"; exit 1; }
 until mkdir $LOCK 2>/dev/null; do echo "lock held by $(cat $LOCK/owner 2>/dev/null), waiting 60 s"; sleep 60; done
