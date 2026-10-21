@@ -214,8 +214,8 @@ struct EventRow: View {
         let started = event?.start.map { $0 <= Date() } ?? false
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
         let state = model.gameState(entry)
-        let badge = state.badge
-        let notPlaying = live && state.notPlaying
+        let badge = TileBadge.game(state)
+        let notPlaying = live && state == .notPlaying
         let line = [Self.when(event?.start, started: started), event?.league, event?.detail]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         HStack(spacing: 12) {

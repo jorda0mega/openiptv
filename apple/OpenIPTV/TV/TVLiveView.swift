@@ -498,8 +498,8 @@ private struct TVEventCard: View {
         let started = event?.start.map { $0 <= Date() } ?? false
         let live = GameTime.state(start: event?.start, league: event?.league ?? "", title: entry.title) == .live
         let state = model.gameState(entry)
-        let notPlaying = live && state.notPlaying
-        let badge = state.badge
+        let notPlaying = live && state == .notPlaying
+        let badge = TileBadge.game(state)
         VStack(alignment: .leading, spacing: 12) {
             Button(action: action) {
                 ZStack(alignment: .topLeading) {
