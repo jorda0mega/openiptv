@@ -60,7 +60,9 @@ CONNECTIONS = set()
 # unset: as normal), "xtream_empty" ("streams" or "categories": that list
 # for the whole lineup, get_live_streams or get_live_categories, answers an
 # empty list, HTTP 200, a provider that sent nothing; other requests as
-# normal).
+# normal), "emby_convert" ("1": the converted version made from the film
+# as Emby makes it, see converted_segment), "convert_delay" (seconds before
+# a conversion's first segment), "convert_clock" (see converted_segment).
 CONTROL = {}
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
@@ -316,6 +318,36 @@ if os.environ.get("OPENIPTV_MOCK_LINEUP"):
         LINEUP = json.load(f)
 
 _RECORDED = None
+
+# Emby's conversions of a film, by item: (the segment it started at, when).
+SEGMENT = 3
+CONVERSIONS = {}
+_CONVERSIONS_LOCK = threading.Lock()
+
+
+def restart_conversion(item, segment, bitrate=None):
+    with _CONVERSIONS_LOCK:
+        CONVERSIONS[item] = (segment, time.time())
+    print(f"{time.time():.2f} convert {item} from {segment * SEGMENT} s" + (f" at {bitrate} b/s" if bitrate else ""), flush=True)
+
+
+def converted_segment(item, n):
+    """Segment n of the film converted as Emby does: made in turn after a
+    slow first one ("convert_delay" s), four times faster than it plays. Asked
+    for one behind it or far ahead, the conversion starts again there."""
+    delay = float(CONTROL.get("convert_delay", 6))
+    with _CONVERSIONS_LOCK:
+        first, began = CONVERSIONS.get(item, (None, 0.0))
+        made = max(0.0, (time.time() - began - delay) * 4 / SEGMENT)
+    if first is None or n < first or n > first + made + 12:
+        restart_conversion(item, n)
+        first, began = n, time.time()
+    time.sleep(max(0.0, began + delay + (n - first) * SEGMENT / 4 - time.time()))
+    # "convert_clock": "restart": timed from 0 where the conversion started;
+    # else (ffmpeg's -copyts) the film's own times.
+    clock = ["-output_ts_offset", str((n - first) * SEGMENT)] if CONTROL.get("convert_clock") == "restart" else ["-copyts"]
+    return subprocess.run(["ffmpeg", "-v", "error", "-ss", str(n * SEGMENT), "-t", str(SEGMENT), "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
+                           "-c", "copy", *clock, "-f", "mpegts", "-"], capture_output=True).stdout
 
 
 def recorded_ts():
@@ -857,8 +889,31 @@ class Handler(BaseHTTPRequestHandler):
                 if q.get("SeriesId") else [episode(i) for i in range(3, 5)]
             return self.send({"Items": items, "TotalRecordCount": len(items)})
         hls = os.environ.get("OPENIPTV_MOCK_HLS")
+        converting = CONTROL.get("emby_convert") == "1" and os.environ.get("OPENIPTV_MOCK_VIDEO")
         if path.startswith("/Videos/") and path.endswith("/master.m3u8") and not self.key_check(f"hls:{path.split('/')[2]}", q):
             return self.send({"error": "unauthorized"}, status=401)
+        if converting and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
+            time.sleep(float(CONTROL.get("hls_delay", 0)))
+            start = int(int(q.get("StartTimeTicks", "0")) / 10_000_000 / SEGMENT)
+            restart_conversion(path.split("/")[2], start, q.get("MaxStreamingBitrate"))
+            variant = f"main.m3u8?MediaSourceId={q.get('MediaSourceId', '')}&PlaySessionId={q.get('PlaySessionId', '')}"
+            return self.send(f"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=480x270\n{variant}\n".encode(),
+                             ctype="application/vnd.apple.mpegurl")
+        if converting and path.startswith("/Videos/") and path.endswith("/main.m3u8"):
+            if not self.key_check(f"playlist:{path.split('/')[2]}", q):
+                return self.send({"error": "unauthorized"}, status=401)
+            # Emby's: the whole film from 0:00 whatever StartTimeTicks asked.
+            count = -(-MOVIE_TICKS // (SEGMENT * 10_000_000))
+            lines = ["#EXTM3U", "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{SEGMENT}",
+                     "#EXT-X-MEDIA-SEQUENCE:0"]
+            for n in range(count):
+                lines += [f"#EXTINF:{SEGMENT}.000000, nodesc", f"hls1/main/{n}.ts?PlaySessionId={q.get('PlaySessionId', '')}"]
+            return self.send(("\n".join(lines + ["#EXT-X-ENDLIST"]) + "\n").encode(), ctype="application/vnd.apple.mpegurl")
+        if converting and path.startswith("/Videos/") and "/hls1/main/" in path and path.endswith(".ts"):
+            item, n = path.split("/")[2], int(os.path.basename(path)[:-3])
+            if not self.key_check(f"segment:{n}", q):
+                return self.send({"error": "unauthorized"}, status=401)
+            return self.send(converted_segment(item, n), ctype="video/mp2t")
         if hls and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             time.sleep(float(CONTROL.get("hls_delay", 0)))
             # As the real Emby answers a master asked with the key in a

@@ -126,6 +126,58 @@ final class RealFeedTests: XCTestCase {
         XCTAssertEqual(stream, film, accuracy: 3, "the stream and the film's place differ")
     }
 
+    /// A film opened forty minutes in, lowered to the server's converted
+    /// version 15 s later, plays on. Prints only yes or no and seconds.
+    func testLowerQualityDeepInAFilmPlaysOn() throws {
+        let film = ProcessInfo.processInfo.environment["REAL_FEED_FILM"] ?? "Asterix and Cleopatra"
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = "2400"
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
+        app.launchArguments += ["-debugSearch", film]
+        app.launch()
+        let tab = app.tabBars.buttons["Search"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 20), "no Search tab")
+        tab.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", film)).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 30), "the film isn't in the results")
+        result.tap()
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
+        play.tap()
+        XCTAssertNotNil(waitForPosition(timeout: 45), "the film didn't open")
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        let note = app.descendants(matching: .any)["player-note"].firstMatch
+        var noted = false
+        let opened = Date()
+        while Date().timeIntervalSince(opened) < 60, !(quality.exists && quality.label.hasPrefix("converted")) {
+            noted = noted || note.exists
+            usleep(500_000)
+        }
+        let lowered = quality.exists && quality.label.hasPrefix("converted")
+        let dropped = Date()
+        let from = position() ?? 0
+        // The player holds the second it was asked for until the first new
+        // frame, which can be a keyframe a moment earlier.
+        var firstFrame: TimeInterval?
+        var at20: Double?
+        var playsAt20: Bool?
+        while Date().timeIntervalSince(dropped) < 60, playsAt20 == nil || firstFrame == nil {
+            let elapsed = Date().timeIntervalSince(dropped)
+            let now = position() ?? from
+            noted = noted || note.exists
+            if firstFrame == nil, abs(now - from) > 0.5 { firstFrame = elapsed }
+            if elapsed >= 20, at20 == nil { at20 = now }
+            if let at20, elapsed >= 22.5, playsAt20 == nil { playsAt20 = now > at20 + 1 }
+            usleep(500_000)
+        }
+        print("REAL deep: forty minutes in \(from >= 2400 ? "yes" : "no") | lowered \(lowered ? "yes" : "no")"
+              + " | playing 20 s after the drop \(playsAt20 == true ? "yes" : "no")"
+              + " | first new frame after \(firstFrame.map { String(format: "%.0f s", $0) } ?? "none in 60 s")"
+              + " | note shown \(noted ? "yes" : "no")")
+        XCTAssertTrue(lowered, "the film wasn't lowered to the converted version")
+        XCTAssertNotNil(firstFrame, "the film stopped after the quality dropped")
+    }
+
     /// Sentimental Destinies: French sound, and on the server only French
     /// subtitles (Junun, tried first, has Spanish ones now). The server's
     /// provider is asked, its likeliest files read through the server
