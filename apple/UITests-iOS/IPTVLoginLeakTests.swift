@@ -29,6 +29,7 @@ final class IPTVLoginLeakTests: XCTestCase {
             XCTAssertTrue(channelRow(2).waitForExistence(timeout: 30), "the lineup didn't load")
             sleep(5)
         }
+        configure(["xtream_latency": "3"])
         for (status, channel) in [("404", 3), ("403", 4), ("503", 5), ("429", 6)] {
             step("channel answers \(status)") {
                 configure(["live_status": status, "live_status_ids": String(channel)])
@@ -86,8 +87,15 @@ final class IPTVLoginLeakTests: XCTestCase {
             sleep(8)
             close()
         }
+        step("provider API times out") {
+            configure(["xtream_latency": "24"])
+            openChannel(16)
+            sleep(28)
+            close()
+            configure(["xtream_latency": "3"])
+        }
         step("provider drops every connection") {
-            openChannel(15)
+            openChannel(17)
             sleep(1)
             _ = control("mock/close_connections", ["abrupt": "1"])
             _ = control("mock/down", ["seconds": "10"])
