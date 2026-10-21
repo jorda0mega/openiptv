@@ -1,19 +1,21 @@
 #!/bin/zsh
 # real-feed-prepare-ahead.sh: RealFeedTests/testPrepareAheadAsSeenNow on an iPhone simulator, with the logins from the
-# helper on 127.0.0.1:8799 (start it first). Continue Watching's first card stays on screen 4 s, plays, then English
-# subtitles go on. Prints only counts and times. -readOnlyServer: nothing is marked watched, no resume point moves.
-# Takes the shared simulator lock (owner prepare-films-real) and runs one simulator: PHONE, or Test iPhone 3.
+# helper on 127.0.0.1:8799 (start it first; FEED=<address> for another helper). Continue Watching's first card stays on
+# screen 4 s, plays, then English subtitles go on, four times: as shipped, as before (nothing ahead, no hidden
+# subtitles), work ahead only, as shipped again. Prints only counts and times. -readOnlyServer: nothing is marked
+# watched, no resume point moves. Takes the shared simulator lock (owner prepare-films-real) and runs one simulator:
+# PHONE, or Test iPhone 3.
 set -u
 APPLE=$(cd "$(dirname "$0")/.." && pwd)
 DD=${DD:-/tmp/openiptv/dd-prepfilms}
 PHONE=${PHONE:-8D05A43B-1F37-4121-86D6-1E95520EC19B}
 LOCK=/tmp/openiptv/sim.lock
-export TEST_RUNNER_REAL_FEED=http://127.0.0.1:8799
+export TEST_RUNNER_REAL_FEED=${FEED:-http://127.0.0.1:8799}
 
-curl -sf -o /dev/null $TEST_RUNNER_REAL_FEED/emby || { echo "the logins helper isn't running on 127.0.0.1:8799"; exit 1; }
+curl -sf -o /dev/null $TEST_RUNNER_REAL_FEED/emby || { echo "the logins helper isn't running on $TEST_RUNNER_REAL_FEED"; exit 1; }
 until mkdir $LOCK 2>/dev/null; do echo "lock held by $(cat $LOCK/owner 2>/dev/null), waiting 60 s"; sleep 60; done
 echo prepare-films-real > $LOCK/owner
-trap 'xcrun simctl shutdown $PHONE 2>/dev/null; rm -rf $LOCK' EXIT
+trap 'xcrun simctl shutdown $PHONE 2>/dev/null; rm -rf $LOCK' EXIT INT TERM HUP
 
 cd $APPLE
 echo "$(git rev-parse --short HEAD) $(date '+%H:%M')"
@@ -28,6 +30,6 @@ for attempt in 1 2 3; do
   if print -r -- "$out" | grep -q "Failed to get list of active applications"; then echo "(start-up error, attempt $attempt)"; continue; fi
   break
 done
-print -r -- "$out" | grep -E "REAL (ahead|tap|subtitle)|Test Case .*(passed|failed|skipped)|Executed .* tests?," \
-  | sed -E 's/^.*Test Case //; s/^.*(REAL )/\1/' | head -20
+print -r -- "$out" | grep -E "REAL |error: -|Test Case .*(passed|failed|skipped)|Executed .* tests?," \
+  | sed -E 's/^.*Test Case //; s/^.*(REAL )/\1/; s/^.*error: -/error: -/' | head -40
 echo "== done $(date '+%H:%M')"

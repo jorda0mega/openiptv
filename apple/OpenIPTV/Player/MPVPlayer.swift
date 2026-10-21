@@ -168,6 +168,11 @@ final class MPVPlayer: @unchecked Sendable {
     private var switches = 0
     private var switchAsked: CFAbsoluteTime?
     private var switchedFromHidden = false
+    /// The start, once the first frame shows: the open, the first frame
+    /// after it, the subtitles at the start, and the relay's reads.
+    private var opening = (loadedAt: CFAbsoluteTime(0), note: "", preroll: "")
+    var startLoadedAt: CFAbsoluteTime { stateLock.withLock { opening.loadedAt } }
+    var startNote: String { stateLock.withLock { opening.note } }
     private var awaitingLine: (n: Int, since: CFAbsoluteTime)?
     private var stalledSince: CFAbsoluteTime?
     #endif
@@ -384,6 +389,8 @@ final class MPVPlayer: @unchecked Sendable {
             loadStarted = CFAbsoluteTimeGetCurrent()
             #if DEBUG
             awaitingLine = (switches, loadStarted)
+            stateLock.withLock { opening = (loadStarted, "", opening.preroll) }
+            if file { StreamRelay.shared.beginStartReads() }
             #endif
             reportsWindow = !file
             openedAfter = nil
@@ -395,6 +402,14 @@ final class MPVPlayer: @unchecked Sendable {
                 ? "multiple_requests=1,initial_request_size=524288,request_size=8388608,short_seek_size=1048576"
                 : sequential ? "seekable=0" : "")
             mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
+            #if DEBUG
+            // UI tests: `-noStartPreroll YES`: a film starting without
+            // subtitles shown isn't read from before where it starts for them.
+            let preroll = Self.noStartPreroll && file && tracks?.subtitles == nil
+            let set = [mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll-secs", preroll ? "0" : "1"),
+                       mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll-secs-index", preroll ? "0" : "10")]
+            stateLock.withLock { opening.preroll = preroll ? (set.allSatisfy { $0 >= 0 } ? "none" : "not set") : "as mpv's" }
+            #endif
             // Resume at the nearest keyframe instead of decoding up to the
             // exact second; precise seeking comes back once it's playing.
             mpv_set_property_string(mpv, "hr-seek", start == nil ? "default" : "no")
@@ -1333,7 +1348,7 @@ final class MPVPlayer: @unchecked Sendable {
                 // out of sight. Turned on from the film's own track, they
                 // made the player read back into the film for the line on
                 // screen (7 s on a big film). Another quality keeps its own.
-                let hidden = choice.subtitle == nil && carryOver == nil
+                let hidden = choice.subtitle == nil && carryOver == nil && !Self.noHiddenSubtitles
                     ? TrackChoice.likelySubtitle(list.filter { $0.kind == .subtitle && !$0.external }, plan: plan) : nil
                 mpv_set_property_string(mpv, "sid", (choice.subtitle ?? hidden).map(String.init) ?? "no")
                 if carryOver == nil { hideSubtitles(hidden != nil) }
@@ -1348,6 +1363,12 @@ final class MPVPlayer: @unchecked Sendable {
         case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:
             #if DEBUG
             stopwatch.note(.firstFrame)
+            let opened = openedAfter ?? 0, shown = CFAbsoluteTimeGetCurrent() - loadStarted
+            let subtitles = shownSubtitle == nil ? "off" : subtitlesHidden ? "hidden" : "shown"
+            let preroll = stateLock.withLock { opening.preroll }
+            let note = String(format: "open %.2f s, first frame %.2f s after, subtitles %@, read before the start %@ | relay %@", opened,
+                              shown - opened, subtitles, preroll, StreamRelay.shared.startReadsReadout)
+            stateLock.withLock { opening.note = note }
             #endif
             reportedStart = true
             startLock.withLock { startedFlag = true }
@@ -1435,6 +1456,15 @@ final class MPVPlayer: @unchecked Sendable {
             break
         }
     }
+
+    #if DEBUG
+    /// UI tests: `-noHiddenSubtitles YES` starts films without the likely
+    /// subtitles read along hidden (as before they were).
+    private static var noHiddenSubtitles: Bool { UserDefaults.standard.bool(forKey: "noHiddenSubtitles") }
+    private static var noStartPreroll: Bool { UserDefaults.standard.bool(forKey: "noStartPreroll") }
+    #else
+    private static let noHiddenSubtitles = false
+    #endif
 
     #if DEBUG
     private func noteTracks() {

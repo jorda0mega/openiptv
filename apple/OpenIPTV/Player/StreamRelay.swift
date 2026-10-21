@@ -137,6 +137,8 @@ final class StreamRelay: @unchecked Sendable {
         let cache = method == "GET" ? cache(for: route.url) : nil
         #if DEBUG
         noteRead(token, range)
+        let cachedNow = cache.flatMap { cache in Self.bounds(range, total: cache.total).map { min(cache.available(from: $0.0), $0.1 - $0.0 + 1) } }
+        noteStartRead(cached: max(0, cachedNow ?? 0))
         #endif
         if let cache, cache.claimIndex() {
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache) }
@@ -170,6 +172,38 @@ final class StreamRelay: @unchecked Sendable {
     /// again (a jump back, or subtitles picked the first time).
     private(set) var readsBack = 0
     private var lastRead: [String: Int64] = [:]
+
+    /// UI tests: how the player's reads were served since the film began
+    /// to open (counts, sizes and waits only).
+    private var startReads = (requests: 0, cached: Int64(0), fetches: 0, fetched: Int64(0), firstByte: 0.0)
+
+    func beginStartReads() {
+        lock.withLock { startReads = (0, 0, 0, 0, 0) }
+    }
+
+    var startReadsReadout: String {
+        let reads = lock.withLock { startReads }
+        return String(format: "reads %d, from the device %.1f MB, from the server %d reads %.1f MB first byte up to %.0f ms",
+                      reads.requests, Double(reads.cached) / 1e6, reads.fetches, Double(reads.fetched) / 1e6, reads.firstByte * 1000)
+    }
+
+    private func noteStartRead(cached: Int64) {
+        lock.withLock {
+            startReads.requests += 1
+            startReads.cached += cached
+        }
+    }
+
+    fileprivate func noteFetch(firstByteAfter seconds: Double) {
+        lock.withLock {
+            startReads.fetches += 1
+            startReads.firstByte = max(startReads.firstByte, seconds)
+        }
+    }
+
+    fileprivate func noteFetched(_ count: Int) {
+        lock.withLock { startReads.fetched += Int64(count) }
+    }
 
     private func noteRead(_ token: String, _ range: String?) {
         guard let range, range.hasPrefix("bytes="),
@@ -274,6 +308,9 @@ final class StreamRelay: @unchecked Sendable {
         if let range { upstream.setValue(range, forHTTPHeaderField: "Range") }
         let task = HTTP.session.dataTask(with: upstream)
         let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head)
+        #if DEBUG
+        relay.relay = self
+        #endif
         task.delegate = relay
         // The player hung up (a seek): stop downloading what it won't read.
         connection.stateUpdateHandler = { state in
@@ -490,6 +527,10 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private var finished = false
     /// Where in the file the next byte received goes (for the cache).
     private var offset: Int64?
+    #if DEBUG
+    weak var relay: StreamRelay?
+    private let asked = CFAbsoluteTimeGetCurrent()
+    #endif
 
     init(connection: NWConnection, task: URLSessionDataTask, cache: ByteCache?, sendsHead: Bool) {
         self.connection = connection
@@ -514,6 +555,9 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 502
+        #if DEBUG
+        relay?.noteFetch(firstByteAfter: CFAbsoluteTimeGetCurrent() - asked)
+        #endif
         // Where these bytes sit in the file, and its size, for the cache.
         if status == 206, let range = http?.value(forHTTPHeaderField: "Content-Range"),
            let (from, total) = Self.parse(range) {
@@ -550,6 +594,9 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        #if DEBUG
+        relay?.noteFetched(data.count)
+        #endif
         if let at = offset {
             cache?.store(data, at: at)
             offset = at + Int64(data.count)
