@@ -51,9 +51,11 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(segments(text).count, 1)
     }
 
-    private func requests(listing listed: String, masterAt: URL) async -> [(url: URL, key: String?)] {
+    private func requests(listing listed: String, masterAt: URL? = nil,
+                          master: URL = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&api_key=test-key")!)
+        async -> [(url: URL, key: String?)] {
         var sent: [(url: URL, key: String?)] = []
-        let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&api_key=test-key")!
+        let masterAt = masterAt ?? master
         _ = await ConvertedPlaylist.load(master, headers: ["X-Emby-Token: test-key"]) { request in
             guard let url = request.url else { return nil }
             sent.append((url, request.value(forHTTPHeaderField: "X-Emby-Token")))
@@ -80,6 +82,34 @@ final class ConvertedPlaylistTests: XCTestCase {
             XCTAssertNil(variant.key, "\(name): the key in its header")
             XCTAssertFalse(variant.url.absoluteString.contains("test-key"), "\(name): the key in its address")
         }
+    }
+
+    /// An address with no port is on the scheme's own: 443 for https, 80 for http.
+    func testAPortWrittenOutIsTheSameServer() async {
+        let bare = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
+        let written = URL(string: "https://emby.example:443/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
+        for (master, variant) in [(bare, "https://emby.example:443/emby/Videos/m1/main.m3u8"), (written, "https://emby.example/emby/Videos/m1/main.m3u8")] {
+            let sent = await requests(listing: variant, master: master)
+            XCTAssertEqual(sent.map(\.key), ["test-key", "test-key"], "\(master.port ?? 0) then \(variant)")
+        }
+        let plain = URL(string: "http://emby.example/x")!, plainWritten = URL(string: "http://emby.example:80/x")!
+        XCTAssertTrue(HTTP.sameServer(plain, plainWritten))
+        XCTAssertTrue(HTTP.sameServer(plainWritten, plain))
+        for other in ["https://emby.example:8443/x", "http://emby.example:443/x", "https://emby.example/x", "http://other.example/x"] {
+            XCTAssertFalse(HTTP.sameServer(plain, URL(string: other)!), other)
+            XCTAssertFalse(HTTP.sameServer(URL(string: other)!, plain), other)
+        }
+    }
+
+    /// The address a server redirects to is its choice, and Emby reads its
+    /// query's names in any case.
+    func testARedirectElsewhereCarriesTheKeyUnderNoSpelling() {
+        var request = URLRequest(url: URL(string: "https://cdn.example/main.m3u8?API_KEY=test-key&Api_Key=test-key&api_key=test-key&b=1")!)
+        request.setValue("test-key", forHTTPHeaderField: "x-emby-token")
+        let sent = HTTP.redirected(request, from: URL(string: "https://emby.example/emby/Videos/m1/master.m3u8")!)
+        XCTAssertFalse(sent.url?.absoluteString.contains("test-key") ?? true, "the key in its address")
+        XCTAssertEqual(sent.url?.query(), "b=1")
+        XCTAssertNil(sent.value(forHTTPHeaderField: "X-Emby-Token"), "the key in its header")
     }
 
     func testAPlaylistStillGrowingOrWithKeysIsLeftAsItIs() {
