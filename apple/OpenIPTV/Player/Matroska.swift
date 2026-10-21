@@ -232,8 +232,9 @@ enum Matroska {
             tail = fetched.data
         }
         let index: [UInt8]
-        if cues >= tailAt, cues < tailAt + Int64(tail.count) {
-            index = [UInt8](tail.dropFirst(Int(cues - tailAt)))
+        let inTail = cues >= tailAt ? [UInt8](tail.dropFirst(Int(cues - tailAt))) : []
+        if let length = elementLength([UInt8](inTail.prefix(16))), length <= inTail.count {
+            index = inTail
         } else {
             guard let fetched = await fetchIndex(at: cues, total: total, fetch: fetch) else { return false }
             index = fetched
