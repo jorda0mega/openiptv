@@ -51,6 +51,41 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(segments(text).count, 1)
     }
 
+    /// What each request sent: the address asked and the account's key in
+    /// its header, the master answered from `masterAt` listing `listed`.
+    private func requests(listing listed: String, masterAt: URL) async -> [(url: URL, key: String?)] {
+        var sent: [(url: URL, key: String?)] = []
+        let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&api_key=test-key")!
+        _ = await ConvertedPlaylist.load(master, headers: ["X-Emby-Token: test-key"]) { request in
+            guard let url = request.url else { return nil }
+            sent.append((url, request.value(forHTTPHeaderField: "X-Emby-Token")))
+            return url.lastPathComponent == "master.m3u8"
+                ? (["#EXTM3U", "#EXT-X-STREAM-INF:BANDWIDTH=2000000", listed], masterAt) : (emby(segments: 3), url)
+        }
+        return sent
+    }
+
+    func testTheAccountsKeyGoesToTheServerItWasGivenFor() async {
+        let sent = await requests(listing: "main.m3u8?MediaSourceId=m1", masterAt: master)
+        XCTAssertEqual(sent.map(\.url.host), ["emby.example", "emby.example"])
+        XCTAssertEqual(sent.map(\.key), ["test-key", "test-key"])
+    }
+
+    /// The account's key goes to no other server: not to one the master
+    /// was redirected to, nor to one it lists the variant on.
+    func testTheAccountsKeyGoesNowhereElse() async {
+        let redirected = await requests(listing: "main.m3u8?MediaSourceId=m1&api_key=test-key",
+                                        masterAt: URL(string: "https://cdn.example/emby/Videos/m1/master.m3u8")!)
+        let listedElsewhere = await requests(listing: "https://other.example:8443/Videos/m1/main.m3u8?api_key=test-key", masterAt: master)
+        for (name, sent) in [("redirected", redirected), ("listed elsewhere", listedElsewhere)] {
+            XCTAssertEqual(sent.count, 2, name)
+            guard let variant = sent.last else { continue }
+            XCTAssertNotEqual(variant.url.host, "emby.example", name)
+            XCTAssertNil(variant.key, "\(name): the key in its header")
+            XCTAssertFalse(variant.url.absoluteString.contains("test-key"), "\(name): the key in its address")
+        }
+    }
+
     func testAPlaylistStillGrowingOrWithKeysIsLeftAsItIs() {
         XCTAssertNil(ConvertedPlaylist(Array(emby(segments: 3).dropLast()), at: variant), "still growing")
         var keyed = emby(segments: 3)
