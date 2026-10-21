@@ -38,6 +38,7 @@
 		115F406EC20EB90B56F66B3F /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D277F32EC509804119BFFFC4 /* VideoToolbox.framework */; };
 		1273ABF188482A875F821B01 /* SharedGuideRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2871C16F0BDAE894782F88F /* SharedGuideRule.swift */; };
 		14A08E4F734C8F088B866562 /* HomeFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72303AAC600EF3DE6075EF7A /* HomeFeed.swift */; };
+		155CEA99E45526C19A9E2E15 /* IPTVLoginLeakTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF9B0D6D8D57792C2CC377E /* IPTVLoginLeakTests.swift */; };
 		16CD43F670583A93B6D7F02E /* LoadEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA38D24AAC5091B4859CE0C6 /* LoadEvents.swift */; };
 		17243955F351E795FB4C4893 /* SubtitleStopwatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194E5155111600ED590FA9F4 /* SubtitleStopwatch.swift */; };
 		199695CF489DC54ED1DF885A /* lcms2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */; };
@@ -189,6 +190,7 @@
 		976B05916C747916000E1666 /* LivePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */; };
 		9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
 		98FA019033809EFDE43A037C /* LivePerf.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F0061726E90B7BD6DAB284 /* LivePerf.swift */; };
+		99C2332005A0415F51BC32E2 /* IPTVLoginLeakTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8DD6BCA3D732E716C638FF8 /* IPTVLoginLeakTests.swift */; };
 		99DE67411BE1E03903160C2B /* Libswresample.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D7286B5ED1C79D8A2625EBC /* Libswresample.xcframework */; };
 		9D020ADB81802B4D285D41DE /* Libswscale.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */; };
 		9D12F9249C18D8868CB560E6 /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BBE98FBA505A36A33CB129 /* libresolv.tbd */; };
@@ -410,6 +412,7 @@
 		A2871C16F0BDAE894782F88F /* SharedGuideRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedGuideRule.swift; sourceTree = "<group>"; };
 		A4962C0F389044958A1E2BE4 /* hogweed.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = hogweed.xcframework; path = Vendor/hogweed.xcframework; sourceTree = "<group>"; };
 		A651DA02BA6A980C42B2EE28 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		A8DD6BCA3D732E716C638FF8 /* IPTVLoginLeakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPTVLoginLeakTests.swift; sourceTree = "<group>"; };
 		A8E89B6CEFC2EA7DE2C9606D /* LiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSession.swift; sourceTree = "<group>"; };
 		A9E566E295D6785A720DEA83 /* libexpat.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libexpat.tbd; path = usr/lib/libexpat.tbd; sourceTree = SDKROOT; };
 		AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libdovi.xcframework; path = Vendor/Libdovi.xcframework; sourceTree = "<group>"; };
@@ -435,6 +438,7 @@
 		C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = gnutls.xcframework; path = Vendor/gnutls.xcframework; sourceTree = "<group>"; };
 		C8BBE98FBA505A36A33CB129 /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 		CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libswscale.xcframework; path = Vendor/Libswscale.xcframework; sourceTree = "<group>"; };
+		CBF9B0D6D8D57792C2CC377E /* IPTVLoginLeakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPTVLoginLeakTests.swift; sourceTree = "<group>"; };
 		CC1500ACB77AA629F7F047BF /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
 		CD1EBDEA2DAED98E26A044D2 /* Signposts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Signposts.swift; sourceTree = "<group>"; };
 		CDBCDEA1B3FDB76BBFA31935 /* FFmpegLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFmpegLog.swift; sourceTree = "<group>"; };
@@ -754,6 +758,7 @@
 			isa = PBXGroup;
 			children = (
 				E181E6602A0A74CA82B8EB92 /* HomeAfterLandscapeTests.swift */,
+				A8DD6BCA3D732E716C638FF8 /* IPTVLoginLeakTests.swift */,
 				24565F5C6D48E734D5EE8D21 /* KeyLeakTests.swift */,
 				F4CB49D07772393CE3267AC2 /* LivePerfProbeTests.swift */,
 				9A1EC37B63ED8CD9B42434CF /* LiveRecoveryTests.swift */,
@@ -800,6 +805,7 @@
 			isa = PBXGroup;
 			children = (
 				1C6E6C6920060C5CF3CC65EF /* HomeStabilityTests.swift */,
+				CBF9B0D6D8D57792C2CC377E /* IPTVLoginLeakTests.swift */,
 				B217D5609554E1FC63908BD0 /* PrepareAheadTests.swift */,
 				44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */,
 				890075B848C59F9A66DD756E /* RemoteFocusTests.swift */,
@@ -1070,6 +1076,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6164F58D3BB936D5574C3FC1 /* HomeAfterLandscapeTests.swift in Sources */,
+				99C2332005A0415F51BC32E2 /* IPTVLoginLeakTests.swift in Sources */,
 				478A24F36571FFD69E611315 /* KeyLeakTests.swift in Sources */,
 				F53713E92CA858B3297424D8 /* LivePerfProbeTests.swift in Sources */,
 				8ED22EEDAFCE31116298BFA4 /* LiveRecoveryTests.swift in Sources */,
@@ -1185,6 +1192,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1B573875ED79BC2420B63AE6 /* HomeStabilityTests.swift in Sources */,
+				155CEA99E45526C19A9E2E15 /* IPTVLoginLeakTests.swift in Sources */,
 				A91B46915C3AAA41EBA1400B /* PrepareAheadTests.swift in Sources */,
 				3C08CEF60D0EC57E6C0B56D7 /* RealFeedTests.swift in Sources */,
 				764C48551392DEFB47995D89 /* RemoteFocusTests.swift in Sources */,
