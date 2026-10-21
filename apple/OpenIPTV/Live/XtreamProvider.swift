@@ -58,8 +58,6 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
         if !formats.isEmpty, !formats.contains("ts"), formats.contains("m3u8") { outputExtension = "m3u8" }
 
         let (categories, channels) = lineup(categoryData: try await categoryData, channelData: try await channelData)
-        // Today and tomorrow only, a quarter smaller than everything; a
-        // channel's earlier programmes come from its own schedule.
         let xmltv = HTTP.form(server.appending(path: "xmltv.php"), login + [.init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")])
         return LiveLineup(categories: categories, channels: channels, guides: [xmltv])
     }

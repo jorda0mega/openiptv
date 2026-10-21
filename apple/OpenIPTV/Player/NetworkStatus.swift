@@ -48,7 +48,6 @@ final class NetworkStatus: @unchecked Sendable {
     }
 
     #if DEBUG
-    /// UI tests: the network taken as down while the test server says so.
     private func followDebugOnline(_ url: URL) {
         let session = URLSession(configuration: .ephemeral)
         Task.detached { [weak self] in

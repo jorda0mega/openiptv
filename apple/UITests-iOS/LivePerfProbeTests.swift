@@ -1,11 +1,5 @@
 import XCTest
 
-/// Phase 0 of the Live TV measurement (.audit/live-perf/fable-plan.md
-/// §4.3): each test-server switch with a known answer, played on a channel
-/// of its own, so the `tok` of the app's `PERF live` lines names the row.
-/// The lines are checked from the simulator's log, by
-/// scripts/live_app_phase0.py; these tests drive the app and check what it
-/// shows. Needs the test film (OPENIPTV_MOCK_VIDEO) on the test server.
 final class LivePerfProbeTests: XCTestCase {
     private let app = XCUIApplication()
 

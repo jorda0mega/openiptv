@@ -1,8 +1,5 @@
 import XCTest
 
-/// Live TV when a stream starts slowly, is cut, refused or dead, and when
-/// the app leaves with live TV paused (.audit/live-perf/fix-plan.md). Needs
-/// the test film (OPENIPTV_MOCK_VIDEO) on the test server.
 final class LiveRecoveryTests: XCTestCase {
     private let app = XCUIApplication()
 

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Build and run the provider smoke test (macOS). See main.swift for the
-# environment variables it reads, and LiveProbe.swift and LivePick.swift for
-# OPENIPTV_SMOKE_MODE=live-probe and live-pick. `run.sh --build-only PATH` just builds.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out=$(mktemp -d)
@@ -9,7 +6,6 @@ trap 'rm -rf "$out"' EXIT
 src=OpenIPTV
 # The app's code needs macOS 26 (Flex.swift).
 target=arm64-apple-macos26
-# The app's version, for live-probe's user agent ("Openreel/<version>").
 version=$(sed -n 's/^ *MARKETING_VERSION: "\(.*\)"$/\1/p' project.yml | head -1)
 printf 'extension LiveProbe { static let appVersion = "%s" }\n' "${version:-0}" > "$out/AppVersion.swift"
 if [[ "${OPENIPTV_SMOKE_MODE:-}" == "live-probe" || "${OPENIPTV_SMOKE_MODE:-}" == "live-pick" ]]; then
