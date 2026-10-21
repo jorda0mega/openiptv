@@ -263,14 +263,27 @@ final class FilmStartTests: XCTestCase {
     }
 
     func testTheOldWayFetchesWhatItDidBefore() async {
-        // 256 KB of the header, the index, and 8 MB from the cluster of the
-        // last keyframe at or before the whole second; none before the first.
+        // 256 KB of the header, the index's first 64 KB, then all of it from
+        // its start, and 8 MB from the cluster of the last keyframe at or
+        // before the whole second; none before the first.
         let film = Film()
+        let index = [film.cues.lowerBound..<film.cues.lowerBound + (1 << 16), film.cues]
         let resumed = await fetchedAhead(film, for: playback(at: 300.96), asBefore: true)
         XCTAssertTrue(resumed.ok, "the film's start wasn't fetched")
-        XCTAssertEqual(merged(resumed.ranges), [0..<1 << 18, film.cluster(149)..<film.cluster(149) + StreamRelay.readSize, film.cues])
+        XCTAssertEqual(resumed.ranges, [0..<1 << 18] + index + [film.cluster(149)..<film.cluster(149) + StreamRelay.readSize])
         let fromItsBeginning = await fetchedAhead(film, for: playback(at: nil), asBefore: true)
         XCTAssertFalse(fromItsBeginning.ok, "the old way fetched a cluster for a film from its beginning")
-        XCTAssertEqual(merged(fromItsBeginning.ranges), [0..<1 << 18, film.cues])
+        XCTAssertEqual(fromItsBeginning.ranges, [0..<1 << 18] + index)
+    }
+
+    /// The old way kept one fetch for each whole second of a film, whatever
+    /// subtitles were planned.
+    func testTheOldWayKeepsOneFetchForEachWholeSecond() {
+        UserDefaults.standard.set(true, forKey: "oldReadyStart")
+        defer { UserDefaults.standard.removeObject(forKey: "oldReadyStart") }
+        var subtitled = playback(at: 300.9)
+        subtitled.tracks = TrackPlan(audio: ["eng"], subtitles: ["eng"])
+        XCTAssertEqual(Set([FileStart(playback(at: 300.2)), FileStart(subtitled)]).count, 1)
+        XCTAssertEqual(Set([FileStart(playback(at: 300.9)), FileStart(playback(at: 301))]).count, 2)
     }
 }
