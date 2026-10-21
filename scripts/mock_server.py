@@ -636,7 +636,10 @@ class Handler(BaseHTTPRequestHandler):
             addresses = [a for t, a in IPTV_ADDRESSES if t >= since]
             def found(text, key):
                 return text.count(FAKE_LOGIN[key]) if FAKE_LOGIN else -1
-            return self.send({"log_read": bool(log), "log_username": found(log, "username"), "log_password": found(log, "password"),
+            return self.send({"log_read": bool(log), "log_lines": log.count("\n"), "log_perf_open": log.count("PERF live open"),
+                              "log_failing_url": log.count("NSErrorFailingURLStringKey"), "log_private": log.count("<private>"),
+                              "log_api": log.count("player_api.php"), "log_mock_port": log.count(":" + str(self.server.server_port)),
+                              "log_username": found(log, "username"), "log_password": found(log, "password"),
                               "requests": len(addresses), "address_username": sum(found(a, "username") for a in addresses),
                               "address_password": sum(found(a, "password") for a in addresses)})
         if path == "/mock/mark":

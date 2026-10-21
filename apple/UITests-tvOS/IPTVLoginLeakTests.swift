@@ -86,18 +86,20 @@ final class IPTVLoginLeakTests: XCTestCase {
             openPlayer()
         }
         step("provider API times out") {
+            app.terminate()
             configure(["xtream_latency": "24"])
-            zapToAChannelWithoutGuide()
+            app.launch()
             sleep(28)
             configure(["xtream_latency": "3"])
         }
         step("provider drops every connection") {
-            zapToAChannelWithoutGuide()
-            sleep(1)
+            app.terminate()
+            configure(["xtream_latency": "6"])
+            app.launch()
+            sleep(3)
             _ = control("mock/close_connections", ["abrupt": "1"])
             _ = control("mock/down", ["seconds": "10"])
             sleep(14)
-            leavePlayer()
         }
         let leaked = results.filter { $0.counts.contains { $0 != 0 } }.map(\.step)
         XCTAssertEqual(leaked, [], "the made-up IPTV login reached the log or an API address: \(results)")
@@ -111,7 +113,10 @@ final class IPTVLoginLeakTests: XCTestCase {
         XCTAssertEqual(found["log_read"] as? Bool, true, "the simulator's log wasn't read after \(name)")
         let counts = ["log_username", "log_password", "address_username", "address_password"].map { found[$0] as? Int ?? -1 }
         print("LEAK \(name): log username=\(counts[0]) password=\(counts[1]); "
-            + "API addresses username=\(counts[2]) password=\(counts[3]) of \(found["requests"] as? Int ?? -1) requests")
+            + "API addresses username=\(counts[2]) password=\(counts[3]) of \(found["requests"] as? Int ?? -1) requests; "
+            + "log lines=\(found["log_lines"] as? Int ?? -1) perf_open=\(found["log_perf_open"] as? Int ?? -1) "
+            + "failing_url=\(found["log_failing_url"] as? Int ?? -1) private=\(found["log_private"] as? Int ?? -1) "
+            + "player_api=\(found["log_api"] as? Int ?? -1) server_port=\(found["log_mock_port"] as? Int ?? -1)")
         results.append((name, counts))
     }
 
@@ -135,12 +140,6 @@ final class IPTVLoginLeakTests: XCTestCase {
         let deadline = Date().addingTimeInterval(5)
         while player.label == before, Date() < deadline { usleep(250_000) }
         XCTAssertNotEqual(player.label, before, "Down didn't move to the next channel")
-    }
-
-    private func zapToAChannelWithoutGuide() {
-        zap()
-        for _ in 0..<12 where player.label.firstMatch(of: #/Channel \d*0\b/#) == nil { zap() }
-        XCTAssertNotNil(player.label.firstMatch(of: #/Channel \d*0\b/#), "no channel without a guide: \(player.label)")
     }
 
     private func leavePlayer() {
