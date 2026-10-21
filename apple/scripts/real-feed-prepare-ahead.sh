@@ -1,10 +1,4 @@
 #!/bin/zsh
-# real-feed-prepare-ahead.sh: RealFeedTests/testPrepareAheadAsSeenNow on an iPhone simulator, with the logins from the
-# helper on 127.0.0.1:8799 (start it first; FEED=<address> for another helper). Continue Watching's first card stays on
-# screen 4 s, plays, then English subtitles go on, twice: as shipped, then as before (nothing ahead, no hidden
-# subtitles). Prints only counts and times. -readOnlyServer: nothing is marked
-# watched, no resume point moves. Takes the shared simulator lock (owner prepare-films-real) and runs one simulator:
-# PHONE, or Test iPhone 3.
 set -u
 APPLE=$(cd "$(dirname "$0")/.." && pwd)
 DD=${DD:-/tmp/openiptv/dd-prepfilms}

@@ -244,15 +244,6 @@ final class RealFeedTests: XCTestCase {
         XCTAssertGreaterThan(later, at + 3, "the title doesn't play on (\(at) → \(later))")
     }
 
-    /// Continue Watching as the viewer sees it now (diagnostic): the first
-    /// card stays on screen 4 s, plays, then English subtitles go on; twice,
-    /// the app as it ships, then as before (nothing got ready ahead, no
-    /// subtitles read along hidden), so their starts compare on the same
-    /// film and card. Each forgets the
-    /// subtitles picked before (on this simulator only), so each starts the
-    /// same way.
-    /// Counts and times only: what the app fetched before the tap, the tap
-    /// to the first frame and its parts, the subtitle tap to the first line.
     func testPrepareAheadAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]

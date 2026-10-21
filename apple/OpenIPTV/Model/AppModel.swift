@@ -475,9 +475,6 @@ final class AppModel {
             playback.requestedAt = started
             return playback
         }
-        // With the copies known now: one got ready before the library was
-        // read knew a single copy, and a film's other copy, in the language
-        // wanted, was passed over.
         let key = planKey(itemId, kind: kind)
         #if DEBUG
         lastPlanKept = plans.isKept(key)
@@ -486,12 +483,8 @@ final class AppModel {
         do {
             playback = try await plans.take(key)
         } catch {
-            // Got ready ahead and failed then (a moment's network trouble).
             playback = try await plans.take(key)
         }
-        // Got ready without the server's track list (it didn't answer then),
-        // it would play with no subtitle files. Regression: a title got
-        // ready at launch played without them.
         if !playback.listed { playback = (try? await plans.take(key)) ?? playback }
         playback = withLocalResume(playback)
         playback.resolvedIn = Date().timeIntervalSince(started)
@@ -1117,9 +1110,6 @@ final class AppModel {
 
     // MARK: Warm start
 
-    /// A player kept open and paused out of sight, so selecting its title
-    /// starts at once: one that just closed (`parked`), or another copy
-    /// opened for a language picked in the player (see warmSwitch).
     private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback, parked: Bool)?
     private var warmExpiry: Task<Void, Never>?
 
@@ -1233,17 +1223,11 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// UI tests: whether the last play found its plan ready.
     @ObservationIgnored var lastPlanKept = false
     #endif
 
-    /// A player covers the screen (set once it's gone, after playback ends):
-    /// nothing under it is got ready meanwhile.
     var playerShown = false
 
-    /// What a screen shows that may be opened next, got ready while it stays
-    /// there (see Ahead): its page, how to play it, the start of its file
-    /// and its likeliest subtitles.
     @ObservationIgnored private(set) lazy var ahead = Ahead(Ahead.Work(
         page: { [weak self] target, interest in await self?.preparePage(target, interest) },
         plan: { [weak self] target, interest in await self?.preparePlan(target, interest) },
@@ -1257,7 +1241,6 @@ final class AppModel {
         }))
 
     #if DEBUG
-    /// UI tests: what was fetched so far, counts only.
     var aheadCounts: String {
         let now = Conditions.current()
         return "held \(ahead.held) plans \(plans.fetched) starts \(FileStarts.shelf.fetched) files \(ServerSubtitles.beside.fetched) "
@@ -1526,9 +1509,6 @@ final class AppModel {
                                  mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
         }.value
         guard event == .stopped else { return }
-        // Only this title's resume point changed, and a show's got ready by
-        // its series (titles in rotation, Home) has a different next
-        // episode or resume point: everything else stays ready.
         plans.forget { $0.itemId == playback.itemId || $0.itemId == playback.seriesId }
         // A player kept for this title stays if it's where this stopped.
         if let warm, warm.key == playback.itemId || (playback.seriesId != nil && warm.key == playback.seriesId),
@@ -2644,8 +2624,6 @@ extension AppModel {
     #endif
 
     #if DEBUG
-    /// UI tests: `-noPrepareAhead YES` gets nothing ready ahead of a tap
-    /// (titles on screen, forecasts, the next episode).
     nonisolated static var noPrepareAhead: Bool { UserDefaults.standard.bool(forKey: "noPrepareAhead") }
     #else
     nonisolated static let noPrepareAhead = false

@@ -368,7 +368,6 @@ struct MoviePlayerView: View {
     /// Debug builds: how it started ("warm 0.3": a player kept or opened
     /// ahead; "cold 2.1": opened on the tap), and where.
     @State private var startReadout = ""
-    /// The start's parts, from the tap (see MPVPlayer.startNote).
     @State private var startParts = ""
     #endif
 

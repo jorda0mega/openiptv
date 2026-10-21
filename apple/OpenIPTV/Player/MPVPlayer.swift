@@ -119,8 +119,6 @@ final class MPVPlayer: @unchecked Sendable {
     /// A rewritten file's sections, by its track (UI tests' readout).
     private var sectionNotes: [Int: String] = [:]
     #endif
-    /// The subtitle track selected (nil: none), and whether it is read
-    /// along out of sight: shown, it's on screen at once.
     private var shownSubtitle: Int?
     private var subtitlesHidden = false
     /// Every subtitle file added to the film (the server's, those found for
@@ -162,18 +160,13 @@ final class MPVPlayer: @unchecked Sendable {
     private var line = ""
     var subtitleLine: String { stateLock.withLock { line } }
     let stopwatch = SubtitleStopwatch()
-    /// On the queue: subtitle switches since the first frame, when the
-    /// viewer asked for the one under way, the switch whose first line
-    /// hasn't shown yet (0: the film's start), and when a stall began.
-    private var switches = 0
-    private var switchAsked: CFAbsoluteTime?
+    private var subtitleSwitchCount = 0
+    private var subtitleSwitchRequestedAt: CFAbsoluteTime?
     private var switchedFromHidden = false
-    /// The start, once the first frame shows: the open, the first frame
-    /// after it, the subtitles at the start, and the relay's reads.
-    private var opening = (loadedAt: CFAbsoluteTime(0), note: "", preroll: "")
-    var startLoadedAt: CFAbsoluteTime { stateLock.withLock { opening.loadedAt } }
-    var startNote: String { stateLock.withLock { opening.note } }
-    private var awaitingLine: (n: Int, since: CFAbsoluteTime)?
+    private var startTiming = (loadedAt: CFAbsoluteTime(0), note: "", preroll: "")
+    var startLoadedAt: CFAbsoluteTime { stateLock.withLock { startTiming.loadedAt } }
+    var startNote: String { stateLock.withLock { startTiming.note } }
+    private var awaitingSubtitleLine: (n: Int, since: CFAbsoluteTime)?
     private var stalledSince: CFAbsoluteTime?
     #endif
     /// When the file was open (headers read), for the start-up breakdown.
@@ -388,8 +381,8 @@ final class MPVPlayer: @unchecked Sendable {
             apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
             #if DEBUG
-            awaitingLine = (switches, loadStarted)
-            stateLock.withLock { opening = (loadStarted, "", opening.preroll) }
+            awaitingSubtitleLine = (subtitleSwitchCount, loadStarted)
+            stateLock.withLock { startTiming = (loadStarted, "", startTiming.preroll) }
             if file { StreamRelay.shared.beginStartReads() }
             #endif
             reportsWindow = !file
@@ -405,7 +398,7 @@ final class MPVPlayer: @unchecked Sendable {
             let preroll = TrackChoice.subtitlePreroll(Self.noHiddenSubtitles ? nil : tracks, reopening: clock != nil)
             for option in preroll { mpv_set_property_string(mpv, option.name, option.value) }
             #if DEBUG
-            stateLock.withLock { opening.preroll = preroll.allSatisfy { $0.value == "0" } ? "none" : "as mpv's" }
+            stateLock.withLock { startTiming.preroll = preroll.allSatisfy { $0.value == "0" } ? "none" : "as mpv's" }
             #endif
             // Resume at the nearest keyframe instead of decoding up to the
             // exact second; precise seeking comes back once it's playing.
@@ -1086,7 +1079,6 @@ final class MPVPlayer: @unchecked Sendable {
 
     /// Shows this subtitle track (nil: none): from its copy when the
     /// server's is here.
-    /// Off hides them, so the same picked again shows at once.
     func selectSubtitle(_ id: Int?) {
         #if DEBUG
         let asked = CFAbsoluteTimeGetCurrent()
@@ -1097,7 +1089,7 @@ final class MPVPlayer: @unchecked Sendable {
             let sameTrack = shown == nil || shown == shownSubtitle
             #if DEBUG
             if !sameTrack || (shown == nil) != subtitlesHidden {
-                switchAsked = asked
+                subtitleSwitchRequestedAt = asked
                 switchedFromHidden = subtitlesHidden
             }
             if sameTrack, (shown == nil) != subtitlesHidden { noteSwitch(to: shown, hidden: true) }
@@ -1112,7 +1104,7 @@ final class MPVPlayer: @unchecked Sendable {
         subtitlesHidden = hidden
         mpv_set_property_string(mpv, "sub-visibility", hidden ? "no" : "yes")
         #if DEBUG
-        if hidden { awaitingLine = nil }
+        if hidden { awaitingSubtitleLine = nil }
         let text = hidden || !sameTrack ? nil : mpv_get_property_string(mpv, "sub-text")
         let line = text.map { String(cString: $0) } ?? ""
         if let text { mpv_free(text) }
@@ -1362,10 +1354,10 @@ final class MPVPlayer: @unchecked Sendable {
             stopwatch.note(.firstFrame)
             let opened = openedAfter ?? 0, shown = CFAbsoluteTimeGetCurrent() - loadStarted
             let subtitles = shownSubtitle == nil ? "off" : subtitlesHidden ? "hidden" : "shown"
-            let preroll = stateLock.withLock { opening.preroll }
+            let preroll = stateLock.withLock { startTiming.preroll }
             let note = String(format: "open %.2f s, first frame %.2f s after, subtitles %@, read before the start %@ | relay %@", opened,
                               shown - opened, subtitles, preroll, StreamRelay.shared.startReadsReadout)
-            stateLock.withLock { opening.note = note }
+            stateLock.withLock { startTiming.note = note }
             #endif
             reportedStart = true
             startLock.withLock { startedFlag = true }
@@ -1455,8 +1447,6 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     #if DEBUG
-    /// UI tests: `-noHiddenSubtitles YES` starts films without the likely
-    /// subtitles read along hidden (as before they were).
     private static var noHiddenSubtitles: Bool { UserDefaults.standard.bool(forKey: "noHiddenSubtitles") }
     #else
     private static let noHiddenSubtitles = false
@@ -1473,11 +1463,9 @@ final class MPVPlayer: @unchecked Sendable {
                                  .copies: .number(copied.count), .lang: .language(subtitles.first(where: \.selected)?.language)])
     }
 
-    /// The first frame's tracks are the plan's, not a switch.
-    /// `hidden`: shown or hidden, the track selected the same.
     private func noteSwitch(to id: Int?, hidden: Bool) {
-        let asked = switchAsked, fromHidden = switchedFromHidden || hidden && id != nil
-        switchAsked = nil
+        let asked = subtitleSwitchRequestedAt, fromHidden = switchedFromHidden || hidden && id != nil
+        subtitleSwitchRequestedAt = nil
         switchedFromHidden = false
         guard reportedStart, let mpv else { return }
         let list = Self.trackList(mpv).filter { $0.kind == .subtitle }
@@ -1488,21 +1476,20 @@ final class MPVPlayer: @unchecked Sendable {
             guard let track else { return (.none, nil) }
             return (track.external ? .file : track.image ? .picture : .own, track.language)
         }
-        switches += 1
-        awaitingLine = id == nil ? nil : (switches, asked ?? CFAbsoluteTimeGetCurrent())
+        subtitleSwitchCount += 1
+        awaitingSubtitleLine = id == nil ? nil : (subtitleSwitchCount, asked ?? CFAbsoluteTimeGetCurrent())
         let from = kind(fromHidden ? nil : shownSubtitle), to = kind(id)
-        stopwatch.note(.switched, [.n: .number(switches), .from: .word(from.word), .to: .word(to.word), .lang: .language(to.language),
+        stopwatch.note(.switched, [.n: .number(subtitleSwitchCount), .from: .word(from.word), .to: .word(to.word), .lang: .language(to.language),
                                    .hidden: .word(hidden ? .yes : .no)])
     }
 
-    /// `late`: how far into the line the film was when it showed.
     private func noteFirstLine() {
-        guard let mpv, let awaiting = awaitingLine else { return }
-        awaitingLine = nil
+        guard let mpv, let awaiting = awaitingSubtitleLine else { return }
+        awaitingSubtitleLine = nil
         var start = 0.0, position = 0.0
-        let late: SubtitleStopwatch.Value = mpv_get_property(mpv, "sub-start", MPV_FORMAT_DOUBLE, &start) >= 0
+        let secondsIntoSubtitle: SubtitleStopwatch.Value = mpv_get_property(mpv, "sub-start", MPV_FORMAT_DOUBLE, &start) >= 0
             && mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &position) >= 0 ? .seconds(position - start) : .word(.none)
-        stopwatch.note(.shown, [.n: .number(awaiting.n), .after: .seconds(CFAbsoluteTimeGetCurrent() - awaiting.since), .late: late])
+        stopwatch.note(.shown, [.n: .number(awaiting.n), .after: .seconds(CFAbsoluteTimeGetCurrent() - awaiting.since), .late: secondsIntoSubtitle])
     }
 
     private func noteStall(_ stalled: Bool) {
@@ -1510,7 +1497,7 @@ final class MPVPlayer: @unchecked Sendable {
         if stalled { return stalledSince = CFAbsoluteTimeGetCurrent() }
         guard let since = stalledSince else { return }
         stalledSince = nil
-        stopwatch.note(.rebuffer, [.n: .number(switches), .ms: .seconds(CFAbsoluteTimeGetCurrent() - since)])
+        stopwatch.note(.rebuffer, [.n: .number(subtitleSwitchCount), .ms: .seconds(CFAbsoluteTimeGetCurrent() - since)])
     }
 
     private static func size(_ file: URL) -> Int {

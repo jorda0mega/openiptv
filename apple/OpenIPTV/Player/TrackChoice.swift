@@ -162,8 +162,6 @@ enum TrackChoice {
         return [("demuxer-mkv-subtitle-preroll-secs", none ? "0" : "1"), ("demuxer-mkv-subtitle-preroll-secs-index", none ? "0" : "10")]
     }
 
-    /// The subtitles the viewer most likely turns on: the plan's, else in
-    /// the language of the sound it plays.
     static func likelySubtitle(_ tracks: [Track], plan: TrackPlan) -> Int? {
         var plan = plan
         if plan.subtitles == nil { plan.subtitles = plan.audio }

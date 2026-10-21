@@ -3,8 +3,6 @@ import XCTest
 
 @MainActor
 final class AheadTests: XCTestCase {
-    /// A card on screen for `stays`, then gone: each wait past it lasts
-    /// until the card's task ends.
     private final class Screen: @unchecked Sendable {
         private let lock = NSLock()
         private var elapsed = Duration.zero
@@ -66,7 +64,6 @@ final class AheadTests: XCTestCase {
         for _ in 0..<50 { await Task.yield() }
     }
 
-    /// What a target asked of the server while on screen for `stays`.
     private func asked(_ target: Target, at place: Place, on platform: Platform = .phone, stays: Duration,
                        plan: EmbyPlayback? = nil) async -> [String] {
         let server = Server()

@@ -1,11 +1,6 @@
 #if DEBUG
 import Foundation
 
-/// When a film's subtitles get ready and show, from the Play tap: lines
-/// "PERF subs <event> t=<ms since the tap> <key>=<value> …" in the log, and
-/// all of them in the player's readout for the UI tests. Built from numbers
-/// and fixed words only: the log must never hold an address, a key, a host,
-/// an error (its description can carry the address) or a subtitle's text.
 final class SubtitleStopwatch: @unchecked Sendable {
     enum Event: String {
         case tapped, loaded, tracks, fetched, added, shown, rebuffer
@@ -48,7 +43,6 @@ final class SubtitleStopwatch: @unchecked Sendable {
         record((CFAbsoluteTimeGetCurrent(), event, fields.map { " \($0.key.rawValue)=\($0.value.text)" }.joined()))
     }
 
-    /// Lines noted before the tap (a film opened ahead) are logged now.
     func tapped(at time: CFAbsoluteTime) {
         let before = lock.withLock { () -> [Line] in
             tap = time

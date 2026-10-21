@@ -1,9 +1,5 @@
 import XCTest
 
-/// iPhone on the test server (scripts/mock_server.py, signed in through
-/// TEST_RUNNER_DEBUG_EMBY): what a title on screen gets ready before a tap,
-/// and how soon its subtitles show. Needs the ten-minute two-language film
-/// with an English SDH file beside it (TEST_RUNNER_SUBS_TIMING=1).
 final class PrepareAheadTests: XCTestCase {
     private let app = XCUIApplication()
 
@@ -16,9 +12,6 @@ final class PrepareAheadTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    /// Where a first subtitle pick spends its time, for each kind of track:
-    /// the film's own (the server's copy slow to come), the server's copy of
-    /// it, and a file beside the film. Prints the player's stopwatch.
     func testSubtitlePickTimes() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         for copyDelay in ["90", "0"] {
@@ -38,13 +31,6 @@ final class PrepareAheadTests: XCTestCase {
         configure(server, ["reset": "1"])
     }
 
-    /// Continue Watching on iPhone. The first card, on screen past its
-    /// dwell, gets its plan, the start of its file and its likeliest
-    /// subtitles (the server's copy of its own English track) before any
-    /// tap; cards a fast scroll passes get nothing. The card it stops on is
-    /// tapped: nothing is asked again, and English, picked while the
-    /// server's copy is still coming, shows its line at once without the
-    /// player reading back into the film.
     func testContinueWatchingGetsReadyOnlyWhatStays() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -54,12 +40,10 @@ final class PrepareAheadTests: XCTestCase {
         app.launch()
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 20), "no Continue Watching")
-        // Under the hero at launch, half on screen: the page drawn up a little.
         let hero = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
         hero.press(forDuration: 0.1, thenDragTo: hero.withOffset(CGVector(dx: 0, dy: -300)))
         sleep(3)
         print("PREP ahead after the first card's dwell: " + app.staticTexts["debug-ahead"].firstMatch.label)
-        // The show's card plays its episode S2 E3 (the test server's e203).
         let firstItem = "e203"
         XCTAssertTrue(playbackInfoRequests(server).contains(firstItem), "the first card got no plan: \(playbackInfoRequests(server))")
         XCTAssertTrue(videoRequests(server).contains(firstItem), "the first card's file start wasn't fetched: \(videoRequests(server))")
@@ -70,8 +54,6 @@ final class PrepareAheadTests: XCTestCase {
 
         let row = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 360, dy: first.frame.midY))
         let last = app.buttons["continue-m9"]
-        // One hard fling: the first cards along pass in a moment; it slows
-        // down near the end, where cards may stay long enough.
         for _ in 0..<4 where !(last.exists && last.isHittable) {
             row.press(forDuration: 0.05, thenDragTo: row.withOffset(CGVector(dx: -320, dy: 0)),
                       withVelocity: XCUIGestureVelocity(6000), thenHoldForDuration: 0)
@@ -103,9 +85,6 @@ final class PrepareAheadTests: XCTestCase {
         XCTAssertEqual(Int(readsBack.label) ?? -1, before, "showing English read back into the film")
     }
 
-    /// A film's page gets its Play ready while it's open; back from the
-    /// player, again, from where it stopped. Regression: the page under the
-    /// player was held still, and a second Play asked the server afresh.
     func testAPageGetsReadyAgainWhenThePlayerCloses() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -147,8 +126,6 @@ final class PrepareAheadTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["debug-position"].firstMatch.waitForExistence(timeout: 30), "the film didn't open")
     }
 
-    /// One pick in the menu: its switch, its first line (up to 20 s) and any
-    /// stall after it, from the player's stopwatch.
     private func timePick(_ label: String) -> String {
         let before = events("switch").count
         let menu = subtitleMenu()

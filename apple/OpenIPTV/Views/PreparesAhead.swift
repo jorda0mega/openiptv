@@ -1,9 +1,6 @@
 import SwiftUI
 
 extension View {
-    /// Gets `target` ready while it stays on screen (iPhone) or in focus
-    /// (Apple TV), as long as `place` says (see Ahead); a page or a
-    /// forecast, while its screen is open. Not while the player covers it.
     /// On Apple TV, put it on the button's label: focus is the button's.
     func preparesAhead(_ target: Target?, at place: Place) -> some View {
         modifier(PreparesAhead(target: target, place: place))
@@ -22,7 +19,7 @@ private struct PreparesAhead: ViewModifier {
             #if os(iOS)
             .background {
                 GeometryReader { proxy in
-                    let seen = Self.mostlySeen(proxy)
+                    let seen = Self.isAtLeast60PercentVisible(proxy)
                     Color.clear
                         .onAppear { onScreen = seen }
                         .onChange(of: seen) { onScreen = seen }
@@ -34,9 +31,7 @@ private struct PreparesAhead: ViewModifier {
             }
     }
 
-    /// At least 60 % of it inside each scroll view it's in (its row's and
-    /// the page's).
-    private static func mostlySeen(_ proxy: GeometryProxy) -> Bool {
+    private static func isAtLeast60PercentVisible(_ proxy: GeometryProxy) -> Bool {
         let frame = proxy.frame(in: .local)
         guard frame.width > 0, frame.height > 0 else { return false }
         var seen = frame
