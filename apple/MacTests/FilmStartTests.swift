@@ -33,8 +33,7 @@ final class FilmStartTests: XCTestCase {
         let cues: Range<Int64>
         let tags: Range<Int64>
 
-        init(points: [Point] = Film.points(), seeks extra: [(id: UInt32, position: UInt64)] = []) {
-            let firstCluster: Int64 = 4096
+        init(header firstCluster: Int64 = 4096, points: [Point] = Film.points(), seeks extra: [(id: UInt32, position: UInt64)] = []) {
             let ebml = Self.element(0x1A45DFA3, Self.element(0x4282, Array("matroska".utf8)))
             let segmentStart = Int64(ebml.count + 12)
             let clusters = (points.flatMap(\.positions).map(\.cluster).max() ?? 0) + 1
@@ -58,7 +57,9 @@ final class FilmStartTests: XCTestCase {
                 + extra.flatMap { seek($0.id, $0.position) })
             head += Self.element(0x1549A966, Self.element(0x2AD7B1, Self.uint(1_000_000)))
             head += Self.element(0x1654AE6B, Self.track(Self.video, type: 1) + Self.track(Self.subtitles, type: 0x11))
-            head += Self.element(0xEC, [UInt8](repeating: 0, count: Int(firstCluster) - head.count - 9))
+            // Fonts and cover art (Attachments) can push the clusters past the first read.
+            let filler: UInt32 = firstCluster > StreamRelay.firstRead ? 0x1941A469 : 0xEC
+            head += Self.element(filler, [UInt8](repeating: 0, count: Int(firstCluster) - head.count - Self.uint(UInt64(filler)).count - 8))
             head += [0x1F, 0x43, 0xB6, 0x75] + Self.size(Int(Self.clusterSize) - 12)
             // Tags follow the Cues, as mkvmerge writes them.
             self.firstCluster = firstCluster
@@ -108,7 +109,7 @@ final class FilmStartTests: XCTestCase {
     /// starts at.
     private func opening(_ film: Film, start: Int64, keyframe: Int64? = nil) -> [(String, Range<Int64>)] {
         let first = StreamRelay.firstRead
-        return [("first read", 0..<first), ("index and tags", film.cues.lowerBound..<film.total),
+        return [("first read", 0..<first), ("header", 0..<film.firstCluster), ("index and tags", film.cues.lowerBound..<film.total),
                 ("read from the first cluster", film.firstCluster..<film.firstCluster + first),
                 ("start", start..<(keyframe ?? start) + first + StreamRelay.readSize)]
     }
@@ -215,5 +216,12 @@ final class FilmStartTests: XCTestCase {
         let (offOK, offFetched) = await fetchedAhead(film, for: off)
         XCTAssertTrue(offOK, "the film's start wasn't fetched")
         assertAllFetched(opening(film, start: film.cluster(150)), offFetched)
+    }
+
+    func testAHeaderLongerThanTheFirstReadIsFetchedToTheFirstCluster() async {
+        let film = Film(header: 1_200_000)
+        let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.5))
+        XCTAssertTrue(ok, "the film's start wasn't fetched")
+        assertAllFetched(opening(film, start: film.cluster(150)), fetched)
     }
 }
