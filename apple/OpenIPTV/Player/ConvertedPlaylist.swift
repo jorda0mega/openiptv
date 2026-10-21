@@ -6,11 +6,19 @@ struct ConvertedPlaylist: Sendable {
     let segments: [(seconds: Double, tags: [String], url: URL)]
     let header: [String]
 
+    enum Opening: Sendable {
+        case listed(ConvertedPlaylist)
+        /// The server's own playlist: one that can't be listed again.
+        case whole
+        /// Not with the key: words and counts for the debug readout.
+        case refused(String)
+    }
+
     static func load(_ master: URL, headers: [String],
-                     fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> ConvertedPlaylist? {
+                     fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> Opening {
         guard let top = await fetch(request(master, headers, given: master)), let variant = variant(of: top.lines, at: top.url),
-              let list = await fetch(request(variant, headers, given: master)) else { return nil }
-        return ConvertedPlaylist(list.lines, at: list.url)
+              let list = await fetch(request(variant, headers, given: master)) else { return .whole }
+        return ConvertedPlaylist(list.lines, at: list.url).map(Opening.listed) ?? .whole
     }
 
     /// The account's key goes only to the server the app was given: not to

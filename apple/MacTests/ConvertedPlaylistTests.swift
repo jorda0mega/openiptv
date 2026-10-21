@@ -51,36 +51,63 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(segments(text).count, 1)
     }
 
-    private func requests(listing listed: String, masterAt: URL? = nil,
-                          master: URL = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&api_key=test-key")!)
-        async -> [(url: URL, key: String?)] {
+    /// The loader against a made-up server: how the version opens, and
+    /// each request it sent, where to and with which key.
+    private func loaded(listing listed: String = "main.m3u8?MediaSourceId=m1", masterAt: URL? = nil,
+                        master: URL = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&api_key=test-key")!,
+                        variant: [String]? = nil) async -> (opening: ConvertedPlaylist.Opening, sent: [(url: URL, key: String?)]) {
         var sent: [(url: URL, key: String?)] = []
         let masterAt = masterAt ?? master
-        _ = await ConvertedPlaylist.load(master, headers: ["X-Emby-Token: test-key"]) { request in
+        let opening = await ConvertedPlaylist.load(master, headers: ["X-Emby-Token: test-key"]) { request in
             guard let url = request.url else { return nil }
             sent.append((url, request.value(forHTTPHeaderField: "X-Emby-Token")))
             return url.lastPathComponent == "master.m3u8"
-                ? (["#EXTM3U", "#EXT-X-STREAM-INF:BANDWIDTH=2000000", listed], masterAt) : (emby(segments: 3), url)
+                ? (["#EXTM3U", "#EXT-X-STREAM-INF:BANDWIDTH=2000000", listed], masterAt) : (variant ?? emby(segments: 3), url)
         }
-        return sent
+        return (opening, sent)
+    }
+
+    private func requests(listing listed: String, master: URL) async -> [(url: URL, key: String?)] {
+        await loaded(listing: listed, master: master).sent
     }
 
     func testTheAccountsKeyGoesToTheServerItWasGivenFor() async {
-        let sent = await requests(listing: "main.m3u8?MediaSourceId=m1", masterAt: master)
+        let sent = await loaded().sent
         XCTAssertEqual(sent.map(\.url.host), ["emby.example", "emby.example"])
         XCTAssertEqual(sent.map(\.key), ["test-key", "test-key"])
     }
 
-    func testTheAccountsKeyGoesNowhereElse() async {
-        let redirected = await requests(listing: "main.m3u8?MediaSourceId=m1&api_key=test-key",
-                                        masterAt: URL(string: "https://cdn.example/emby/Videos/m1/master.m3u8")!)
-        let listedElsewhere = await requests(listing: "https://other.example:8443/Videos/m1/main.m3u8?api_key=test-key", masterAt: master)
-        for (name, sent) in [("redirected", redirected), ("listed elsewhere", listedElsewhere)] {
-            XCTAssertEqual(sent.count, 2, name)
-            guard let variant = sent.last else { continue }
-            XCTAssertNotEqual(variant.url.host, "emby.example", name)
-            XCTAssertNil(variant.key, "\(name): the key in its header")
-            XCTAssertFalse(variant.url.absoluteString.contains("test-key"), "\(name): the key in its address")
+    /// The player sends the key it is given with every request it makes for
+    /// the version: the master, its redirect, the variant, each segment and
+    /// key. One with any of them elsewhere doesn't open.
+    func testAVersionWithAnAddressElsewhereDoesNotOpen() async {
+        let segmentElsewhere = emby(segments: 3).map { $0.hasPrefix("hls1/main/1.ts") ? "https://cdn.example/hls1/main/1.ts" : $0 }
+        var keyElsewhere = emby(segments: 3)
+        keyElsewhere.insert("#EXT-X-KEY:METHOD=AES-128,URI=\"https://cdn.example/key\"", at: 5)
+        let cases = [
+            ("redirected", await loaded(listing: "main.m3u8?MediaSourceId=m1&api_key=test-key",
+                                        masterAt: URL(string: "https://cdn.example/emby/Videos/m1/master.m3u8")!)),
+            ("listed elsewhere", await loaded(listing: "https://other.example:8443/Videos/m1/main.m3u8?api_key=test-key")),
+            ("a segment elsewhere", await loaded(variant: segmentElsewhere)),
+            ("a key elsewhere", await loaded(variant: keyElsewhere)),
+        ]
+        for (name, (opening, sent)) in cases {
+            if case .refused = opening {} else { XCTFail("\(name): it opens, and the player sends the key there") }
+            for request in sent where request.url.host() != "emby.example" {
+                XCTAssertNil(request.key, "\(name): the key in its header")
+                XCTAssertFalse(request.url.absoluteString.contains("test-key"), "\(name): the key in its address")
+            }
+        }
+    }
+
+    func testAVersionAllOnTheGivenServerOpens() async {
+        guard case let .listed(list) = await loaded().opening else { return XCTFail("not listed") }
+        let hosts = segments(list.listed(from: 4).playlist).map { URL(string: $0)?.host() }
+        XCTAssertEqual(hosts, [String?](repeating: "emby.example", count: 2))
+        var keyed = emby(segments: 3)
+        keyed.insert("#EXT-X-KEY:METHOD=AES-128,URI=\"key\"", at: 5)
+        for (name, variant) in [("a key on the server", keyed), ("still growing", Array(emby(segments: 3).dropLast()))] {
+            if case .whole = await loaded(variant: variant).opening {} else { XCTFail("\(name): not the server's own playlist") }
         }
     }
 
