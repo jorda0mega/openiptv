@@ -694,7 +694,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 
 /// What's been fetched of one file, kept in a sparse temporary file (only
 /// the bytes written take space), up to 1 GB; past that, the bytes
-/// farthest from the newest are let go.
+/// farthest from the newest are let go, but never those fetched ahead.
 final class ByteCache: @unchecked Sendable {
     private static let folder = FileManager.default.temporaryDirectory.appending(path: "relay-cache")
     static let limit: Int64 = 1 << 30
@@ -704,6 +704,7 @@ final class ByteCache: @unchecked Sendable {
     private let path: URL
     private let handle: FileHandle
     private var ranges: [Range<Int64>] = []
+    private var fetchedAhead: [Range<Int64>] = []
     private var stored: Int64 = 0
     private(set) var total: Int64?
     private(set) var contentType: String?
@@ -757,8 +758,10 @@ final class ByteCache: @unchecked Sendable {
     }
     private var indexClaimed = false
 
-    /// `evicting`: may let the bytes farthest from these go to make room
-    /// (not for the index, far from where the film plays).
+    /// `evicting`: may let the bytes farthest from these go to make room.
+    /// `false`, fetched ahead (the file's start, its index and tags, where it
+    /// resumes): lets nothing go, as the index is far from where the film
+    /// plays, and is never let go itself.
     func store(_ data: Data, at offset: Int64, evicting: Bool = true) {
         let end = offset + Int64(data.count)
         lock.withLock {
@@ -768,12 +771,14 @@ final class ByteCache: @unchecked Sendable {
                 try handle.seek(toOffset: UInt64(offset))
                 try handle.write(contentsOf: data)
             } catch { return }
-            add(offset..<end)
+            ranges = Self.adding(offset..<end, to: ranges)
+            stored = ranges.reduce(0) { $0 + Int64($1.count) }
+            if !evicting { fetchedAhead = Self.adding(offset..<end, to: fetchedAhead) }
         }
     }
 
-    /// Adds a run of bytes, merging it with those it touches.
-    private func add(_ new: Range<Int64>) {
+    /// Merges a run of bytes with those it touches.
+    private static func adding(_ new: Range<Int64>, to ranges: [Range<Int64>]) -> [Range<Int64>] {
         var merged = new
         var kept: [Range<Int64>] = []
         for range in ranges {
@@ -784,8 +789,11 @@ final class ByteCache: @unchecked Sendable {
             }
         }
         kept.append(merged)
-        ranges = kept.sorted { $0.lowerBound < $1.lowerBound }
-        stored = ranges.reduce(0) { $0 + Int64($1.count) }
+        return kept.sorted { $0.lowerBound < $1.lowerBound }
+    }
+
+    private static func removing(_ cut: Range<Int64>, from ranges: [Range<Int64>]) -> [Range<Int64>] {
+        ranges.flatMap { [$0.clamped(to: Int64.min..<cut.lowerBound), $0.clamped(to: cut.upperBound..<Int64.max)] }.filter { !$0.isEmpty }
     }
 
     /// mpv reads again from ten seconds back for a track it hasn't been
@@ -795,18 +803,15 @@ final class ByteCache: @unchecked Sendable {
         if Self.oldRule { return oldMakeRoom(for: count, near: offset) }
         #endif
         let step: Int64 = 1 << 20
-        while stored + count > limit, let first = ranges.first, let last = ranges.last {
+        while stored + count > limit {
+            let free = fetchedAhead.reduce(ranges) { Self.removing($1, from: $0) }
+            guard let first = free.first, let last = free.last else { return }
             let excess = stored + count - limit
-            if offset - first.lowerBound >= last.upperBound - offset {
-                let cut = min(first.upperBound, (first.lowerBound + excess + step - 1) / step * step)
-                punch(first.lowerBound..<cut)
-                ranges[0] = cut..<first.upperBound
-            } else {
-                let cut = max(last.lowerBound, (last.upperBound - excess) / step * step)
-                punch(cut..<last.upperBound)
-                ranges[ranges.count - 1] = last.lowerBound..<cut
-            }
-            ranges.removeAll(where: \.isEmpty)
+            let cut = offset - first.lowerBound >= last.upperBound - offset
+                ? first.lowerBound..<min(first.upperBound, (first.lowerBound + excess + step - 1) / step * step)
+                : max(last.lowerBound, (last.upperBound - excess) / step * step)..<last.upperBound
+            punch(cut)
+            ranges = Self.removing(cut, from: ranges)
             stored = ranges.reduce(0) { $0 + Int64($1.count) }
         }
     }
