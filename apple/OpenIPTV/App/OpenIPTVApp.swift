@@ -89,10 +89,7 @@ struct RootView: View {
             PlayerScreen(item: item) { RootView.quietly { shown = nil } }
         }
         .onChange(of: playing?.id) { RootView.quietly { shown = playing } }
-        .onChange(of: shown?.id) {
-            model.playerShown = shown != nil
-            if shown == nil, playing != nil { playing = nil }
-        }
+        .onChange(of: shown?.id) { if shown == nil, playing != nil { playing = nil } }
         .task { await model.loadLive() }
         #if DEBUG
         // UI tests: when the last stop reached the page (see noteStop).

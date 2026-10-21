@@ -144,9 +144,13 @@ struct LivePlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .task { start() }
-        .onAppear { PlaybackActivity.began() }
+        .onAppear {
+            PlaybackActivity.began()
+            model.playerShown = true
+        }
         .onDisappear {
             PlaybackActivity.ended()
+            model.playerShown = false
             ScreenAwake.set(awakeID, playing: false)
             hideTask?.cancel()
             loadTask?.cancel()

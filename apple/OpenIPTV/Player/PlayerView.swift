@@ -497,6 +497,7 @@ struct MoviePlayerView: View {
         .task(id: playback.itemId) { await loadSeason() }
         .onAppear {
             PlaybackActivity.began()
+            model.playerShown = true
             // What was fetched ahead for other titles stops (and none starts
             // while this plays): it has the connection to itself.
             StreamRelay.shared.stopAhead(keeping: playback.url)
@@ -506,6 +507,7 @@ struct MoviePlayerView: View {
         }
         .onDisappear {
             PlaybackActivity.ended()
+            model.playerShown = false
             ScreenAwake.set(awakeID, playing: false)
             #if DEBUG
             model.debugPlayerUp = false
