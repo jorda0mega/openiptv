@@ -131,8 +131,9 @@ final class RealFeedTests: XCTestCase {
     /// and seconds.
     func testLowerQualityDeepInAFilmPlaysOn() throws {
         let film = ProcessInfo.processInfo.environment["REAL_FEED_FILM"] ?? "Asterix and Cleopatra"
+        let start = 2400.0
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
-        app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = "2400"
+        app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = String(Int(start))
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
         app.launchArguments += ["-debugSearch", film]
         app.launch()
@@ -145,12 +146,17 @@ final class RealFeedTests: XCTestCase {
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page has no Play")
         play.tap()
-        XCTAssertNotNil(waitForPosition(timeout: 45), "the film didn't open")
+        // From the keyframe at or before the second asked for: a real film's
+        // are up to about 10 s apart.
+        let opened = try XCTUnwrap(openedAt(timeout: 45), "the film didn't open")
+        let deep = (start - 30...start + 2).contains(opened)
+        print("REAL deep: opened at \(Int(opened)) s | forty minutes in \(deep ? "yes" : "no")")
+        XCTAssertTrue(deep, "the film opened at \(Int(opened)) s, not forty minutes in")
         let quality = app.staticTexts["debug-quality"].firstMatch
         let note = app.descendants(matching: .any)["player-note"].firstMatch
         var noted = false
-        let opened = Date()
-        while Date().timeIntervalSince(opened) < 60, !(quality.exists && quality.label.hasPrefix("converted")) {
+        let shown = Date()
+        while Date().timeIntervalSince(shown) < 60, !(quality.exists && quality.label.hasPrefix("converted")) {
             noted = noted || note.exists
             usleep(500_000)
         }
@@ -171,7 +177,7 @@ final class RealFeedTests: XCTestCase {
             if let at20, elapsed >= 22.5, playsAt20 == nil { playsAt20 = now > at20 + 1 }
             usleep(500_000)
         }
-        print("REAL deep: forty minutes in \(from >= 2400 ? "yes" : "no") | lowered \(lowered ? "yes" : "no")"
+        print("REAL deep: lowered \(lowered ? "yes" : "no")"
               + " | playing 20 s after the drop \(playsAt20 == true ? "yes" : "no")"
               + " | first new frame after \(firstFrame.map { String(format: "%.0f s", $0) } ?? "none in 60 s")"
               + " | note shown \(noted ? "yes" : "no")")
@@ -599,6 +605,18 @@ final class RealFeedTests: XCTestCase {
         print("REAL auth: converted version plays \(plays ? "yes" : "no") | playlist addresses with the key: \(counted)")
         XCTAssertTrue(converted, "the film wasn't lowered to the converted version")
         XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
+    }
+
+    /// The film's second at its first frame, from the player's start
+    /// readout ("cold 4.2 at 2392").
+    private func openedAt(timeout: TimeInterval) -> Double? {
+        let readout = app.staticTexts["debug-start"].firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if readout.exists, let at = readout.label.components(separatedBy: " at ").last.flatMap(Double.init) { return at }
+            usleep(500_000)
+        }
+        return nil
     }
 
     private func waitForPosition(timeout: TimeInterval) -> Double? {
