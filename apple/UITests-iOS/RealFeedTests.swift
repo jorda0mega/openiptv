@@ -697,19 +697,19 @@ final class RealFeedTests: XCTestCase {
         XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
     }
 
-    /// Films as they buffer now (diagnostic, about 17 min, films only).
-    /// Counts and times only: Continue Watching's first three cards started
-    /// cold (nothing got ready ahead) and ready (3 s on screen); the first
-    /// played from its resume point (FILM_BUFFERING_SECONDS, 480 s), every
-    /// 30 s; a jump of +5 min and one of -30 s; another audio track; each
+    /// Films as they buffer, the old way and now, in one run (diagnostic,
+    /// about 19 min, films only). Counts and times only: Continue Watching's
+    /// first three cards started cold (nothing got ready ahead), ready the
+    /// old way and ready now (3 s on screen); the first played from its
+    /// resume point the old way and now (FILM_BUFFERING_SECONDS each, 240 s),
+    /// then a jump of +5 min and one of -30 s, another audio track and each
     /// kind of subtitles; a film heard in English or Spanish only in another
-    /// copy, switched to it; and a start of the converted version.
+    /// copy, switched to it; and a start of the converted version the old
+    /// way and now.
     func testFilmBufferingAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
-        // TEST_RUNNER_OLD_RELAY_CACHE=1: the relay's store as it was, for before and after.
-        let old = ProcessInfo.processInfo.environment["OLD_RELAY_CACHE"] != nil ? ["-oldRelayCache", "YES"] : []
-        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"] + old
-        let playFor = ProcessInfo.processInfo.environment["FILM_BUFFERING_SECONDS"].flatMap(Double.init) ?? 480
+        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
+        let playFor = ProcessInfo.processInfo.environment["FILM_BUFFERING_SECONDS"].flatMap(Double.init) ?? 240
         app.launchArguments = shipped
         app.launch()
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'"))
@@ -719,67 +719,22 @@ final class RealFeedTests: XCTestCase {
         shot("home at launch")
         app.terminate()
 
+        let starts = [("cold", ["-noPrepareAhead", "YES"]), ("ready (old way)", ["-oldReadyStart", "YES"]), ("ready", [])]
         for (n, id) in ids.enumerated() {
-            for cold in n % 2 == 0 ? [true, false] : [false, true] {
-                app.launchArguments = shipped + (cold ? ["-noPrepareAhead", "YES"] : [])
+            for (name, arguments) in n % 2 == 0 ? starts : starts.reversed() {
+                app.launchArguments = shipped + arguments
                 app.launch()
                 try bringOnScreen(id, at: n)
-                if !cold { sleep(3) }
+                if name != "cold" { sleep(3) }
                 app.buttons[id].tap()
-                say("REAL start card \(n + 1) \(cold ? "cold" : "ready"): " + startParts())
+                say("REAL start card \(n + 1) \(name): " + startParts())
                 app.terminate()
             }
         }
 
-        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = String(Int(playFor) + 15)
-        app.launchArguments = shipped
-        app.launch()
-        try bringOnScreen(ids[0], at: 0)
-        sleep(3)
-        app.buttons[ids[0]].tap()
-        say("REAL playback start: " + startParts())
-        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = nil
-        let buffering = app.staticTexts["debug-buffering"].firstMatch
-        let relay = app.staticTexts["debug-relay"].firstMatch
-        let quality = app.staticTexts["debug-quality"].firstMatch
-        let began = Date(), fromServer = serverMB()
-        while Date().timeIntervalSince(began) < playFor {
-            sleep(30)
-            say(String(format: "REAL playback at %.0f s: %@ | %@ | %@", Date().timeIntervalSince(began), buffering.label,
-                       quality.label, relay.label))
+        for old in [true, false] {
+            try playAndSwitch(ids[0], launch: shipped + (old ? ["-oldRelayCache", "YES"] : []), for: playFor, way: old ? " (old way)" : "")
         }
-        let played = Date().timeIntervalSince(began), read = serverMB() - fromServer
-        say(String(format: "REAL playback after %.0f s: %.1f MB from the server, %.2f MB/s on average", played, read, read / played))
-
-        for _ in 0..<90 where field("jumps", in: buffering.label).count < 2 { usleep(500_000) }
-        for (jump, name) in zip(field("jumps", in: buffering.label) + ["none", "none"], ["+5 min", "-30 s"]) {
-            say("REAL jump \(name): \(jump) to the next frame (MB from the server)")
-        }
-
-        let readsBack = app.staticTexts["debug-reads-back"].firstMatch
-        if !openTrackMenu() {
-            say("REAL audio, another track in the file: not measured, the menu didn't open")
-        } else if let other = app.buttons.matching(identifier: "audio-track").allElementsBoundByIndex.first {
-            let back = Int(readsBack.label) ?? 0, rebuffers = count("rebuffers", in: buffering.label)
-            other.tap()
-            for _ in 0..<40 where !buffering.label.contains("audio:") { usleep(250_000) }
-            sleep(3)
-            say("REAL audio, another track in the file: \(last("audio", in: buffering.label)) to its sound, "
-                + "rebuffers \(count("rebuffers", in: buffering.label) - rebuffers), reads back \((Int(readsBack.label) ?? 0) - back)")
-        } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-            say("REAL audio, another track in the file: none")
-        }
-
-        var kinds: [String: String] = [:]
-        for entry in 1...6 {
-            guard let line = pickSubtitles(entry), !line.hasPrefix("not measured") else { break }
-            let kind = line.split(separator: " ").first { $0.hasPrefix("to=") }.map(String.init) ?? "to=?"
-            let hidden = line.contains("hidden=yes") ? " hidden" : ""
-            if kinds[kind + hidden] == nil { kinds[kind + hidden] = line }
-        }
-        for (kind, line) in kinds.sorted(by: { $0.key < $1.key }) { say("REAL subtitles \(kind): \(line)") }
-        app.terminate()
 
         app.launchArguments = shipped + ["-debugPlayCopyFilm", "YES"]
         app.launch()
@@ -802,6 +757,61 @@ final class RealFeedTests: XCTestCase {
         app.terminate()
 
         for old in [true, false] { try sayConvertedStart(ids[0], launch: shipped, old: old) }
+    }
+
+    /// The first card played from its resume point for `seconds`, every
+    /// 30 s, then a jump of +5 min and one of -30 s, another audio track and
+    /// each kind of subtitles; `way` names the old way.
+    private func playAndSwitch(_ id: String, launch arguments: [String], for seconds: Double, way: String) throws {
+        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = String(Int(seconds) + 15)
+        app.launchArguments = arguments
+        app.launch()
+        try bringOnScreen(id, at: 0)
+        sleep(3)
+        app.buttons[id].tap()
+        say("REAL playback\(way) start: " + startParts())
+        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = nil
+        let buffering = app.staticTexts["debug-buffering"].firstMatch
+        let relay = app.staticTexts["debug-relay"].firstMatch
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        let began = Date(), fromServer = serverMB()
+        while Date().timeIntervalSince(began) < seconds {
+            sleep(30)
+            say(String(format: "REAL playback\(way) at %.0f s: %@ | %@ | %@", Date().timeIntervalSince(began), buffering.label,
+                       quality.label, relay.label))
+        }
+        let played = Date().timeIntervalSince(began), read = serverMB() - fromServer
+        say(String(format: "REAL playback\(way) after %.0f s: %.1f MB from the server, %.2f MB/s on average", played, read, read / played))
+
+        for _ in 0..<90 where field("jumps", in: buffering.label).count < 2 { usleep(500_000) }
+        for (jump, name) in zip(field("jumps", in: buffering.label) + ["none", "none"], ["+5 min", "-30 s"]) {
+            say("REAL jump\(way) \(name): \(jump) to the next frame (MB from the server)")
+        }
+
+        let readsBack = app.staticTexts["debug-reads-back"].firstMatch
+        if !openTrackMenu() {
+            say("REAL audio\(way), another track in the file: not measured, the menu didn't open")
+        } else if let other = app.buttons.matching(identifier: "audio-track").allElementsBoundByIndex.first {
+            let back = Int(readsBack.label) ?? 0, rebuffers = count("rebuffers", in: buffering.label)
+            other.tap()
+            for _ in 0..<40 where !buffering.label.contains("audio:") { usleep(250_000) }
+            sleep(3)
+            say("REAL audio\(way), another track in the file: \(last("audio", in: buffering.label)) to its sound, "
+                + "rebuffers \(count("rebuffers", in: buffering.label) - rebuffers), reads back \((Int(readsBack.label) ?? 0) - back)")
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            say("REAL audio\(way), another track in the file: none")
+        }
+
+        var kinds: [String: String] = [:]
+        for entry in 1...6 {
+            guard let line = pickSubtitles(entry), !line.hasPrefix("not measured") else { break }
+            let kind = line.split(separator: " ").first { $0.hasPrefix("to=") }.map(String.init) ?? "to=?"
+            let hidden = line.contains("hidden=yes") ? " hidden" : ""
+            if kinds[kind + hidden] == nil { kinds[kind + hidden] = line }
+        }
+        for (kind, line) in kinds.sorted(by: { $0.key < $1.key }) { say("REAL subtitles\(way) \(kind): \(line)") }
+        app.terminate()
     }
 
     /// A lower quality 10 s into the first Continue Watching card, the
