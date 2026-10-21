@@ -706,7 +706,9 @@ final class RealFeedTests: XCTestCase {
     /// copy, switched to it; and a start of the converted version.
     func testFilmBufferingAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
-        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
+        // TEST_RUNNER_OLD_RELAY_CACHE=1: the relay's store as it was, for before and after.
+        let old = ProcessInfo.processInfo.environment["OLD_RELAY_CACHE"] != nil ? ["-oldRelayCache", "YES"] : []
+        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"] + old
         let playFor = ProcessInfo.processInfo.environment["FILM_BUFFERING_SECONDS"].flatMap(Double.init) ?? 480
         app.launchArguments = shipped
         app.launch()
@@ -900,6 +902,13 @@ final class RealFeedTests: XCTestCase {
         return "tap to first frame \(parts[1]) s (\(player)) | \(split.exists ? split.label : "no parts")"
     }
 
+    /// From the relay readout: "from the device 9.7 MB" → 9.7.
+    private func relayMB(_ part: String) -> Double {
+        let relay = app.staticTexts["debug-relay"].firstMatch
+        guard relay.exists, let range = relay.label.range(of: part + #" ([0-9.]+) MB"#, options: .regularExpression) else { return 0 }
+        return Double(relay.label[range].split(separator: " ").dropLast().last ?? "") ?? 0
+    }
+
     private func serverMB() -> Double {
         let relay = app.staticTexts["debug-relay"].firstMatch
         guard relay.exists, let range = relay.label.range(of: #"from the server \d+ reads ([0-9.]+) MB"#, options: .regularExpression)
@@ -967,6 +976,8 @@ final class RealFeedTests: XCTestCase {
             return nil
         }
         let place = below[entry - 1]
+        let readsBack = app.staticTexts["debug-reads-back"].firstMatch
+        let (device, server, back) = (relayMB("from the device"), serverMB(), Int(readsBack.label) ?? 0)
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: place.midX, dy: place.midY)).tap()
         var switched: String?, shown: String?
         for _ in 0..<80 where shown == nil {
@@ -979,7 +990,9 @@ final class RealFeedTests: XCTestCase {
         let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
         let stalls = events().filter { $0.hasPrefix("rebuffer ") && n.map($0.split(separator: " ").contains) == true }
         let after = shown?.split(separator: " ").first { $0.hasPrefix("after=") }.map(String.init) ?? "no line in 20 s"
-        return ([switched ?? "no switch", after] + (stalls.isEmpty ? ["no stall"] : stalls)).joined(separator: " ; ")
+        let read = String(format: "read %.1f MB from the device, %.1f MB from the server, %d reads back", relayMB("from the device") - device,
+                          serverMB() - server, (Int(readsBack.label) ?? 0) - back)
+        return ([switched ?? "no switch", after] + (stalls.isEmpty ? ["no stall"] : stalls) + [read]).joined(separator: " ; ")
     }
 
     private func openedAt(timeout: TimeInterval) -> Double? {
