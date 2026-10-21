@@ -1030,6 +1030,9 @@ struct FileStart: Hashable, Sendable {
         headers = playback.headers
     }
 
+    /// Where it's fetched from.
+    var seconds: Double { Double(second) }
+
     static func == (a: FileStart, b: FileStart) -> Bool { a.itemId == b.itemId && a.second == b.second }
 
     func hash(into hasher: inout Hasher) {
@@ -1051,7 +1054,7 @@ extension Lane {
 @MainActor
 enum FileStarts {
     static let shelf = shelf(lane: .fileStarts) { start in
-        await StreamRelay.shared.fetchStart(url: start.url, headers: start.headers, at: Double(start.second))
+        await StreamRelay.shared.fetchStart(url: start.url, headers: start.headers, at: start.seconds)
     }
 
     static func shelf(lane: Lane, fetch: @escaping @Sendable (FileStart) async -> Bool) -> Shelf<FileStart, Bool> {
