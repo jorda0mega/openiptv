@@ -524,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path in ("/player_api.php", "/xmltv.php", "/get.php"):
             IPTV_ADDRESSES.append((time.time(), self.path))
+            time.sleep(float(CONTROL.get("xtream_latency", 0)))
             fields = {k: v[0] for k, v in parse_qs(url.query).items()}
             fields.update({k: str(v) for k, v in body.items()})
             if url.path == "/player_api.php":
@@ -703,6 +704,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.emby(path[len("/emby"):], q)
         if path in ("/player_api.php", "/xmltv.php", "/get.php"):
             IPTV_ADDRESSES.append((time.time(), self.path))
+            time.sleep(float(CONTROL.get("xtream_latency", 0)))
         if path == "/player_api.php":
             return self.xtream(q)
         if path in ("/get.php", "/playlist.m3u"):

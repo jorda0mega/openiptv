@@ -26,49 +26,43 @@ final class IPTVLoginLeakTests: XCTestCase {
             sleep(12)
             remote.press(.down)
             sleep(2)
-            XCTAssertNotNil(focusedChannel(), "no channel card in Live TV: \(focusedLabel())")
+            XCTAssertTrue(focusedLabel().contains("Channel"), "no channel card in Live TV: \(focusedLabel())")
+            openPlayer()
+            sleep(6)
         }
+        configure(["xtream_latency": "3"])
         for status in ["404", "403", "503", "429"] {
             step("channel answers \(status)") {
-                let channel = nextCard()
-                configure(["live_status": status, "live_status_ids": channel])
-                remote.press(.select)
+                configure(["live_status": status])
+                zap()
                 sleep(10)
-                leavePlayer()
                 configure(["live_status": "0"])
             }
         }
         step("slow start") {
-            _ = nextCard()
             configure(["live_delay": "6"])
-            remote.press(.select)
+            zap()
             sleep(12)
-            leavePlayer()
             configure(["live_delay": "0"])
         }
         step("cut") {
-            _ = nextCard()
             configure(["live_cut": "5"])
-            remote.press(.select)
+            zap()
             sleep(16)
-            leavePlayer()
             configure(["live_cut": "0"])
         }
         step("zap away mid-start") {
-            _ = nextCard()
             configure(["live_delay": "8"])
-            remote.press(.select)
+            zap()
             sleep(2)
-            remote.press(.down)
+            zap()
             sleep(2)
-            remote.press(.down)
+            zap()
             sleep(3)
-            leavePlayer()
             configure(["live_delay": "0"])
         }
         step("background and back") {
-            _ = nextCard()
-            remote.press(.select)
+            zap()
             sleep(8)
             remote.press(.home)
             sleep(5)
@@ -80,21 +74,25 @@ final class IPTVLoginLeakTests: XCTestCase {
             sleep(6)
             app.activate()
             sleep(8)
-            leavePlayer()
         }
         step("closing the player") {
-            _ = nextCard()
-            remote.press(.select)
+            leavePlayer()
+            openPlayer()
             sleep(1)
             leavePlayer()
-            _ = nextCard()
-            remote.press(.select)
+            openPlayer()
             sleep(8)
             leavePlayer()
+            openPlayer()
+        }
+        step("provider API times out") {
+            configure(["xtream_latency": "24"])
+            zap()
+            sleep(28)
+            configure(["xtream_latency": "3"])
         }
         step("provider drops every connection") {
-            _ = nextCard()
-            remote.press(.select)
+            zap()
             sleep(1)
             _ = control("mock/close_connections", ["abrupt": "1"])
             _ = control("mock/down", ["seconds": "10"])
@@ -117,27 +115,29 @@ final class IPTVLoginLeakTests: XCTestCase {
         results.append((name, counts))
     }
 
+    private var player: XCUIElement {
+        app.staticTexts["debug-live-copy"].firstMatch
+    }
+
     private func focusedLabel() -> String {
         let element = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
         return element.exists ? element.label : ""
     }
 
-    private func focusedChannel() -> String? {
-        focusedLabel().firstMatch(of: #/Channel (\d+)/#).map { String($0.1) }
+    private func openPlayer() {
+        remote.press(.select)
+        XCTAssertTrue(player.waitForExistence(timeout: 10), "the player didn't open from \(focusedLabel())")
     }
 
-    private func nextCard() -> String {
-        let before = focusedChannel()
-        remote.press(.right)
-        sleep(1)
-        let channel = focusedChannel()
-        XCTAssertNotNil(channel, "focus left the channel cards: \(focusedLabel())")
-        XCTAssertNotEqual(channel, before, "the next card is the same channel")
-        return channel ?? ""
+    private func zap() {
+        let before = player.label
+        remote.press(.down)
+        let deadline = Date().addingTimeInterval(5)
+        while player.label == before, Date() < deadline { usleep(250_000) }
+        XCTAssertNotEqual(player.label, before, "Down didn't move to the next channel")
     }
 
     private func leavePlayer() {
-        let player = app.staticTexts["debug-live-copy"].firstMatch
         for _ in 0..<3 where player.exists {
             remote.press(.menu)
             _ = player.waitForNonExistence(timeout: 3)
