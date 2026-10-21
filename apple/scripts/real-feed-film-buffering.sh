@@ -21,7 +21,7 @@ for attempt in 1 2 3; do
   xcrun simctl shutdown $PHONE 2>/dev/null
   xcrun simctl boot $PHONE 2>/dev/null; xcrun simctl bootstatus $PHONE -b >/dev/null 2>&1; sleep 5
   out=$(xcodebuild test-without-building -scheme OpenIPTV -destination "platform=iOS Simulator,id=$PHONE" -derivedDataPath $DD \
-    "-only-testing:OpenIPTV UITests/RealFeedTests/testFilmBufferingAsSeenNow" 2>&1)
+    "-only-testing:OpenIPTV UITests/RealFeedFilmTests/testFilmBufferingAsSeenNow" 2>&1)
   if print -r -- "$out" | grep -q "Failed to get list of active applications"; then echo "(start-up error, attempt $attempt)"; continue; fi
   break
 done

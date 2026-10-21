@@ -34,6 +34,7 @@
 		0F5DA94E3A68E664F7B7DDFD /* LiveShelfViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766249862D814DF2C6786AF4 /* LiveShelfViews.swift */; };
 		0FB942BAE8072453D1B7CD43 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23A89C8F6E23115DFA3208C6 /* AudioToolbox.framework */; };
 		10831580B6F72D43D2609FD1 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
+		1094A33DDB56CCAB0D7D56E3 /* RealFeedFilmTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC8B73B30FA5CF3FB502D43 /* RealFeedFilmTests.swift */; };
 		10E6DBCB2E85AE6FC761AF98 /* LocalArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */; };
 		115F406EC20EB90B56F66B3F /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D277F32EC509804119BFFFC4 /* VideoToolbox.framework */; };
 		1273ABF188482A875F821B01 /* SharedGuideRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2871C16F0BDAE894782F88F /* SharedGuideRule.swift */; };
@@ -116,6 +117,7 @@
 		56FC834D455E6F4164EC0918 /* Libavformat.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */; };
 		58E6D3829366CA7178C840B0 /* Gzip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1500ACB77AA629F7F047BF /* Gzip.swift */; };
 		5982568A867A84D00F3E34AC /* FilmStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = A499AF3328F37CF4A80BDD45 /* FilmStream.swift */; };
+		59C38F95C70FC1EC1C1BDB21 /* Matroska.swift in Sources */ = {isa = PBXBuildFile; fileRef = 639680A5419B6E8D2BBE7319 /* Matroska.swift */; };
 		5DAD3128BF5196E7F19247AC /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 4B0770E7215519F6AED0BA2C /* libz.tbd */; };
 		5DD666173BB4384D42856227 /* FilmStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = A499AF3328F37CF4A80BDD45 /* FilmStream.swift */; };
 		5E075ACFCF2BDA408958FA86 /* Gzip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1500ACB77AA629F7F047BF /* Gzip.swift */; };
@@ -136,6 +138,7 @@
 		673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8781972F0C4836EB0FCF2A63 /* Onboarding.swift */; };
 		675F87B1E11CC35003D7F57C /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
 		679B1E1CB1D8E950DC8E10EE /* PrepareAheadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1512DD4E28DAAD7ADF7E915A /* PrepareAheadTests.swift */; };
+		69DCE4162B149229C80BF8E4 /* ByteCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6FAD856F6F003A471235BD6 /* ByteCache.swift */; };
 		6A0F285EDD9EEFA5D6857F60 /* Plans.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBFF8291952318930D966ED /* Plans.swift */; };
 		6A41782159CEB6B853714738 /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */; };
 		6AAED15590593E71877BC43A /* LiveOrganizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF29F5EC9640222904218E1B /* LiveOrganizer.swift */; };
@@ -195,7 +198,9 @@
 		98FA019033809EFDE43A037C /* LivePerf.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F0061726E90B7BD6DAB284 /* LivePerf.swift */; };
 		99C2332005A0415F51BC32E2 /* IPTVLoginLeakTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8DD6BCA3D732E716C638FF8 /* IPTVLoginLeakTests.swift */; };
 		99DE67411BE1E03903160C2B /* Libswresample.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D7286B5ED1C79D8A2625EBC /* Libswresample.xcframework */; };
+		99FD38A8AD28CFD45D5B9B24 /* ByteCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6FAD856F6F003A471235BD6 /* ByteCache.swift */; };
 		9D020ADB81802B4D285D41DE /* Libswscale.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */; };
+		9D05CD62347A3FC7AF9FB37E /* Matroska.swift in Sources */ = {isa = PBXBuildFile; fileRef = 639680A5419B6E8D2BBE7319 /* Matroska.swift */; };
 		9D12F9249C18D8868CB560E6 /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BBE98FBA505A36A33CB129 /* libresolv.tbd */; };
 		9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D066C9DD9FC2285C24EF35 /* LiveView.swift */; };
 		9E2304F19B2CE1A0B3B0FE59 /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 188FE6D60C2DA8B042E0772F /* libc++.tbd */; };
@@ -384,6 +389,7 @@
 		60039C18093C4A9478614C1B /* PersonPageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPageTests.swift; sourceTree = "<group>"; };
 		60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libuavs3d.xcframework; path = Vendor/Libuavs3d.xcframework; sourceTree = "<group>"; };
 		63408BC25C1847C3DC54CDDE /* ShowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowView.swift; sourceTree = "<group>"; };
+		639680A5419B6E8D2BBE7319 /* Matroska.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Matroska.swift; sourceTree = "<group>"; };
 		6624BB656CA61632353DBA8C /* Preferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preferences.swift; sourceTree = "<group>"; };
 		66B020D0F87B72E286D9A48D /* TVLiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVLiveView.swift; sourceTree = "<group>"; };
 		66D066C9DD9FC2285C24EF35 /* LiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveView.swift; sourceTree = "<group>"; };
@@ -422,6 +428,7 @@
 		A4962C0F389044958A1E2BE4 /* hogweed.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = hogweed.xcframework; path = Vendor/hogweed.xcframework; sourceTree = "<group>"; };
 		A499AF3328F37CF4A80BDD45 /* FilmStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmStream.swift; sourceTree = "<group>"; };
 		A651DA02BA6A980C42B2EE28 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		A6FAD856F6F003A471235BD6 /* ByteCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByteCache.swift; sourceTree = "<group>"; };
 		A8DD6BCA3D732E716C638FF8 /* IPTVLoginLeakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPTVLoginLeakTests.swift; sourceTree = "<group>"; };
 		A8E89B6CEFC2EA7DE2C9606D /* LiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSession.swift; sourceTree = "<group>"; };
 		A9E566E295D6785A720DEA83 /* libexpat.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libexpat.tbd; path = usr/lib/libexpat.tbd; sourceTree = SDKROOT; };
@@ -450,6 +457,7 @@
 		CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libswscale.xcframework; path = Vendor/Libswscale.xcframework; sourceTree = "<group>"; };
 		CBF9B0D6D8D57792C2CC377E /* IPTVLoginLeakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPTVLoginLeakTests.swift; sourceTree = "<group>"; };
 		CC1500ACB77AA629F7F047BF /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
+		CCC8B73B30FA5CF3FB502D43 /* RealFeedFilmTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealFeedFilmTests.swift; sourceTree = "<group>"; };
 		CD1EBDEA2DAED98E26A044D2 /* Signposts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Signposts.swift; sourceTree = "<group>"; };
 		CDBCDEA1B3FDB76BBFA31935 /* FFmpegLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFmpegLog.swift; sourceTree = "<group>"; };
 		CF29F5EC9640222904218E1B /* LiveOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveOrganizer.swift; sourceTree = "<group>"; };
@@ -601,6 +609,7 @@
 			isa = PBXGroup;
 			children = (
 				054309E9F5F6C53E9B0548BC /* BufferingLog.swift */,
+				A6FAD856F6F003A471235BD6 /* ByteCache.swift */,
 				8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */,
 				552E4FC1AEA7C403E995DC38 /* ConvertedPlaylist.swift */,
 				CDBCDEA1B3FDB76BBFA31935 /* FFmpegLog.swift */,
@@ -609,6 +618,7 @@
 				E6F0061726E90B7BD6DAB284 /* LivePerf.swift */,
 				E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */,
 				AA38D24AAC5091B4859CE0C6 /* LoadEvents.swift */,
+				639680A5419B6E8D2BBE7319 /* Matroska.swift */,
 				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
 				F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */,
 				404C86B1D60778438688EBC2 /* PictureInPicture.swift */,
@@ -782,6 +792,7 @@
 				FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */,
 				DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */,
 				1512DD4E28DAAD7ADF7E915A /* PrepareAheadTests.swift */,
+				CCC8B73B30FA5CF3FB502D43 /* RealFeedFilmTests.swift */,
 				12195947E258462DA892954B /* RealFeedTests.swift */,
 				050F50A01718229F1DF48EE0 /* SearchStabilityTests.swift */,
 			);
@@ -1101,6 +1112,7 @@
 				790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */,
 				DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */,
 				679B1E1CB1D8E950DC8E10EE /* PrepareAheadTests.swift in Sources */,
+				1094A33DDB56CCAB0D7D56E3 /* RealFeedFilmTests.swift in Sources */,
 				2189DEC59E88C8D452C4B465 /* RealFeedTests.swift in Sources */,
 				296D7A13458E6C452ABC7FC1 /* SearchStabilityTests.swift in Sources */,
 			);
@@ -1115,6 +1127,7 @@
 				6174F7217B1972C035E19B29 /* AreaPicker.swift in Sources */,
 				F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */,
 				E79797576A5367AA203CF4BE /* BufferingLog.swift in Sources */,
+				99FD38A8AD28CFD45D5B9B24 /* ByteCache.swift in Sources */,
 				D74D0C1558A8A17859D625AE /* ChannelGuideSheet.swift in Sources */,
 				B8A0FCC54D5980F1954474BF /* ConvertedPlaylist.swift in Sources */,
 				5274B2DEB0C7389DA1D68536 /* EmbyClient.swift in Sources */,
@@ -1149,6 +1162,7 @@
 				C4B8046237E84B860469F18F /* LocalArea.swift in Sources */,
 				330A2AE3555A65DCFB5FD0A9 /* M3UProvider.swift in Sources */,
 				7E8E70B831C4BE5F7BEBC6F6 /* MPVPlayer.swift in Sources */,
+				59C38F95C70FC1EC1C1BDB21 /* Matroska.swift in Sources */,
 				760E273F99B961DCBF917D46 /* MovieView.swift in Sources */,
 				631B418BC637AAF1204B020B /* NetworkStatus.swift in Sources */,
 				10831580B6F72D43D2609FD1 /* Onboarding.swift in Sources */,
@@ -1227,6 +1241,7 @@
 				C296F7829BEFC8DEE6E19B75 /* AreaPicker.swift in Sources */,
 				AA86629D3DF58B7575BE0703 /* Artwork.swift in Sources */,
 				559A50CB8044DF026615C087 /* BufferingLog.swift in Sources */,
+				69DCE4162B149229C80BF8E4 /* ByteCache.swift in Sources */,
 				2174A08ABD27777FA42CA50C /* ChannelGuideSheet.swift in Sources */,
 				BBE7EBD1FA2C0325B82D69AD /* ConvertedPlaylist.swift in Sources */,
 				70DBA9993C5650094FE7CCDD /* EmbyClient.swift in Sources */,
@@ -1261,6 +1276,7 @@
 				10E6DBCB2E85AE6FC761AF98 /* LocalArea.swift in Sources */,
 				808B66520C8C418D89B0EC89 /* M3UProvider.swift in Sources */,
 				FFB2BF63F71C83887DFCC92F /* MPVPlayer.swift in Sources */,
+				9D05CD62347A3FC7AF9FB37E /* Matroska.swift in Sources */,
 				500CE028575089ED5DE60A5C /* MovieView.swift in Sources */,
 				C833AF2FFF051FF67BD0B769 /* NetworkStatus.swift in Sources */,
 				673F96FEAFD8336691B110F6 /* Onboarding.swift in Sources */,
