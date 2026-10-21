@@ -430,7 +430,7 @@ final class MPVPlayer: @unchecked Sendable {
             duration = nil
             mpv_set_property_string(mpv, "http-header-fields", headers.joined(separator: ","))
             mpv_set_property_string(mpv, "stream-lavf-o", file
-                ? "multiple_requests=1,initial_request_size=524288,request_size=8388608,short_seek_size=1048576"
+                ? "multiple_requests=1,initial_request_size=\(StreamRelay.firstRead),request_size=\(StreamRelay.readSize),short_seek_size=1048576"
                 : sequential ? "seekable=0" : "")
             // Emby answers for a segment once it's converted: ffmpeg asking
             // for the next one as it opened one (http_multiple) waited for
