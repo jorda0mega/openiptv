@@ -84,9 +84,10 @@ final class AppModel {
     private(set) var channelCorpus = SearchCorpus<LiveChannel>(name: \.name)
     /// Server search results by query, for episodes the index doesn't hold.
     private var serverSearchCache: [String: [Card]] = [:]
-    /// Playback worked out ahead of a tap (Continue Watching, Next Up, an
-    /// open show), so selecting it goes straight to the player.
-    private var prepared: [String: (at: Date, task: Task<EmbyPlayback, Error>, copies: [String])] = [:]
+    @ObservationIgnored private(set) lazy var plans = Plans.shelf { [weak self] key in
+        guard let (emby, shows) = await self?.planSource() else { throw SourceError.unexpected("Add your Emby server in Settings.") }
+        return try await emby.playback(versions: key.versions, kind: key.kind, maxWidth: AppModel.maxWidth, showCopies: shows)
+    }
     private var visible: Set<String> = []
     /// The rows just below the last one scrolled to, fetched ahead.
     private var lookahead: [String] = []
@@ -345,7 +346,7 @@ final class AppModel {
             let pages = (fresh.spotlight ?? []).map(\.card) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(4) }
             pages.forEach(prefetchTitle)
             prepareRotation()
-            prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
+            prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) }, at: .homeForecast)
             if sync { Task { await syncLibrary(emby) } }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
@@ -474,36 +475,21 @@ final class AppModel {
             playback.requestedAt = started
             return playback
         }
-        let task: Task<EmbyPlayback, Error>
-        // Worked out with the copies known now (one prepared before the
-        // library was read knew a single copy: a film's other copy, in the
-        // language wanted, was passed over).
-        if let ready = prepared[itemId], Date().timeIntervalSince(ready.at) < 180, ready.copies == library.versions(of: itemId) {
-            task = ready.task
-        } else {
-            guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
-            let versions = library.versions(of: itemId)
-            let shows = showCopies
-            task = Task { try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth, showCopies: shows) }
-        }
-        prepared[itemId] = nil
+        // With the copies known now: one got ready before the library was
+        // read knew a single copy, and a film's other copy, in the language
+        // wanted, was passed over.
+        let key = planKey(itemId, kind: kind)
         var playback: EmbyPlayback
         do {
-            playback = try await task.value
-            // Got ready without the server's track list (it didn't answer
-            // then): asked again now, or it plays with no subtitle files.
-            // Regression: a title got ready at launch played without them.
-            if !playback.listed, let emby {
-                playback = (try? await emby.playback(versions: library.versions(of: itemId), kind: kind, maxWidth: Self.maxWidth,
-                                                     showCopies: showCopies)) ?? playback
-            }
+            playback = try await plans.take(key)
         } catch {
-            // Worked out ahead and failed then (a moment's network trouble):
-            // ask again now rather than fail the tap.
-            guard let emby else { throw error }
-            playback = try await emby.playback(versions: library.versions(of: itemId), kind: kind, maxWidth: Self.maxWidth,
-                                               showCopies: showCopies)
+            // Got ready ahead and failed then (a moment's network trouble).
+            playback = try await plans.take(key)
         }
+        // Got ready without the server's track list (it didn't answer then),
+        // it would play with no subtitle files. Regression: a title got
+        // ready at launch played without them.
+        if !playback.listed { playback = (try? await plans.take(key)) ?? playback }
         playback = withLocalResume(playback)
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
@@ -520,6 +506,14 @@ final class AppModel {
         next.startSeconds = seconds
         next.requestedAt = Date()
         return next
+    }
+
+    func planKey(_ itemId: String, kind: String?) -> PlanKey {
+        PlanKey(itemId: itemId, kind: kind, versions: library.versions(of: itemId))
+    }
+
+    private func planSource() -> (EmbyClient, @Sendable (String) -> [String])? {
+        emby.map { ($0, showCopies) }
     }
 
     /// A show's copies by its id (another library's), to find an episode
@@ -714,14 +708,14 @@ final class AppModel {
         for (id, kind) in rotation {
             if kind == "Series" { prefetchShows([id]) } else { Task(priority: .utility) { await refreshTitle(id, kind: kind) } }
         }
-        prepare(rotation.map { (id: $0.id, kind: Optional($0.kind)) })
+        prepare(rotation.map { (id: $0.id, kind: Optional($0.kind)) }, at: .homeForecast)
     }
 
     /// Near the end of an episode: the next one's details and how to play it.
     func prepareNext(after playback: EmbyPlayback) {
         Task {
             guard let next = await episode(after: playback) else { return }
-            prepare([(id: next.id, kind: "Episode")], duringPlayback: true)
+            prepare([(id: next.id, kind: "Episode")], at: .upNext)
         }
     }
 
@@ -1110,7 +1104,8 @@ final class AppModel {
         let row = reconciled(server)
         offerContinue(row, now: returning)
         if afterStop { continueMovesUntil = nil }
-        prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) })
+        prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) },
+                at: .continueWatching)
         return false
     }
 
@@ -1141,11 +1136,11 @@ final class AppModel {
               NetworkStatus.shared.knownUnmetered, !Self.noStreamAhead else { return }
         coolDown()
         warming = itemId
-        prepare([(id: itemId, kind: kind)])
+        let key = planKey(itemId, kind: kind)
         // Fetched ahead: waiting for it mustn't promote it to the
         // connections kept for what's on screen.
         warmTask = Task(priority: .utility) {
-            let playback = (try? await prepared[itemId]?.task.value).map(withLocalResume)
+            let playback = await plans.warm(key, for: Interest(at: .page, .next)).map(withLocalResume)
             guard !Task.isCancelled, warming == itemId else { return }
             warming = nil
             guard let playback, warm == nil else { return }
@@ -1297,10 +1292,11 @@ final class AppModel {
             if let episode = card.episodeId { return (episode, "Episode") }
             return card.kind == "Series" ? nil : (card.id, card.kind)
         }
-        prepare(items)
+        let interest = Interest(at: .continueWatching, .likely)
         for item in items {
+            let key = planKey(item.id, kind: item.kind)
             Task(priority: .utility) {
-                guard let playback = (try? await prepared[item.id]?.task.value).map(withLocalResume),
+                guard let playback = await plans.warm(key, for: interest).map(withLocalResume),
                       !PlaybackActivity.isPlaying else { return }
                 StreamRelay.shared.prefetchStart(url: playback.url, headers: playback.headers, at: playback.startSeconds ?? 0)
             }
@@ -1400,18 +1396,11 @@ final class AppModel {
     }
 
     /// Works out how to play these in the background; a later tap uses it.
-    func prepare(_ items: [(id: String, kind: String?)], duringPlayback: Bool = false) {
-        guard let emby, duringPlayback || !PlaybackActivity.isPlaying else { return }
-        if prepared.count > 120 {
-            // Kept three minutes at most anyway: drop the stale ones.
-            prepared = prepared.filter { Date().timeIntervalSince($0.value.at) < 180 }
-        }
-        for (id, kind) in items where prepared[id].map({ Date().timeIntervalSince($0.at) >= 180 || $0.copies != library.versions(of: id) }) ?? true {
-            let versions = library.versions(of: id)
-            let shows = showCopies
-            prepared[id] = (Date(), Task(priority: .utility) {
-                try await emby.playback(versions: versions, kind: kind, maxWidth: Self.maxWidth, showCopies: shows)
-            }, versions)
+    func prepare(_ items: [(id: String, kind: String?)], at place: Place) {
+        let interest = Interest(at: place, .likely)
+        for (id, kind) in items {
+            let key = planKey(id, kind: kind)
+            Task { _ = await plans.warm(key, for: interest) }
         }
     }
 
@@ -1443,7 +1432,7 @@ final class AppModel {
     }
 
     func forgetPlaybackPlans() {
-        prepared = [:]
+        plans.forgetAll()
     }
 
     private func syncLibrary(_ emby: EmbyClient, urgent: Bool = false) async {
@@ -1559,12 +1548,10 @@ final class AppModel {
                                  mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
         }.value
         guard event == .stopped else { return }
-        // Only this title's resume point changed: everything else prepared
-        // stays ready.
-        prepared[playback.itemId] = nil
-        // A show prepared by its series (titles in rotation, Home) now has
-        // a different next episode or resume point.
-        if let series = playback.seriesId { prepared[series] = nil }
+        // Only this title's resume point changed, and a show's got ready by
+        // its series (titles in rotation, Home) has a different next
+        // episode or resume point: everything else stays ready.
+        plans.forget { $0.itemId == playback.itemId || $0.itemId == playback.seriesId }
         // A player kept for this title stays if it's where this stopped.
         if let warm, warm.key == playback.itemId || (playback.seriesId != nil && warm.key == playback.seriesId),
            warm.playback.itemId != playback.itemId || abs((warm.playback.startSeconds ?? 0) - seconds) >= 2 {
@@ -1601,6 +1588,7 @@ final class AppModel {
     func signedInToEmby(_ account: EmbyAccount) async {
         accountGeneration += 1
         StreamRelay.shared.forgetAccount()
+        plans.forgetAll()
         // A Home on its way for the old account is dropped, not waited for.
         homeLoad = nil
         homeLoadID = UUID()
@@ -1642,7 +1630,7 @@ final class AppModel {
         // watched is this account's too.
         shows = [:]
         movies = [:]
-        prepared = [:]
+        plans.forgetAll()
         previews = []
         previewLoads = [:]
         StreamRelay.shared.forgetAccount()
@@ -1672,6 +1660,7 @@ final class AppModel {
         AppCache.remove(Self.lineupFile)
         library.clear()
         StreamRelay.shared.forgetAccount()
+        plans.forgetAll()
         await ServerSubtitles.forgetAll()
         serverSearchCache = [:]
         channelCorpus = SearchCorpus(name: \.name)
