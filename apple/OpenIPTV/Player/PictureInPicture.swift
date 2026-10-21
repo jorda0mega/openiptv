@@ -46,8 +46,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     private var host: FrameView?
     private var controller: AVPictureInPictureController?
     private var timebase: CMTimebase?
-    /// Where a server-converted stream starts (its clock starts at 0).
-    private var offset: Double = 0
+    private var stream: FilmStream = .whole
     private var position: Double = 0
     private var total: Double = 0
     private var paused = false {
@@ -75,7 +74,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     /// Moves `player`'s picture into the window. `started`: the window has
     /// it (the full-screen player closes, leaving the player running);
     /// `failed`: it couldn't (the player carries on on screen).
-    func start(_ player: MPVPlayer, playback: EmbyPlayback, offset: Double, position: Double, total: Double, paused: Bool,
+    func start(_ player: MPVPlayer, playback: EmbyPlayback, stream: FilmStream, position: Double, total: Double, paused: Bool,
                started: @escaping () -> Void, failed: @escaping () -> Void) {
         close()
         guard Self.isSupported, let window = Self.window else { return failed() }
@@ -103,7 +102,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         self.host = host
         self.controller = controller
         self.timebase = clock
-        self.offset = offset
+        self.stream = stream
         self.position = position
         self.lastReport = position
         self.total = total
@@ -146,9 +145,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     /// The window's player, for the full-screen player putting up this
     /// title (brought back, or chosen again): the same playback, where it
     /// has got to. The window closes.
-    func takeBack(_ itemId: String) -> (player: MPVPlayer, offset: Double, position: Double, paused: Bool)? {
+    func takeBack(_ itemId: String) -> (player: MPVPlayer, stream: FilmStream, position: Double, paused: Bool)? {
         guard phase == .active || phase == .restoring, let player, playback?.itemId == itemId else { return nil }
-        let back = (player, offset, position, paused)
+        let back = (player, stream, position, paused)
         self.player = nil
         player.onEvent = nil
         if let restored {
@@ -215,7 +214,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     private func handle(_ event: MPVPlayer.Event) {
         switch event {
         case let .time(raw, _):
-            position = total > 0 ? min(raw + offset, total) : raw + offset
+            position = total > 0 ? min(raw + stream.clockStart, total) : raw + stream.clockStart
             if let timebase, abs(CMTimebaseGetTime(timebase).seconds - position) > 0.5 {
                 CMTimebaseSetTime(timebase, time: CMTime(seconds: position, preferredTimescale: 600))
             }
@@ -325,8 +324,13 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, skipByInterval skipInterval: CMTime,
                                                 completion completionHandler: @escaping () -> Void) {
         let seconds = skipInterval.seconds
-        Task { @MainActor in self.player?.seek(by: seconds) }
+        Task { @MainActor in self.skip(by: seconds) }
         completionHandler()
+    }
+
+    private func skip(by seconds: Double) {
+        guard let player, let playback else { return }
+        stream = player.jump(in: stream, to: max(0, position + seconds), for: playback) { _ in player.seek(by: seconds) }
     }
 }
 

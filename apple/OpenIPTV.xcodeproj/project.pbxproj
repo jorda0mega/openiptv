@@ -115,7 +115,9 @@
 		5633E2B7128DB4B72E585CD4 /* XtreamProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B14B5E25BA30ECE2BD6E701 /* XtreamProvider.swift */; };
 		56FC834D455E6F4164EC0918 /* Libavformat.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FAB17C230566C9BCAF5D0D6 /* Libavformat.xcframework */; };
 		58E6D3829366CA7178C840B0 /* Gzip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1500ACB77AA629F7F047BF /* Gzip.swift */; };
+		5982568A867A84D00F3E34AC /* FilmStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = A499AF3328F37CF4A80BDD45 /* FilmStream.swift */; };
 		5DAD3128BF5196E7F19247AC /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 4B0770E7215519F6AED0BA2C /* libz.tbd */; };
+		5DD666173BB4384D42856227 /* FilmStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = A499AF3328F37CF4A80BDD45 /* FilmStream.swift */; };
 		5E075ACFCF2BDA408958FA86 /* Gzip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1500ACB77AA629F7F047BF /* Gzip.swift */; };
 		5F01E1907CEC93ADB72EB792 /* TVTitlePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21CB2421CE9A188C91DE446 /* TVTitlePages.swift */; };
 		5F82F737A3D8F30EA5D8D9F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B695C9975B1FB89D1266C09E /* Assets.xcassets */; };
@@ -418,6 +420,7 @@
 		A01633BC141A3C9A9B66CFBB /* StalkerProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StalkerProvider.swift; sourceTree = "<group>"; };
 		A2871C16F0BDAE894782F88F /* SharedGuideRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedGuideRule.swift; sourceTree = "<group>"; };
 		A4962C0F389044958A1E2BE4 /* hogweed.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = hogweed.xcframework; path = Vendor/hogweed.xcframework; sourceTree = "<group>"; };
+		A499AF3328F37CF4A80BDD45 /* FilmStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmStream.swift; sourceTree = "<group>"; };
 		A651DA02BA6A980C42B2EE28 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
 		A8DD6BCA3D732E716C638FF8 /* IPTVLoginLeakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPTVLoginLeakTests.swift; sourceTree = "<group>"; };
 		A8E89B6CEFC2EA7DE2C9606D /* LiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSession.swift; sourceTree = "<group>"; };
@@ -601,6 +604,7 @@
 				8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */,
 				552E4FC1AEA7C403E995DC38 /* ConvertedPlaylist.swift */,
 				CDBCDEA1B3FDB76BBFA31935 /* FFmpegLog.swift */,
+				A499AF3328F37CF4A80BDD45 /* FilmStream.swift */,
 				2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */,
 				E6F0061726E90B7BD6DAB284 /* LivePerf.swift */,
 				E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */,
@@ -1116,6 +1120,7 @@
 				5274B2DEB0C7389DA1D68536 /* EmbyClient.swift in Sources */,
 				E40A99A7F0AB7CF0C2BEC24E /* EmbyModels.swift in Sources */,
 				7B9EBC358C4C4F12984D438B /* FFmpegLog.swift in Sources */,
+				5DD666173BB4384D42856227 /* FilmStream.swift in Sources */,
 				C2FA9C8739B0E46A8270DC84 /* Flex.swift in Sources */,
 				4B549190154807E418B0C270 /* FoundSubtitles.swift in Sources */,
 				FF7EBF552AFC5BF778068FE1 /* GameTime.swift in Sources */,
@@ -1227,6 +1232,7 @@
 				70DBA9993C5650094FE7CCDD /* EmbyClient.swift in Sources */,
 				FFA65B87FDAD93B66C25DE91 /* EmbyModels.swift in Sources */,
 				A97DA2D0ACA021649F9D17C1 /* FFmpegLog.swift in Sources */,
+				5982568A867A84D00F3E34AC /* FilmStream.swift in Sources */,
 				87A1B9D7209C39E0CE907BA4 /* Flex.swift in Sources */,
 				484B832C1477FD548B848A9E /* FoundSubtitles.swift in Sources */,
 				ADB139F687A97F2FB173E933 /* GameTime.swift in Sources */,

@@ -1117,7 +1117,7 @@ final class AppModel {
 
     // MARK: Warm start
 
-    private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback, parked: Bool)?
+    private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback, stream: FilmStream, parked: Bool)?
     private var warmExpiry: Task<Void, Never>?
 
     /// The preview stills (BIF) of the last two titles got ready ahead of a
@@ -1163,7 +1163,7 @@ final class AppModel {
                     tracks: playback.tracks)
         player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
         player.addCopies(playback.subtitleCopies)
-        warm = (playback.itemId, player, playback, false)
+        warm = (playback.itemId, player, playback, .whole, false)
         warmExpiry = Task { [weak self] in
             try? await Task.sleep(for: .seconds(120))
             guard !Task.isCancelled else { return }
@@ -1176,7 +1176,7 @@ final class AppModel {
     /// open at `start` (one opened at another second, say before the last
     /// stop reached the server, would play from there: "the same frame
     /// again").
-    func takeWarm(_ itemId: String, at start: Double?) -> (MPVPlayer, EmbyPlayback)? {
+    func takeWarm(_ itemId: String, at start: Double?) -> (MPVPlayer, EmbyPlayback, FilmStream)? {
         guard let warm, warm.playback.itemId == itemId else { return nil }
         // Failed meanwhile (the connection lost, the app away): the title
         // opens afresh. Handed over, it waited for a start that never came.
@@ -1190,20 +1190,20 @@ final class AppModel {
         }
         self.warm = nil
         warmExpiry?.cancel()
-        return (warm.player, warm.playback)
+        return (warm.player, warm.playback, warm.stream)
     }
 
     /// Keeps a player that just closed, paused where it stopped, for five
     /// minutes: the title chosen again carries on at once. Not at the end
     /// (the next episode, or the start, plays then).
-    func park(_ player: MPVPlayer, _ playback: EmbyPlayback) {
+    func park(_ player: MPVPlayer, _ playback: EmbyPlayback, stream: FilmStream) {
         let seconds = playback.startSeconds ?? 0
         guard let duration = playback.durationSeconds, duration > 0, seconds < duration * 0.9 else { return player.shutdown() }
         coolDown()
         player.onEvent = nil
         player.setPaused(true)
         player.setReadahead(.warm)
-        warm = (playback.itemId, player, playback, true)
+        warm = (playback.itemId, player, playback, stream, true)
         warmExpiry = Task { [weak self] in
             try? await Task.sleep(for: .seconds(300))
             guard !Task.isCancelled else { return }
