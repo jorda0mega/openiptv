@@ -1,19 +1,11 @@
 import Foundation
 
-/// The server's converted version of a film, listed from where it plays.
-/// Emby lists the whole film whatever second it was asked from, and the
-/// player (ffmpeg) reads a playlist's first segment before it jumps: Emby
-/// converted the film's start, then started again at the second asked, two
-/// waits for its slow first segment. Listed from the segment holding that
-/// second, the player asks for that one first.
+/// Emby lists the whole film whatever second it was asked from, and ffmpeg
+/// reads a playlist's first segment before it jumps.
 struct ConvertedPlaylist: Sendable {
-    /// Each segment: its length, its own tags, and where it is.
     let segments: [(seconds: Double, tags: [String], url: URL)]
-    /// The playlist's tags before its first segment.
     let header: [String]
 
-    /// Emby's playlist for this master, fetched with the key in a header as
-    /// the player sends it; nil when it can't be read or listed again.
     static func load(_ master: URL, headers: [String]) async -> ConvertedPlaylist? {
         guard let top = await lines(master, headers), let variant = variant(of: top.lines, at: top.url),
               let list = await lines(variant, headers) else { return nil }
@@ -45,7 +37,6 @@ struct ConvertedPlaylist: Sendable {
         return (lines, at)
     }
 
-    /// The master playlist's first variant, where it is.
     static func variant(of master: [String], at url: URL) -> URL? {
         master.lazy.map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty && !$0.hasPrefix("#") }
@@ -76,18 +67,16 @@ struct ConvertedPlaylist: Sendable {
         self.segments = segments
     }
 
-    /// The playlist for the player to play `second` from, and where in the
-    /// film the player's clock starts (its first segment's start).
-    func from(_ second: Double) -> (text: String, start: Double) {
-        var first = 0, start = 0.0
-        while first < segments.count - 1, start + segments[first].seconds <= second {
-            start += segments[first].seconds
+    func listed(from second: Double) -> (playlist: String, clockStart: Double) {
+        var first = 0, clockStart = 0.0
+        while first < segments.count - 1, clockStart + segments[first].seconds <= second {
+            clockStart += segments[first].seconds
             first += 1
         }
         let tag = "#EXT-X-MEDIA-SEQUENCE:"
         let sequence = header.first { $0.hasPrefix(tag) }.flatMap { Int($0.dropFirst(tag.count)) } ?? 0
         let lines = header.filter { !$0.hasPrefix(tag) } + [tag + String(sequence + first)]
             + segments[first...].flatMap { $0.tags + [$0.url.absoluteString] } + ["#EXT-X-ENDLIST"]
-        return (lines.joined(separator: "\n") + "\n", start)
+        return (lines.joined(separator: "\n") + "\n", clockStart)
     }
 }

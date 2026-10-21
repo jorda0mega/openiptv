@@ -99,7 +99,6 @@ final class StreamRelay: @unchecked Sendable {
         return URL(string: "http://127.0.0.1:\(port)/\(token)\(ext)")
     }
 
-    /// A local address serving this playlist, or nil (relay not running).
     func localURL(serving playlist: String) -> URL? {
         start()
         lock.lock()
@@ -758,10 +757,8 @@ final class ByteCache: @unchecked Sendable {
         stored = ranges.reduce(0) { $0 + Int64($1.count) }
     }
 
-    /// Frees the bytes farthest from `offset` until `count` more fit, a
-    /// megabyte or more at a time. The player reads on from `offset`, and
-    /// up to its whole read-ahead behind it again (from ten seconds before
-    /// where it plays, for a track it hasn't been reading).
+    /// mpv reads again from ten seconds back for a track it hasn't been
+    /// reading, so the bytes near `offset` stay.
     private func makeRoom(for count: Int64, near offset: Int64) {
         #if DEBUG
         if Self.oldRule { return oldMakeRoom(for: count, near: offset) }

@@ -27,7 +27,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     /// then 5:00), each a wait for its slow first segment.
     func testAConvertedVersionIsListedFromTheSegmentHoldingTheSecond() throws {
         let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
-        let (text, start) = list.from(301.5)
+        let (text, start) = list.listed(from:301.5)
         XCTAssertEqual(start, 300, "the player's clock 0 isn't where its first segment starts")
         let listed = segments(text)
         XCTAssertEqual(listed.first, "https://emby.example/emby/Videos/m1/hls1/main/100.ts?PlaySessionId=p1")
@@ -38,14 +38,14 @@ final class ConvertedPlaylistTests: XCTestCase {
 
     func testFromTheStartItIsTheWholeFilm() throws {
         let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
-        let (text, start) = list.from(0)
+        let (text, start) = list.listed(from:0)
         XCTAssertEqual(start, 0)
         XCTAssertEqual(segments(text).count, 200)
     }
 
     func testPastTheEndItIsTheLastSegment() throws {
         let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
-        let (text, start) = list.from(10_000)
+        let (text, start) = list.listed(from:10_000)
         XCTAssertEqual(start, 597)
         XCTAssertEqual(segments(text).first, "https://emby.example/emby/Videos/m1/hls1/main/199.ts?PlaySessionId=p1")
         XCTAssertEqual(segments(text).count, 1)

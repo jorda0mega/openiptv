@@ -10,14 +10,14 @@ final class OtherCopyLanguageTests: XCTestCase {
     }
 
     func testEnglishOnlyInAnotherCopyIsFound() {
-        XCTAssertEqual(film(heard: ["fre"], others: [["en", "fr"]]).languagesOnlyInOtherCopies, ["en"])
+        XCTAssertEqual(film(heard: ["fre"], others: [["en", "fr"]]).englishOrSpanishOnlyInOtherCopies, ["en"])
     }
 
     func testALanguageThisCopyHasIsNotOffered() {
-        XCTAssertEqual(film(heard: ["eng", "spa"], others: [["en", "es"]]).languagesOnlyInOtherCopies, [])
+        XCTAssertEqual(film(heard: ["eng", "spa"], others: [["en", "es"]]).englishOrSpanishOnlyInOtherCopies, [])
     }
 
     func testOnlyEnglishAndSpanishAreOffered() {
-        XCTAssertEqual(film(heard: ["eng"], others: [["ja"], ["es", "es"]]).languagesOnlyInOtherCopies, ["es"])
+        XCTAssertEqual(film(heard: ["eng"], others: [["ja"], ["es", "es"]]).englishOrSpanishOnlyInOtherCopies, ["es"])
     }
 }

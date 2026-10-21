@@ -265,8 +265,6 @@ struct MoviePlayerView: View {
     /// the second asked from, a lowered quality played the film from its
     /// beginning, after a pause.
     @State private var offset: Double = 0
-    /// The converted version playing and its whole list: a jump to before
-    /// where it starts opens it again from there.
     @State private var converted: (url: URL, list: ConvertedPlaylist)?
     /// "Started in …" for a few seconds after the first frame (development
     /// builds with the stats on).
@@ -1099,8 +1097,6 @@ struct MoviePlayerView: View {
         #if DEBUG
         // UI tests (OPENREEL_DEBUG_LOWER_AFTER=seconds): a converted version
         // then, as for a slow connection.
-        // UI tests (OPENREEL_DEBUG_JUMPS_AFTER=seconds): a jump of +5 min
-        // then, and one of -30 s 20 s later.
         if let after = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_JUMPS_AFTER"].flatMap(Double.init) {
             Task {
                 try? await Task.sleep(for: .seconds(after))
@@ -1227,8 +1223,6 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// The server's converted version (`url`, Emby's whole film) from `at`,
-    /// listed from there; as Emby lists it when it can't be.
     private func playConverted(_ url: URL, at: Double?) {
         guard let player else { return }
         #if DEBUG
@@ -1247,12 +1241,12 @@ struct MoviePlayerView: View {
         // The stream playing reports where it was for a moment after the
         // clock moves: the bar stays put meanwhile.
         jumpUntil = Date().addingTimeInterval(1.5)
-        if let listed = list?.from(at ?? 0), let local = StreamRelay.shared.localURL(serving: listed.text) {
+        if let listed = list?.listed(from: at ?? 0), let local = StreamRelay.shared.localURL(serving: listed.playlist) {
             // From the segment's start, at most a segment before `at`: a
             // jump to `at` read the segment again for a keyframe in it.
-            offset = listed.start
+            offset = listed.clockStart
             player?.load(local, headers: playback.fallbackHeaders, file: false, converting: true, tracks: playback.tracks,
-                         sameFilm: listed.start)
+                         sameFilm: listed.clockStart)
         } else {
             offset = 0
             player?.load(url, headers: playback.fallbackHeaders, start: at, file: false, converting: !Self.oldConvertedStart,
@@ -1260,8 +1254,7 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// A jump to before where the converted version playing starts: it
-    /// opens again from there (Emby converts from there either way).
+    /// Emby converts from the new second either way.
     private func reopensBefore(_ target: Double) -> Bool {
         guard target < offset, let converted else { return false }
         #if DEBUG

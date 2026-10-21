@@ -459,8 +459,7 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     #if DEBUG
-    /// UI tests: a converted version asked for now, its open timed from
-    /// here (its playlists may be fetched before `load`).
+    /// Timed from here: its playlists may be fetched before `load`.
     func askedForConverted() {
         let now = CFAbsoluteTimeGetCurrent()
         stateLock.withLock { convertedAskedAt = now }
