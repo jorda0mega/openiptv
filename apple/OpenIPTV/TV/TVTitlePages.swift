@@ -68,7 +68,6 @@ private func titleDetails(_ item: EmbyItem?, model: AppModel, kind: String) -> S
 
 struct TVMovieView: View {
     @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     let route: MovieRoute
     @Binding var playing: PlayerItem?
 
@@ -121,6 +120,7 @@ struct TVMovieView: View {
         }
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
+        .task(id: route.id) { await model.ahead.holding(.playable(id: route.id, kind: "Movie"), at: .page) }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -148,7 +148,6 @@ struct TVMovieView: View {
     }
 
     private func load() async {
-        model.warmUp(route.id, kind: "Movie", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
         if pin == nil { pin = model.pin(route.id) }
         _ = model.cachedMovie(route.id)
         _ = await model.loadMovie(route.id)
@@ -174,7 +173,6 @@ struct TVMovieView: View {
 /// over a row of episodes, the cast, and more like it.
 struct TVShowView: View {
     @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     let route: ShowRoute
     @Binding var playing: PlayerItem?
 
@@ -314,6 +312,7 @@ struct TVShowView: View {
         }
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
+        .task(id: route.id) { await model.ahead.holding(route.playTarget, at: .page) }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -330,11 +329,6 @@ struct TVShowView: View {
     }
 
     private func load() async {
-        if let episode = route.episodeId {
-            model.warmUp(episode, kind: "Episode", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-        } else {
-            model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-        }
         if pin == nil { pin = model.pin(route.id) }
         _ = model.cachedShow(route.id)
         _ = await model.loadShow(route.id)

@@ -24,6 +24,7 @@ let package = Package(
                 "Live/StalkerProvider.swift",
                 "Live/WatchOn.swift",
                 "Live/XtreamProvider.swift",
+                "Model/Ahead.swift",
                 "Model/Flex.swift",
                 "Model/HomeFeed.swift",
                 "Model/Shelf.swift",

@@ -90,9 +90,8 @@ struct HomeView: View {
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             .navigationDestination(for: RowRoute.self) { RowPage(route: $0, open: { open($0) }, play: { play($0) }) }
-            // The first thing in Continue Watching opens the moment it's tapped.
-            .task(id: model.rows.first?.cards.first?.id) { warmFirst() }
-            .onAppear { warmFirst() }
+            .task(id: model.rows.first?.cards.first?.id) { prefetchFirstShows() }
+            .onAppear { prefetchFirstShows() }
             .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -168,20 +167,12 @@ struct HomeView: View {
         }
     }
 
-    private func warmFirst() {
-        // Every show in Continue Watching, and the first few below, open
-        // fully drawn (saved ones are only checked for changes).
+    /// Every show in Continue Watching, and the first few below, open fully
+    /// drawn (saved ones are only checked for changes).
+    private func prefetchFirstShows() {
         let resuming = model.rows.first { $0.title == "Continue Watching" }?.cards ?? []
         let below = model.rows.filter { $0.title != "Continue Watching" }.prefix(1).flatMap { $0.cards.prefix(3) }
         model.prefetchShows((resuming + below).filter { $0.kind == "Series" }.map(\.id))
-        // A tap on any of them starts from the device.
-        model.prefetchContinueWatching(resuming)
-        guard let card = (model.rows.first { $0.title == "Continue Watching" } ?? model.rows.first)?.cards.first else { return }
-        if let episode = card.episodeId {
-            model.warmUp(episode, kind: "Episode", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-        } else if card.kind != "Series" {
-            model.warmUp(card.id, kind: card.kind, options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-        }
     }
 
     /// A title's page (a show at the episode you're up to).
@@ -488,8 +479,6 @@ private struct RowPage: View {
 /// through, the episode and what's left. Tap plays; press and hold for the
 /// show or film.
 private struct ContinueRow: View {
-    @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     let row: HomeRow
     let loadingCard: String?
     let play: (Card) -> Void
@@ -504,6 +493,7 @@ private struct ContinueRow: View {
                         ZStack(alignment: .bottomTrailing) {
                             Button { play(card) } label: { cardView(card) }
                                 .buttonStyle(.plain)
+                                .preparesAhead(card.playTarget, at: .continueWatching)
                                 .contextMenu {
                                     Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }
                                 }
@@ -525,15 +515,6 @@ private struct ContinueRow: View {
                 .padding(.horizontal, 20)
             }
             .scrollIndicators(.hidden)
-        }
-        // The title you're most likely to resume, opened in the background
-        // a second after Home settles (on Wi-Fi), so Play starts at once.
-        .task(id: row.cards.first?.id) {
-            guard let card = row.cards.first else { return }
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered else { return }
-            model.warmUp(card.episodeId ?? card.id, kind: card.episodeId != nil ? "Episode" : card.kind,
-                         options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
         }
     }
 
@@ -576,8 +557,6 @@ private struct ContinueRow: View {
 /// A row of posters: the artwork only (it carries the title). Tap opens
 /// the title; press and hold to play.
 private struct PosterRow: View {
-    @Environment(AppModel.self) private var model
-    @State private var pending: [String: Task<Void, Never>] = [:]
     let title: String
     let cards: [Card]
     let open: (Card) -> Void
@@ -602,17 +581,7 @@ private struct PosterRow: View {
                         .contextMenu {
                             Button("Play", systemImage: "play.fill") { play(card) }
                         }
-                        // Really on screen a moment (not scrolling past, not just
-                        // laid out ahead): fetch its page and pictures, so a
-                        // tap opens it complete.
-                        .onScrollVisibilityChange(threshold: 0.6) { visible in
-                            pending[card.id]?.cancel()
-                            pending[card.id] = visible ? Task {
-                                try? await Task.sleep(for: .milliseconds(600))
-                                guard !Task.isCancelled, NetworkStatus.shared.knownUnmetered else { return }
-                                model.prefetchTitle(card)
-                            } : nil
-                        }
+                        .preparesAhead(card.pageTarget, at: .posterRow)
                         .accessibilityLabel([card.title, card.subtitle].compactMap(\.self).joined(separator: ", "))
                     }
                 }

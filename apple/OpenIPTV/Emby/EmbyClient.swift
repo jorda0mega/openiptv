@@ -994,7 +994,8 @@ struct EmbyClient {
             guard stream.Type == "Subtitle", stream.IsExternal != true, stream.IsForced != true, let index = stream.Index,
                   let codec = stream.Codec?.lowercased(), Self.textSubtitles.contains(codec),
                   ["en", "es"].contains(stream.Language.flatMap(TrackChoice.normalized) ?? "") else { return nil }
-            return serverSubtitle(itemId, source, stream).map { .init(streamIndex: index, subtitle: $0) }
+            let title = [stream.IsHearingImpaired == true ? "SDH" : nil, stream.Title].compactMap(\.self).joined(separator: " ")
+            return serverSubtitle(itemId, source, stream).map { .init(streamIndex: index, subtitle: $0, language: stream.Language, title: title) }
         }
     }
 

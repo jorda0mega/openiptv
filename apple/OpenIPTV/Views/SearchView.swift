@@ -697,13 +697,12 @@ struct SearchView: View {
             Task {
                 try? await Task.sleep(for: .milliseconds(450))
                 guard !Task.isCancelled, query == q else { return }
-                model.warmUp(top.id, kind: top.kind, options: prefs.playerProfile.mpvOptions,
-                             hardwareDecoding: prefs.hardwareDecoding)
                 // The first few results' pages and pictures too, so the one
                 // chosen opens complete.
                 if NetworkStatus.shared.knownUnmetered { likely.forEach(model.prefetchTitle) } else if top.kind == "Series" {
                     model.prefetchShows([top.id])
                 }
+                await model.ahead.holding(.playable(id: top.id, kind: top.kind), at: .searchTop)
             }
         }
 

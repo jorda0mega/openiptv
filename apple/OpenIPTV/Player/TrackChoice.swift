@@ -152,6 +152,14 @@ enum TrackChoice {
         return (chosen?.id, forced?.id)
     }
 
+    /// The subtitles the viewer most likely turns on: the plan's, else in
+    /// the language of the sound it plays.
+    static func likelySubtitle(_ tracks: [Track], plan: TrackPlan) -> Int? {
+        var plan = plan
+        if plan.subtitles == nil { plan.subtitles = plan.audio }
+        return choose(tracks.filter { !$0.image }, plan: plan).subtitle
+    }
+
     /// Best first: more channels and a better sound (TrueHD, DTS, E-AC-3,
     /// AC-3, then the rest) for audio; for subtitles text before pictures
     /// (sharper, any size), inside the film before a file beside it (always

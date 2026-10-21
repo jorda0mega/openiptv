@@ -75,9 +75,7 @@ final class MPVPlayer: @unchecked Sendable {
     private let stateLock = NSLock()
     private var closed = false
     private var playedLive = false
-    private var ahead: Interest?
     private var subtitleTasks: [Task<Void, Never>] = []
-    private var serverSubtitles: [ServerSubtitle] = []
     #if DEBUG
     private var playlistKeys = ""
     var hlsKeys: String { stateLock.withLock { playlistKeys } }
@@ -657,13 +655,12 @@ final class MPVPlayer: @unchecked Sendable {
         guard !files.isEmpty else { return }
         // Asked for at once, beside the files: the server may take
         // minutes to give the film's own.
-        let ahead = wantServerSubtitles(files.compactMap(\.server) + references.map(\.subtitle))
         let asked = stateLock.withLock { () -> (files: Task<[SubtitleSync.Reference], Never>, own: Task<[SubtitleSync.Reference], Never>) in
             let urls = references.map(\.subtitle.address)
             if let asked = self.references, asked.urls == urls { return (asked.files, asked.own) }
             let others = references.filter { !$0.own }, own = references.filter(\.own)
-            let filesTask = Task.detached(priority: .utility) { await Self.fetchReferences(others, ahead: ahead) }
-            let ownTask = Task.detached(priority: .utility) { await Self.fetchReferences(own, ahead: ahead) }
+            let filesTask = Task.detached(priority: .utility) { await Self.fetchReferences(others) }
+            let ownTask = Task.detached(priority: .utility) { await Self.fetchReferences(own) }
             self.references = (urls, filesTask, ownTask)
             return (filesTask, ownTask)
         }
@@ -674,7 +671,7 @@ final class MPVPlayer: @unchecked Sendable {
                 #if DEBUG
                 let asked = CFAbsoluteTimeGetCurrent()
                 #endif
-                guard let local = await Self.local(file.source, ahead: self?.currentAheadInterest) else {
+                guard let local = await Self.local(file.source) else {
                     #if DEBUG
                     self?.stopwatch.note(.fetchFailed, [.kind: .word(.file), .ms: .seconds(CFAbsoluteTimeGetCurrent() - asked)])
                     #endif
@@ -1023,11 +1020,11 @@ final class MPVPlayer: @unchecked Sendable {
         fitBySpeechIfShown()
     }
 
-    private static func fetchReferences(_ references: [EmbyPlayback.SubtitleReference], ahead: Interest?) async -> [SubtitleSync.Reference] {
+    private static func fetchReferences(_ references: [EmbyPlayback.SubtitleReference]) async -> [SubtitleSync.Reference] {
         await withTaskGroup(of: (Int, SubtitleSync.Reference?).self) { group in
             for (i, reference) in references.enumerated() {
                 group.addTask {
-                    guard let local = await ServerSubtitles.local(reference.subtitle, ahead: ahead),
+                    guard let local = await ServerSubtitles.local(reference.subtitle),
                           let text = try? String(contentsOf: local, encoding: .utf8) else { return (i, nil) }
                     return (i, SubtitleSync.Reference(cues: SubtitleSync.cues(text), own: reference.own))
                 }
@@ -1038,38 +1035,14 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    private static func local(_ source: EmbyPlayback.SubtitleSource, ahead: Interest?) async -> URL? {
+    private static func local(_ source: EmbyPlayback.SubtitleSource) async -> URL? {
         switch source {
         case let .server(subtitle):
-            return await ServerSubtitles.local(subtitle, ahead: ahead)
+            return await ServerSubtitles.local(subtitle)
         case let .device(file):
             let local = ServerSubtitles.perPlayFile(file.pathExtension.isEmpty ? "srt" : file.pathExtension)
             return (try? FileManager.default.copyItem(at: file, to: local)) != nil ? local : nil
         }
-    }
-
-    func openedAhead(for interest: Interest) {
-        stateLock.withLock { ahead = interest }
-    }
-
-    func playNow() {
-        let waiting = stateLock.withLock { () -> [ServerSubtitle] in
-            ahead = nil
-            return serverSubtitles
-        }
-        Task { @MainActor in ServerSubtitles.hurry(waiting) }
-    }
-
-    @discardableResult
-    private func wantServerSubtitles(_ subtitles: [ServerSubtitle]) -> Interest? {
-        stateLock.withLock {
-            serverSubtitles += subtitles
-            return ahead
-        }
-    }
-
-    private var currentAheadInterest: Interest? {
-        stateLock.withLock { ahead }
     }
 
     private func startSubtitleWork(_ work: @escaping @Sendable () async -> Void) {
@@ -1142,14 +1115,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// adds them, unshown (see `subtitleCopies`). Each once.
     func addCopies(_ wanted: [EmbyPlayback.SubtitleCopy]) {
         guard !wanted.isEmpty else { return }
-        wantServerSubtitles(wanted.map(\.subtitle))
         startSubtitleWork { [weak self] in
             for copy in wanted {
                 guard !Task.isCancelled else { return }
                 #if DEBUG
                 let asked = CFAbsoluteTimeGetCurrent()
                 #endif
-                guard let local = await ServerSubtitles.local(copy.subtitle, ahead: self?.currentAheadInterest) else {
+                guard let local = await ServerSubtitles.local(copy.subtitle) else {
                     #if DEBUG
                     self?.stopwatch.note(.fetchFailed, [.kind: .word(.copy), .track: .number(copy.streamIndex),
                                                         .ms: .seconds(CFAbsoluteTimeGetCurrent() - asked)])

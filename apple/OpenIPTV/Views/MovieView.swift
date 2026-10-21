@@ -12,7 +12,6 @@ struct MovieRoute: Hashable {
 /// at once.
 struct MovieView: View {
     @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     @Environment(\.displayScale) private var displayScale
     let route: MovieRoute
     @Binding var playing: PlayerItem?
@@ -88,6 +87,7 @@ struct MovieView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         #endif
         .task { await load() }
+        .task(id: route.id) { await model.ahead.holding(.playable(id: route.id, kind: "Movie"), at: .page) }
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -139,7 +139,6 @@ struct MovieView: View {
     }
 
     private func load() async {
-        model.warmUp(route.id, kind: "Movie", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
         if pin == nil { pin = model.pin(route.id) }
         _ = model.cachedMovie(route.id)
         _ = await model.loadMovie(route.id)
