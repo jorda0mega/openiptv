@@ -248,8 +248,9 @@ enum Matroska {
     /// The old fetch, for -oldReadyStart.
     static func fetchStartAsBefore(at seconds: Double, fetch: Fetch) async -> Bool {
         guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head), total: total), let cues = layout.cues,
-              let index = await fetchIndex(at: cues, total: total, fetch: fetch),
-              let at = clusterPositionAsBefore(in: index, at: seconds, layout: layout)
+              let probe = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](probe.data.prefix(16))),
+              let index = await fetch(cues, min(length, largest, total - cues)),
+              let at = clusterPositionAsBefore(in: [UInt8](index.data), at: seconds, layout: layout)
         else { return false }
         return await fetch(at, min(StreamRelay.readSize, total - at)) != nil
     }
