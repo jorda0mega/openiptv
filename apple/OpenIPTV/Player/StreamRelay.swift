@@ -514,7 +514,7 @@ final class StreamRelay: @unchecked Sendable {
             if tries > 0 { queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache, tries: tries - 1) } }
             return
         }
-        guard let cues = Matroska.layout(in: [UInt8](head))?.cues, cues < total, cache.available(from: cues) == 0 else { return }
+        guard let cues = Matroska.layout(in: [UInt8](head), total: total)?.cues, cache.available(from: cues) == 0 else { return }
         #if DEBUG
         let started = CFAbsoluteTimeGetCurrent()
         #endif
