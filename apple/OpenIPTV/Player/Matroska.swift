@@ -17,6 +17,11 @@ enum Matroska {
     private static let cueTimeID: UInt32 = 0xB3
     private static let cueTrackPositionsID: UInt32 = 0xB7
     private static let cueClusterPositionID: UInt32 = 0xF1
+    private static let cueTrackID: UInt32 = 0xF7
+    private static let tracksID: UInt32 = 0x1654AE6B
+    private static let trackEntryID: UInt32 = 0xAE
+    private static let trackNumberID: UInt32 = 0xD7
+    private static let trackTypeID: UInt32 = 0x83
 
     struct Layout {
         let segmentStart: Int64
@@ -26,6 +31,7 @@ enum Matroska {
         /// Earliest SeekHead offset after the clusters. libmpv reads that tail on open.
         let pastClusters: Int64?
         let timecodeScale: UInt64
+        let videoTrack: UInt64?
     }
 
     static func layout(in d: [UInt8], total: Int64) -> Layout? {
@@ -37,6 +43,7 @@ enum Matroska {
         var listed: [(UInt32, UInt64)]?
         var firstCluster: Int64?
         var scale: UInt64 = 1_000_000
+        var videoTrack: UInt64?
         while let (element, el) = id(d, i) {
             if element == clusterID {
                 firstCluster = Int64(i)
@@ -50,6 +57,13 @@ enum Matroska {
                     if let unit = uint(value), unit > 0 { scale = unit }
                 }
             }
+            if element == tracksID, videoTrack == nil {
+                videoTrack = children(d, from: body, to: min(body + Int(length), d.count)).lazy
+                    .filter { $0.0 == trackEntryID }
+                    .map { children(d, from: $0.1.startIndex, to: $0.1.endIndex) }
+                    .first { value(trackTypeID, in: $0) == 1 }
+                    .flatMap { value(trackNumberID, in: $0) }
+            }
             i = body + Int(length)
         }
         let positions = (listed ?? []).compactMap { entry in
@@ -59,7 +73,7 @@ enum Matroska {
             positions.filter { $0.target != clusterID && $0.at > first }.map(\.at).min()
         }
         return Layout(segmentStart: Int64(segmentStart), total: total, firstCluster: firstCluster, cues: positions.first { $0.target == cuesID }?.at,
-                      pastClusters: pastClusters, timecodeScale: scale)
+                      pastClusters: pastClusters, timecodeScale: scale, videoTrack: videoTrack)
     }
 
     /// A position counted from the segment's start, in the file (nil: past its end).
@@ -69,26 +83,51 @@ enum Matroska {
         return overflow || at >= total ? nil : at
     }
 
-    /// Where in the file libmpv's cluster for `seconds` starts: the last
-    /// keyframe at or before it, else the next.
+    /// Where in the file libmpv's cluster for `seconds` starts.
     static func clusterPosition(in d: [UInt8], at seconds: Double, layout: Layout) -> Int64? {
-        guard let (element, el) = id(d, 0), element == cuesID, let (length, sl) = size(d, el), let length else { return nil }
-        // mpv seeks to 5 ms past what it is told, in nanoseconds (demux_mkv.c, demux_mkv_seek).
+        let all = cues(in: d, layout: layout)
+        // mpv seeks by the video track's cue entries, else by all of them,
+        // to 5 ms past what it is told, in nanoseconds (demux_mkv.c, demux_mkv_seek).
+        let video = all.filter { $0.track == layout.videoTrack }
         let target = UInt64(min(max(0, seconds + 0.005) * 1e9 + 0.5, 9e18))
-        var before: (time: UInt64, position: Int64)?, after: (time: UInt64, position: Int64)?
+        return keyframe(in: video.isEmpty ? all : video, at: target, scale: layout.timecodeScale)?.position
+    }
+
+    /// One CueTrackPositions.
+    private struct Cue {
+        let track: UInt64?
+        let time: UInt64
+        let position: Int64
+    }
+
+    private static func cues(in d: [UInt8], layout: Layout) -> [Cue] {
+        guard let (element, el) = id(d, 0), element == cuesID, let (length, sl) = size(d, el), let length else { return [] }
+        var found: [Cue] = []
         for (child, point) in children(d, from: el + sl, to: min(d.count, el + sl + Int(length))) where child == cuePointID {
             let fields = children(d, from: point.startIndex, to: point.endIndex)
-            guard let ticks = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }),
-                  case (let time, false) = ticks.multipliedReportingOverflow(by: layout.timecodeScale),
-                  let positions = fields.first(where: { $0.0 == cueTrackPositionsID }),
-                  let position = children(d, from: positions.1.startIndex, to: positions.1.endIndex)
-                      .first(where: { $0.0 == cueClusterPositionID }).flatMap({ uint($0.1) }),
-                  let position = inFile(position, from: layout.segmentStart, total: layout.total)
-            else { continue }
-            if time <= target, before.map({ time >= $0.time }) ?? true { before = (time, position) }
-            if time > target, after.map({ time < $0.time }) ?? true { after = (time, position) }
+            guard let time = value(cueTimeID, in: fields) else { continue }
+            for (field, positions) in fields where field == cueTrackPositionsID {
+                let values = children(d, from: positions.startIndex, to: positions.endIndex)
+                guard let position = value(cueClusterPositionID, in: values).flatMap({ inFile($0, from: layout.segmentStart, total: layout.total) })
+                else { continue }
+                found.append(Cue(track: value(cueTrackID, in: values), time: time, position: position))
+            }
         }
-        return (before ?? after)?.position
+        return found
+    }
+
+    /// The closest cue at or before `target` nanoseconds, else the closest
+    /// after; the first of equals (demux_mkv.c, seek_with_cues).
+    private static func keyframe(in cues: [Cue], at target: UInt64, scale: UInt64) -> Cue? {
+        var best: (cue: Cue, diff: Int64)?
+        for cue in cues {
+            guard case (let nanoseconds, false) = cue.time.multipliedReportingOverflow(by: scale), let time = Int64(exactly: nanoseconds)
+            else { continue }
+            let diff = time - Int64(target)
+            if let best, diff <= 0 ? best.diff <= 0 && diff <= best.diff : diff >= best.diff { continue }
+            best = (cue, diff)
+        }
+        return best?.cue
     }
 
     /// The elements inside `from..<to`, each with its contents.
@@ -102,6 +141,10 @@ enum Matroska {
             j = body + Int(length)
         }
         return found
+    }
+
+    private static func value(_ id: UInt32, in fields: [(UInt32, ArraySlice<UInt8>)]) -> UInt64? {
+        fields.first { $0.0 == id }.flatMap { uint($0.1) }
     }
 
     private static func uint(_ value: ArraySlice<UInt8>) -> UInt64? {
