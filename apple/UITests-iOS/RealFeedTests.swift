@@ -697,6 +697,234 @@ final class RealFeedTests: XCTestCase {
         XCTAssertTrue(counted.hasPrefix("master"), "the converted version's playlists weren't counted")
     }
 
+    /// Films as they buffer now (diagnostic, about 17 min, films only).
+    /// Counts and times only: Continue Watching's first three cards started
+    /// cold (nothing got ready ahead) and ready (3 s on screen); the first
+    /// played from its resume point (FILM_BUFFERING_SECONDS, 480 s), every
+    /// 30 s; a jump of +5 min and one of -30 s; another audio track; each
+    /// kind of subtitles; a film heard in English or Spanish only in another
+    /// copy, switched to it; and a start of the converted version.
+    func testFilmBufferingAsSeenNow() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
+        let playFor = ProcessInfo.processInfo.environment["FILM_BUFFERING_SECONDS"].flatMap(Double.init) ?? 480
+        app.launchArguments = shipped
+        app.launch()
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'"))
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 45), "no Continue Watching")
+        let ids = cards.allElementsBoundByIndex.prefix(3).map(\.identifier)
+        say("REAL Continue Watching: \(ids.count) cards to start")
+        app.terminate()
+
+        for (n, id) in ids.enumerated() {
+            for cold in n % 2 == 0 ? [true, false] : [false, true] {
+                app.launchArguments = shipped + (cold ? ["-noPrepareAhead", "YES"] : [])
+                app.launch()
+                try bringOnScreen(id, at: n)
+                if !cold { sleep(3) }
+                app.buttons[id].tap()
+                say("REAL start card \(n + 1) \(cold ? "cold" : "ready"): " + startParts())
+                app.terminate()
+            }
+        }
+
+        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = String(Int(playFor) + 15)
+        app.launchArguments = shipped
+        app.launch()
+        try bringOnScreen(ids[0], at: 0)
+        sleep(3)
+        app.buttons[ids[0]].tap()
+        say("REAL playback start: " + startParts())
+        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = nil
+        let buffering = app.staticTexts["debug-buffering"].firstMatch
+        let relay = app.staticTexts["debug-relay"].firstMatch
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        let began = Date(), fromServer = serverMB()
+        while Date().timeIntervalSince(began) < playFor {
+            sleep(30)
+            say(String(format: "REAL playback at %.0f s: %@ | %@ | %@", Date().timeIntervalSince(began), buffering.label,
+                       quality.label, relay.label))
+        }
+        let played = Date().timeIntervalSince(began), read = serverMB() - fromServer
+        say(String(format: "REAL playback after %.0f s: %.1f MB from the server, %.2f MB/s on average", played, read, read / played))
+
+        for _ in 0..<90 where field("jumps", in: buffering.label).count < 2 { usleep(500_000) }
+        for (jump, name) in zip(field("jumps", in: buffering.label) + ["none", "none"], ["+5 min", "-30 s"]) {
+            say("REAL jump \(name): \(jump) to the next frame (MB from the server)")
+        }
+
+        let readsBack = app.staticTexts["debug-reads-back"].firstMatch
+        if !openTrackMenu() {
+            say("REAL audio, another track in the file: not measured, the menu didn't open")
+        } else if let other = app.buttons.matching(identifier: "audio-track").allElementsBoundByIndex.first {
+            let back = Int(readsBack.label) ?? 0, rebuffers = count("rebuffers", in: buffering.label)
+            other.tap()
+            for _ in 0..<40 where !buffering.label.contains("audio:") { usleep(250_000) }
+            sleep(3)
+            say("REAL audio, another track in the file: \(last("audio", in: buffering.label)) to its sound, "
+                + "rebuffers \(count("rebuffers", in: buffering.label) - rebuffers), reads back \((Int(readsBack.label) ?? 0) - back)")
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            say("REAL audio, another track in the file: none")
+        }
+
+        var kinds: [String: String] = [:]
+        for entry in 1...6 {
+            guard let line = pickSubtitles(entry), !line.hasPrefix("not measured") else { break }
+            let kind = line.split(separator: " ").first { $0.hasPrefix("to=") }.map(String.init) ?? "to=?"
+            let hidden = line.contains("hidden=yes") ? " hidden" : ""
+            if kinds[kind + hidden] == nil { kinds[kind + hidden] = line }
+        }
+        for (kind, line) in kinds.sorted(by: { $0.key < $1.key }) { say("REAL subtitles \(kind): \(line)") }
+        app.terminate()
+
+        app.launchArguments = shipped + ["-debugPlayCopyFilm", "YES"]
+        app.launch()
+        let found = app.staticTexts["debug-copy-film"].firstMatch
+        let deadline = Date().addingTimeInterval(120)
+        while Date() < deadline, !(found.exists && !found.label.isEmpty) { sleep(1) }
+        say("REAL other copy: \(found.exists ? found.label : "not searched")")
+        if found.label.hasSuffix("found yes"), waitForPosition(timeout: 45) != nil {
+            sleep(5)
+            let other = app.buttons.matching(identifier: "audio-other-copy").firstMatch
+            if openTrackMenu(), other.exists {
+                other.tap()
+                let switched = app.staticTexts["debug-copy-switch"].firstMatch
+                for _ in 0..<60 where !(switched.exists && !switched.label.isEmpty) { usleep(500_000) }
+                say("REAL other copy's language: \(switched.exists && !switched.label.isEmpty ? switched.label : "no switch in 30 s")")
+            } else {
+                say("REAL other copy's language: not in the menu")
+            }
+        }
+        app.terminate()
+
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "10"
+        app.launchArguments = shipped
+        app.launch()
+        try bringOnScreen(ids[0], at: 0)
+        app.buttons[ids[0]].tap()
+        _ = startParts()
+        for _ in 0..<60 where !buffering.label.contains("converted ") { sleep(1) }
+        sleep(3)
+        say("REAL converted start: \(last("opens", in: buffering.label)) | \(quality.label)")
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
+    }
+
+    /// The page drawn up from under the hero, then the row moved along to
+    /// the card: whole on screen, as a viewer brings it.
+    private func bringOnScreen(_ id: String, at index: Int) throws {
+        let card = app.buttons[id]
+        XCTAssertTrue(card.waitForExistence(timeout: 45), "no Continue Watching card")
+        let hero = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        hero.press(forDuration: 0.1, thenDragTo: hero.withOffset(CGVector(dx: 0, dy: -300)))
+        let screen = app.windows.firstMatch.frame
+        let rowY = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch.frame.midY
+        func whole() -> Bool { card.exists && screen.contains(card.frame) }
+        for _ in 0..<(index + 4) where !whole() {
+            let left = !card.exists || card.frame.midX > screen.midX
+            let row = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: screen.midX, dy: rowY))
+            row.press(forDuration: 0.1, thenDragTo: row.withOffset(CGVector(dx: left ? -150 : 150, dy: 0)), withVelocity: .slow,
+                      thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(whole(), "card \(index + 1) didn't come on screen")
+    }
+
+    /// The tap to the first frame and its parts, once it started.
+    private func startParts() -> String {
+        let start = app.staticTexts["debug-start"].firstMatch
+        var parts: [Substring] = []
+        for _ in 0..<240 where parts.count < 4 {
+            usleep(250_000)
+            parts = start.exists ? start.label.split(separator: " ") : []
+        }
+        guard parts.count == 4 else { return "no start in 60 s" }
+        let split = app.staticTexts["debug-start-parts"].firstMatch
+        let player = parts[0] == "warm" ? "a kept player" : "a new player"
+        return "tap to first frame \(parts[1]) s (\(player)) | \(split.exists ? split.label : "no parts")"
+    }
+
+    private func serverMB() -> Double {
+        let relay = app.staticTexts["debug-relay"].firstMatch
+        guard relay.exists, let range = relay.label.range(of: #"from the server \d+ reads ([0-9.]+) MB"#, options: .regularExpression)
+        else { return 0 }
+        return Double(relay.label[range].split(separator: " ").dropLast().last ?? "") ?? 0
+    }
+
+    /// From the buffering readout: "rebuffers 2: …" → 2.
+    private func count(_ part: String, in readout: String) -> Int {
+        let field = readout.components(separatedBy: " | ").first { $0.hasPrefix(part) } ?? ""
+        return Int(field.split(separator: " ").dropFirst().first?.trimmingCharacters(in: [":", ","]) ?? "") ?? 0
+    }
+
+    /// From the buffering readout: "jumps: 400 ms 12.3 MB, 1200 ms 0.0 MB" → its two entries.
+    private func field(_ part: String, in readout: String) -> [String] {
+        guard let field = readout.components(separatedBy: " | ").first(where: { $0.hasPrefix(part + ":") }) else { return [] }
+        return field.dropFirst(part.count + 2).components(separatedBy: ", ")
+    }
+
+    private func last(_ part: String, in readout: String) -> String {
+        let field = readout.components(separatedBy: " | ").first { $0.hasPrefix(part) } ?? ""
+        if part == "opens" { return field.components(separatedBy: ", ").last ?? "none" }
+        return field.split(separator: " ").dropLast().last.map { "\($0) ms" } ?? "none"
+    }
+
+    /// The Audio and Subtitles menu, opened (false when it didn't open):
+    /// tapped where it is, the controls brought up again when they hid.
+    private func openTrackMenu() -> Bool {
+        let menu = app.buttons["Audio and Subtitles"].firstMatch
+        let off = app.buttons["Off"].firstMatch
+        for _ in 0..<4 where !off.exists {
+            if !(menu.exists && menu.isHittable) {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+                _ = menu.waitForExistence(timeout: 2)
+            }
+            if menu.exists, menu.isHittable {
+                let frame = menu.frame
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            }
+            _ = off.waitForExistence(timeout: 3)
+        }
+        return off.exists
+    }
+
+    /// The `entry`th subtitles in the menu, picked: its switch, its first
+    /// line and any stall; nil when there's no such entry. The menu is read
+    /// from one snapshot and tapped where its entry was: it's built again
+    /// when a track arrives.
+    private func pickSubtitles(_ entry: Int) -> String? {
+        let timing = app.staticTexts["debug-subs-timing"].firstMatch
+        let events = { timing.exists ? timing.label.components(separatedBy: " | ") : [] }
+        let before = events().filter { $0.hasPrefix("switch ") }.count
+        guard openTrackMenu() else { return "not measured, the menu didn't open" }
+        var buttons: [XCUIElementSnapshot] = []
+        func collect(_ element: XCUIElementSnapshot) {
+            if element.elementType == .button { buttons.append(element) }
+            element.children.forEach(collect)
+        }
+        if let screen = try? app.snapshot() { collect(screen) }
+        guard let off = buttons.first(where: { $0.label == "Off" || $0.identifier == "Off" })?.frame else { return nil }
+        let below = buttons.filter { $0.frame.minY > off.minY && abs($0.frame.minX - off.minX) < 1 && abs($0.frame.width - off.width) < 1 }
+            .map(\.frame).sorted { $0.minY < $1.minY }
+        guard entry <= below.count else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            return nil
+        }
+        let place = below[entry - 1]
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: place.midX, dy: place.midY)).tap()
+        var switched: String?, shown: String?
+        for _ in 0..<80 where shown == nil {
+            usleep(250_000)
+            switched = events().filter { $0.hasPrefix("switch ") }.dropFirst(before).first
+            let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
+            shown = n.flatMap { n in events().first { $0.hasPrefix("shown ") && $0.split(separator: " ").contains(n) } }
+        }
+        sleep(2)
+        let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
+        let stalls = events().filter { $0.hasPrefix("rebuffer ") && n.map($0.split(separator: " ").contains) == true }
+        let after = shown?.split(separator: " ").first { $0.hasPrefix("after=") }.map(String.init) ?? "no line in 20 s"
+        return ([switched ?? "no switch", after] + (stalls.isEmpty ? ["no stall"] : stalls)).joined(separator: " ; ")
+    }
+
     private func openedAt(timeout: TimeInterval) -> Double? {
         let readout = app.staticTexts["debug-start"].firstMatch
         let deadline = Date().addingTimeInterval(timeout)
