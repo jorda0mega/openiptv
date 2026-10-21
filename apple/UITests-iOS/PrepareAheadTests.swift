@@ -118,8 +118,17 @@ final class PrepareAheadTests: XCTestCase {
         sleep(4)
         let film = item.label
         let planned = playbackInfoRequests(server).filter { $0 == film }.count
-        showControls()
-        app.buttons["Close player"].firstMatch.tap()
+        let player = app.staticTexts["debug-position"].firstMatch
+        let close = app.buttons["Close player"].firstMatch
+        for _ in 0..<3 where player.exists {
+            if !close.isHittable {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+                _ = close.waitForExistence(timeout: 2)
+            }
+            if close.isHittable { close.tap() }
+            _ = player.waitForNonExistence(timeout: 3)
+        }
+        XCTAssertFalse(player.exists, "the player didn't close")
         sleep(4)
         XCTAssertEqual(playbackInfoRequests(server).filter { $0 == film }.count, planned + 1,
                        "back on its page, the film didn't get ready again")
