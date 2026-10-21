@@ -65,7 +65,8 @@ CONNECTIONS = set()
 # as Emby makes it, see converted_segment), "convert_delay" (seconds before
 # a conversion's first segment), "convert_clock" (see converted_segment),
 # "resume_movies" ("1,2,3": those films in Continue Watching after the
-# rest, each stopped 5 minutes in).
+# rest, each stopped 5 minutes in), "wide_pictures" ("1": Thumb and Backdrop
+# pictures 16:9, as a real server's are, not the 2:3 of a poster).
 CONTROL = {}
 CONTROL.update({k: v[0] for k, v in parse_qs(os.environ.get("OPENIPTV_MOCK_SET", "")).items()})
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
@@ -299,6 +300,11 @@ def live_chosen(key, channel):
     return channel in (CONTROL.get(key) or channel).split(",")
 
 
+def backdrop_tag(tag):
+    """A wide picture is another picture: its own tag, as Emby's are."""
+    return tag + "w" if CONTROL.get("wide_pictures") else tag
+
+
 def known_item(entry, played=False):
     id_, name, kind, year, imdb, tmdb = entry
     # "imdb": "k8:tt0000001": that copy's IMDb id is another (a server's
@@ -310,7 +316,7 @@ def known_item(entry, played=False):
     providers = {"Tmdb": tmdb} | ({"Imdb": imdb} if imdb else {})
     return {"Id": id_, "Name": name, "Type": kind, "ProductionYear": year, "ProviderIds": providers,
             "PrimaryImageAspectRatio": 0.6667, "ImageTags": {"Primary": f"t{len(id_) * 7 + int(id_[1:])}"},
-            "BackdropImageTags": [f"b{id_}"], "Overview": LONG_OVERVIEWS.get(id_, f"{name} ({year}), a title from the test library."),
+            "BackdropImageTags": [backdrop_tag(f"b{id_}")], "Overview": LONG_OVERVIEWS.get(id_, f"{name} ({year}), a title from the test library."),
             "DateCreated": f"2026-10-{10 - int(id_[1:]) % 10:02d}T12:00:00.0000000Z", "RunTimeTicks": MOVIE_TICKS,
             "UserData": {"Played": played, "LastPlayedDate": "2026-10-09T20:00:00.0000000Z" if played else None,
                          "IsFavorite": id_ in FAVORITES} | (
@@ -1076,7 +1082,7 @@ class Handler(BaseHTTPRequestHandler):
         movie = lambda i: {"Id": f"m{i}", "Name": f"Movie {i}", "Type": "Movie", "ProductionYear": 2020,
                            "PrimaryImageAspectRatio": 0.6667,
                            "ImageTags": {"Primary": "stale-t15" if i == 15 else f"t{i}"},
-                           "BackdropImageTags": [f"b{i}"]} | (
+                           "BackdropImageTags": [backdrop_tag(f"b{i}")]} | (
             # Where it was last stopped (reported), as on Emby.
             {"UserData": {"PlaybackPositionTicks": POSITIONS[f"m{i}"]}} if POSITIONS.get(f"m{i}") else {})
         # Each episode has its own still (a frame from it), but every fifth,
@@ -1374,7 +1380,8 @@ class Handler(BaseHTTPRequestHandler):
             if q.get("tag", "").startswith("stale"):
                 return self.send({"error": "image not found"}, status=404)
             time.sleep(0.01)
-            return self.send(png(sum(map(ord, path))), "image/png",
+            wide = CONTROL.get("wide_pictures") and ("/Images/Thumb" in path or "/Images/Backdrop" in path)
+            return self.send(png(sum(map(ord, path)), *((160, 90) if wide else ())), "image/png",
                              headers={"Cache-Control": "public, max-age=31536000"})
         self.send({"error": "not found"}, status=404)
 
