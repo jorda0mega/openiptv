@@ -161,6 +161,14 @@ final class MPVPlayer: @unchecked Sendable {
     /// The subtitle line on screen (UI tests).
     private var line = ""
     var subtitleLine: String { stateLock.withLock { line } }
+    let stopwatch = SubtitleStopwatch()
+    /// On the queue: subtitle switches since the first frame, when the
+    /// viewer asked for the one under way, the switch whose first line
+    /// hasn't shown yet (0: the film's start), and when a stall began.
+    private var switches = 0
+    private var switchAsked: CFAbsoluteTime?
+    private var awaitingLine: (n: Int, since: CFAbsoluteTime)?
+    private var stalledSince: CFAbsoluteTime?
     #endif
     /// When the file was open (headers read), for the start-up breakdown.
     private(set) var openedAfter: Double?
@@ -373,6 +381,9 @@ final class MPVPlayer: @unchecked Sendable {
             if !file { _ = Self.closing.wait(timeout: .now() + 2) }
             apply(readahead, mpv)
             loadStarted = CFAbsoluteTimeGetCurrent()
+            #if DEBUG
+            awaitingLine = (switches, loadStarted)
+            #endif
             reportsWindow = !file
             openedAfter = nil
             reportedStart = false
@@ -660,7 +671,19 @@ final class MPVPlayer: @unchecked Sendable {
             var fetched: [(EmbyPlayback.SubtitleFile, String)] = []
             for file in files {
                 guard !Task.isCancelled else { return }
-                guard let local = await Self.local(file.source, ahead: self?.currentAheadInterest) else { continue }
+                #if DEBUG
+                let asked = CFAbsoluteTimeGetCurrent()
+                #endif
+                guard let local = await Self.local(file.source, ahead: self?.currentAheadInterest) else {
+                    #if DEBUG
+                    self?.stopwatch.note(.fetchFailed, [.kind: .word(.file), .ms: .seconds(CFAbsoluteTimeGetCurrent() - asked)])
+                    #endif
+                    continue
+                }
+                #if DEBUG
+                self?.stopwatch.note(.fetched, [.kind: .word(.file), .ms: .seconds(CFAbsoluteTimeGetCurrent() - asked),
+                                                .bytes: .number(Self.size(local)), .lang: .language(file.language)])
+                #endif
                 let text = try? String(contentsOf: local, encoding: .utf8)
                 if let text { fetched.append((file, text)) }
                 // In time from the first line when it played before.
@@ -867,7 +890,13 @@ final class MPVPlayer: @unchecked Sendable {
         guard let mpv, addedFiles.insert(file.id).inserted else { return }
         fileInfo[file.id] = file
         let title = file.title.isEmpty ? (file.language ?? "") : file.title
+        #if DEBUG
+        let adding = CFAbsoluteTimeGetCurrent()
+        #endif
         command(["sub-add", local.path, "auto", title, file.language ?? ""])
+        #if DEBUG
+        stopwatch.note(.added, [.kind: .word(.file), .ms: .seconds(CFAbsoluteTimeGetCurrent() - adding), .lang: .language(file.language)])
+        #endif
         if let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external }).map(\.id).max() {
             fileTracks[file.id] = id
             carried.append((.file(file.id), local, title, file.language ?? ""))
@@ -1069,9 +1098,15 @@ final class MPVPlayer: @unchecked Sendable {
     /// Shows this subtitle track (nil: none): from its copy when the
     /// server's is here.
     func selectSubtitle(_ id: Int?) {
+        #if DEBUG
+        let asked = CFAbsoluteTimeGetCurrent()
+        #endif
         queue.async { [self] in
             guard let mpv else { return }
             let shown = id.map { copies[$0] ?? $0 }
+            #if DEBUG
+            if shown != shownSubtitle { switchAsked = asked }
+            #endif
             mpv_set_property_string(mpv, "sid", shown.map(String.init) ?? "no")
         }
     }
@@ -1111,7 +1146,20 @@ final class MPVPlayer: @unchecked Sendable {
         startSubtitleWork { [weak self] in
             for copy in wanted {
                 guard !Task.isCancelled else { return }
-                guard let local = await ServerSubtitles.local(copy.subtitle, ahead: self?.currentAheadInterest) else { continue }
+                #if DEBUG
+                let asked = CFAbsoluteTimeGetCurrent()
+                #endif
+                guard let local = await ServerSubtitles.local(copy.subtitle, ahead: self?.currentAheadInterest) else {
+                    #if DEBUG
+                    self?.stopwatch.note(.fetchFailed, [.kind: .word(.copy), .track: .number(copy.streamIndex),
+                                                        .ms: .seconds(CFAbsoluteTimeGetCurrent() - asked)])
+                    #endif
+                    continue
+                }
+                #if DEBUG
+                self?.stopwatch.note(.fetched, [.kind: .word(.copy), .track: .number(copy.streamIndex),
+                                                .ms: .seconds(CFAbsoluteTimeGetCurrent() - asked), .bytes: .number(Self.size(local))])
+                #endif
                 self?.queue.async { [weak self] in self?.addCopy(copy, at: local, tries: 10) }
             }
         }
@@ -1126,7 +1174,14 @@ final class MPVPlayer: @unchecked Sendable {
             return
         }
         addedFiles.insert(copy.subtitle.id)
+        #if DEBUG
+        let adding = CFAbsoluteTimeGetCurrent()
+        #endif
         command(["sub-add", local.path, "auto", original.title ?? "", original.language ?? ""])
+        #if DEBUG
+        stopwatch.note(.added, [.kind: .word(.copy), .track: .number(copy.streamIndex), .ms: .seconds(CFAbsoluteTimeGetCurrent() - adding),
+                                .lang: .language(original.language)])
+        #endif
         // Subtitle numbers only: audio tracks are numbered apart.
         let known = Set(list.filter { $0.kind == .subtitle }.map(\.id))
         guard let id = Self.trackList(mpv).filter({ $0.kind == .subtitle && $0.external && !known.contains($0.id) }).map(\.id).max() else { return }
@@ -1281,7 +1336,13 @@ final class MPVPlayer: @unchecked Sendable {
         case MPV_EVENT_FILE_LOADED:
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
             restoreCarried()
+            #if DEBUG
+            noteTracks()
+            #endif
         case MPV_EVENT_PLAYBACK_RESTART where !reportedStart:
+            #if DEBUG
+            stopwatch.note(.firstFrame)
+            #endif
             reportedStart = true
             startLock.withLock { startedFlag = true }
             seekStarted = nil
@@ -1314,7 +1375,11 @@ final class MPVPlayer: @unchecked Sendable {
             guard let value = property.data else { return }
             switch String(cString: property.name) {
             case "paused-for-cache" where property.format == MPV_FORMAT_FLAG:
-                emit(.buffering(value.assumingMemoryBound(to: Int32.self).pointee != 0))
+                let stalled = value.assumingMemoryBound(to: Int32.self).pointee != 0
+                emit(.buffering(stalled))
+                #if DEBUG
+                noteStall(stalled)
+                #endif
             case "pause" where property.format == MPV_FORMAT_FLAG:
                 emit(.paused(value.assumingMemoryBound(to: Int32.self).pointee != 0))
             case "duration" where property.format == MPV_FORMAT_DOUBLE:
@@ -1337,6 +1402,7 @@ final class MPVPlayer: @unchecked Sendable {
             case "sub-text" where property.format == MPV_FORMAT_STRING:
                 let shown = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.map { String(cString: $0) } ?? ""
                 stateLock.withLock { line = shown }
+                if !shown.isEmpty { noteFirstLine() }
             #endif
             case "aid" where property.format == MPV_FORMAT_STRING:
                 // The film's own audio track (not a converted version's).
@@ -1349,6 +1415,9 @@ final class MPVPlayer: @unchecked Sendable {
                 // Other subtitles showing: their shift (a file's), or none.
                 let id = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.flatMap { Int(String(cString: $0)) }
                 if id != shownSubtitle {
+                    #if DEBUG
+                    noteSwitch(to: id)
+                    #endif
                     shownSubtitle = id
                     applyFit(for: id)
                 }
@@ -1359,6 +1428,59 @@ final class MPVPlayer: @unchecked Sendable {
             break
         }
     }
+
+    #if DEBUG
+    private func noteTracks() {
+        guard let mpv else { return }
+        let subtitles = Self.trackList(mpv).filter { $0.kind == .subtitle }
+        let own = subtitles.filter { !$0.external }
+        stopwatch.note(.loaded)
+        stopwatch.note(.tracks, [.text: .number(own.filter { !$0.image }.count), .picture: .number(own.filter(\.image).count),
+                                 .external: .number(subtitles.filter { $0.external && copied[$0.id] == nil }.count),
+                                 .copies: .number(copied.count), .lang: .language(subtitles.first(where: \.selected)?.language)])
+    }
+
+    /// The first frame's tracks are the plan's, not a switch.
+    private func noteSwitch(to id: Int?) {
+        let asked = switchAsked
+        switchAsked = nil
+        guard reportedStart, let mpv else { return }
+        let list = Self.trackList(mpv).filter { $0.kind == .subtitle }
+        func kind(_ id: Int?) -> (word: SubtitleStopwatch.Word, language: String?) {
+            guard let id else { return (.off, nil) }
+            let track = list.first { $0.id == id }
+            if copied[id] != nil { return (.copy, track?.language) }
+            guard let track else { return (.none, nil) }
+            return (track.external ? .file : track.image ? .picture : .own, track.language)
+        }
+        switches += 1
+        awaitingLine = id == nil ? nil : (switches, asked ?? CFAbsoluteTimeGetCurrent())
+        let from = kind(shownSubtitle), to = kind(id)
+        stopwatch.note(.switched, [.n: .number(switches), .from: .word(from.word), .to: .word(to.word), .lang: .language(to.language)])
+    }
+
+    /// `late`: how far into the line the film was when it showed.
+    private func noteFirstLine() {
+        guard let mpv, let awaiting = awaitingLine else { return }
+        awaitingLine = nil
+        var start = 0.0, position = 0.0
+        let late: SubtitleStopwatch.Value = mpv_get_property(mpv, "sub-start", MPV_FORMAT_DOUBLE, &start) >= 0
+            && mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &position) >= 0 ? .seconds(position - start) : .word(.none)
+        stopwatch.note(.shown, [.n: .number(awaiting.n), .after: .seconds(CFAbsoluteTimeGetCurrent() - awaiting.since), .late: late])
+    }
+
+    private func noteStall(_ stalled: Bool) {
+        guard reportedStart else { return }
+        if stalled { return stalledSince = CFAbsoluteTimeGetCurrent() }
+        guard let since = stalledSince else { return }
+        stalledSince = nil
+        stopwatch.note(.rebuffer, [.n: .number(switches), .ms: .seconds(CFAbsoluteTimeGetCurrent() - since)])
+    }
+
+    private static func size(_ file: URL) -> Int {
+        (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    }
+    #endif
 
     private func reportNetwork() {
         let now = CFAbsoluteTimeGetCurrent()
