@@ -828,8 +828,11 @@ final class RealFeedTests: XCTestCase {
     /// Films' starts as seen now (diagnostic, about 2 min a round): Continue
     /// Watching's first two cards started as in testFilmBufferingAsSeenNow,
     /// FILM_START_ROUNDS times (2), each with the reads before its first frame.
+    /// FILM_START_AT: each resumes there instead (a real server's places
+    /// fall between whole seconds).
     func testFilmStartsAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = ProcessInfo.processInfo.environment["FILM_START_AT"]
         let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
         app.launchArguments = shipped
         app.launch()

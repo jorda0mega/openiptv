@@ -1,26 +1,31 @@
 #!/bin/zsh
-# make_real_film.sh [out-dir]: a test film laid out like a real one on Emby (about 900 MB): eight minutes of 720p
-# at 14 Mbit/s (8 MB is 4-5 s of it), keyframes 2 s apart, 5.1 and stereo sound, English and Spanish subtitles
-# with a line over most seconds, its index (Cues) at the end, and its tags after the index, where mkvmerge writes
-# them. Continue Watching resumes it 5 minutes in:
-#   OPENIPTV_MOCK_VIDEO=<out>/real.mkv OPENIPTV_MOCK_RUNTIME=480 and /mock/set?resume_movies=1,2
+# make_real_film.sh [out-dir]: a two-hour test film laid out like a real one on Emby (about 510 MB): 720p at 23.976
+# frames a second, keyframes 24 frames apart as on a Blu-ray (so they fall between whole seconds), 5.1 and stereo sound,
+# English and Spanish subtitles with a line over most seconds, its index (Cues, about 230 KB) at the end, and its tags
+# after the index, where mkvmerge writes them. From 3 to 10 minutes it runs at about 9 Mbit/s (8 MB is 7 s of it), where
+# Continue Watching resumes it; elsewhere it's one colour, to keep it small:
+#   OPENIPTV_MOCK_VIDEO=<out>/real.mkv and /mock/set?watched_elsewhere=m1 (3:36 in; the next card, an episode, 8:48 in)
 set -e
 out=${1:-/tmp/openreel-media/real}
 mkdir -p $out
-ffmpeg -v error -y -f lavfi -i "testsrc2=size=1280x720:rate=24,noise=alls=24:allf=t+u" \
-  -f lavfi -i "sine=frequency=440:sample_rate=48000" -t 60 -map 0:v -map 1:a -map 1:a \
-  -c:v libx264 -preset ultrafast -b:v 14M -maxrate 16M -bufsize 16M -g 48 -keyint_min 48 -sc_threshold 0 -pix_fmt yuv420p \
-  -c:a:0 ac3 -b:a:0 640k -ac:a:0 6 -c:a:1 aac -b:a:1 128k -ac:a:1 2 $out/minute.mkv
-for i in {1..8}; do echo "file '$out/minute.mkv'"; done > $out/parts.txt
+minute() {
+  ffmpeg -v error -y -f lavfi -i "$2size=1280x720:rate=24000/1001" -f lavfi -i "sine=frequency=440:sample_rate=48000" -t 60 \
+    -map 0:v -map 1:a -map 1:a -c:v libx264 -preset ultrafast -crf 23 -maxrate 8M -bufsize 8M -g 24 -keyint_min 24 \
+    -sc_threshold 0 -pix_fmt yuv420p -c:a:0 ac3 -b:a:0 128k -ac:a:0 6 -c:a:1 aac -b:a:1 32k -ac:a:1 2 $out/$1.mkv
+}
+minute still "color=c=0x405060:"
+minute busy "testsrc2="
+
+{ for i in {1..120}; do echo "file '$out/$([ $i -gt 3 ] && [ $i -le 10 ] && echo busy || echo still).mkv'"; done } > $out/parts.txt
 for lang in eng spa; do
-  for k in {0..119}; do
-    printf '%d\n00:%02d:%02d,100 --> 00:%02d:%02d,700\n%s %d\n\n' $((k + 1)) $(((3 + 4 * k) / 60)) $(((3 + 4 * k) % 60)) \
-      $(((5 + 4 * k) / 60)) $(((5 + 4 * k) % 60)) $lang $k
+  for k in {0..1799}; do
+    printf '%d\n%02d:%02d:%02d,100 --> %02d:%02d:%02d,700\n%s %d\n\n' $((k + 1)) $(((3 + 4 * k) / 3600)) $(((3 + 4 * k) / 60 % 60)) \
+      $(((3 + 4 * k) % 60)) $(((5 + 4 * k) / 3600)) $(((5 + 4 * k) / 60 % 60)) $(((5 + 4 * k) % 60)) $lang $k
   done > $out/$lang.srt
 done
 ffmpeg -v error -y -f concat -safe 0 -i $out/parts.txt -i $out/eng.srt -i $out/spa.srt -map 0 -map 1 -map 2 -c copy -c:s srt \
   -metadata:s:a:0 language=eng -metadata:s:a:1 language=spa -metadata:s:s:0 language=eng -metadata:s:s:1 language=spa $out/real.mkv
-rm $out/minute.mkv $out/parts.txt
+rm $out/still.mkv $out/busy.mkv $out/parts.txt
 python3 -I - $out/real.mkv <<'EOF'
 import os, sys
 
