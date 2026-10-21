@@ -200,4 +200,20 @@ final class FilmStartTests: XCTestCase {
             assertAllFetched(opening(film, start: film.cluster(keyframe)), fetched)
         }
     }
+
+    func testWithSubtitlesOnTheStartIsWhereMpvReadsBackToForTheLineOn() async {
+        var points = Film.points()
+        // A line from 296.0 s for 6 s, in the cluster of the keyframe at 294.3 s: on at the keyframe at 300.3 s.
+        points.insert(Film.Point(ms: 296_000, positions: [Film.Position(track: Film.subtitles, cluster: 147, durationMS: 6_000)]), at: 148)
+        let film = Film(points: points)
+        var on = playback(at: 300.5), off = on
+        on.tracks = TrackPlan(audio: ["eng"], subtitles: ["eng"])
+        off.tracks = TrackPlan(audio: ["eng"], subtitles: nil)
+        let (ok, fetched) = await fetchedAhead(film, for: on)
+        XCTAssertTrue(ok, "the film's start wasn't fetched")
+        assertAllFetched(opening(film, start: film.cluster(147), keyframe: film.cluster(150)), fetched)
+        let (offOK, offFetched) = await fetchedAhead(film, for: off)
+        XCTAssertTrue(offOK, "the film's start wasn't fetched")
+        assertAllFetched(opening(film, start: film.cluster(150)), offFetched)
+    }
 }
