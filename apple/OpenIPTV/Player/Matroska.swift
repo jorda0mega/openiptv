@@ -210,20 +210,18 @@ enum Matroska {
         var head = [UInt8](data)
         guard var layout = layout(in: head, total: total) else { return false }
         // Fonts and cover art (Attachments) can push it past the first read.
-        while layout.firstCluster == nil, let continueAt = layout.continueAt, continueAt < largest {
-            let from = Int64(head.count), to = min(continueAt + (1 << 16), total)
+        while layout.firstCluster == nil, let continueAt = layout.continueAt, head.count < largest {
+            let from = Int64(head.count), to = min(continueAt + (1 << 16), total, largest)
             guard from < to, let next = await fetch(from, to - from), let longer = Self.layout(in: head + next.data, total: total) else { return false }
             head += next.data
             layout = longer
         }
-        guard let cues = layout.cues else { return false }
+        guard let cluster = layout.firstCluster, let cues = layout.cues else { return false }
         var header = Int64(head.count)
-        if let cluster = layout.firstCluster {
-            let to = min(cluster + first, total)
-            if to > header {
-                guard await fetch(header, to - header) != nil else { return false }
-                header = to
-            }
+        let headerEnd = min(cluster + first, total)
+        if headerEnd > header {
+            guard await fetch(header, headerEnd - header) != nil else { return false }
+            header = headerEnd
         }
         let tailAt = layout.tail.lowerBound
         var tail = Data()
