@@ -108,7 +108,7 @@ final class IPTVLoginLeakTests: XCTestCase {
     }
 
     private func step(_ name: String, _ body: () -> Void) {
-        let since = mark()
+        let since = control("mock/mark")["t"] as? Double ?? 0
         body()
         sleep(3)
         let found = control("mock/iptv_leaks", ["since": String(since)])
@@ -160,10 +160,6 @@ final class IPTVLoginLeakTests: XCTestCase {
             _ = player.waitForNonExistence(timeout: 3)
         }
         XCTAssertFalse(player.exists, "the player didn't close")
-    }
-
-    private func mark() -> Double {
-        control("mock/mark")["t"] as? Double ?? 0
     }
 
     private func configure(_ settings: [String: String]) {

@@ -169,10 +169,6 @@ enum LiveProbe {
 
     static var requests = 0
 
-    static func read(_ url: URL, agent: String, cap: Double, keep: Int = 0) async -> Reader {
-        await read(URLRequest(url: url), agent: agent, cap: cap, keep: keep)
-    }
-
     static func read(_ asked: URLRequest, agent: String, cap: Double, keep: Int = 0) async -> Reader {
         requests += 1
         let config = URLSessionConfiguration.ephemeral
@@ -237,7 +233,7 @@ enum LiveProbe {
     }
 
     static func open(_ login: Login, id: String, ext: Ext, ua: Agent, round: Int, cap: Double) async -> Open {
-        let r = await read(login.stream(id, ext), agent: agent(ua), cap: cap, keep: ext == .m3u8 ? 1 << 20 : 0)
+        let r = await read(URLRequest(url: login.stream(id, ext)), agent: agent(ua), cap: cap, keep: ext == .m3u8 ? 1 << 20 : 0)
         let hops = r.metrics?.transactionMetrics ?? []
         let origin = hops.first?.fetchStartDate ?? r.started
         let response = r.response ?? hops.last?.response as? HTTPURLResponse
@@ -299,7 +295,7 @@ enum LiveProbe {
         let segments = lines.filter { !$0.isEmpty && !$0.hasPrefix("#") }
         p.segments = segments.count
         if let first = segments.first, let url = URL(string: first, relativeTo: r.response?.url) {
-            let segment = await read(url.absoluteURL, agent: agent, cap: cap)
+            let segment = await read(URLRequest(url: url.absoluteURL), agent: agent, cap: cap)
             p.segmentFirstData = ms(segment.metrics?.transactionMetrics.first?.fetchStartDate ?? segment.started, segment.firstByte)
         }
         return p
@@ -341,7 +337,9 @@ enum LiveProbe {
 
     static func login(_ env: [String: String]) async -> Login? {
         if let holder = env["OPENIPTV_SMOKE_FEED"].flatMap(URL.init(string:)) { return await loginFromHolder(holder) }
-        return loginFromEnvironment(env)
+        guard let server = env["OPENIPTV_XTREAM_URL"].flatMap({ XtreamProvider.parse($0)?.server }),
+              let username = env["OPENIPTV_XTREAM_USER"], let password = env["OPENIPTV_XTREAM_PASS"] else { return nil }
+        return Login(server: server, username: username, password: password)
     }
 
     static func loginFromHolder(_ holder: URL) async -> Login? {
@@ -352,12 +350,6 @@ enum LiveProbe {
         guard let (data, response) = try? await session.data(from: holder), (response as? HTTPURLResponse)?.statusCode == 200,
               let source = try? JSONDecoder().decode(IPTVSource.self, from: data),
               case let .xtream(server, username, password) = source.kind else { return nil }
-        return Login(server: server, username: username, password: password)
-    }
-
-    static func loginFromEnvironment(_ env: [String: String]) -> Login? {
-        guard let server = env["OPENIPTV_XTREAM_URL"].flatMap({ XtreamProvider.parse($0)?.server }),
-              let username = env["OPENIPTV_XTREAM_USER"], let password = env["OPENIPTV_XTREAM_PASS"] else { return nil }
         return Login(server: server, username: username, password: password)
     }
 
