@@ -84,6 +84,12 @@ struct LiveView: View {
                 }
             }
             .listStyle(.plain)
+            #if DEBUG
+            .background {
+                Text(debugLineup).frame(width: 1, height: 1).opacity(0.02)
+                    .accessibilityLabel(debugLineup).accessibilityIdentifier("debug-live-lineup")
+            }
+            #endif
             // The tab strip says which shelf; the title says where you are.
             .navigationTitle("Live TV")
             .inlineTitle()
@@ -122,6 +128,18 @@ struct LiveView: View {
             }
         }
     }
+
+    #if DEBUG
+    private var debugLineup: String {
+        let guide = switch model.guideState {
+        case let .ready(programmes, fetchedAt): "\(fetchedAt > model.launchedAt ? "fresh" : "saved") entries=\(programmes)"
+        case .idle: "idle"
+        case .loading: "loading"
+        case .failed: "failed"
+        }
+        return "channels=\(model.allChannels.count) guide=\(guide)"
+    }
+    #endif
 
     private var visibleCategories: [LiveCategory] {
         model.categories.filter { !prefs.hiddenCategories.contains($0.id) }
