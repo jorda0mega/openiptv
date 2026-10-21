@@ -675,10 +675,13 @@ struct FileStart: Hashable, Sendable {
 
     init(_ playback: EmbyPlayback) {
         itemId = playback.itemId
-        seconds = Double(String(format: "%.1f", playback.startSeconds ?? 0)) ?? 0
+        seconds = Double(Self.mpvStart(playback.startSeconds ?? 0)) ?? 0
         url = playback.url
         headers = playback.headers
     }
+
+    /// The start MPVPlayer.load gives mpv.
+    static func mpvStart(_ seconds: Double) -> String { String(format: "%.1f", seconds) }
 
     static func == (a: FileStart, b: FileStart) -> Bool { a.itemId == b.itemId && a.seconds == b.seconds }
 
