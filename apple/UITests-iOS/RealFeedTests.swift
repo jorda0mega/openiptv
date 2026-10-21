@@ -714,6 +714,7 @@ final class RealFeedTests: XCTestCase {
         XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 45), "no Continue Watching")
         let ids = cards.allElementsBoundByIndex.prefix(3).map(\.identifier)
         say("REAL Continue Watching: \(ids.count) cards to start")
+        shot("home at launch")
         app.terminate()
 
         for (n, id) in ids.enumerated() {
@@ -810,23 +811,47 @@ final class RealFeedTests: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
     }
 
-    /// The page drawn up from under the hero, then the row moved along to
-    /// the card: whole on screen, as a viewer brings it.
+    /// The card brought whole on screen as a viewer does: once Home stops
+    /// moving (it draws in parts), the page scrolled until the card sits
+    /// above the tab bar, then the row moved along to it; up to 30 s.
     private func bringOnScreen(_ id: String, at index: Int) throws {
         let card = app.buttons[id]
         XCTAssertTrue(card.waitForExistence(timeout: 45), "no Continue Watching card")
-        let hero = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
-        hero.press(forDuration: 0.1, thenDragTo: hero.withOffset(CGVector(dx: 0, dy: -300)))
         let screen = app.windows.firstMatch.frame
-        let rowY = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch.frame.midY
-        func whole() -> Bool { card.exists && screen.contains(card.frame) }
-        for _ in 0..<(index + 4) where !whole() {
-            let left = !card.exists || card.frame.midX > screen.midX
-            let row = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: screen.midX, dy: rowY))
-            row.press(forDuration: 0.1, thenDragTo: row.withOffset(CGVector(dx: left ? -150 : 150, dy: 0)), withVelocity: .slow,
-                      thenHoldForDuration: 0.3)
+        let tabBar = app.tabBars.firstMatch
+        func visible() -> CGRect {
+            let bottom = tabBar.exists ? tabBar.frame.minY : screen.maxY
+            return CGRect(x: screen.minX, y: screen.minY + 100, width: screen.width, height: bottom - screen.minY - 100)
         }
-        XCTAssertTrue(whole(), "card \(index + 1) didn't come on screen")
+        func whole() -> Bool { card.exists && visible().contains(card.frame) }
+        func drag(from point: CGPoint, by offset: CGVector) {
+            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(offset), withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        let deadline = Date().addingTimeInterval(30)
+        var before = CGRect.null
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        while Date() < deadline, !whole() {
+            let target = card.exists ? card : row
+            guard target.exists else { sleep(1); continue }
+            let frame = target.frame, area = visible()
+            if frame != before {
+                before = frame
+                sleep(1)
+                continue
+            }
+            if frame.minY < area.minY || frame.maxY > area.maxY {
+                drag(from: CGPoint(x: area.midX, y: area.midY), by: CGVector(dx: 0, dy: max(-400, min(400, area.midY - frame.midY))))
+            } else {
+                let left = !card.exists || frame.midX > area.midX
+                drag(from: CGPoint(x: area.midX, y: frame.midY), by: CGVector(dx: left ? -150 : 150, dy: 0))
+            }
+            before = .null
+        }
+        if !whole() { shot("card \(index + 1) not on screen") }
+        let frame = card.exists ? card.frame : .null, area = visible()
+        XCTAssertTrue(whole(), String(format: "card %d didn't come on screen in 30 s (card %.0f-%.0f down, %.0f-%.0f across; screen %.0f-%.0f down)",
+                                      index + 1, frame.minY, frame.maxY, frame.minX, frame.maxX, area.minY, area.maxY))
     }
 
     /// The tap to the first frame and its parts, once it started.
