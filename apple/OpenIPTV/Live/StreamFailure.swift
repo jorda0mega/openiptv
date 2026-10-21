@@ -68,10 +68,9 @@ enum StreamFailure: String, CaseIterable {
         }
     }
 
-    /// "5XX" is not a number. Every other status the log regex yields is.
-    private static func http(_ status: some StringProtocol) -> StreamFailure {
-        if let code = Int(status) { return http(code) }
-        return status.hasPrefix("5") ? .http_5xx : .http_other
+    private static func http(_ statusCodeOrClass: some StringProtocol) -> StreamFailure {
+        if let code = Int(statusCodeOrClass) { return http(code) }
+        return statusCodeOrClass.hasPrefix("5") ? .http_5xx : .http_other
     }
 
     static func worthReading(format: UnsafePointer<CChar>) -> Bool {

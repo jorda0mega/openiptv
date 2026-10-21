@@ -38,7 +38,6 @@ struct LoadEvents {
         startedSinceDrain ? nil : current
     }
 
-    /// The load whose first picture this is; nil for a jump.
     mutating func restarted() -> Int? {
         guard !pictured else { return nil }
         pictured = true

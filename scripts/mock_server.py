@@ -67,7 +67,6 @@ CONNECTIONS = set()
 # "resume_movies" ("1,2,3": those films in Continue Watching after the
 # rest, each stopped 5 minutes in).
 CONTROL = {}
-# Switches set at start, as /mock/set takes them ("sports=1&xtream_post_only=1").
 CONTROL.update({k: v[0] for k, v in parse_qs(os.environ.get("OPENIPTV_MOCK_SET", "")).items()})
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
@@ -99,8 +98,6 @@ XTREAM_REQUESTS = []
 # the provider takes it beside u/p, and the simulator's log and the API
 # addresses are searched for it. Never printed or sent back.
 FAKE_LOGIN = {}
-# The address of every player_api.php, xmltv.php and get.php request, with
-# its query: (time, address).
 IPTV_ADDRESSES = []
 LIVE_REQUESTS = []
 LIVE_HELD = {}
@@ -676,8 +673,6 @@ class Handler(BaseHTTPRequestHandler):
             since = float(q.get("since", "0"))
             return self.send({"items": [name for t, name in XTREAM_REQUESTS if t >= since]})
         if path == "/mock/online":
-            # /mock/set?offline=1: debug builds told to read the network
-            # from here (OPENREEL_DEBUG_ONLINE_URL) take it as down.
             return self.send({"online": CONTROL.get("offline") != "1"})
         if path == "/mock/live_requests":
             since = float(q.get("since", "0"))
