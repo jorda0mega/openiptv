@@ -115,14 +115,26 @@ final class FilmStartTests: XCTestCase {
                 ("start", start..<(keyframe ?? start) + first + StreamRelay.readSize)]
     }
 
-    private func fetchedAhead(_ film: Film, for playback: EmbyPlayback) async -> (ok: Bool, ranges: [Range<Int64>]) {
+    private func fetchedAhead(_ film: Film, for playback: EmbyPlayback, asBefore: Bool = false) async -> (ok: Bool, ranges: [Range<Int64>]) {
         var fetched: [Range<Int64>] = []
-        let ok = await FileStart(playback).fetch { from, count in
+        let fetch: Matroska.Fetch = { from, count in
             let data = film.bytes(from, count)
             fetched.append(from..<from + Int64(data.count))
             return (data, film.total)
         }
+        let start = FileStart(playback)
+        let ok = asBefore ? await start.fetchAsBefore(through: fetch) : await start.fetch(through: fetch)
         return (ok, fetched)
+    }
+
+    private func merged(_ ranges: [Range<Int64>]) -> [Range<Int64>] {
+        ranges.sorted { $0.lowerBound < $1.lowerBound }.reduce(into: []) { merged, range in
+            if let last = merged.last, range.lowerBound <= last.upperBound {
+                merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+            } else {
+                merged.append(range)
+            }
+        }
     }
 
     private func assertAllFetched(_ reads: [(String, Range<Int64>)], _ fetched: [Range<Int64>], file: StaticString = #filePath,
@@ -135,13 +147,7 @@ final class FilmStartTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(covered, read.upperBound, "the \(name) wasn't all fetched ahead: \(read.upperBound - covered) bytes missing",
                                         file: file, line: line)
         }
-        let needed = reads.map(\.1).sorted { $0.lowerBound < $1.lowerBound }.reduce(into: [Range<Int64>]()) { merged, read in
-            if let last = merged.last, read.lowerBound <= last.upperBound {
-                merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, read.upperBound)
-            } else {
-                merged.append(read)
-            }
-        }
+        let needed = merged(reads.map(\.1))
         XCTAssertLessThanOrEqual(fetched.reduce(0) { $0 + $1.count }, needed.reduce(0) { $0 + $1.count },
                                  "fetched more than opening it reads", file: file, line: line)
     }
@@ -231,5 +237,17 @@ final class FilmStartTests: XCTestCase {
         let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.5))
         XCTAssertTrue(ok, "the film's start wasn't fetched")
         assertAllFetched(opening(film, start: film.cluster(150)), fetched)
+    }
+
+    func testTheOldWayFetchesWhatItDidBefore() async {
+        // 256 KB of the header, the index, and 8 MB from the cluster of the
+        // last keyframe at or before the whole second; none before the first.
+        let film = Film()
+        let resumed = await fetchedAhead(film, for: playback(at: 300.96), asBefore: true)
+        XCTAssertTrue(resumed.ok, "the film's start wasn't fetched")
+        XCTAssertEqual(merged(resumed.ranges), [0..<1 << 18, film.cluster(149)..<film.cluster(149) + StreamRelay.readSize, film.cues])
+        let fromItsBeginning = await fetchedAhead(film, for: playback(at: nil), asBefore: true)
+        XCTAssertFalse(fromItsBeginning.ok, "the old way fetched a cluster for a film from its beginning")
+        XCTAssertEqual(merged(fromItsBeginning.ranges), [0..<1 << 18, film.cues])
     }
 }
