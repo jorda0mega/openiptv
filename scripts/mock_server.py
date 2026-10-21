@@ -347,7 +347,8 @@ def converted_segment(item, n):
     # else (ffmpeg's -copyts) the film's own times.
     clock = ["-output_ts_offset", str((n - first) * SEGMENT)] if CONTROL.get("convert_clock") == "restart" else ["-copyts"]
     return subprocess.run(["ffmpeg", "-v", "error", "-ss", str(n * SEGMENT), "-t", str(SEGMENT), "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
-                           "-c", "copy", *clock, "-f", "mpegts", "-"], capture_output=True).stdout
+                           "-c:v", "libx264", "-preset", "ultrafast", "-g", "72", "-c:a", "aac", "-b:a", "32k", *clock,
+                           "-f", "mpegts", "-"], capture_output=True).stdout
 
 
 def recorded_ts():

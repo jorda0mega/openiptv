@@ -598,6 +598,9 @@ final class PlayerLookTests: XCTestCase {
         try resume(server, "a9", at: 2400)
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
         openFilm(titled: "Oppenheimer")
+        // From the keyframe at or before 40:00 (39:52 in the test film).
+        let opened = try XCTUnwrap(openedAt(), "the film didn't open")
+        XCTAssertTrue((2370...2402).contains(opened), "the film opened at \(Int(opened)) s, not forty minutes in")
         let quality = app.staticTexts["debug-quality"].firstMatch
         var lowered = false
         for _ in 0..<40 where !lowered {
@@ -606,7 +609,6 @@ final class PlayerLookTests: XCTestCase {
         }
         XCTAssertTrue(lowered, "the quality wasn't lowered: \(quality.exists ? quality.label : "no readout")")
         let from = try XCTUnwrap(position(), "no position")
-        XCTAssertGreaterThan(from, 2400, "the film didn't resume forty minutes in")
         var seen: [Double] = []
         for _ in 0..<40 {
             sleep(1)
@@ -1681,6 +1683,17 @@ final class PlayerLookTests: XCTestCase {
         }.resume()
         wait(for: [done], timeout: 10)
         return items
+    }
+
+    /// The film's second at its first frame, from the player's start
+    /// readout ("cold 4.2 at 2392").
+    private func openedAt() -> Double? {
+        let readout = app.staticTexts["debug-start"].firstMatch
+        for _ in 0..<20 {
+            if readout.exists, let at = readout.label.components(separatedBy: " at ").last.flatMap(Double.init) { return at }
+            usleep(500_000)
+        }
+        return nil
     }
 
     /// The app's debug readout of the player: its second, and whether it plays.
