@@ -186,4 +186,18 @@ final class FilmStartTests: XCTestCase {
             assertAllFetched(opening(film, start: film.cluster(keyframe)), fetched)
         }
     }
+
+    func testTheStartIsTheVideosKeyframeWhateverOtherTracksTheIndexLists() async {
+        let subtitle = { (n: Int) in Film.Position(track: Film.subtitles, cluster: n, into: 1_000_000) }
+        var points = Film.points()
+        points[170].positions.insert(subtitle(170), at: 0)
+        points.insert(Film.Point(ms: Film.keyframesMS[160], positions: [subtitle(160)]), at: 161)
+        points.insert(Film.Point(ms: 300_400, positions: [subtitle(150)]), at: 151)
+        let film = Film(points: points)
+        for (seconds, keyframe) in [(300.5, 150), (320.4, 160), (340.4, 170)] {
+            let (ok, fetched) = await fetchedAhead(film, for: playback(at: seconds))
+            XCTAssertTrue(ok, "the film's start wasn't fetched")
+            assertAllFetched(opening(film, start: film.cluster(keyframe)), fetched)
+        }
+    }
 }
