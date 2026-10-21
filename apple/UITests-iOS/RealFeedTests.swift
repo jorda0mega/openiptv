@@ -27,11 +27,15 @@ class RealFeedCase: XCTestCase {
         print(line.replacing(#/tok=\w+/#, with: "tok=#"))
     }
 
+    /// A readout's text, read once from a snapshot (nil: not there), so it
+    /// can't go between finding it and reading it.
+    func readout(_ id: String) -> String? {
+        (try? app.staticTexts[id].firstMatch.snapshot())?.label
+    }
+
     /// The film player's second, from its debug readout ("72.4 playing").
     func position() -> Double? {
-        let readout = app.staticTexts["debug-position"].firstMatch
-        guard readout.exists else { return nil }
-        return readout.label.split(separator: " ").first.flatMap { Double($0) }
+        readout("debug-position")?.split(separator: " ").first.flatMap { Double($0) }
     }
 
     func waitForPosition(timeout: TimeInterval) -> Double? {
