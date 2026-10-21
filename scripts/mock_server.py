@@ -86,6 +86,12 @@ KEY_CHECKS = []
 CANCELLED = []
 SUBTITLES_CUT = []
 
+# The video's bytes sent (GET /mock/video_bytes), and those sent a second
+# time or more: a player reading again what it was already sent.
+VIDEO_SENT = {}
+VIDEO_BYTES = {"sent": 0, "again": 0}
+VIDEO_LOCK = threading.Lock()
+
 # Requests for a stretch of a film's sound, and those with the key in
 # their address (GET /mock/audio_requests).
 AUDIO_REQUESTS = [0, 0]
@@ -462,6 +468,21 @@ def recorded_ts():
     return _RECORDED or None
 
 
+def note_video_sent(path, start, end):
+    with VIDEO_LOCK:
+        runs = VIDEO_SENT.setdefault(path, [])
+        VIDEO_BYTES["sent"] += end - start
+        VIDEO_BYTES["again"] += sum(max(0, min(end, b) - max(start, a)) for a, b in runs)
+        merged = [start, end]
+        kept = []
+        for a, b in runs:
+            if b < merged[0] or a > merged[1]:
+                kept.append((a, b))
+            else:
+                merged = [min(a, merged[0]), max(b, merged[1])]
+        VIDEO_SENT[path] = sorted(kept + [tuple(merged)])
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -660,6 +681,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"items": [item for t, item in VIDEO_REQUESTS if t >= since]})
         if path == "/mock/audio_requests":
             return self.send({"count": AUDIO_REQUESTS[0], "keyed": AUDIO_REQUESTS[1]})
+        if path == "/mock/video_bytes":
+            with VIDEO_LOCK:
+                return self.send(dict(VIDEO_BYTES))
         if path == "/mock/key_checks":
             since = float(q.get("since", "0"))
             asked = [r for r in KEY_CHECKS if r[0] >= since]
@@ -687,6 +711,9 @@ class Handler(BaseHTTPRequestHandler):
             if "reset" in q:
                 AUDIO_REQUESTS[0] = AUDIO_REQUESTS[1] = 0
                 VIDEO_REQUESTS.clear()
+                with VIDEO_LOCK:
+                    VIDEO_SENT.clear()
+                    VIDEO_BYTES.update(sent=0, again=0)
                 SUBTITLE_REQUESTS.clear()
                 SUBTITLES_CUT.clear()
                 PLAYBACKINFO_REQUESTS.clear()
@@ -1063,10 +1090,12 @@ class Handler(BaseHTTPRequestHandler):
                 f.seek(start)
                 left = end - start + 1
                 while left > 0:
+                    at = f.tell()
                     chunk = f.read(min(262144, left))
                     if not chunk:
                         break
                     self.wfile.write(chunk)
+                    note_video_sent(file_path, at, at + len(chunk))
                     left -= len(chunk)
                     time.sleep(0.025)
         except (BrokenPipeError, ConnectionResetError):

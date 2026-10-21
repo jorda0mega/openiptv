@@ -254,11 +254,20 @@ final class StreamRelay: @unchecked Sendable {
             caches.append(found)
             return found.cache
         }
-        guard let made = ByteCache() else { return nil }
+        guard let made = ByteCache(limit: Self.keptBytes) else { return nil }
         caches.append((key, made))
         if caches.count > Self.keptFiles { caches.removeFirst() }
         return made
     }
+
+    #if DEBUG
+    // UI tests (OPENREEL_DEBUG_RELAY_KEEP_MB=megabytes): a small test film
+    // fills less than a real one does.
+    private static let keptBytes = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_RELAY_KEEP_MB"].flatMap(Int64.init).map { $0 << 20 }
+        ?? ByteCache.limit
+    #else
+    private static let keptBytes = ByteCache.limit
+    #endif
 
     /// A file's address without the server's session for one request.
     private func cacheKey(_ url: URL) -> String {
@@ -658,8 +667,9 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 /// behind the newest bytes is let go.
 final class ByteCache: @unchecked Sendable {
     private static let folder = FileManager.default.temporaryDirectory.appending(path: "relay-cache")
-    private static let limit: Int64 = 1 << 30
+    static let limit: Int64 = 1 << 30
 
+    private let limit: Int64
     private let lock = NSLock()
     private let path: URL
     private let handle: FileHandle
@@ -668,7 +678,8 @@ final class ByteCache: @unchecked Sendable {
     private(set) var total: Int64?
     private(set) var contentType: String?
 
-    init?() {
+    init?(limit: Int64 = ByteCache.limit) {
+        self.limit = limit
         try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
         path = Self.folder.appending(path: UUID().uuidString)
         guard FileManager.default.createFile(atPath: path.path(), contents: nil),
@@ -721,8 +732,8 @@ final class ByteCache: @unchecked Sendable {
     func store(_ data: Data, at offset: Int64, evicting: Bool = true) {
         let end = offset + Int64(data.count)
         lock.withLock {
-            if evicting, stored + Int64(data.count) > Self.limit { letGo(before: offset - (64 << 20)) }
-            guard stored + Int64(data.count) <= Self.limit else { return }
+            if evicting, stored + Int64(data.count) > limit { letGo(before: offset - (64 << 20)) }
+            guard stored + Int64(data.count) <= limit else { return }
             do {
                 try handle.seek(toOffset: UInt64(offset))
                 try handle.write(contentsOf: data)
