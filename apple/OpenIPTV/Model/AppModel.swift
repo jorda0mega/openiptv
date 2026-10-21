@@ -1229,7 +1229,8 @@ final class AppModel {
         warm = nil
     }
 
-    /// The player covers the screen: nothing under it is got ready.
+    /// A player covers the screen (set once it's gone, after playback ends):
+    /// nothing under it is got ready meanwhile.
     var playerShown = false
 
     /// What a screen shows that may be opened next, got ready while it stays
