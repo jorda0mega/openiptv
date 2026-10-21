@@ -28,6 +28,8 @@ enum Matroska {
         let segmentStart: Int64
         let total: Int64
         let firstCluster: Int64?
+        /// Where the walk to the first cluster needs more of the file.
+        let more: Int64?
         let cues: Int64?
         /// Earliest SeekHead offset after the clusters. libmpv reads that tail on open.
         let pastClusters: Int64?
@@ -73,8 +75,9 @@ enum Matroska {
         let pastClusters = firstCluster.flatMap { first in
             positions.filter { $0.target != clusterID && $0.at > first }.map(\.at).min()
         }
-        return Layout(segmentStart: Int64(segmentStart), total: total, firstCluster: firstCluster, cues: positions.first { $0.target == cuesID }?.at,
-                      pastClusters: pastClusters, timecodeScale: scale, videoTrack: videoTrack)
+        let more = firstCluster == nil && i + 12 > d.count ? Int64(i) : nil
+        return Layout(segmentStart: Int64(segmentStart), total: total, firstCluster: firstCluster, more: more,
+                      cues: positions.first { $0.target == cuesID }?.at, pastClusters: pastClusters, timecodeScale: scale, videoTrack: videoTrack)
     }
 
     /// A position counted from the segment's start, in the file (nil: past its end).
@@ -201,10 +204,19 @@ enum Matroska {
 
     static func fetchStart(at seconds: Double, subtitlePreroll: Double, fetch: Fetch) async -> Bool {
         let first = StreamRelay.firstRead
-        guard let (head, total) = await fetch(0, first), let layout = layout(in: [UInt8](head), total: total), let cues = layout.cues
-        else { return false }
-        var header = min(first, total)
-        if let cluster = layout.firstCluster, cluster < largest {
+        guard let (data, total) = await fetch(0, first) else { return false }
+        var head = [UInt8](data)
+        guard var layout = layout(in: head, total: total) else { return false }
+        // Fonts and cover art (Attachments) can push it past the first read.
+        while layout.firstCluster == nil, let more = layout.more, more < largest {
+            let from = Int64(head.count), to = min(more + (1 << 16), total)
+            guard from < to, let next = await fetch(from, to - from), let longer = Self.layout(in: head + next.data, total: total) else { return false }
+            head += next.data
+            layout = longer
+        }
+        guard let cues = layout.cues else { return false }
+        var header = Int64(head.count)
+        if let cluster = layout.firstCluster {
             let to = min(cluster + first, total)
             if to > header {
                 guard await fetch(header, to - header) != nil else { return false }
