@@ -3,38 +3,63 @@ import XCTest
 
 final class FilmStartTests: XCTestCase {
     private struct Film {
-        static let firstCluster: Int64 = 4096
         static let clusterSize: Int64 = 3_500_000 // 14 Mbit/s across one keyframe gap
-        static let clusters = 3600 // two hours; the Cues then exceed a 64 KB read
-        static let firstKeyframeMS = 21 // half a frame at 23.976 fps, so 0 s is before it
-        static let keyframeEveryMS = 2002 // 48 frames at 24000/1001
+        static let video: UInt64 = 1
+        static let subtitles: UInt64 = 3
+        /// Two hours at 23.976 fps: a keyframe every 48 frames from half a
+        /// frame in, so 0 s is before the first. The Cues then exceed a 64 KB read.
+        static let keyframesMS = (0..<3600).map { 21 + $0 * 2002 }
+
+        struct Position {
+            var track = Film.video
+            let cluster: Int
+            var into: Int64 = 0
+            var durationMS: Int?
+        }
+
+        struct Point {
+            let ms: Int
+            var positions: [Position]
+        }
+
+        static func points(_ keyframesMS: [Int] = keyframesMS) -> [Point] {
+            keyframesMS.enumerated().map { Point(ms: $1, positions: [Position(cluster: $0)]) }
+        }
+
+        let firstCluster: Int64
         let parts: [(at: Int64, bytes: [UInt8])]
         let cues: Range<Int64>
         let tags: Range<Int64>
 
-        init() {
+        init(points: [Point] = Film.points(), seeks extra: [(id: UInt32, position: UInt64)] = []) {
+            let firstCluster: Int64 = 4096
             let ebml = Self.element(0x1A45DFA3, Self.element(0x4282, Array("matroska".utf8)))
             let segmentStart = Int64(ebml.count + 12)
-            let cuesAt = Self.firstCluster + Int64(Self.clusters) * Self.clusterSize
-            let points = (0..<Self.clusters).flatMap { n in
-                Self.element(0xBB, Self.element(0xB3, Self.uint(UInt64(Self.keyframe(n))))
-                    + Self.element(0xB7, Self.element(0xF7, [1])
-                        + Self.element(0xF1, Self.uint(UInt64(Self.firstCluster - segmentStart + Int64(n) * Self.clusterSize)))))
-            }
-            let index = Self.element(0x1C53BB6B, points)
+            let clusters = (points.flatMap(\.positions).map(\.cluster).max() ?? 0) + 1
+            let cuesAt = firstCluster + Int64(clusters) * Self.clusterSize
+            let index = Self.element(0x1C53BB6B, points.flatMap { point in
+                Self.element(0xBB, Self.element(0xB3, Self.uint(UInt64(point.ms))) + point.positions.flatMap { position in
+                    let at = firstCluster + Int64(position.cluster) * Self.clusterSize + position.into - segmentStart
+                    return Self.element(0xB7, Self.element(0xF7, Self.uint(position.track)) + Self.element(0xF1, Self.uint(UInt64(at)))
+                        + (position.durationMS.map { Self.element(0xB2, Self.uint(UInt64($0))) } ?? []))
+                })
+            })
             let tagsAt = cuesAt + Int64(index.count)
             let tagged = Self.element(0x1254C367, Self.element(0x7373, Self.element(0x67C8, Self.element(0x45A3, Array("BPS".utf8))
                 + Self.element(0x4487, Array("14000000".utf8)))))
             let total = tagsAt + Int64(tagged.count)
-            func seek(_ id: UInt32, _ at: Int64) -> [UInt8] {
-                Self.element(0x4DBB, Self.element(0x53AB, Self.uint(UInt64(id))) + Self.element(0x53AC, Self.uint(UInt64(at - segmentStart))))
+            func seek(_ id: UInt32, _ position: UInt64) -> [UInt8] {
+                Self.element(0x4DBB, Self.element(0x53AB, Self.uint(UInt64(id))) + Self.element(0x53AC, Self.uint(position)))
             }
             var head = ebml + [0x18, 0x53, 0x80, 0x67] + Self.size(Int(total - segmentStart))
-            head += Self.element(0x114D9B74, seek(0x1C53BB6B, cuesAt) + seek(0x1254C367, tagsAt))
-            head += Self.element(0x1549A966, Self.element(0x2AD7B1, Self.uint(1_000_000))) + Self.element(0x1654AE6B, [])
-            head += Self.element(0xEC, [UInt8](repeating: 0, count: Int(Self.firstCluster) - head.count - 9))
+            head += Self.element(0x114D9B74, seek(0x1C53BB6B, UInt64(cuesAt - segmentStart)) + seek(0x1254C367, UInt64(tagsAt - segmentStart))
+                + extra.flatMap { seek($0.id, $0.position) })
+            head += Self.element(0x1549A966, Self.element(0x2AD7B1, Self.uint(1_000_000)))
+            head += Self.element(0x1654AE6B, Self.track(Self.video, type: 1) + Self.track(Self.subtitles, type: 0x11))
+            head += Self.element(0xEC, [UInt8](repeating: 0, count: Int(firstCluster) - head.count - 9))
             head += [0x1F, 0x43, 0xB6, 0x75] + Self.size(Int(Self.clusterSize) - 12)
             // Tags follow the Cues, as mkvmerge writes them.
+            self.firstCluster = firstCluster
             parts = [(0, head), (cuesAt, index), (tagsAt, tagged)]
             cues = cuesAt..<tagsAt
             tags = tagsAt..<total
@@ -42,21 +67,24 @@ final class FilmStartTests: XCTestCase {
 
         var total: Int64 { tags.upperBound }
 
-        static func keyframe(_ n: Int) -> Int { firstKeyframeMS + n * keyframeEveryMS }
+        func cluster(_ n: Int) -> Int64 { firstCluster + Int64(n) * Self.clusterSize }
 
         func cluster(at seconds: Double) -> Int64 {
-            let n = (0..<Self.clusters).last { Double(Self.keyframe($0)) <= seconds * 1000 } ?? 0
-            return Self.firstCluster + Int64(n) * Self.clusterSize
+            cluster(Self.keyframesMS.lastIndex { Double($0) <= seconds * 1000 } ?? 0)
         }
 
         func bytes(_ from: Int64, _ count: Int64) -> Data {
-            var data = Data(count: Int(min(count, total - from)))
+            var data = Data(count: Int(max(0, min(count, total - from))))
             for part in parts {
                 let start = max(from, part.at), end = min(from + Int64(data.count), part.at + Int64(part.bytes.count))
                 guard start < end else { continue }
                 data.replaceSubrange(Int(start - from)..<Int(end - from), with: part.bytes[Int(start - part.at)..<Int(end - part.at)])
             }
             return data
+        }
+
+        private static func track(_ number: UInt64, type: UInt64) -> [UInt8] {
+            element(0xAE, element(0xD7, uint(number)) + element(0x83, uint(type)))
         }
 
         private static func element(_ id: UInt32, _ body: [UInt8]) -> [UInt8] {
@@ -74,16 +102,18 @@ final class FilmStartTests: XCTestCase {
     }
 
     /// A jump opens a new request, so its first read is `firstRead` again.
-    private func opening(_ film: Film, at seconds: Double?) -> [(String, Range<Int64>)] {
-        let first = StreamRelay.firstRead, resume = film.cluster(at: seconds ?? 0)
+    /// mpv starts reading at `start` and reads on past the keyframe it
+    /// starts at.
+    private func opening(_ film: Film, start: Int64, keyframe: Int64? = nil) -> [(String, Range<Int64>)] {
+        let first = StreamRelay.firstRead
         return [("first read", 0..<first), ("index and tags", film.cues.lowerBound..<film.total),
-                ("read from the first cluster", Film.firstCluster..<Film.firstCluster + first),
-                ("start", resume..<resume + first + StreamRelay.readSize)]
+                ("read from the first cluster", film.firstCluster..<film.firstCluster + first),
+                ("start", start..<(keyframe ?? start) + first + StreamRelay.readSize)]
     }
 
     private func fetchedAhead(_ film: Film, for playback: EmbyPlayback) async -> (ok: Bool, ranges: [Range<Int64>]) {
         var fetched: [Range<Int64>] = []
-        let ok = await Matroska.fetchStart(at: FileStart(playback).seconds) { from, count in
+        let ok = await FileStart(playback).fetch { from, count in
             let data = film.bytes(from, count)
             fetched.append(from..<from + Int64(data.count))
             return (data, film.total)
@@ -124,13 +154,13 @@ final class FilmStartTests: XCTestCase {
         XCTAssertEqual(told, 300.5)
         let (ok, fetched) = await fetchedAhead(film, for: item)
         XCTAssertTrue(ok, "the film's start wasn't fetched")
-        assertAllFetched(opening(film, at: told), fetched)
+        assertAllFetched(opening(film, start: film.cluster(at: told)), fetched)
     }
 
     func testOpeningAFilmFromItsBeginningReadsOnlyWhatWasFetchedAhead() async {
         let film = Film()
         let (ok, fetched) = await fetchedAhead(film, for: playback(at: nil))
         XCTAssertTrue(ok, "the film's start wasn't fetched")
-        assertAllFetched(opening(film, at: nil), fetched)
+        assertAllFetched(opening(film, start: film.cluster(at: 0)), fetched)
     }
 }

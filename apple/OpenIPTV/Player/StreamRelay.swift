@@ -400,9 +400,9 @@ final class StreamRelay: @unchecked Sendable {
 
     // MARK: Ahead of a tap
 
-    func fetchStart(url: URL, headers: [String], at seconds: Double) async -> Bool {
+    func fetchStart(_ file: FileStart) async -> Bool {
         start()
-        let key = cacheKey(url)
+        let key = cacheKey(file.url)
         // Asked a moment after something started playing: not now.
         let allowed = lock.withLock { () -> Bool in
             guard !PlaybackActivity.isPlaying || key == playingFile else { return false }
@@ -410,25 +410,19 @@ final class StreamRelay: @unchecked Sendable {
             aheadFiles.insert(key)
             return true
         }
-        let route = Self.route(url, headers)
+        let route = Self.route(file.url, file.headers)
         guard allowed, let cache = cache(for: route.url) else { return false }
-        #if DEBUG
-        let started = CFAbsoluteTimeGetCurrent()
-        #endif
         let fetch = fetcher(route, cache, ahead: key)
         #if DEBUG
-        // The old fetch took the whole second below the resume point.
-        let fetched = Self.oldReadyStart
-            ? await Matroska.fetchStartAsBefore(at: seconds.rounded(.down), fetch: fetch) : await Matroska.fetchStart(at: seconds, fetch: fetch)
-        #else
-        let fetched = await Matroska.fetchStart(at: seconds, fetch: fetch)
-        #endif
-        #if DEBUG
+        let started = CFAbsoluteTimeGetCurrent()
+        let fetched = Self.oldReadyStart ? await file.fetchAsBefore(through: fetch) : await file.fetch(through: fetch)
         if fetched {
-            NSLog("%@", String(format: "PERF relay start fetched ahead at %.0f s in %.0f ms", seconds, (CFAbsoluteTimeGetCurrent() - started) * 1000))
+            NSLog("%@", String(format: "PERF relay start fetched ahead at %.0f s in %.0f ms", file.seconds, (CFAbsoluteTimeGetCurrent() - started) * 1000))
         }
-        #endif
         return fetched
+        #else
+        return await file.fetch(through: fetch)
+        #endif
     }
 
     #if DEBUG
@@ -683,6 +677,18 @@ struct FileStart: Hashable, Sendable {
     /// The start MPVPlayer.load gives mpv.
     static func mpvStart(_ seconds: Double) -> String { String(format: "%.1f", seconds) }
 
+    /// What opening it reads before its first frame, through `fetch`.
+    func fetch(through fetch: Matroska.Fetch) async -> Bool {
+        await Matroska.fetchStart(at: seconds, fetch: fetch)
+    }
+
+    #if DEBUG
+    /// -oldReadyStart: the old fetch took the whole second below.
+    func fetchAsBefore(through fetch: Matroska.Fetch) async -> Bool {
+        await Matroska.fetchStartAsBefore(at: seconds.rounded(.down), fetch: fetch)
+    }
+    #endif
+
     static func == (a: FileStart, b: FileStart) -> Bool { a.itemId == b.itemId && a.seconds == b.seconds }
 
     func hash(into hasher: inout Hasher) {
@@ -704,7 +710,7 @@ extension Lane {
 @MainActor
 enum FileStarts {
     static let shelf = shelf(lane: .fileStarts) { start in
-        await StreamRelay.shared.fetchStart(url: start.url, headers: start.headers, at: start.seconds)
+        await StreamRelay.shared.fetchStart(start)
     }
 
     static func shelf(lane: Lane, fetch: @escaping @Sendable (FileStart) async -> Bool) -> Shelf<FileStart, Bool> {
