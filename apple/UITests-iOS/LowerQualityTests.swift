@@ -83,6 +83,39 @@ extension PlayerLookTests {
         XCTAssertEqual(later, closed + 4, accuracy: 3, "it didn't open where it stopped")
     }
 
+    /// The window takes the player's stream as it is; a lower quality
+    /// opening meanwhile reopened the player under it, its clock elsewhere.
+    func testPictureInPictureWhileALowerQualityOpensKeepsTheBarWithThePictures() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        // The playlists arrive while the window holds the picture.
+        app.launchEnvironment["OPENREEL_DEBUG_PIP_HOLD"] = "3.5"
+        openLowered(server, ["hls_delay": "2"])
+        let quality = app.staticTexts["debug-quality"].firstMatch
+        for _ in 0..<120 where !(quality.exists && quality.label.hasPrefix("converted")) { usleep(250_000) }
+        XCTAssertTrue(quality.exists && quality.label.hasPrefix("converted"), "the quality wasn't lowered")
+        controlsUp()
+        let pip = app.buttons["Picture in Picture"].firstMatch
+        XCTAssertTrue(pip.waitForExistence(timeout: 3), "no Picture in Picture button")
+        pip.tap()
+        let asked = Date()
+        while Date().timeIntervalSince(asked) < 8, pipState() == nil { usleep(200_000) }
+        XCTAssertNotNil(pipState(), "Picture in Picture didn't start")
+        sleep(3)
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        board.otherElements["Video"].firstMatch.tap()
+        let restore = board.buttons["Restore fullscreen"].firstMatch
+        XCTAssertTrue(restore.waitForExistence(timeout: 3), "no Restore fullscreen in the window")
+        restore.tap()
+        sleep(4)
+        let film = try XCTUnwrap(position(), "no position")
+        let stream = Double(app.staticTexts["debug-stream-time"].firstMatch.label) ?? -1
+        print("PIP WHILE LOWERING the film at \(film) s, the stream's own second \(stream)")
+        XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
+    }
+
     func testAJumpBackAfterPictureInPicturePlaysFromThere() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
