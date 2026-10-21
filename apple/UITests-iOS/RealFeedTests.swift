@@ -245,11 +245,10 @@ final class RealFeedTests: XCTestCase {
     }
 
     /// Continue Watching as the viewer sees it now (diagnostic): the first
-    /// card stays on screen 4 s, plays, then English subtitles go on; five
-    /// times, alternating the app as it ships with it as before (nothing
-    /// got ready ahead, no subtitles read along hidden), with only the
-    /// work ahead, and with no read from before the start for subtitles,
-    /// so their starts compare on the same film and card. Each forgets the
+    /// card stays on screen 4 s, plays, then English subtitles go on; twice,
+    /// the app as it ships, then as before (nothing got ready ahead, no
+    /// subtitles read along hidden), so their starts compare on the same
+    /// film and card. Each forgets the
     /// subtitles picked before (on this simulator only), so each starts the
     /// same way.
     /// Counts and times only: what the app fetched before the tap, the tap
@@ -260,9 +259,6 @@ final class RealFeedTests: XCTestCase {
         let runs: [(name: String, arguments: [String])] = [
             ("as shipped", []),
             ("as before", ["-noPrepareAhead", "YES", "-noHiddenSubtitles", "YES"]),
-            ("work ahead only", ["-noHiddenSubtitles", "YES"]),
-            ("as shipped, nothing read before the start for subtitles", ["-noStartPreroll", "YES"]),
-            ("as shipped again", []),
         ]
         var played: String?
         for run in runs {

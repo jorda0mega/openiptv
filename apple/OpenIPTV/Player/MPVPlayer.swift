@@ -402,13 +402,10 @@ final class MPVPlayer: @unchecked Sendable {
                 ? "multiple_requests=1,initial_request_size=524288,request_size=8388608,short_seek_size=1048576"
                 : sequential ? "seekable=0" : "")
             mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
+            let preroll = TrackChoice.subtitlePreroll(Self.noHiddenSubtitles ? nil : tracks, reopening: clock != nil)
+            for option in preroll { mpv_set_property_string(mpv, option.name, option.value) }
             #if DEBUG
-            // UI tests: `-noStartPreroll YES`: a film starting without
-            // subtitles shown isn't read from before where it starts for them.
-            let preroll = Self.noStartPreroll && file && tracks?.subtitles == nil
-            let set = [mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll-secs", preroll ? "0" : "1"),
-                       mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll-secs-index", preroll ? "0" : "10")]
-            stateLock.withLock { opening.preroll = preroll ? (set.allSatisfy { $0 >= 0 } ? "none" : "not set") : "as mpv's" }
+            stateLock.withLock { opening.preroll = preroll.allSatisfy { $0.value == "0" } ? "none" : "as mpv's" }
             #endif
             // Resume at the nearest keyframe instead of decoding up to the
             // exact second; precise seeking comes back once it's playing.
@@ -1461,7 +1458,6 @@ final class MPVPlayer: @unchecked Sendable {
     /// UI tests: `-noHiddenSubtitles YES` starts films without the likely
     /// subtitles read along hidden (as before they were).
     private static var noHiddenSubtitles: Bool { UserDefaults.standard.bool(forKey: "noHiddenSubtitles") }
-    private static var noStartPreroll: Bool { UserDefaults.standard.bool(forKey: "noStartPreroll") }
     #else
     private static let noHiddenSubtitles = false
     #endif

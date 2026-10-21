@@ -152,6 +152,16 @@ enum TrackChoice {
         return (chosen?.id, forced?.id)
     }
 
+    /// How far before where a Matroska film starts mpv reads, so the
+    /// subtitle line already on shows. None when it starts with none shown:
+    /// the likely ones read along hidden then show from the next line, and
+    /// reading back for them cost 1.1-1.4 s on the real feed. mpv's own
+    /// with subtitles shown, for another quality of the same film, and live.
+    static func subtitlePreroll(_ plan: TrackPlan?, reopening: Bool) -> [(name: String, value: String)] {
+        let none = plan != nil && plan?.subtitles == nil && !reopening
+        return [("demuxer-mkv-subtitle-preroll-secs", none ? "0" : "1"), ("demuxer-mkv-subtitle-preroll-secs-index", none ? "0" : "10")]
+    }
+
     /// The subtitles the viewer most likely turns on: the plan's, else in
     /// the language of the sound it plays.
     static func likelySubtitle(_ tracks: [Track], plan: TrackPlan) -> Int? {
