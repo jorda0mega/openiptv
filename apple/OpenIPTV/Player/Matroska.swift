@@ -20,6 +20,7 @@ enum Matroska {
 
     struct Layout {
         let segmentStart: Int64
+        let total: Int64
         let firstCluster: Int64?
         let cues: Int64?
         /// Earliest SeekHead offset after the clusters. libmpv reads that tail on open.
@@ -27,7 +28,7 @@ enum Matroska {
         let timecodeScale: UInt64
     }
 
-    static func layout(in d: [UInt8]) -> Layout? {
+    static func layout(in d: [UInt8], total: Int64) -> Layout? {
         guard let (ebml, il) = id(d, 0), ebml == ebmlID, let (headerSize, sl) = self.size(d, il), let header = headerSize else { return nil }
         var i = il + sl + Int(header)
         guard let (segment, gl) = id(d, i), segment == segmentID, let (_, zl) = self.size(d, i + gl) else { return nil }
@@ -51,31 +52,41 @@ enum Matroska {
             }
             i = body + Int(length)
         }
-        let positions = (listed ?? []).map { (target: $0.0, at: Int64(segmentStart) + Int64($0.1)) }
+        let positions = (listed ?? []).compactMap { entry in
+            inFile(entry.1, from: Int64(segmentStart), total: total).map { (target: entry.0, at: $0) }
+        }
         let pastClusters = firstCluster.flatMap { first in
             positions.filter { $0.target != clusterID && $0.at > first }.map(\.at).min()
         }
-        return Layout(segmentStart: Int64(segmentStart), firstCluster: firstCluster, cues: positions.first { $0.target == cuesID }?.at,
+        return Layout(segmentStart: Int64(segmentStart), total: total, firstCluster: firstCluster, cues: positions.first { $0.target == cuesID }?.at,
                       pastClusters: pastClusters, timecodeScale: scale)
     }
 
-    /// libmpv's CueClusterPosition for `seconds`, counted from the segment:
-    /// the last keyframe at or before it, else the next.
-    static func clusterPosition(in d: [UInt8], at seconds: Double, scale: UInt64) -> Int64? {
+    /// A position counted from the segment's start, in the file (nil: past its end).
+    private static func inFile(_ position: UInt64, from segmentStart: Int64, total: Int64) -> Int64? {
+        guard let position = Int64(exactly: position) else { return nil }
+        let (at, overflow) = segmentStart.addingReportingOverflow(position)
+        return overflow || at >= total ? nil : at
+    }
+
+    /// Where in the file libmpv's cluster for `seconds` starts: the last
+    /// keyframe at or before it, else the next.
+    static func clusterPosition(in d: [UInt8], at seconds: Double, layout: Layout) -> Int64? {
         guard let (element, el) = id(d, 0), element == cuesID, let (length, sl) = size(d, el), let length else { return nil }
-        let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(scale))
-        var before: (time: UInt64, position: UInt64)?, after: (time: UInt64, position: UInt64)?
+        let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(layout.timecodeScale))
+        var before: (time: UInt64, position: Int64)?, after: (time: UInt64, position: Int64)?
         for (child, point) in children(d, from: el + sl, to: min(d.count, el + sl + Int(length))) where child == cuePointID {
             let fields = children(d, from: point.startIndex, to: point.endIndex)
             guard let time = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }),
                   let positions = fields.first(where: { $0.0 == cueTrackPositionsID }),
                   let position = children(d, from: positions.1.startIndex, to: positions.1.endIndex)
-                      .first(where: { $0.0 == cueClusterPositionID }).flatMap({ uint($0.1) })
+                      .first(where: { $0.0 == cueClusterPositionID }).flatMap({ uint($0.1) }),
+                  let position = inFile(position, from: layout.segmentStart, total: layout.total)
             else { continue }
             if time <= target, before.map({ time >= $0.time }) ?? true { before = (time, position) }
             if time > target, after.map({ time < $0.time }) ?? true { after = (time, position) }
         }
-        return (before ?? after).map { Int64($0.position) }
+        return (before ?? after)?.position
     }
 
     /// The elements inside `from..<to`, each with its contents.
@@ -126,7 +137,7 @@ enum Matroska {
 
     static func fetchStart(at seconds: Double, fetch: Fetch) async -> Bool {
         let first = StreamRelay.firstRead
-        guard let (head, total) = await fetch(0, first), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total
+        guard let (head, total) = await fetch(0, first), let layout = layout(in: [UInt8](head), total: total), let cues = layout.cues
         else { return false }
         var header = min(first, total)
         if let cluster = layout.firstCluster, cluster < largest {
@@ -149,8 +160,7 @@ enum Matroska {
             guard let fetched = await fetchIndex(at: cues, total: total, fetch: fetch) else { return false }
             index = fetched
         }
-        guard let cluster = clusterPosition(in: index, at: seconds, scale: layout.timecodeScale) else { return false }
-        let at = layout.segmentStart + cluster
+        guard let at = clusterPosition(in: index, at: seconds, layout: layout) else { return false }
         let from = max(at, header), to = min(at + first + StreamRelay.readSize, tailAt)
         guard from < to else { return true }
         return await fetch(from, to - from) != nil
@@ -160,12 +170,10 @@ enum Matroska {
     /// The old ranges, but the cluster is the new choice. A film from the
     /// start gets its first cluster, which the old fetch skipped.
     static func fetchStartAsBefore(at seconds: Double, fetch: Fetch) async -> Bool {
-        guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head)), let cues = layout.cues,
+        guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head), total: total), let cues = layout.cues,
               let index = await fetchIndex(at: cues, total: total, fetch: fetch),
-              let cluster = clusterPosition(in: index, at: seconds, scale: layout.timecodeScale)
+              let at = clusterPosition(in: index, at: seconds, layout: layout)
         else { return false }
-        let at = layout.segmentStart + cluster
-        guard at < total else { return false }
         return await fetch(at, min(StreamRelay.readSize, total - at)) != nil
     }
     #endif
