@@ -258,14 +258,15 @@ struct MoviePlayerView: View {
     }
     /// How many fallback streams have been tried after the first failed.
     @State private var attempt = 0
-    /// Where in the film the stream's clock starts: 0 for the file; for the
-    /// server's converted version, the start of the segment it's listed
-    /// from (ConvertedPlaylist). Regression: Emby's playlist is the whole
-    /// film whatever second it's asked from (Emby 4.9); taken as starting at
-    /// the second asked from, a lowered quality played the film from its
-    /// beginning, after a pause.
-    @State private var offset: Double = 0
-    @State private var converted: (url: URL, list: ConvertedPlaylist)?
+    @State private var stream: FilmStream = .whole
+    /// A converted version on its way (its playlists being fetched): any
+    /// other open stops it.
+    @State private var convertedOpen: Task<Void, Never>?
+    /// Where in the film the stream's clock starts. Regression: Emby's
+    /// playlist is the whole film whatever second it's asked from (Emby
+    /// 4.9); taken as starting at the second asked from, a lowered quality
+    /// played the film from its beginning, after a pause.
+    private var offset: Double { stream.clockStart }
     /// "Started in …" for a few seconds after the first frame (development
     /// builds with the stats on).
     @State private var timing: String?
@@ -752,7 +753,7 @@ struct MoviePlayerView: View {
         // The picture's way out changes (a moment's refresh): not a stall
         // to lower the quality for.
         trackSwitched()
-        PictureInPicture.shared.start(player, playback: playback, offset: offset, position: position, total: total, paused: paused,
+        PictureInPicture.shared.start(player, playback: playback, stream: stream, position: position, total: total, paused: paused,
                                       started: {
             handedOff = true
             if let closePlayer { closePlayer() } else { dismiss() }
@@ -996,7 +997,7 @@ struct MoviePlayerView: View {
 
     /// "From Beginning": the start, playing.
     private func restart() {
-        if !reopensBefore(0) { player?.seek(to: 0, exact: true) }
+        jump(to: 0) { $0.seek(to: $1, exact: true) }
         lastSeek = Date()
         position = 0
         jumpUntil = Date().addingTimeInterval(1.5)
@@ -1114,9 +1115,10 @@ struct MoviePlayerView: View {
             }
         }
         #endif
-        if let (warmPlayer, _) = model.takeWarm(playback.itemId, at: playback.startSeconds) {
+        if let (warmPlayer, _, warmStream) = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
+            stream = warmStream
             PlaybackAudio.activate()
             warmPlayer.onEvent = { event, _ in handle(event) }
             self.player = warmPlayer
@@ -1153,9 +1155,9 @@ struct MoviePlayerView: View {
 
     #if os(iOS)
     /// The player from Picture in Picture, drawing on this screen again.
-    private func adopt(_ back: (player: MPVPlayer, offset: Double, position: Double, paused: Bool)) {
+    private func adopt(_ back: (player: MPVPlayer, stream: FilmStream, position: Double, paused: Bool)) {
         PlaybackAudio.activate()
-        offset = back.offset
+        stream = back.stream
         position = back.position
         paused = back.paused
         started = true
@@ -1213,64 +1215,46 @@ struct MoviePlayerView: View {
             revertTo = nil
             lastConverted = bitrate
             guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at, audio: player.audioStreamIndex) else { return }
-            playConverted(url, at: at)
+            playConverted(url)
         case .original:
             revertTo = lastConverted
-            offset = 0
             jumpUntil = Date().addingTimeInterval(1.5)
-            player.load(playback.url, headers: playback.headers, start: at, file: true,
-                        readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks, sameFilm: 0)
+            playFile(playback.url, headers: playback.headers, at: at, readahead: NetworkStatus.shared.fileReadahead)
         }
     }
 
-    private func playConverted(_ url: URL, at: Double?) {
+    /// The file again (the original, or another way the server offers it).
+    private func playFile(_ url: URL, headers: [String], at: Double?, readahead: MPVPlayer.Readahead = .live) {
+        convertedOpen?.cancel()
+        stream = .whole
+        player?.load(url, headers: headers, start: at, file: true, readahead: readahead, tracks: playback.tracks, sameFilm: 0)
+    }
+
+    /// The server's converted version once its playlists are here (two
+    /// requests): from where the film is then, so a jump meanwhile holds.
+    /// Regression: a jump or another open meanwhile was undone.
+    private func playConverted(_ url: URL) {
         guard let player else { return }
         #if DEBUG
         player.askedForConverted()
         #endif
         let headers = playback.fallbackHeaders
-        Task {
-            let list = Self.oldConvertedStart ? nil : await ConvertedPlaylist.load(url, headers: headers)
-            guard self.player === player else { return }
-            converted = list.map { (url, $0) }
-            openConverted(url, list, at: at)
+        convertedOpen?.cancel()
+        convertedOpen = Task {
+            let list = FilmStream.oldConvertedStart ? nil : await ConvertedPlaylist.load(url, headers: headers)
+            guard !Task.isCancelled, self.player === player else { return }
+            // The stream playing reports where it was for a moment after the
+            // clock moves: the bar stays put meanwhile.
+            jumpUntil = Date().addingTimeInterval(1.5)
+            stream = player.openConverted(url, list, at: position, for: playback)
         }
     }
 
-    private func openConverted(_ url: URL, _ list: ConvertedPlaylist?, at: Double?) {
-        // The stream playing reports where it was for a moment after the
-        // clock moves: the bar stays put meanwhile.
-        jumpUntil = Date().addingTimeInterval(1.5)
-        if let listed = list?.listed(from: at ?? 0), let local = StreamRelay.shared.localURL(serving: listed.playlist) {
-            // From the segment's start, at most a segment before `at`: a
-            // jump to `at` read the segment again for a keyframe in it.
-            offset = listed.clockStart
-            player?.load(local, headers: playback.fallbackHeaders, file: false, converting: true, tracks: playback.tracks,
-                         sameFilm: listed.clockStart)
-        } else {
-            offset = 0
-            player?.load(url, headers: playback.fallbackHeaders, start: at, file: false, converting: !Self.oldConvertedStart,
-                         tracks: playback.tracks, sameFilm: 0)
-        }
+    /// Every jump (see MPVPlayer.jump): `seek` gets the stream's own second.
+    private func jump(to target: Double, seek: (MPVPlayer, Double) -> Void) {
+        guard let player else { return }
+        stream = player.jump(in: stream, to: target, for: playback) { seek(player, $0) }
     }
-
-    /// Emby converts from the new second either way.
-    private func reopensBefore(_ target: Double) -> Bool {
-        guard target < offset, let converted else { return false }
-        #if DEBUG
-        player?.askedForConverted()
-        #endif
-        openConverted(converted.url, converted.list, at: max(0, target))
-        return true
-    }
-
-    #if DEBUG
-    /// UI tests (-oldConvertedStart YES): the converted version as Emby
-    /// lists it, the whole film from 0:00.
-    private static var oldConvertedStart: Bool { UserDefaults.standard.bool(forKey: "oldConvertedStart") }
-    #else
-    private static let oldConvertedStart = false
-    #endif
 
     /// Shows a timing under the title for a few seconds.
     private func showTiming(_ text: String, for seconds: Double) {
@@ -1403,25 +1387,22 @@ struct MoviePlayerView: View {
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
                 revertTo = nil
                 governor?.revert(to: bitrate)
-                playConverted(url, at: position)
+                playConverted(url)
                 return
             }
             // A converted version the server won't make: go back to the
             // original and stop adapting.
             if started, governor?.current != nil {
                 governor = nil
-                offset = 0
-                player?.load(playback.url, headers: playback.headers, start: position, file: true, tracks: playback.tracks, sameFilm: 0)
+                playFile(playback.url, headers: playback.headers, at: position)
                 return
             }
             if !started, attempt < playback.fallbacks.count {
                 // The original didn't open; try the next way Emby offers.
                 let next = playback.fallbacks[attempt]
                 attempt += 1
-                if next.path().hasSuffix(".m3u8") { playConverted(next, at: playback.startSeconds); return }
-                offset = 0
-                player?.load(next, headers: playback.fallbackHeaders, start: playback.startSeconds, file: true,
-                              tracks: playback.tracks, sameFilm: 0)
+                if next.path().hasSuffix(".m3u8") { playConverted(next); return }
+                playFile(next, headers: playback.fallbackHeaders, at: playback.startSeconds)
                 return
             }
             error = "Couldn't play: \(message)"
@@ -1510,6 +1491,7 @@ struct MoviePlayerView: View {
     private func finish() {
         hideTask?.cancel()
         probeTask?.cancel()
+        convertedOpen?.cancel()
         thumbnailTask?.cancel()
         settleSeek?.cancel()
         #if os(tvOS)
@@ -1529,7 +1511,7 @@ struct MoviePlayerView: View {
         // once (it closed, and the next tap waited for the server and a
         // new stream, then started where the server last heard).
         if let player {
-            if started, offset == 0, error == nil { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
+            if started, error == nil { model.park(player, playback.resuming(at: seconds), stream: stream) } else { player.shutdown() }
         }
         player = nil
         let noted = closedAt != nil
@@ -1626,8 +1608,10 @@ struct MoviePlayerView: View {
         showPreview(target, exact: scrubSpeed != nil)
     }
 
+    /// Not before a listed version's first segment: the player shows that
+    /// segment's start for any second before it.
     private func showPreview(_ target: Double, exact: Bool) {
-        player?.follow(to: max(0, target - offset), exact: exact)
+        if target >= offset { player?.follow(to: target - offset, exact: exact) }
         lastSeek = Date()
     }
 
@@ -1641,7 +1625,7 @@ struct MoviePlayerView: View {
         // Carries on from the picture on screen when it's already there (no
         // second jump); otherwise one jump, replacing any preview still on
         // its way, so nothing lands after letting go.
-        if !reopensBefore(target) { player?.settle(at: max(0, target - offset), exact: scrubSpeed != nil) }
+        jump(to: target) { $0.settle(at: $1, exact: scrubSpeed != nil) }
         lastSeek = Date()
         position = target
         jumpUntil = Date().addingTimeInterval(0.5)
@@ -1979,7 +1963,7 @@ struct MoviePlayerView: View {
     private func cancelScrub() {
         settleSeek?.cancel()
         if let origin = scrubOrigin {
-            player?.seek(to: max(0, origin - offset), exact: true)
+            jump(to: origin) { $0.seek(to: $1, exact: true) }
             lastSeek = Date()
         }
         scrubbing = nil
@@ -2058,7 +2042,7 @@ struct MoviePlayerView: View {
     /// To the intro's end, straight away.
     private func skipIntro() {
         guard let end = playback.intro?.upperBound else { return }
-        if !reopensBefore(end) { player?.seek(to: max(0, end - offset), exact: false) }
+        jump(to: end) { $0.seek(to: $1, exact: false) }
         lastSeek = Date()
         position = end
         jumpUntil = Date().addingTimeInterval(1.5)
@@ -2069,7 +2053,7 @@ struct MoviePlayerView: View {
     private func skip(_ seconds: Double) {
         guard started else { return }
         let target = min(max(position + seconds, 0), max(total, 1))
-        if !reopensBefore(target) { player?.seek(by: seconds, exact: false) }
+        jump(to: target) { player, _ in player.seek(by: seconds, exact: false) }
         lastSeek = Date()
         position = target
         jumpUntil = Date().addingTimeInterval(1.5)
