@@ -28,6 +28,7 @@ let package = Package(
                 "Model/HomeFeed.swift",
                 "Model/Shelf.swift",
                 "Model/Keychain.swift",
+                "Model/Plans.swift",
                 "Model/Preferences.swift",
                 "Model/Sources.swift",
                 "Player/FoundSubtitles.swift",

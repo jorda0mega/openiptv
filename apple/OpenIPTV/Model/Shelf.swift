@@ -262,6 +262,19 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         }
     }
 
+    func take(_ key: Key) async throws -> Value {
+        let value = try await value(for: key)
+        if case .kept? = entries[key] { entries[key] = nil }
+        return value
+    }
+
+    func forget(where matches: (Key) -> Bool) {
+        for (key, entry) in entries where matches(key) {
+            if let job = entry.job { stop(job) }
+            entries[key] = nil
+        }
+    }
+
     func warm(_ key: Key, for interest: Interest) async -> Value? {
         let job: Job
         switch current(key) {
