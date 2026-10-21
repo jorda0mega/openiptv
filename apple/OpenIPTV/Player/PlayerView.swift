@@ -367,6 +367,7 @@ struct MoviePlayerView: View {
     /// ahead; "cold 2.1": opened on the tap), and where.
     @State private var startReadout = ""
     @State private var startParts = ""
+    @State private var convertedReadout = ""
     #endif
 
     var body: some View {
@@ -457,6 +458,7 @@ struct MoviePlayerView: View {
                 ClockReadout(clock: playClock)
                 debugReadout(startReadout, "debug-start")
                 debugReadout(startParts, "debug-start-parts")
+                debugReadout(convertedReadout, "debug-converted")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
                 debugReadout(String(keyedAddresses), "debug-keyed")
@@ -1232,14 +1234,30 @@ struct MoviePlayerView: View {
         let headers = playback.fallbackHeaders
         convertedOpen?.cancel()
         convertedOpen = Task {
-            let opening = FilmStream.oldConvertedStart ? .whole : await ConvertedPlaylist.load(url, headers: headers)
+            let opening = await ConvertedPlaylist.load(url, headers: headers)
             guard !Task.isCancelled, self.player === player else { return }
-            let list: ConvertedPlaylist? = if case let .listed(list) = opening { list } else { nil }
+            let list: ConvertedPlaylist?
+            switch opening {
+            case let .listed(listed): list = FilmStream.oldConvertedStart ? nil : listed
+            case .whole: list = nil
+            case let .refused(why): return refuseConverted(why, player)
+            }
             // The stream playing reports where it was for a moment after the
             // clock moves: the bar stays put meanwhile.
             jumpUntil = Date().addingTimeInterval(1.5)
             stream = player.openConverted(url, list, at: position, for: playback)
         }
+    }
+
+    /// The key would go elsewhere, or the playlists couldn't be checked:
+    /// the film plays on as it was, and the quality stops adapting, as for
+    /// a version the server won't make.
+    private func refuseConverted(_ why: String, _ player: MPVPlayer) {
+        #if DEBUG
+        convertedReadout = "not opened, " + why
+        #endif
+        governor = nil
+        if player.hasFailed { handle(.failed("The converted version didn't open.", nil)) }
     }
 
     private func jump(to target: Double, seek: (MPVPlayer, Double) -> Void) {

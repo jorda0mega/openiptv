@@ -14,11 +14,36 @@ struct ConvertedPlaylist: Sendable {
         case refused(String)
     }
 
+    /// The player sends the key with every request for the version, so it
+    /// opens only when every address the playlists name is on the server
+    /// the app was given. The master names one: the player reads every
+    /// variant it lists.
     static func load(_ master: URL, headers: [String],
                      fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> Opening {
-        guard let top = await fetch(request(master, headers, given: master)), let variant = variant(of: top.lines, at: top.url),
-              let list = await fetch(request(variant, headers, given: master)) else { return .whole }
+        guard let top = await fetch(request(master, headers, given: master)) else { return .refused("master unread") }
+        let named = addresses(top.lines, at: top.url)
+        guard named.count == 1, let variant = variant(of: top.lines, at: top.url) else { return .refused("master names \(named.count)") }
+        let away = elsewhere([top.url] + named, from: master)
+        guard away == 0 else { return .refused("master \(away) of \(named.count + 1) elsewhere") }
+        guard let list = await fetch(request(variant, headers, given: master)) else { return .refused("variant unread") }
+        let inside = addresses(list.lines, at: list.url)
+        let out = elsewhere([list.url] + inside, from: master)
+        guard out == 0 else { return .refused("variant \(out) of \(inside.count + 1) elsewhere") }
         return ConvertedPlaylist(list.lines, at: list.url).map(Opening.listed) ?? .whole
+    }
+
+    /// Its entries and URI= values, as the player resolves them (nil: one it can't).
+    private static func addresses(_ lines: [String], at url: URL) -> [URL?] {
+        lines.map { $0.trimmingCharacters(in: .whitespaces) }.compactMap { line -> String? in
+            guard line.hasPrefix("#") else { return line.isEmpty ? nil : line }
+            guard let start = line.range(of: "URI=") else { return nil }
+            let value = line[start.upperBound...]
+            return value.hasPrefix("\"") ? String(value.dropFirst().prefix { $0 != "\"" }) : String(value.prefix { $0 != "," })
+        }.map { URL(string: $0, relativeTo: url)?.absoluteURL }
+    }
+
+    private static func elsewhere(_ addresses: [URL?], from given: URL) -> Int {
+        addresses.filter { $0.map { !HTTP.sameServer($0, given) } ?? true }.count
     }
 
     /// The account's key goes only to the server the app was given: not to
