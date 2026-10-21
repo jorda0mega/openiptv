@@ -143,6 +143,39 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(server.stopped, ["file start"])
     }
 
+    func testAShowPagePreparesWhatItsPlayPlays() {
+        XCTAssertEqual(Target.showMain("s1", upNext: "e203"), .playable(id: "e203", kind: "Episode"))
+        XCTAssertEqual(Target.showMain("s1", upNext: nil), .playable(id: "s1", kind: "Series"))
+    }
+
+    func testAFileStartStoppedShortIsFetchedAgain() async {
+        final class Starts: @unchecked Sendable {
+            let lock = NSLock()
+            var asked = 0
+            var completes: Bool
+            init(completes: Bool) { self.completes = completes }
+        }
+        let starts = Starts(completes: false)
+        let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal, memoryWarned: false,
+                              freeDisk: 10_000_000_000)
+        let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { open }) { _ in
+            starts.lock.withLock {
+                starts.asked += 1
+                return starts.completes
+            }
+        }
+        let start = FileStart(film())
+        let interest = Interest(at: .continueWatching, .likely)
+        let stoppedShort = await shelf.warm(start, for: interest)
+        starts.lock.withLock { starts.completes = true }
+        let fetched = await shelf.warm(start, for: interest)
+        let kept = await shelf.warm(start, for: interest)
+        XCTAssertNil(stoppedShort)
+        XCTAssertEqual(fetched, true)
+        XCTAssertEqual(kept, true)
+        XCTAssertEqual(starts.lock.withLock { starts.asked }, 2, "a start stopped short was kept as done, or a done one fetched again")
+    }
+
     func testEachLikelihoodOnlyAdds() {
         for target in [card, .title(id: "m5", kind: "Movie")] {
             let ladder = [Likelihood.glance, .likely, .next].map { Set(Ahead.needs(target, $0)) }
