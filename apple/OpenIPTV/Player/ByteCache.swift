@@ -79,6 +79,8 @@ final class ByteCache: @unchecked Sendable {
         }
     }
 
+    func keep(_ bytes: Range<Int64>) {}
+
     private static func adding(_ new: Range<Int64>, to ranges: [Range<Int64>]) -> [Range<Int64>] {
         var merged = new
         var kept: [Range<Int64>] = []
