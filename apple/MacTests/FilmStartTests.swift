@@ -234,6 +234,14 @@ final class FilmStartTests: XCTestCase {
         assertAllFetched(opening(film, start: film.cluster(150)), fetched)
     }
 
+    /// One element (fonts and cover art) from the first read to past 32 MB.
+    func testAHeaderPast32MBIsFetchedTo32MBAndTheStartNotSaidFetched() async {
+        let film = Film(header: 40 << 20)
+        let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.5))
+        XCTAssertFalse(ok, "the start was said to be fetched without all of the header the player reads")
+        assertAllFetched([("header to 32 MB", 0..<(32 << 20))], fetched)
+    }
+
     func testIndexAndTagsPast32MBAreFetchedTo32MB() async {
         let film = Film(tags: 33 << 20)
         let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.5))
