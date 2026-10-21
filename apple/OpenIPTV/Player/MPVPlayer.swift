@@ -119,8 +119,10 @@ final class MPVPlayer: @unchecked Sendable {
     /// A rewritten file's sections, by its track (UI tests' readout).
     private var sectionNotes: [Int: String] = [:]
     #endif
-    /// The subtitle track showing (nil: none).
+    /// The subtitle track selected (nil: none), and whether it is read
+    /// along out of sight: shown, it's on screen at once.
     private var shownSubtitle: Int?
+    private var subtitlesHidden = false
     /// Every subtitle file added to the film (the server's, those found for
     /// it, copies of its own tracks; a rewritten file's copy in its place),
     /// on the device, and its track now: added again when the film is
@@ -165,6 +167,7 @@ final class MPVPlayer: @unchecked Sendable {
     /// hasn't shown yet (0: the film's start), and when a stall began.
     private var switches = 0
     private var switchAsked: CFAbsoluteTime?
+    private var switchedFromHidden = false
     private var awaitingLine: (n: Int, since: CFAbsoluteTime)?
     private var stalledSince: CFAbsoluteTime?
     #endif
@@ -904,10 +907,11 @@ final class MPVPlayer: @unchecked Sendable {
         defer { emit(.tracksChanged) }
         guard let plan = trackPlan?.refreshed(), plan.subtitles != nil,
               let now = mpv_get_property_string(mpv, "sid") else { return }
-        let off = String(cString: now) == "no"
+        let off = String(cString: now) == "no" || subtitlesHidden
         mpv_free(now)
         if off, let id = TrackChoice.choose(shown(Self.trackList(mpv)), plan: plan).subtitle {
             mpv_set_property_string(mpv, "sid", String(copies[id] ?? id))
+            hideSubtitles(false)
         }
     }
 
@@ -1070,18 +1074,40 @@ final class MPVPlayer: @unchecked Sendable {
 
     /// Shows this subtitle track (nil: none): from its copy when the
     /// server's is here.
+    /// Off hides them, so the same picked again shows at once.
     func selectSubtitle(_ id: Int?) {
         #if DEBUG
         let asked = CFAbsoluteTimeGetCurrent()
         #endif
         queue.async { [self] in
             guard let mpv else { return }
-            let shown = id.map { copies[$0] ?? $0 }
+            let shown = id.map { $0 == shownSubtitle ? $0 : copies[$0] ?? $0 }
+            let sameTrack = shown == nil || shown == shownSubtitle
             #if DEBUG
-            if shown != shownSubtitle { switchAsked = asked }
+            if !sameTrack || (shown == nil) != subtitlesHidden {
+                switchAsked = asked
+                switchedFromHidden = subtitlesHidden
+            }
+            if sameTrack, (shown == nil) != subtitlesHidden { noteSwitch(to: shown, hidden: true) }
             #endif
-            mpv_set_property_string(mpv, "sid", shown.map(String.init) ?? "no")
+            if let shown, !sameTrack { mpv_set_property_string(mpv, "sid", String(shown)) }
+            hideSubtitles(shown == nil, sameTrack: sameTrack)
         }
+    }
+
+    private func hideSubtitles(_ hidden: Bool, sameTrack: Bool = true) {
+        guard let mpv, hidden != subtitlesHidden else { return }
+        subtitlesHidden = hidden
+        mpv_set_property_string(mpv, "sub-visibility", hidden ? "no" : "yes")
+        #if DEBUG
+        if hidden { awaitingLine = nil }
+        let text = hidden || !sameTrack ? nil : mpv_get_property_string(mpv, "sub-text")
+        let line = text.map { String(cString: $0) } ?? ""
+        if let text { mpv_free(text) }
+        stateLock.withLock { self.line = line }
+        if !line.isEmpty { noteFirstLine() }
+        #endif
+        emit(.tracksChanged)
     }
 
     /// The tracks as the menu lists them: the copies left out, a track
@@ -1106,7 +1132,7 @@ final class MPVPlayer: @unchecked Sendable {
             guard track.kind == .subtitle else { return track }
             if copied[track.id] != nil { return nil }
             var track = track
-            if showingCopy.contains(track.id) { track.selected = true }
+            if subtitlesHidden { track.selected = false } else if showingCopy.contains(track.id) { track.selected = true }
             return track
         }
     }
@@ -1300,9 +1326,17 @@ final class MPVPlayer: @unchecked Sendable {
             // newest picks) before anything is decoded: nothing switches
             // once it plays (a switch just after the start could stall it).
             if String(cString: hook.name) == "on_preloaded", let plan = trackPlan?.refreshed() {
-                let choice = TrackChoice.choose(Self.trackList(mpv), plan: plan)
+                let list = Self.trackList(mpv)
+                let choice = TrackChoice.choose(list, plan: plan)
                 if let audio = choice.audio { mpv_set_property_string(mpv, "aid", String(audio)) }
-                mpv_set_property_string(mpv, "sid", choice.subtitle.map(String.init) ?? "no")
+                // None to show: the ones most likely turned on, read along
+                // out of sight. Turned on from the film's own track, they
+                // made the player read back into the film for the line on
+                // screen (7 s on a big film). Another quality keeps its own.
+                let hidden = choice.subtitle == nil && carryOver == nil
+                    ? TrackChoice.likelySubtitle(list.filter { $0.kind == .subtitle && !$0.external }, plan: plan) : nil
+                mpv_set_property_string(mpv, "sid", (choice.subtitle ?? hidden).map(String.init) ?? "no")
+                if carryOver == nil { hideSubtitles(hidden != nil) }
             }
             mpv_hook_continue(mpv, hook.id)
         case MPV_EVENT_FILE_LOADED:
@@ -1372,7 +1406,8 @@ final class MPVPlayer: @unchecked Sendable {
                 reportNetwork()
             #if DEBUG
             case "sub-text" where property.format == MPV_FORMAT_STRING:
-                let shown = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.map { String(cString: $0) } ?? ""
+                let text = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.map { String(cString: $0) } ?? ""
+                let shown = subtitlesHidden ? "" : text
                 stateLock.withLock { line = shown }
                 if !shown.isEmpty { noteFirstLine() }
             #endif
@@ -1388,7 +1423,7 @@ final class MPVPlayer: @unchecked Sendable {
                 let id = value.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee.flatMap { Int(String(cString: $0)) }
                 if id != shownSubtitle {
                     #if DEBUG
-                    noteSwitch(to: id)
+                    noteSwitch(to: id, hidden: false)
                     #endif
                     shownSubtitle = id
                     applyFit(for: id)
@@ -1413,9 +1448,11 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     /// The first frame's tracks are the plan's, not a switch.
-    private func noteSwitch(to id: Int?) {
-        let asked = switchAsked
+    /// `hidden`: shown or hidden, the track selected the same.
+    private func noteSwitch(to id: Int?, hidden: Bool) {
+        let asked = switchAsked, fromHidden = switchedFromHidden || hidden && id != nil
         switchAsked = nil
+        switchedFromHidden = false
         guard reportedStart, let mpv else { return }
         let list = Self.trackList(mpv).filter { $0.kind == .subtitle }
         func kind(_ id: Int?) -> (word: SubtitleStopwatch.Word, language: String?) {
@@ -1427,8 +1464,9 @@ final class MPVPlayer: @unchecked Sendable {
         }
         switches += 1
         awaitingLine = id == nil ? nil : (switches, asked ?? CFAbsoluteTimeGetCurrent())
-        let from = kind(shownSubtitle), to = kind(id)
-        stopwatch.note(.switched, [.n: .number(switches), .from: .word(from.word), .to: .word(to.word), .lang: .language(to.language)])
+        let from = kind(fromHidden ? nil : shownSubtitle), to = kind(id)
+        stopwatch.note(.switched, [.n: .number(switches), .from: .word(from.word), .to: .word(to.word), .lang: .language(to.language),
+                                   .hidden: .word(hidden ? .yes : .no)])
     }
 
     /// `late`: how far into the line the film was when it showed.
