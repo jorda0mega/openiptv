@@ -6,9 +6,7 @@ enum Target: Hashable, Sendable {
     case title(id: String, kind: String)
     /// A tap plays it (Continue Watching, a page's Play).
     case playable(id: String, kind: String?)
-}
 
-extension Target {
     /// What a show page's main button plays: the episode the viewer is up
     /// to, else the show (the server picks the episode).
     static func showMain(_ show: String, upNext episode: String?) -> Target {
@@ -37,23 +35,22 @@ extension Place {
     /// iPhone: on screen at least 60 %. Apple TV: in focus. A fast scroll or
     /// a sweep across posters never reaches the first step.
     func ladder(on platform: Platform) -> [Step] {
-        func step(_ after: Duration, _ likelihood: Likelihood) -> Step { Step(after: after, likelihood: likelihood) }
         switch (self, platform) {
-        case (.continueWatching, .phone): return [step(.milliseconds(600), .likely), step(.seconds(2), .next)]
-        case (.continueWatching, .tv), (.episodeRow, .tv): return [step(.milliseconds(150), .likely), step(.milliseconds(400), .next)]
-        case (.episodeRow, .phone): return [step(.milliseconds(600), .glance), step(.seconds(2), .likely)]
+        case (.continueWatching, .phone): return [.init(after: .milliseconds(600), likelihood: .likely), .init(after: .seconds(2), likelihood: .next)]
+        case (.continueWatching, .tv), (.episodeRow, .tv): return [.init(after: .milliseconds(150), likelihood: .likely), .init(after: .milliseconds(400), likelihood: .next)]
+        case (.episodeRow, .phone): return [.init(after: .milliseconds(600), likelihood: .glance), .init(after: .seconds(2), likelihood: .likely)]
         case (.posterRow, .phone), (.grid, .phone), (.moreLikeThis, .phone), (.person, .phone), (.searchResult, .phone):
-            return [step(.milliseconds(600), .glance)]
+            return [.init(after: .milliseconds(600), likelihood: .glance)]
         case (.posterRow, .tv), (.grid, .tv), (.moreLikeThis, .tv), (.person, .tv), (.searchResult, .tv):
-            return [step(.milliseconds(150), .glance), step(.seconds(1), .likely)]
-        case (.searchTop, _): return [step(.zero, .likely)]
-        case (.hero, .phone): return [step(.seconds(1), .likely)]
-        case (.hero, .tv): return [step(.milliseconds(400), .next)]
-        case (.page, _): return [step(.zero, .next)]
-        case (.homeForecast, _): return [step(.zero, .likely)]
-        case (.upNext, _): return [step(.zero, .glance)]
-        case (.liveRow, _): return [step(.milliseconds(250), .likely)]
-        case (.liveLookahead, _): return [step(.milliseconds(500), .glance)]
+            return [.init(after: .milliseconds(150), likelihood: .glance), .init(after: .seconds(1), likelihood: .likely)]
+        case (.searchTop, _): return [.init(after: .zero, likelihood: .likely)]
+        case (.hero, .phone): return [.init(after: .seconds(1), likelihood: .likely)]
+        case (.hero, .tv): return [.init(after: .milliseconds(400), likelihood: .next)]
+        case (.page, _): return [.init(after: .zero, likelihood: .next)]
+        case (.homeForecast, _): return [.init(after: .zero, likelihood: .likely)]
+        case (.upNext, _): return [.init(after: .zero, likelihood: .glance)]
+        case (.liveRow, _): return [.init(after: .milliseconds(250), likelihood: .likely)]
+        case (.liveLookahead, _): return [.init(after: .milliseconds(500), likelihood: .glance)]
         }
     }
 

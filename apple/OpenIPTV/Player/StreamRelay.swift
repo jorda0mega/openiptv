@@ -138,7 +138,11 @@ final class StreamRelay: @unchecked Sendable {
         #if DEBUG
         noteRead(token, range)
         let cachedNow = cache.flatMap { cache in Self.bounds(range, total: cache.total).map { min(cache.available(from: $0.0), $0.1 - $0.0 + 1) } }
-        noteStartRead(cached: max(0, cachedNow ?? 0))
+        let cached = max(0, cachedNow ?? 0)
+        lock.withLock {
+            startReads.requests += 1
+            startReads.cached += cached
+        }
         #endif
         if let cache, cache.claimIndex() {
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache) }
@@ -185,13 +189,6 @@ final class StreamRelay: @unchecked Sendable {
         let reads = lock.withLock { startReads }
         return String(format: "reads %d, from the device %.1f MB, from the server %d reads %.1f MB first byte up to %.0f ms",
                       reads.requests, Double(reads.cached) / 1e6, reads.fetches, Double(reads.fetched) / 1e6, reads.firstByte * 1000)
-    }
-
-    private func noteStartRead(cached: Int64) {
-        lock.withLock {
-            startReads.requests += 1
-            startReads.cached += cached
-        }
     }
 
     fileprivate func noteFetch(firstByteAfter seconds: Double) {
