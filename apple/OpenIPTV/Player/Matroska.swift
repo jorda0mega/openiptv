@@ -89,7 +89,7 @@ enum Matroska {
 
     /// Where in the file libmpv starts reading a film told to start at
     /// `seconds`, and the keyframe it plays from there.
-    static func start(in d: [UInt8], at seconds: Double, subtitlePreroll: Double, layout: Layout) -> (reads: Int64, keyframe: Int64)? {
+    private static func start(in d: [UInt8], at seconds: Double, subtitlePreroll: Double, layout: Layout) -> (reads: Int64, keyframe: Int64)? {
         let all = cues(in: d, layout: layout)
         // As demux_mkv.c's demux_mkv_seek and seek_with_cues: by the video
         // track's cue entries, else by all of them, 5 ms past what it is
@@ -103,12 +103,12 @@ enum Matroska {
         // subtitle still on at the keyframe.
         guard subtitlePreroll > 0, all.contains(where: { $0.duration != nil }) else { return (keyframe.position, keyframe.position) }
         let back = UInt64(min(subtitlePreroll * 1e9 / Double(layout.timecodeScale), 9e18))
-        let earliest = keyframe.time > back ? keyframe.time - back : 0
-        var floor: (time: UInt64, position: Int64) = (0, 0)
-        for cue in seekable where cue.time <= earliest && cue.time >= floor.time { floor = (cue.time, cue.position) }
+        let backTo = keyframe.time > back ? keyframe.time - back : 0
+        var since: (time: UInt64, position: Int64) = (0, 0)
+        for cue in seekable where cue.time <= backTo && cue.time >= since.time { since = (cue.time, cue.position) }
         let reads = all.filter { cue in
             guard case (let end, false) = cue.time.addingReportingOverflow(cue.duration ?? 0) else { return false }
-            return cue.time <= keyframe.time && end > keyframe.time && cue.position >= floor.position && cue.position < keyframe.position
+            return cue.time <= keyframe.time && end > keyframe.time && cue.position >= since.position && cue.position < keyframe.position
         }.map(\.position).min()
         return (reads ?? keyframe.position, keyframe.position)
     }
@@ -284,7 +284,7 @@ enum Matroska {
     }
 
     /// The whole length (header and contents) of the element at the start.
-    static func elementLength(_ d: [UInt8]) -> Int64? {
+    private static func elementLength(_ d: [UInt8]) -> Int64? {
         guard let (element, el) = id(d, 0), element == cuesID, let (contents, sl) = self.size(d, el), let contents else { return nil }
         return Int64(el + sl) + Int64(contents)
     }

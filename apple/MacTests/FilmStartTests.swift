@@ -209,7 +209,7 @@ final class FilmStartTests: XCTestCase {
         }
     }
 
-    func testWithSubtitlesOnTheStartIsWhereMpvReadsBackToForTheLineOn() async {
+    func testWithSubtitlesOnTheStartIsWhereMpvReadsBackTo() async {
         var points = Film.points()
         // A line from 296.0 s for 6 s, in the cluster of the keyframe at 294.3 s: on at the keyframe at 300.3 s.
         points.insert(Film.Point(ms: 296_000, positions: [Film.Position(track: Film.subtitles, cluster: 147, durationMS: 6_000)]), at: 148)
