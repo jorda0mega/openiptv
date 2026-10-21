@@ -379,9 +379,11 @@ final class MPVPlayer: @unchecked Sendable {
     /// a stream straight through even if the server could jump (an IPTV
     /// recording: opening one jumps to its end and back, extra connections
     /// a one-connection provider may refuse); jumps stay within what's
-    /// downloaded.
+    /// downloaded. `converting`: segments the server converts as they're
+    /// asked for (Emby's converted versions).
     func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, sequential: Bool = false,
-              readahead: Readahead = .live, tracks: TrackPlan? = nil, sameFilm clock: Double? = nil, attempt: Int = 0) {
+              converting: Bool = false, readahead: Readahead = .live, tracks: TrackPlan? = nil, sameFilm clock: Double? = nil,
+              attempt: Int = 0) {
         // Files go through the in-app relay, which keeps one warm HTTP/2
         // connection to the server instead of a new one per seek.
         var url = url, headers = headers
@@ -427,6 +429,10 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_set_property_string(mpv, "stream-lavf-o", file
                 ? "multiple_requests=1,initial_request_size=524288,request_size=8388608,short_seek_size=1048576"
                 : sequential ? "seekable=0" : "")
+            // Emby answers for a segment once it's converted: ffmpeg asking
+            // for the next one as it opened one (http_multiple) waited for
+            // that before reading the one it had.
+            mpv_set_property_string(mpv, "demuxer-lavf-o", converting ? "http_multiple=0" : "")
             mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
             let preroll = TrackChoice.subtitlePreroll(Self.noHiddenSubtitles ? nil : tracks, reopening: clock != nil)
             for option in preroll { mpv_set_property_string(mpv, option.name, option.value) }

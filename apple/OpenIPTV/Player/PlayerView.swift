@@ -1248,12 +1248,15 @@ struct MoviePlayerView: View {
         // clock moves: the bar stays put meanwhile.
         jumpUntil = Date().addingTimeInterval(1.5)
         if let listed = list?.from(at ?? 0), let local = StreamRelay.shared.localURL(serving: listed.text) {
+            // From the segment's start, at most a segment before `at`: a
+            // jump to `at` read the segment again for a keyframe in it.
             offset = listed.start
-            player?.load(local, headers: playback.fallbackHeaders, start: at.map { $0 - listed.start }, file: false,
-                         tracks: playback.tracks, sameFilm: listed.start)
+            player?.load(local, headers: playback.fallbackHeaders, file: false, converting: true, tracks: playback.tracks,
+                         sameFilm: listed.start)
         } else {
             offset = 0
-            player?.load(url, headers: playback.fallbackHeaders, start: at, file: false, tracks: playback.tracks, sameFilm: 0)
+            player?.load(url, headers: playback.fallbackHeaders, start: at, file: false, converting: !Self.oldConvertedStart,
+                         tracks: playback.tracks, sameFilm: 0)
         }
     }
 
