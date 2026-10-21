@@ -26,6 +26,9 @@ final class StreamRelay: @unchecked Sendable {
     private var listener: NWListener?
     private var port: UInt16?
     private var routes = RelayRoutes()
+    /// Converted versions listed from where they play (ConvertedPlaylist),
+    /// the last few, by their local token.
+    private var playlists: [(token: String, body: Data)] = []
     /// What's been fetched of the last few files (the one playing, ones
     /// opened or fetched ahead), by their real address without the
     /// server's per-request session (asked again later, a title's address
@@ -96,6 +99,18 @@ final class StreamRelay: @unchecked Sendable {
         return URL(string: "http://127.0.0.1:\(port)/\(token)\(ext)")
     }
 
+    /// A local address serving this playlist, or nil (relay not running).
+    func localURL(serving playlist: String) -> URL? {
+        start()
+        lock.lock()
+        defer { lock.unlock() }
+        guard let port else { return nil }
+        let token = UUID().uuidString.lowercased()
+        playlists.append((token, Data(playlist.utf8)))
+        if playlists.count > 4 { playlists.removeFirst() }
+        return URL(string: "http://127.0.0.1:\(port)/\(token).m3u8")
+    }
+
     // MARK: Serving
 
     private func serve(_ connection: NWConnection) {
@@ -125,8 +140,14 @@ final class StreamRelay: @unchecked Sendable {
         let method = String(request[0])
         let token = String(request[1].dropFirst().split(separator: ".").first ?? "")
         lock.lock()
+        let playlist = playlists.first { $0.token == token }?.body
         let route = routes.route(token)
         lock.unlock()
+        if let playlist, method == "GET" || method == "HEAD" {
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: \(playlist.count)\r\nConnection: close\r\n\r\n"
+            return connection.send(content: Data(head.utf8) + (method == "GET" ? playlist : Data()), contentContext: .finalMessage,
+                                   isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+        }
         guard let route, method == "GET" || method == "HEAD" else { return fail(connection, 404) }
 
         var range: String?
@@ -251,6 +272,7 @@ final class StreamRelay: @unchecked Sendable {
         let stopping: [URLSessionDataTask] = lock.withLock {
             let stopping = ahead.values.flatMap { $0 }
             routes = RelayRoutes()
+            playlists = []
             caches = []
             ahead = [:]
             aheadFiles = []

@@ -258,13 +258,16 @@ struct MoviePlayerView: View {
     }
     /// How many fallback streams have been tried after the first failed.
     @State private var attempt = 0
-    /// Where in the film the stream's clock starts: 0 for the file and for
-    /// the server's converted versions, whose playlist is the whole film
-    /// whatever second they're asked from (Emby 4.9). Regression: taken as
-    /// starting at the second asked from, a lowered quality played the film
-    /// from its beginning, after a pause (the server converting from that
-    /// second, the player asking for the start).
+    /// Where in the film the stream's clock starts: 0 for the file; for the
+    /// server's converted version, the start of the segment it's listed
+    /// from (ConvertedPlaylist). Regression: Emby's playlist is the whole
+    /// film whatever second it's asked from (Emby 4.9); taken as starting at
+    /// the second asked from, a lowered quality played the film from its
+    /// beginning, after a pause.
     @State private var offset: Double = 0
+    /// The converted version playing and its whole list: a jump to before
+    /// where it starts opens it again from there.
+    @State private var converted: (url: URL, list: ConvertedPlaylist)?
     /// "Started in …" for a few seconds after the first frame (development
     /// builds with the stats on).
     @State private var timing: String?
@@ -995,7 +998,7 @@ struct MoviePlayerView: View {
 
     /// "From Beginning": the start, playing.
     private func restart() {
-        player?.seek(to: 0, exact: true)
+        if !reopensBefore(0) { player?.seek(to: 0, exact: true) }
         lastSeek = Date()
         position = 0
         jumpUntil = Date().addingTimeInterval(1.5)
@@ -1214,20 +1217,64 @@ struct MoviePlayerView: View {
             revertTo = nil
             lastConverted = bitrate
             guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at, audio: player.audioStreamIndex) else { return }
-            #if DEBUG
-            player.askedForConverted()
-            #endif
-            // The server's converted version is the whole film (its playlist
-            // from the start, converted from `at` on): played from `at`.
-            offset = 0
-            player.load(url, headers: playback.fallbackHeaders, start: at, file: false, tracks: playback.tracks, sameFilm: 0)
+            playConverted(url, at: at)
         case .original:
             revertTo = lastConverted
             offset = 0
+            jumpUntil = Date().addingTimeInterval(1.5)
             player.load(playback.url, headers: playback.headers, start: at, file: true,
                         readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks, sameFilm: 0)
         }
     }
+
+    /// The server's converted version (`url`, Emby's whole film) from `at`,
+    /// listed from there; as Emby lists it when it can't be.
+    private func playConverted(_ url: URL, at: Double?) {
+        guard let player else { return }
+        #if DEBUG
+        player.askedForConverted()
+        #endif
+        let headers = playback.fallbackHeaders
+        Task {
+            let list = Self.oldConvertedStart ? nil : await ConvertedPlaylist.load(url, headers: headers)
+            guard self.player === player else { return }
+            converted = list.map { (url, $0) }
+            openConverted(url, list, at: at)
+        }
+    }
+
+    private func openConverted(_ url: URL, _ list: ConvertedPlaylist?, at: Double?) {
+        // The stream playing reports where it was for a moment after the
+        // clock moves: the bar stays put meanwhile.
+        jumpUntil = Date().addingTimeInterval(1.5)
+        if let listed = list?.from(at ?? 0), let local = StreamRelay.shared.localURL(serving: listed.text) {
+            offset = listed.start
+            player?.load(local, headers: playback.fallbackHeaders, start: at.map { $0 - listed.start }, file: false,
+                         tracks: playback.tracks, sameFilm: listed.start)
+        } else {
+            offset = 0
+            player?.load(url, headers: playback.fallbackHeaders, start: at, file: false, tracks: playback.tracks, sameFilm: 0)
+        }
+    }
+
+    /// A jump to before where the converted version playing starts: it
+    /// opens again from there (Emby converts from there either way).
+    private func reopensBefore(_ target: Double) -> Bool {
+        guard target < offset, let converted else { return false }
+        #if DEBUG
+        player?.askedForConverted()
+        #endif
+        openConverted(converted.url, converted.list, at: max(0, target))
+        return true
+    }
+
+    #if DEBUG
+    /// UI tests (-oldConvertedStart YES): the converted version as Emby
+    /// lists it, the whole film from 0:00.
+    private static var oldConvertedStart: Bool { UserDefaults.standard.bool(forKey: "oldConvertedStart") }
+    #else
+    private static let oldConvertedStart = false
+    #endif
 
     /// Shows a timing under the title for a few seconds.
     private func showTiming(_ text: String, for seconds: Double) {
@@ -1360,11 +1407,7 @@ struct MoviePlayerView: View {
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
                 revertTo = nil
                 governor?.revert(to: bitrate)
-                #if DEBUG
-                player?.askedForConverted()
-                #endif
-                offset = 0
-                player?.load(url, headers: playback.fallbackHeaders, start: position, file: false, tracks: playback.tracks, sameFilm: 0)
+                playConverted(url, at: position)
                 return
             }
             // A converted version the server won't make: go back to the
@@ -1379,12 +1422,9 @@ struct MoviePlayerView: View {
                 // The original didn't open; try the next way Emby offers.
                 let next = playback.fallbacks[attempt]
                 attempt += 1
-                let converted = next.path().hasSuffix(".m3u8")
-                #if DEBUG
-                if converted { player?.askedForConverted() }
-                #endif
+                if next.path().hasSuffix(".m3u8") { playConverted(next, at: playback.startSeconds); return }
                 offset = 0
-                player?.load(next, headers: playback.fallbackHeaders, start: playback.startSeconds, file: !converted,
+                player?.load(next, headers: playback.fallbackHeaders, start: playback.startSeconds, file: true,
                               tracks: playback.tracks, sameFilm: 0)
                 return
             }
@@ -1605,7 +1645,7 @@ struct MoviePlayerView: View {
         // Carries on from the picture on screen when it's already there (no
         // second jump); otherwise one jump, replacing any preview still on
         // its way, so nothing lands after letting go.
-        player?.settle(at: max(0, target - offset), exact: scrubSpeed != nil)
+        if !reopensBefore(target) { player?.settle(at: max(0, target - offset), exact: scrubSpeed != nil) }
         lastSeek = Date()
         position = target
         jumpUntil = Date().addingTimeInterval(0.5)
@@ -2022,7 +2062,7 @@ struct MoviePlayerView: View {
     /// To the intro's end, straight away.
     private func skipIntro() {
         guard let end = playback.intro?.upperBound else { return }
-        player?.seek(to: max(0, end - offset), exact: false)
+        if !reopensBefore(end) { player?.seek(to: max(0, end - offset), exact: false) }
         lastSeek = Date()
         position = end
         jumpUntil = Date().addingTimeInterval(1.5)
@@ -2032,9 +2072,10 @@ struct MoviePlayerView: View {
     /// picture follows from the nearest keyframe past the ten seconds.
     private func skip(_ seconds: Double) {
         guard started else { return }
-        player?.seek(by: seconds, exact: false)
+        let target = min(max(position + seconds, 0), max(total, 1))
+        if !reopensBefore(target) { player?.seek(by: seconds, exact: false) }
         lastSeek = Date()
-        position = min(max(position + seconds, 0), max(total, 1))
+        position = target
         jumpUntil = Date().addingTimeInterval(1.5)
         showControls(autoHide: !paused)
     }
