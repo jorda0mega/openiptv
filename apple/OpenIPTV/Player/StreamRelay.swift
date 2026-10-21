@@ -160,13 +160,8 @@ final class StreamRelay: @unchecked Sendable {
         #if DEBUG
         noteRead(token, range)
         let cachedNow = cache.flatMap { cache in Self.bounds(range, total: cache.total).map { min(cache.available(from: $0.0), $0.1 - $0.0 + 1) } }
-        let cached = max(0, cachedNow ?? 0)
-        lock.withLock {
-            startReads.requests += 1
-            startReads.cached += cached
-            startLog.append(StartRead(at: CFAbsoluteTimeGetCurrent() - startBegan, range: range, cache: cache, device: cached))
-            startReadOf[ObjectIdentifier(connection)] = startLog.count - 1
-        }
+        let read = noteStartRead(range, cache: cache, device: max(0, cachedNow ?? 0))
+        lock.withLock { startReadOf[ObjectIdentifier(connection)] = read }
         #endif
         if let cache, cache.claimIndex() {
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache) }
@@ -233,6 +228,15 @@ final class StreamRelay: @unchecked Sendable {
         }
     }
 
+    func noteStartRead(_ range: String?, cache: ByteCache?, device: Int64) -> Int {
+        lock.withLock {
+            startReads.requests += 1
+            startReads.cached += device
+            startLog.append(StartRead(at: CFAbsoluteTimeGetCurrent() - startBegan, range: range, cache: cache, device: device))
+            return startLog.count - 1
+        }
+    }
+
     var serverBytes: Int64 { lock.withLock { startReads.fetched } }
 
     var startReadsReadout: String {
@@ -247,14 +251,14 @@ final class StreamRelay: @unchecked Sendable {
         lock.withLock { startReadOf[ObjectIdentifier(connection)] }
     }
 
-    fileprivate func noteFetch(firstByteAfter seconds: Double) {
+    func noteFetch(firstByteAfter seconds: Double, for read: Int?) {
         lock.withLock {
             startReads.fetches += 1
             startReads.firstByte = max(startReads.firstByte, seconds)
         }
     }
 
-    fileprivate func noteFetched(_ count: Int, for read: Int?) {
+    func noteFetched(_ count: Int, for read: Int?) {
         lock.withLock {
             startReads.fetched += Int64(count)
             if let read, startLog.indices.contains(read) { startLog[read].server += Int64(count) }
@@ -579,7 +583,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 502
         #if DEBUG
-        relay?.noteFetch(firstByteAfter: CFAbsoluteTimeGetCurrent() - asked)
+        relay?.noteFetch(firstByteAfter: CFAbsoluteTimeGetCurrent() - asked, for: read)
         #endif
         // Where these bytes sit in the file, and its size, for the cache.
         if status == 206, let range = http?.value(forHTTPHeaderField: "Content-Range"),
