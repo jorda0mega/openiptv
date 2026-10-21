@@ -647,6 +647,10 @@ struct CoverImage: View {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contain ? .fit : .fill)
+                    // The space it's given, not the filled picture's: that
+                    // made a Continue Watching card's box and taps 302 points
+                    // wide with a 16:9 picture, over the next card.
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                     .transition(.opacity)
             } else if failed {
                 Text(title)
