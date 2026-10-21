@@ -30,6 +30,35 @@ final class BufferingLogTests: XCTestCase {
         XCTAssertTrue(log.readout.contains("opens: original 0.62 s, converted 3.10 s"), log.readout)
     }
 
+    func testAConvertedOpenIsSplitIntoTheServersWaitsAndTheRest() {
+        var waits = ServerWaits()
+        waits.asked(on: 1, at: 0.1)
+        waits.answered(on: 1, at: 0.2)
+        waits.segmentComing()
+        waits.asked(on: 2, at: 0.3)
+        waits.answered(on: 2, at: 6.3)
+        waits.answered(on: 2, at: 6.31)
+        waits.segmentComing()
+        waits.asked(on: 2, at: 6.5)
+        waits.answered(on: 2, at: 12.5)
+        var log = BufferingLog()
+        log.opening(converted: true)
+        log.firstFrame(after: 13, waits: waits)
+        XCTAssertTrue(log.readout.contains("opens: converted 13.00 s: server 12100 ms client 900 ms (p100 s6000 s6000)"), log.readout)
+    }
+
+    func testRequestsWaitingTogetherCountOnce() {
+        var waits = ServerWaits()
+        waits.fetched(.playlist, from: 0, to: 1)
+        waits.segmentComing()
+        waits.asked(on: 7, at: 2)
+        waits.segmentComing()
+        waits.asked(on: 8, at: 3)
+        waits.answered(on: 8, at: 5)
+        waits.answered(on: 7, at: 6)
+        XCTAssertEqual(waits.server, 5, accuracy: 1e-9)
+    }
+
     func testAnAudioSwitchIsTimedToItsSound() {
         var log = BufferingLog()
         log.opening(converted: false)

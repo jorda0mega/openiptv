@@ -184,6 +184,7 @@ final class MPVPlayer: @unchecked Sendable {
     var startLoadedAt: CFAbsoluteTime { stateLock.withLock { startTiming.loadedAt } }
     var startNote: String { stateLock.withLock { startTiming.note } }
     private var bufferingLog = BufferingLog()
+    private var convertedAskedAt: CFAbsoluteTime?
     private var serverBytesAtSeek: Int64 = 0
     var bufferingReadout: String { stateLock.withLock { bufferingLog.readout } }
     private var awaitingSubtitleLine: (n: Int, since: CFAbsoluteTime)?
@@ -447,6 +448,16 @@ final class MPVPlayer: @unchecked Sendable {
             stateLock.withLock { loads.asked(attempt, entry: sent.entry) }
         }
     }
+
+    #if DEBUG
+    /// UI tests: a converted version asked for now, its open timed from
+    /// here (its playlists may be fetched before `load`).
+    func askedForConverted() {
+        let now = CFAbsoluteTimeGetCurrent()
+        stateLock.withLock { convertedAskedAt = now }
+        OpenRequests.begin()
+    }
+    #endif
 
     /// Changes how far ahead the current file downloads (a warmed-up player
     /// switches to the whole file once it's actually being watched).
@@ -1445,7 +1456,12 @@ final class MPVPlayer: @unchecked Sendable {
                                   shown - opened, subtitles, preroll, StreamRelay.shared.startReadsReadout)
                 stateLock.withLock {
                     startTiming.note = note
-                    bufferingLog.firstFrame(after: shown)
+                    if let asked = convertedAskedAt {
+                        convertedAskedAt = nil
+                        bufferingLog.firstFrame(after: CFAbsoluteTimeGetCurrent() - asked, waits: OpenRequests.finish())
+                    } else {
+                        bufferingLog.firstFrame(after: shown)
+                    }
                 }
                 #endif
                 readableWhileQueueIsBusy.withLock { firstPictureShown = true }
