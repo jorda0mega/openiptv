@@ -479,10 +479,8 @@ final class PhoneHomeStabilityTests: XCTestCase {
         let card: XCUIElement? = first.waitForExistence(timeout: 3) ? first : nil
         XCTAssertNotNil(card, "no Continue Watching card")
         if let card {
-            // Its height can't be read (its picture, cut to the card, counts
-            // at full size): its words sit inside the card's 170 points,
-            // along the bottom.
-            XCTAssertEqual(card.frame.width, 240, accuracy: 1, "Continue Watching card: \(card.frame)")
+            XCTAssertEqual(card.frame.size.width, 240, accuracy: 1, "Continue Watching card: \(card.frame)")
+            XCTAssertEqual(card.frame.size.height, 170, accuracy: 1, "Continue Watching card: \(card.frame)")
             // Episodes written as in the Apple TV app ("S2, E3").
             let show = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-' AND label CONTAINS 'Case 3'")).firstMatch
             XCTAssertTrue(show.label.contains("S2, E3"), "not \"S2, E3\": \(show.label)")
@@ -528,7 +526,8 @@ final class PhoneHomeStabilityTests: XCTestCase {
         sleep(3)
         shot("wide pictures")
         for card in cards.allElementsBoundByIndex {
-            XCTAssertEqual(card.frame.width, 240, accuracy: 1, "Continue Watching card \(card.identifier): \(card.frame)")
+            XCTAssertEqual(card.frame.size.width, 240, accuracy: 1, "Continue Watching card \(card.identifier): \(card.frame)")
+            XCTAssertEqual(card.frame.size.height, 170, accuracy: 1, "Continue Watching card \(card.identifier): \(card.frame)")
         }
     }
 
