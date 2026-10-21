@@ -2,7 +2,7 @@
 import Foundation
 
 enum PlaylistKeys {
-    static func count(_ master: URL, headers: [String]) async -> String {
+    static func count(_ master: URL, headers: [String], read: (URL, [String]) async -> String? = read) async -> String {
         guard headers.contains(where: { $0.hasPrefix("X-Emby-Token:") }) else { return "not an Emby stream" }
         guard let top = await read(master, headers) else { return "master unread" }
         let found = addresses(top)
