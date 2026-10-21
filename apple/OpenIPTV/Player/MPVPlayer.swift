@@ -436,7 +436,7 @@ final class MPVPlayer: @unchecked Sendable {
             // for the next one as it opened one (http_multiple) waited for
             // that before reading the one it had.
             mpv_set_property_string(mpv, "demuxer-lavf-o", converting ? "http_multiple=0" : "")
-            mpv_set_property_string(mpv, "start", start.map { String(format: "%.1f", $0) } ?? "none")
+            mpv_set_property_string(mpv, "start", start.map(FileStart.mpvStart) ?? "none")
             let preroll = TrackChoice.subtitlePreroll(Self.noHiddenSubtitles ? nil : tracks, reopening: clock != nil)
             for option in preroll { mpv_set_property_string(mpv, option.name, option.value) }
             #if DEBUG
