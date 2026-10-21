@@ -89,13 +89,13 @@ final class IPTVLoginLeakTests: XCTestCase {
         }
         step("provider API times out") {
             configure(["xtream_latency": "24"])
-            openChannel(16)
+            openChannel(30)
             sleep(28)
             close()
             configure(["xtream_latency": "3"])
         }
         step("provider drops every connection") {
-            openChannel(17)
+            openChannel(40)
             sleep(1)
             _ = control("mock/close_connections", ["abrupt": "1"])
             _ = control("mock/down", ["seconds": "10"])

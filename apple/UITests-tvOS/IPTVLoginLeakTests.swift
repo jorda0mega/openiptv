@@ -87,12 +87,12 @@ final class IPTVLoginLeakTests: XCTestCase {
         }
         step("provider API times out") {
             configure(["xtream_latency": "24"])
-            zap()
+            zapToAChannelWithoutGuide()
             sleep(28)
             configure(["xtream_latency": "3"])
         }
         step("provider drops every connection") {
-            zap()
+            zapToAChannelWithoutGuide()
             sleep(1)
             _ = control("mock/close_connections", ["abrupt": "1"])
             _ = control("mock/down", ["seconds": "10"])
@@ -135,6 +135,12 @@ final class IPTVLoginLeakTests: XCTestCase {
         let deadline = Date().addingTimeInterval(5)
         while player.label == before, Date() < deadline { usleep(250_000) }
         XCTAssertNotEqual(player.label, before, "Down didn't move to the next channel")
+    }
+
+    private func zapToAChannelWithoutGuide() {
+        zap()
+        for _ in 0..<12 where player.label.firstMatch(of: #/Channel \d*0\b/#) == nil { zap() }
+        XCTAssertNotNil(player.label.firstMatch(of: #/Channel \d*0\b/#), "no channel without a guide: \(player.label)")
     }
 
     private func leavePlayer() {
