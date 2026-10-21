@@ -1232,8 +1232,9 @@ struct MoviePlayerView: View {
         let headers = playback.fallbackHeaders
         convertedOpen?.cancel()
         convertedOpen = Task {
-            let list = FilmStream.oldConvertedStart ? nil : await ConvertedPlaylist.load(url, headers: headers)
+            let opening = FilmStream.oldConvertedStart ? .whole : await ConvertedPlaylist.load(url, headers: headers)
             guard !Task.isCancelled, self.player === player else { return }
+            let list: ConvertedPlaylist? = if case let .listed(list) = opening { list } else { nil }
             // The stream playing reports where it was for a moment after the
             // clock moves: the bar stays put meanwhile.
             jumpUntil = Date().addingTimeInterval(1.5)
