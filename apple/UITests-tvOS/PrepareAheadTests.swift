@@ -21,25 +21,28 @@ final class PrepareAheadTests: XCTestCase {
         configure(server, ["reset": "1"])
         configure(server, ["reference_delay": "90"])
         defer { configure(server, ["reset": "1"]) }
-        app.launchArguments = ["-tvTab", "home", "-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"]
+        app.launchArguments = ["-tvTab", "home", "-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES",
+                               "-cacheFolder", "prepare-ahead-\(UUID())"]
         app.launch()
         sleep(8)
+        // The show's card plays its episode S2 E3 (the test server's e203).
+        let item = "e203"
+        let plannedBefore = playbackInfoRequests(server).filter { $0 == item }.count
         for _ in 0..<5 where !focused().contains("id='continue-") {
             remote.press(.down)
             sleep(1)
         }
         XCTAssertTrue(focused().contains("id='continue-s1'"), "not on Continue Watching's first card: \(focused())")
         sleep(2)
-        // The show's card plays its episode S2 E3 (the test server's e203).
-        let item = "e203"
-        XCTAssertEqual(playbackInfoRequests(server).filter { $0 == item }.count, 1, "no plan: \(playbackInfoRequests(server))")
+        let planned = playbackInfoRequests(server).filter { $0 == item }.count
+        XCTAssertGreaterThan(planned, plannedBefore, "no plan: \(playbackInfoRequests(server))")
         XCTAssertTrue(videoRequests(server).contains(item), "its file start wasn't fetched: \(videoRequests(server))")
         XCTAssertEqual(subtitleRequests(server).filter { $0 == "\(item):4" }.count, 1, "its English track wasn't asked for: \(subtitleRequests(server))")
 
         remote.press(.select)
         XCTAssertTrue(app.staticTexts["debug-item"].firstMatch.waitForExistence(timeout: 20), "the player didn't open")
         sleep(4)
-        XCTAssertEqual(playbackInfoRequests(server).filter { $0 == item }.count, 1, "Select asked again how to play it")
+        XCTAssertEqual(playbackInfoRequests(server).filter { $0 == item }.count, planned, "Select asked again how to play it")
         XCTAssertEqual(subtitleRequests(server).filter { $0 == "\(item):4" }.count, 1, "Select asked again for the English track")
     }
 

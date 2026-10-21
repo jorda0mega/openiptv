@@ -54,6 +54,9 @@ final class PrepareAheadTests: XCTestCase {
         app.launch()
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 20), "no Continue Watching")
+        // Under the hero at launch, half on screen: the page drawn up a little.
+        let hero = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        hero.press(forDuration: 0.1, thenDragTo: hero.withOffset(CGVector(dx: 0, dy: -300)))
         sleep(3)
         print("PREP ahead after the first card's dwell: " + app.staticTexts["debug-ahead"].firstMatch.label)
         // The show's card plays its episode S2 E3 (the test server's e203).
@@ -62,10 +65,14 @@ final class PrepareAheadTests: XCTestCase {
         XCTAssertTrue(videoRequests(server).contains(firstItem), "the first card's file start wasn't fetched: \(videoRequests(server))")
         XCTAssertTrue(subtitleRequests(server).contains("\(firstItem):4"), "its English track wasn't asked for: \(subtitleRequests(server))")
 
-        let row = app.scrollViews.containing(.button, identifier: first.identifier).firstMatch
+        let row = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 360, dy: first.frame.midY))
         let last = app.buttons["continue-m9"]
-        for _ in 0..<3 where !(last.exists && last.isHittable) { row.swipeLeft(velocity: .fast) }
-        XCTAssertTrue(last.waitForExistence(timeout: 5) && last.isHittable, "Continue Watching didn't reach its last card")
+        for _ in 0..<8 where !(last.exists && last.isHittable) {
+            row.press(forDuration: 0.05, thenDragTo: row.withOffset(CGVector(dx: -320, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        }
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).allElementsBoundByIndex
+        XCTAssertTrue(last.waitForExistence(timeout: 5) && last.isHittable,
+                      "Continue Watching didn't reach its last card: \(cards.filter(\.isHittable).map(\.identifier))")
         sleep(3)
         let planned = playbackInfoRequests(server)
         for passed in ["m1", "m2", "m3", "m4"] {
