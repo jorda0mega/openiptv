@@ -47,7 +47,7 @@ private struct PreparesAhead: ViewModifier {
     }
 
     private var held: Bool {
-        guard !model.playerShown else { return false }
+        guard !model.playerShown, !AppModel.noPrepareAhead else { return false }
         #if os(tvOS)
         return place.heldWhileOpen || focused
         #else

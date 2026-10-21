@@ -245,34 +245,70 @@ final class RealFeedTests: XCTestCase {
     }
 
     /// Continue Watching as the viewer sees it now (diagnostic): the first
-    /// card stays on screen 4 s, then plays, then English subtitles are
-    /// turned on. Counts and times only: what the app fetched before the
-    /// tap, the tap to the first frame, the subtitle tap to the first line.
+    /// card stays on screen 4 s, plays, then English subtitles go on; five
+    /// times, alternating the app as it ships with it as before (nothing
+    /// got ready ahead, no subtitles read along hidden), with only the
+    /// work ahead, and with no read from before the start for subtitles,
+    /// so their starts compare on the same film and card. Each forgets the
+    /// subtitles picked before (on this simulator only), so each starts the
+    /// same way.
+    /// Counts and times only: what the app fetched before the tap, the tap
+    /// to the first frame and its parts, the subtitle tap to the first line.
     func testPrepareAheadAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
-        app.launch()
-        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
-        XCTAssertTrue(card.waitForExistence(timeout: 45), "no Continue Watching card")
-        sleep(4)
-        let counts = app.staticTexts["debug-ahead"].firstMatch
-        print("REAL ahead before the tap: \(counts.exists ? counts.label : "no readout")")
-        card.tap()
-        let start = app.staticTexts["debug-start"].firstMatch
-        var parts: [Substring] = []
-        for _ in 0..<120 where parts.count < 4 {
-            usleep(250_000)
-            parts = start.exists ? start.label.split(separator: " ") : []
+        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
+        let runs: [(name: String, arguments: [String])] = [
+            ("as shipped", []),
+            ("as before", ["-noPrepareAhead", "YES", "-noHiddenSubtitles", "YES"]),
+            ("work ahead only", ["-noHiddenSubtitles", "YES"]),
+            ("as shipped, nothing read before the start for subtitles", ["-noStartPreroll", "YES"]),
+            ("as shipped again", []),
+        ]
+        var played: String?
+        for run in runs {
+            app.launchArguments = shipped + run.arguments
+            app.launch()
+            let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+            XCTAssertTrue(card.waitForExistence(timeout: 45), "no Continue Watching card")
+            if let played { XCTAssertEqual(card.identifier, played, "another card came first") }
+            played = card.identifier
+            sleep(4)
+            let counts = app.staticTexts["debug-ahead"].firstMatch
+            print("REAL \(run.name), ahead before the tap: \(counts.exists ? counts.label : "no readout")")
+            card.tap()
+            let start = app.staticTexts["debug-start"].firstMatch
+            var parts: [Substring] = []
+            for _ in 0..<240 where parts.count < 4 {
+                usleep(250_000)
+                parts = start.exists ? start.label.split(separator: " ") : []
+            }
+            print("REAL \(run.name), tap to first frame: \(parts.count == 4 ? "\(parts[1]) s (\(parts[0]))" : "no start in 60 s")")
+            let split = app.staticTexts["debug-start-parts"].firstMatch
+            print("REAL \(run.name), its parts: \(split.exists ? split.label : "none")")
+            XCTAssertEqual(parts.count, 4, "the title didn't start")
+            sleep(6)
+            print("REAL \(run.name), subtitle tap to first line: " + (try timeEnglishSubtitles()))
+            shot("subtitles on \(run.name)")
+            app.terminate()
         }
-        print("REAL tap to first frame: \(parts.count == 4 ? "\(parts[1]) s (\(parts[0]))" : "no start in 30 s")")
-        XCTAssertEqual(parts.count, 4, "the title didn't start")
-        sleep(6)
+    }
+
+    private func timeEnglishSubtitles() throws -> String {
         let timing = app.staticTexts["debug-subs-timing"].firstMatch
         let events = { timing.exists ? timing.label.components(separatedBy: " | ") : [] }
         let before = events().filter { $0.hasPrefix("switch ") }.count
-        showControls()
-        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let menu = app.buttons["Audio and Subtitles"].firstMatch
         let off = app.buttons["Off"].firstMatch
-        XCTAssertTrue(off.waitForExistence(timeout: 5), "no subtitles menu")
+        for _ in 0..<3 where !off.exists {
+            if !menu.isHittable {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+                _ = menu.waitForExistence(timeout: 2)
+            }
+            if menu.isHittable { menu.tap() }
+            _ = off.waitForExistence(timeout: 3)
+        }
+        if !off.exists { shot("no subtitles menu") }
+        XCTAssertTrue(off.exists, "no subtitles menu")
         let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).allElementsBoundByIndex
             .first { $0.frame.minY > off.frame.minY }
         try XCTUnwrap(english, "no English subtitles").tap()
@@ -286,8 +322,7 @@ final class RealFeedTests: XCTestCase {
         let after = shown?.split(separator: " ").first { $0.hasPrefix("after=") }.flatMap { Double($0.dropFirst(6)) }
         let switched = events().filter { $0.hasPrefix("switch ") }.dropFirst(before).first ?? "no switch"
         let stall = events().filter { $0.hasPrefix("rebuffer ") }.last ?? "no stall"
-        print("REAL subtitle tap to first line: \(after.map { String(format: "%.2f s", $0 / 1000) } ?? "no line in 20 s") | \(switched) | \(stall)")
-        shot("subtitles on")
+        return "\(after.map { String(format: "%.2f s", $0 / 1000) } ?? "no line in 20 s") | \(switched) | \(stall)"
     }
 
     /// Sports as the viewer sees it now (diagnostic): every game row, then

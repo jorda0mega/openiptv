@@ -274,6 +274,12 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         }
     }
 
+    #if DEBUG
+    func isKept(_ key: Key) -> Bool {
+        if case .kept? = current(key) { true } else { false }
+    }
+    #endif
+
     func take(_ key: Key) async throws -> Value {
         let value = try await value(for: key)
         if case .kept? = entries[key] { entries[key] = nil }

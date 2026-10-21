@@ -368,6 +368,8 @@ struct MoviePlayerView: View {
     /// Debug builds: how it started ("warm 0.3": a player kept or opened
     /// ahead; "cold 2.1": opened on the tap), and where.
     @State private var startReadout = ""
+    /// The start's parts, from the tap (see MPVPlayer.startNote).
+    @State private var startParts = ""
     #endif
 
     var body: some View {
@@ -457,6 +459,7 @@ struct MoviePlayerView: View {
                 debugReadout(qualityReadout, "debug-quality")
                 ClockReadout(clock: playClock)
                 debugReadout(startReadout, "debug-start")
+                debugReadout(startParts, "debug-start-parts")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
                 debugReadout(String(keyedAddresses), "debug-keyed")
@@ -1258,6 +1261,11 @@ struct MoviePlayerView: View {
             #if DEBUG
             NSLog("%@", "PERF start " + (timing ?? ""))
             startReadout = String(format: "%@ %.1f at %.0f", warmStart ? "warm" : "cold", total, position)
+            if let player, !warmStart {
+                let loading = player.startLoadedAt - playback.requestedAt.timeIntervalSinceReferenceDate - playback.resolvedIn
+                startParts = String(format: "plan %.2f s (%@), then %.2f s to the open, ", playback.resolvedIn,
+                                    model.lastPlanKept ? "kept" : "asked", loading) + player.startNote
+            }
             #endif
             Task { await loadTrackInfo() }
             // No subtitles a foreign film needs: the server's providers

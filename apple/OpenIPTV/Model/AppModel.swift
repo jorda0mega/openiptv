@@ -479,6 +479,9 @@ final class AppModel {
         // read knew a single copy, and a film's other copy, in the language
         // wanted, was passed over.
         let key = planKey(itemId, kind: kind)
+        #if DEBUG
+        lastPlanKept = plans.isKept(key)
+        #endif
         var playback: EmbyPlayback
         do {
             playback = try await plans.take(key)
@@ -1229,6 +1232,11 @@ final class AppModel {
         warm = nil
     }
 
+    #if DEBUG
+    /// UI tests: whether the last play found its plan ready.
+    @ObservationIgnored var lastPlanKept = false
+    #endif
+
     /// A player covers the screen (set once it's gone, after playback ends):
     /// nothing under it is got ready meanwhile.
     var playerShown = false
@@ -1369,6 +1377,7 @@ final class AppModel {
 
     /// Works out how to play these in the background; a later tap uses it.
     func prepare(_ targets: [Target], at place: Place) {
+        guard !Self.noPrepareAhead else { return }
         let interest = Interest(at: place, .likely)
         for target in targets { Task { _ = await preparePlan(target, interest) } }
     }
@@ -2632,6 +2641,14 @@ extension AppModel {
     private nonisolated static var freshLineup: Bool { UserDefaults.standard.bool(forKey: "freshLineup") }
     #else
     private nonisolated static let freshLineup = false
+    #endif
+
+    #if DEBUG
+    /// UI tests: `-noPrepareAhead YES` gets nothing ready ahead of a tap
+    /// (titles on screen, forecasts, the next episode).
+    nonisolated static var noPrepareAhead: Bool { UserDefaults.standard.bool(forKey: "noPrepareAhead") }
+    #else
+    nonisolated static let noPrepareAhead = false
     #endif
 
     #if DEBUG
