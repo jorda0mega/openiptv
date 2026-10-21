@@ -7,9 +7,6 @@ struct ShowRoute: Hashable {
     let id: String
     let title: String
     var episodeId: String? = nil
-
-    /// What the page's main button plays.
-    var playTarget: Target { episodeId.map { .playable(id: $0, kind: "Episode") } ?? .playable(id: id, kind: "Series") }
 }
 
 /// A show: artwork and overview, one button to resume or start the right
@@ -189,7 +186,7 @@ struct ShowView: View {
         .navigationTitle(route.title)
         #endif
         .inlineTitle()
-        .task(id: route.id) { await model.ahead.holding(route.playTarget, at: .page) }
+        .preparesAhead(mainTarget, at: .page)
         .task {
             // Draw what's already here at once, then refresh behind it.
             if pin == nil { pin = model.pin(route.id) }
@@ -299,8 +296,10 @@ struct ShowView: View {
     }
 
     private func playMain() {
-        if let upNext { play(upNext.id, kind: "Episode") } else { play(route.id, kind: "Series") }
+        if case let .playable(id, kind) = mainTarget { play(id, kind: kind ?? "Series") }
     }
+
+    private var mainTarget: Target { .showMain(route.id, upNext: upNext?.id) }
 
     private func play(_ id: String, kind: String) {
         guard loadingItem == nil else { return }

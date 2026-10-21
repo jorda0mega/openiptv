@@ -8,6 +8,14 @@ enum Target: Hashable, Sendable {
     case playable(id: String, kind: String?)
 }
 
+extension Target {
+    /// What a show page's main button plays: the episode the viewer is up
+    /// to, else the show (the server picks the episode).
+    static func showMain(_ show: String, upNext episode: String?) -> Target {
+        episode.map { .playable(id: $0, kind: "Episode") } ?? .playable(id: show, kind: "Series")
+    }
+}
+
 enum Platform: Sendable {
     case phone, tv
 
@@ -48,6 +56,10 @@ extension Place {
         case (.liveLookahead, _): return [step(.milliseconds(500), .glance)]
         }
     }
+
+    /// Held while its screen is open, whatever is on screen: an open page,
+    /// a forecast.
+    var heldWhileOpen: Bool { self == .page || self == .homeForecast }
 }
 
 /// What a target gets ready. A higher likelihood only adds, and the work
@@ -76,6 +88,10 @@ final class Ahead {
     }
 
     private let work: Work
+    #if DEBUG
+    /// Targets held so far, for the UI tests' readout.
+    private(set) var held = 0
+    #endif
     private let platform: Platform
     private let sleep: @Sendable (Duration) async throws -> Void
 
@@ -99,6 +115,9 @@ final class Ahead {
     /// Climbs the place's ladder while the caller's task lives; what hasn't
     /// started stops when it ends (the target left the screen or focus).
     func holding(_ target: Target, at place: Place) async {
+        #if DEBUG
+        held += 1
+        #endif
         await withTaskGroup(of: Void.self) { group in
             var waited = Duration.zero
             var started: Set<Need> = []

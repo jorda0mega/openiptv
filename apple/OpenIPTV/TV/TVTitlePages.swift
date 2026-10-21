@@ -120,7 +120,7 @@ struct TVMovieView: View {
         }
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
-        .task(id: route.id) { await model.ahead.holding(.playable(id: route.id, kind: "Movie"), at: .page) }
+        .preparesAhead(.playable(id: route.id, kind: "Movie"), at: .page)
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -312,7 +312,7 @@ struct TVShowView: View {
         }
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
-        .task(id: route.id) { await model.ahead.holding(route.playTarget, at: .page) }
+        .preparesAhead(mainTarget, at: .page)
         .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -335,8 +335,10 @@ struct TVShowView: View {
     }
 
     private func playMain() {
-        if let upNext { play(upNext.id, kind: "Episode") } else { play(route.id, kind: "Series") }
+        if case let .playable(id, kind) = mainTarget { play(id, kind: kind ?? "Series") }
     }
+
+    private var mainTarget: Target { .showMain(route.id, upNext: upNext?.id) }
 
     private func play(_ id: String, kind: String) {
         guard loadingItem == nil else { return }

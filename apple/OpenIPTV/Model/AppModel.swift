@@ -1229,6 +1229,9 @@ final class AppModel {
         warm = nil
     }
 
+    /// The player covers the screen: nothing under it is got ready.
+    var playerShown = false
+
     /// What a screen shows that may be opened next, got ready while it stays
     /// there (see Ahead): its page, how to play it, the start of its file
     /// and its likeliest subtitles.
@@ -1247,7 +1250,10 @@ final class AppModel {
     #if DEBUG
     /// UI tests: what was fetched so far, counts only.
     var aheadCounts: String {
-        "plans \(plans.fetched) starts \(FileStarts.shelf.fetched) files \(ServerSubtitles.beside.fetched) copies \(ServerSubtitles.inFile.fetched)"
+        let now = Conditions.current()
+        return "held \(ahead.held) plans \(plans.fetched) starts \(FileStarts.shelf.fetched) files \(ServerSubtitles.beside.fetched) "
+            + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) disk \(now.freeDisk / 1_000_000_000) GB thermal \(now.thermal.rawValue)"
+            + (now.lowPower ? " low power" : "") + (now.memoryWarned ? " memory warned" : "") + (now.playing ? " playing" : "")
     }
     #endif
 
@@ -1263,7 +1269,9 @@ final class AppModel {
         case let .title(id, kind): planKey(id, kind: kind)
         case let .playable(id, kind): planKey(id, kind: kind)
         }
-        return await plans.warm(key, for: interest).map(withLocalResume)
+        let account = accountGeneration
+        let plan = await plans.warm(key, for: interest).map(withLocalResume)
+        return account == accountGeneration ? plan : nil
     }
 
     /// Subtitle files found for a film heard in neither English nor
