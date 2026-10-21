@@ -50,11 +50,12 @@ final class PrepareAheadTests: XCTestCase {
         configure(server, ["reset": "1"])
         configure(server, ["resume_movies": "1,2,3,4,6,7,8,9", "reference_delay": "90"])
         defer { configure(server, ["reset": "1"]) }
-        app.launchArguments = ["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"]
+        app.launchArguments = ["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES", "-cacheFolder", "prepare-ahead-\(UUID())"]
         app.launch()
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 20), "no Continue Watching")
         sleep(3)
+        print("PREP ahead after the first card's dwell: " + app.staticTexts["debug-ahead"].firstMatch.label)
         // The show's card plays its episode S2 E3 (the test server's e203).
         let firstItem = "e203"
         XCTAssertTrue(playbackInfoRequests(server).contains(firstItem), "the first card got no plan: \(playbackInfoRequests(server))")
@@ -86,6 +87,13 @@ final class PrepareAheadTests: XCTestCase {
         let after = try XCTUnwrap(field("after", in: pick.components(separatedBy: " ; ")[1]).flatMap(Int.init), "no line: \(pick)")
         XCTAssertLessThan(after, 300, "English took \(after) ms to show")
         XCTAssertEqual(Int(readsBack.label) ?? -1, before, "showing English read back into the film")
+
+        // Closed: the card under the player gets ready again, from where it stopped.
+        showControls()
+        app.buttons["Close player"].firstMatch.tap()
+        XCTAssertTrue(last.waitForExistence(timeout: 10), "back on Home, its card is gone")
+        sleep(4)
+        XCTAssertEqual(playbackInfoRequests(server).filter { $0 == "m9" }.count, 2, "closed, its card didn't get ready again")
     }
 
     private func playFilm(_ film: String) {
