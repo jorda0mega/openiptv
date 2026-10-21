@@ -10,14 +10,17 @@ struct ConvertedPlaylist: Sendable {
     /// any redirect).
     static func load(_ master: URL, headers: [String],
                      fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> ConvertedPlaylist? {
-        guard let top = await fetch(request(master, headers)), let variant = variant(of: top.lines, at: top.url),
-              let list = await fetch(request(variant, headers)) else { return nil }
+        guard let top = await fetch(request(master, headers, given: master)), let variant = variant(of: top.lines, at: top.url),
+              let list = await fetch(request(variant, headers, given: master)) else { return nil }
         return ConvertedPlaylist(list.lines, at: list.url)
     }
 
-    private static func request(_ url: URL, _ headers: [String]) -> URLRequest {
-        var request = HTTP.keyInHeader(URLRequest(url: url))
+    /// The account's key goes only to the server the app was given: not to
+    /// one the master was redirected to, nor to one it lists the variant on.
+    private static func request(_ url: URL, _ headers: [String], given: URL) -> URLRequest {
+        var request = HTTP.redirected(URLRequest(url: url), from: given)
         request.timeoutInterval = 20
+        guard HTTP.sameServer(url, given) else { return request }
         for header in headers {
             let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             if pair.count == 2 { request.setValue(pair[1], forHTTPHeaderField: pair[0]) }
