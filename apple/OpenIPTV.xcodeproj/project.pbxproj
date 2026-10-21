@@ -222,7 +222,9 @@
 		B7E430E49C8BD6FC0A114352 /* nettle.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57788799C7CF36103C03E61C /* nettle.xcframework */; };
 		B845A3EB0B884AD2D73E3AEB /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */; };
 		B8640E66EFE6670F23CE9788 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF445F6EA568B19DE61583D9 /* CoreFoundation.framework */; };
+		B8A0FCC54D5980F1954474BF /* ConvertedPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 552E4FC1AEA7C403E995DC38 /* ConvertedPlaylist.swift */; };
 		B9B3E51F633430D265866D55 /* StreamFailure.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F541AD421A2D3B5632946E /* StreamFailure.swift */; };
+		BBE7EBD1FA2C0325B82D69AD /* ConvertedPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 552E4FC1AEA7C403E995DC38 /* ConvertedPlaylist.swift */; };
 		BD094BC015A36CC339757823 /* PlayerOrientation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */; };
 		BE03B6B036990782A2E60BB6 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E6BB902BA3158069CE35BE75 /* QuartzCore.framework */; };
 		BEA7D82FFF28D87DD9B16601 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D277F32EC509804119BFFFC4 /* VideoToolbox.framework */; };
@@ -369,6 +371,7 @@
 		4FF14463A6C22E095CC94044 /* IOSurface.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOSurface.framework; path = System/Library/Frameworks/IOSurface.framework; sourceTree = SDKROOT; };
 		5183C151FC323F23D289CE6E /* Libfreetype.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libfreetype.xcframework; path = Vendor/Libfreetype.xcframework; sourceTree = "<group>"; };
 		51D44FF07C32C09B2952917A /* LibraryIndexFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryIndexFile.swift; sourceTree = "<group>"; };
+		552E4FC1AEA7C403E995DC38 /* ConvertedPlaylist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvertedPlaylist.swift; sourceTree = "<group>"; };
 		57788799C7CF36103C03E61C /* nettle.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = nettle.xcframework; path = Vendor/nettle.xcframework; sourceTree = "<group>"; };
 		58885EDA4FF6868BE2C2A526 /* Libfribidi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libfribidi.xcframework; path = Vendor/Libfribidi.xcframework; sourceTree = "<group>"; };
 		58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalArea.swift; sourceTree = "<group>"; };
@@ -594,6 +597,7 @@
 			children = (
 				054309E9F5F6C53E9B0548BC /* BufferingLog.swift */,
 				8CBB4542D9A1AA6C13842414 /* ChannelGuideSheet.swift */,
+				552E4FC1AEA7C403E995DC38 /* ConvertedPlaylist.swift */,
 				CDBCDEA1B3FDB76BBFA31935 /* FFmpegLog.swift */,
 				2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */,
 				E6F0061726E90B7BD6DAB284 /* LivePerf.swift */,
@@ -1104,6 +1108,7 @@
 				F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */,
 				E79797576A5367AA203CF4BE /* BufferingLog.swift in Sources */,
 				D74D0C1558A8A17859D625AE /* ChannelGuideSheet.swift in Sources */,
+				B8A0FCC54D5980F1954474BF /* ConvertedPlaylist.swift in Sources */,
 				5274B2DEB0C7389DA1D68536 /* EmbyClient.swift in Sources */,
 				E40A99A7F0AB7CF0C2BEC24E /* EmbyModels.swift in Sources */,
 				7B9EBC358C4C4F12984D438B /* FFmpegLog.swift in Sources */,
@@ -1214,6 +1219,7 @@
 				AA86629D3DF58B7575BE0703 /* Artwork.swift in Sources */,
 				559A50CB8044DF026615C087 /* BufferingLog.swift in Sources */,
 				2174A08ABD27777FA42CA50C /* ChannelGuideSheet.swift in Sources */,
+				BBE7EBD1FA2C0325B82D69AD /* ConvertedPlaylist.swift in Sources */,
 				70DBA9993C5650094FE7CCDD /* EmbyClient.swift in Sources */,
 				FFA65B87FDAD93B66C25DE91 /* EmbyModels.swift in Sources */,
 				A97DA2D0ACA021649F9D17C1 /* FFmpegLog.swift in Sources */,
