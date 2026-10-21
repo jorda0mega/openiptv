@@ -5,7 +5,7 @@ import XCTest
 /// `xcodebuild test -scheme OpenIPTV` on an iPhone simulator, signed in to
 /// the test server (scripts/mock_server.py) through TEST_RUNNER_DEBUG_EMBY.
 final class PlayerLookTests: XCTestCase {
-    private let app = XCUIApplication()
+    let app = XCUIApplication()
     private let shots = URL(fileURLWithPath: "/tmp/openiptv/uitest-ios")
     private var step = 0
 
@@ -37,7 +37,7 @@ final class PlayerLookTests: XCTestCase {
         print("SHOT \(note) → \(name)")
     }
 
-    private func openFilm(_ arguments: [String] = [], titled title: String? = nil) {
+    func openFilm(_ arguments: [String] = [], titled title: String? = nil) {
         app.launchArguments = ["-debugSearch", title?.lowercased() ?? "animals"] + arguments
         app.launch()
         sleep(4)
@@ -304,7 +304,7 @@ final class PlayerLookTests: XCTestCase {
 
     /// The player's controls on screen (a tap on the picture shows them,
     /// and hides them when they're up).
-    private func controlsUp() {
+    func controlsUp() {
         let close = app.buttons["Close player"].firstMatch
         // Above the middle: the middle is the play/pause button.
         let picture = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
@@ -326,7 +326,7 @@ final class PlayerLookTests: XCTestCase {
     /// The player's second: from the app's debug readout (there whether
     /// or not the controls are up), else the bar ("Playback position"
     /// "00:01:12").
-    private func position() -> Double? {
+    func position() -> Double? {
         if let state = playerState() { return state.seconds.rounded() }
         let bar = app.otherElements["Playback position"].firstMatch
         let value = (bar.exists ? bar : app.descendants(matching: .any)["Playback position"].firstMatch).value as? String
@@ -337,7 +337,7 @@ final class PlayerLookTests: XCTestCase {
     /// clock=72 start=640 from=screen" (seconds: the film's second it
     /// reports; clock: the window's stream; start: milliseconds to come up;
     /// from: whether it grew out of the picture on screen).
-    private func pipState() -> (playing: Bool, seconds: Double, clock: Double, startMs: Int, from: String)? {
+    func pipState() -> (playing: Bool, seconds: Double, clock: Double, startMs: Int, from: String)? {
         let text = app.staticTexts["debug-pip"].firstMatch.label
         guard text.hasPrefix("pip") else { return nil }
         let fields = Dictionary(uniqueKeysWithValues: text.split(separator: " ").dropFirst().compactMap { part -> (String, String)? in
@@ -614,34 +614,6 @@ final class PlayerLookTests: XCTestCase {
         }
         print("DEEP lowered at \(from): \(seen.map { Int($0) })")
         XCTAssertGreaterThan(seen.last ?? -1, from + 15, "the film stopped after the quality dropped: \(seen.map { Int($0) })")
-    }
-
-    /// A jump back past where a lower quality began plays from where it
-    /// lands, its pictures where the bar says. The server's converted
-    /// version is listed from the segment the film was at, so the jump
-    /// opens it again from there; else the jump stopped at the version's
-    /// start. The test server converts as Emby does.
-    func testJumpBackPastALowerQualitysStartPlaysFromThere() throws {
-        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
-        configure(server, ["reset": "1"])
-        defer { configure(server, ["reset": "1"]) }
-        configure(server, ["emby_convert": "1", "convert_delay": "2"])
-        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
-        openFilm()
-        let buffering = app.staticTexts["debug-buffering"].firstMatch
-        for _ in 0..<60 where !buffering.label.contains("converted ") { usleep(500_000) }
-        XCTAssertTrue(buffering.label.contains("converted "), "the lower quality didn't start: \(buffering.label)")
-        let from = try XCTUnwrap(position(), "no position")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-        let back = app.buttons["Back 10 seconds"].firstMatch
-        XCTAssertTrue(back.waitForExistence(timeout: 5), "no Back 10 seconds")
-        back.tap()
-        sleep(8)
-        let film = try XCTUnwrap(position(), "no position")
-        let stream = Double(app.staticTexts["debug-stream-time"].firstMatch.label) ?? -1
-        print("JUMP BACK from \(from) s: the film at \(film) s, the stream's own second \(stream)")
-        XCTAssertLessThan(film, from - 2, "the jump back stopped at the lower quality's start")
-        XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
     }
 
     /// Subtitles showing stay, in time, when a slow connection lowers the
@@ -1803,7 +1775,7 @@ final class PlayerLookTests: XCTestCase {
         return (seconds, parts[1] == "playing")
     }
 
-    private func testServer() -> URL? {
+    func testServer() -> URL? {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
               let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               let address = json["serverURL"] as? String else { return nil }
@@ -1824,7 +1796,7 @@ final class PlayerLookTests: XCTestCase {
     }
 
     /// Sets how the test server behaves (see CONTROL in mock_server.py).
-    private func configure(_ server: URL, _ settings: [String: String]) {
+    func configure(_ server: URL, _ settings: [String: String]) {
         let url = server.appending(path: "mock/set").appending(queryItems: settings.map { URLQueryItem(name: $0.key, value: $0.value) })
         let done = expectation(description: "configure")
         URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()

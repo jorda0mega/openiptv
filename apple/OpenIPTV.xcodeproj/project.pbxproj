@@ -234,6 +234,7 @@
 		C296F7829BEFC8DEE6E19B75 /* AreaPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7ED05298F5A207B9C71BE5A /* AreaPicker.swift */; };
 		C2B3A024AC7BEF379F2E4C4A /* ImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */; };
 		C2FA9C8739B0E46A8270DC84 /* Flex.swift in Sources */ = {isa = PBXBuildFile; fileRef = F54AA14367E83C43E1A0457D /* Flex.swift */; };
+		C476E7219798091C15B0C498 /* LowerQualityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF6B4562433675D1F763C59F /* LowerQualityTests.swift */; };
 		C48EE2D7F8B58042DF260BD4 /* hogweed.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4962C0F389044958A1E2BE4 /* hogweed.xcframework */; };
 		C4A0CD4ECBEDA91A0F869B61 /* SubtitleStopwatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194E5155111600ED590FA9F4 /* SubtitleStopwatch.swift */; };
 		C4B8046237E84B860469F18F /* LocalArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */; };
@@ -459,6 +460,7 @@
 		DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVHomeView.swift; sourceTree = "<group>"; };
 		DB4C4ECAD884618771521E44 /* MPVPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MPVPlayer.swift; sourceTree = "<group>"; };
 		DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerLookTests.swift; sourceTree = "<group>"; };
+		DF6B4562433675D1F763C59F /* LowerQualityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LowerQualityTests.swift; sourceTree = "<group>"; };
 		E07979C91518955236F76395 /* GameTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameTime.swift; sourceTree = "<group>"; };
 		E181E6602A0A74CA82B8EB92 /* HomeAfterLandscapeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAfterLandscapeTests.swift; sourceTree = "<group>"; };
 		E1FD9D66654217AC33F67CB5 /* IMDbSignals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMDbSignals.swift; sourceTree = "<group>"; };
@@ -771,6 +773,7 @@
 				F4CB49D07772393CE3267AC2 /* LivePerfProbeTests.swift */,
 				9A1EC37B63ED8CD9B42434CF /* LiveRecoveryTests.swift */,
 				D1A9C8D5BE1D0FF094368580 /* LiveSportsTests.swift */,
+				DF6B4562433675D1F763C59F /* LowerQualityTests.swift */,
 				60039C18093C4A9478614C1B /* PersonPageTests.swift */,
 				FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */,
 				DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */,
@@ -1089,6 +1092,7 @@
 				F53713E92CA858B3297424D8 /* LivePerfProbeTests.swift in Sources */,
 				8ED22EEDAFCE31116298BFA4 /* LiveRecoveryTests.swift in Sources */,
 				53C4FE41A43696DEC32E2768 /* LiveSportsTests.swift in Sources */,
+				C476E7219798091C15B0C498 /* LowerQualityTests.swift in Sources */,
 				201B09174ED3CF5739821CA4 /* PersonPageTests.swift in Sources */,
 				790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */,
 				DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */,
