@@ -749,6 +749,8 @@ struct MoviePlayerView: View {
         // The picture's way out changes (a moment's refresh): not a stall
         // to lower the quality for.
         trackSwitched()
+        // The window takes the stream as it is now.
+        convertedOpen?.cancel()
         PictureInPicture.shared.start(player, playback: playback, stream: stream, position: position, total: total, paused: paused,
                                       started: {
             handedOff = true
