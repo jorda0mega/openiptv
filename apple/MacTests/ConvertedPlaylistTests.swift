@@ -139,6 +139,18 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertNil(sent.value(forHTTPHeaderField: "X-Emby-Token"), "the key in its header")
     }
 
+    func testTheDebugCountAsksNoOtherServerWithTheKey() async {
+        let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
+        var asked: [(host: String?, keyed: Bool)] = []
+        _ = await PlaylistKeys.count(master, headers: ["X-Emby-Token: test-key"]) { url, headers in
+            asked.append((url.host(), headers.contains { $0.contains("test-key") }))
+            return url.lastPathComponent == "master.m3u8"
+                ? "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nmain.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhttps://cdn.example/other.m3u8\n"
+                : emby(segments: 3).joined(separator: "\n")
+        }
+        XCTAssertEqual(asked.filter(\.keyed).map(\.host), ["emby.example", "emby.example"])
+    }
+
     func testAPlaylistStillGrowingOrWithKeysIsLeftAsItIs() {
         XCTAssertNil(ConvertedPlaylist(Array(emby(segments: 3).dropLast()), at: variant), "still growing")
         var keyed = emby(segments: 3)
