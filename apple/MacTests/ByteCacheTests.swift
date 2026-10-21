@@ -1,0 +1,47 @@
+import XCTest
+@testable import OpenIPTV
+
+/// What the relay keeps of a file (ByteCache): read past what it keeps, it
+/// still has the bytes just behind where the player reads. mpv reads them
+/// again for subtitles or audio it hasn't been reading (from ten seconds
+/// back), and from the server that stopped the film for seconds.
+final class ByteCacheTests: XCTestCase {
+    private let megabyte = 1 << 20
+
+    /// Megabyte `n` of the made-up film.
+    private func megabyte(_ n: Int) -> Data { Data(repeating: UInt8(n % 251), count: megabyte) }
+
+    private func read(_ megabytes: ClosedRange<Int>, into cache: ByteCache) {
+        for n in megabytes {
+            let data = megabyte(n)
+            for part in stride(from: 0, to: megabyte, by: 64 << 10) {
+                cache.store(data.subdata(in: part..<part + (64 << 10)), at: Int64(n * megabyte + part))
+            }
+        }
+    }
+
+    /// Regression: past its limit (1 GB) it kept nothing new until the
+    /// player had read 64 MB more, then let everything behind go and began
+    /// again at the newest bytes. Until the film reached them, what it
+    /// played and the ten seconds before came from the server again for
+    /// subtitles picked then: 4 s stopped.
+    func testAFilmReadPastTheLimitKeepsItsNewestBytes() throws {
+        let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
+        read(0...74, into: cache)
+        let back = 75 - 7
+        XCTAssertEqual(cache.available(from: Int64(back * megabyte)), Int64(7 * megabyte), "the 7 MB just read aren't all kept")
+        let kept = try XCTUnwrap(cache.read(Int64(back * megabyte), 7 * megabyte), "the 7 MB just read don't read back")
+        XCTAssertEqual(kept, (back..<75).reduce(into: Data()) { $0.append(megabyte($1)) }, "not the bytes that were read there")
+        XCTAssertEqual(cache.available(from: 0), 0, "the first bytes are still kept, over the limit")
+    }
+
+    /// A jump back past the limit: the bytes read at the new place are
+    /// kept, those left farthest away go.
+    func testAJumpBackKeepsTheBytesReadThere() throws {
+        let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
+        read(50...55, into: cache)
+        read(0...5, into: cache)
+        XCTAssertEqual(cache.available(from: 0), Int64(6 * megabyte), "the bytes read after the jump aren't all kept")
+        XCTAssertLessThanOrEqual(cache.available(from: Int64(50 * megabyte)), Int64(2 * megabyte), "more than the limit is kept")
+    }
+}

@@ -715,6 +715,83 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(after, before, "picking subtitles went back into the film to read it again")
     }
 
+    /// Spanish subtitles inside the film, picked late in it, before the
+    /// server has sent its copy: the line for the second on screen shows
+    /// at once, the film plays on, and nothing comes from the server a
+    /// second time. mpv reads the file again from ten seconds back for a
+    /// track it hasn't been reading, and the relay is to have those bytes.
+    /// Regression: full (1 GB on a real film, 200 MB here), the relay let
+    /// everything behind go and began again at the newest bytes, so for a
+    /// while those came from the server: 3.9 s stopped. Needs the film from
+    /// scripts/make_big_film.sh (OPENIPTV_MOCK_VIDEO=…/big.mkv,
+    /// OPENIPTV_MOCK_RUNTIME=240; TEST_RUNNER_BIG_FILM=1).
+    func testSubtitlesPickedLateInAFilmReadNothingAgain() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["BIG_FILM"] != nil, "needs the 16 Mbps film with a line a second")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["reference_delay": "900"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_RELAY_KEEP_MB"] = "200"
+        app.launchEnvironment["OPENREEL_DEBUG_READAHEAD"] = "60"
+        openFilm(["-forgetTrackChoices", "YES", "-forgetServerSubtitles", "YES"])
+        for _ in 0..<90 where (position() ?? 0) < 98 { sleep(1) }
+        XCTAssertGreaterThanOrEqual(position() ?? 0, 98, "the film didn't reach a minute and a half")
+        let timing = app.staticTexts["debug-subs-timing"].firstMatch
+        let events = { timing.label.components(separatedBy: " | ") }
+        func pick(_ language: String) -> (switched: String?, shown: String?, stalls: [String], line: String, at: Double, again: Int) {
+            let before = events().filter { $0.hasPrefix("switch ") }.count
+            let sentBefore = videoBytes(server).again
+            controlsUp()
+            app.buttons["Audio and Subtitles"].firstMatch.tap()
+            let off = app.buttons["Off"].firstMatch
+            XCTAssertTrue(off.waitForExistence(timeout: 3), "no subtitles menu")
+            let track = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", language)).allElementsBoundByIndex
+                .first { $0.frame.minY > off.frame.minY }
+            XCTAssertNotNil(track, "no \(language) subtitles")
+            track?.tap()
+            var switched: String?, shown: String?
+            for _ in 0..<80 where shown == nil {
+                usleep(250_000)
+                switched = events().filter { $0.hasPrefix("switch ") }.dropFirst(before).first
+                let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
+                shown = n.flatMap { n in events().first { $0.hasPrefix("shown ") && $0.split(separator: " ").contains(n) } }
+            }
+            let readout = app.staticTexts["debug-subtext"].firstMatch
+            for _ in 0..<8 where shown != nil && readout.label.isEmpty { usleep(250_000) }
+            let line = readout.label, at = position() ?? -1
+            sleep(8)
+            let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
+            let stalls = events().filter { $0.hasPrefix("rebuffer ") && n.map($0.split(separator: " ").contains) == true }
+            return (switched, shown, stalls, line, at, videoBytes(server).again - sentBefore)
+        }
+        let english = pick("English"), spanish = pick("Spanish")
+        for (name, result) in [("English", english), ("Spanish", spanish)] {
+            print("LATE \(name): \(result.switched ?? "no switch") ; \(result.shown ?? "no line in 20 s") ; "
+                  + "\(result.stalls.isEmpty ? "no stall" : result.stalls.joined(separator: ", ")) ; line \(result.line) at \(result.at) s ; "
+                  + String(format: "%.1f MB sent again", Double(result.again) / 1e6))
+        }
+        XCTAssertNotNil(spanish.shown, "no Spanish line in 20 s")
+        // mpv reads the ten seconds back again even from the device: a
+        // moment's wait at most (0.1 s on the simulator).
+        let stopped = spanish.stalls.compactMap { $0.split(separator: " ").first { $0.hasPrefix("ms=") }.flatMap { Int($0.dropFirst(3)) } }
+        XCTAssertLessThanOrEqual(stopped.reduce(0, +), 300, "the film stopped when Spanish was picked: \(spanish.stalls)")
+        XCTAssertEqual(Double(spanish.line.replacingOccurrences(of: "ES ", with: "")) ?? -1, spanish.at, accuracy: 2,
+                       "not the line for the second on screen")
+        XCTAssertLessThan(spanish.again, 1 << 20, "picking Spanish read the film again from the server")
+        XCTAssertEqual(tracksPlaying(), "audio=eng subtitles=spa")
+    }
+
+    private func videoBytes(_ server: URL) -> (sent: Int, again: Int) {
+        var counts: [String: Int] = [:]
+        let done = expectation(description: "video bytes")
+        URLSession.shared.dataTask(with: server.appending(path: "mock/video_bytes")) { data, _, _ in
+            counts = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Int] }) ?? [:]
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return (counts["sent"] ?? -1, counts["again"] ?? -1)
+    }
+
     private func readsBackPickingEnglish() throws -> Int {
         let readout = app.staticTexts["debug-reads-back"].firstMatch
         XCTAssertTrue(readout.waitForExistence(timeout: 5), "no reads-back readout")
