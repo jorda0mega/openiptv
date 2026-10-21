@@ -824,14 +824,10 @@ final class RealFeedTests: XCTestCase {
             let bottom = tabBar.exists ? tabBar.frame.minY : screen.maxY
             return CGRect(x: screen.minX, y: screen.minY + 100, width: screen.width, height: bottom - screen.minY - 100)
         }
-        // The card's element is its picture's size before the picture is cut
-        // to the card's 240 × 170 points (a 16:9 one runs 31 points past each
-        // side), so the card is the middle of it.
-        func drawn(_ frame: CGRect) -> CGRect { CGRect(x: frame.midX - 120, y: frame.midY - 85, width: 240, height: 170) }
         func seen() -> Bool {
             guard card.exists else { return false }
-            let drawn = drawn(card.frame), shown = drawn.intersection(visible())
-            return !shown.isNull && shown.width * shown.height >= 0.6 * drawn.width * drawn.height
+            let frame = card.frame, shown = frame.intersection(visible())
+            return !shown.isNull && shown.width * shown.height >= 0.6 * frame.width * frame.height
         }
         func drag(from point: CGPoint, by offset: CGVector) {
             let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y))
@@ -849,19 +845,18 @@ final class RealFeedTests: XCTestCase {
                 sleep(1)
                 continue
             }
-            let drawn = drawn(frame)
-            if drawn.minY < area.minY || drawn.maxY > area.maxY {
-                drag(from: CGPoint(x: area.midX, y: area.midY), by: CGVector(dx: 0, dy: max(-400, min(400, area.midY - drawn.midY))))
+            if frame.minY < area.minY || frame.maxY > area.maxY {
+                drag(from: CGPoint(x: area.midX, y: area.midY), by: CGVector(dx: 0, dy: max(-400, min(400, area.midY - frame.midY))))
             } else {
-                let left = !card.exists || drawn.midX > area.midX
-                drag(from: CGPoint(x: area.midX, y: drawn.midY), by: CGVector(dx: left ? -150 : 150, dy: 0))
+                let left = !card.exists || frame.midX > area.midX
+                drag(from: CGPoint(x: area.midX, y: frame.midY), by: CGVector(dx: left ? -150 : 150, dy: 0))
             }
             before = .null
         }
         if !seen() { shot("card \(index + 1) not on screen") }
-        let drawn = card.exists ? drawn(card.frame) : .null, area = visible()
+        let frame = card.exists ? card.frame : .null, area = visible()
         XCTAssertTrue(seen(), String(format: "card %d didn't come on screen in 30 s (card %.0f-%.0f down, %.0f-%.0f across; screen %.0f-%.0f down)",
-                                     index + 1, drawn.minY, drawn.maxY, drawn.minX, drawn.maxX, area.minY, area.maxY))
+                                     index + 1, frame.minY, frame.maxY, frame.minX, frame.maxX, area.minY, area.maxY))
     }
 
     /// The tap to the first frame and its parts, once it started.
