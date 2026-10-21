@@ -33,6 +33,20 @@ final class ByteCacheTests: XCTestCase {
         XCTAssertEqual(cache.available(from: 0), 0, "the first bytes are still kept, over the limit")
     }
 
+    /// Regression: full, it let go of the bytes farthest from the read
+    /// first, and the film's index (fetched ahead, at the file's end) was
+    /// those. The first subtitles or audio picked after that read the index
+    /// from the server again, and nothing fetched it ahead again.
+    func testTheIndexFetchedAheadIsKeptWhenTheFilmFillsTheStore() throws {
+        let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
+        let index = Data(repeating: 7, count: 256 << 10)
+        let indexAt = Int64(500 * megabyte)
+        cache.store(index, at: indexAt, evicting: false)
+        read(0...11, into: cache)
+        XCTAssertEqual(cache.read(indexAt, index.count), index, "the index fetched ahead was let go")
+        XCTAssertEqual(cache.available(from: Int64(5 * megabyte)), Int64(7 * megabyte), "the 7 MB just read aren't all kept")
+    }
+
     func testAJumpBackKeepsTheBytesReadThere() throws {
         let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
         read(50...55, into: cache)
