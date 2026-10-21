@@ -16,7 +16,7 @@ final class M3UProvider: LiveProvider, @unchecked Sendable {
     }
 
     func load() async throws -> LiveLineup {
-        let data = try await HTTP.data(playlist)
+        let data = try await HTTP.data(HTTP.loginInForm(playlist))
         guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
             throw SourceError.unexpected("The playlist couldn't be read.")
         }
@@ -29,7 +29,7 @@ final class M3UProvider: LiveProvider, @unchecked Sendable {
         let parsed = Self.parse(text, sourceId: source.id, secrets: secrets)
         var guides = guide.map { [$0] } ?? []
         if guides.isEmpty { guides = parsed.headerGuides }
-        return LiveLineup(categories: parsed.categories, channels: parsed.channels, guideURLs: guides)
+        return LiveLineup(categories: parsed.categories, channels: parsed.channels, guides: guides.map(HTTP.loginInForm))
     }
 
     func playable(_ channel: LiveChannel) async throws -> PlayableStream {

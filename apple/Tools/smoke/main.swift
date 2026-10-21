@@ -19,7 +19,7 @@ func check(_ source: IPTVSource) async {
     let started = Date()
     do {
         let lineup = try await provider.load()
-        print("  lineup        \(lineup.channels.count) channels, \(lineup.categories.count) categories, \(lineup.guideURLs.count) guide URL(s) in \(ms(started))")
+        print("  lineup        \(lineup.channels.count) channels, \(lineup.categories.count) categories, \(lineup.guides.count) guide(s) in \(ms(started))")
         let withEPG = lineup.channels.filter { $0.epgId != nil }.count
         print("  with guide id \(withEPG)")
         let leaked = lineup.channels.filter { AccountInfoFilter.looksLikeAccountInfo($0.name) }.count
@@ -37,10 +37,10 @@ func check(_ source: IPTVSource) async {
             let stream = try await provider.playable(first)
             print("  playable      \(stream.url.scheme ?? "?")://\(stream.url.host() ?? "?") with \(stream.headers.count) header(s) in \(ms(playStart))")
         }
-        if value("OPENIPTV_SMOKE_GUIDE") != nil, !lineup.guideURLs.isEmpty {
+        if value("OPENIPTV_SMOKE_GUIDE") != nil, !lineup.guides.isEmpty {
             let guide = GuideStore()
             let guideStart = Date()
-            await guide.refresh(from: lineup.guideURLs, keep: Set(lineup.channels.compactMap(\.epgId)))
+            await guide.refresh(from: lineup.guides, keep: Set(lineup.channels.compactMap(\.epgId)))
             print("  guide         \(await guide.state) in \(ms(guideStart))")
             var covered = 0
             for channel in lineup.channels.prefix(200) {

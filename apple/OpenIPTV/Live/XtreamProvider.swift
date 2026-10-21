@@ -39,10 +39,12 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
         return (url, user, pass)
     }
 
-    private func api(_ items: [URLQueryItem]) -> URL {
-        var parts = URLComponents(url: server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password)] + items
-        return parts.url!
+    private var login: [URLQueryItem] {
+        [.init(name: "username", value: username), .init(name: "password", value: password)]
+    }
+
+    private func api(_ items: [URLQueryItem]) -> URLRequest {
+        HTTP.form(server.appending(path: "player_api.php"), login + items)
     }
 
     func load() async throws -> LiveLineup {
@@ -56,12 +58,10 @@ final class XtreamProvider: LiveProvider, @unchecked Sendable {
         if !formats.isEmpty, !formats.contains("ts"), formats.contains("m3u8") { outputExtension = "m3u8" }
 
         let (categories, channels) = lineup(categoryData: try await categoryData, channelData: try await channelData)
-        var xmltv = URLComponents(url: server.appending(path: "xmltv.php"), resolvingAgainstBaseURL: false)!
         // Today and tomorrow only, a quarter smaller than everything; a
         // channel's earlier programmes come from its own schedule.
-        xmltv.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password),
-                            .init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")]
-        return LiveLineup(categories: categories, channels: channels, guideURLs: [xmltv.url!])
+        let xmltv = HTTP.form(server.appending(path: "xmltv.php"), login + [.init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")])
+        return LiveLineup(categories: categories, channels: channels, guides: [xmltv])
     }
 
     func lineup(categoryData: Data, channelData: Data) -> (categories: [LiveCategory], channels: [LiveChannel]) {

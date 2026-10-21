@@ -115,7 +115,7 @@ struct LiveLineup {
     var categories: [LiveCategory]
     var channels: [LiveChannel]
     /// XMLTV guide(s) the provider publishes.
-    var guideURLs: [URL]
+    var guides: [URLRequest]
 }
 
 protocol LiveProvider: Sendable {

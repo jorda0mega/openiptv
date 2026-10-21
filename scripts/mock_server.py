@@ -27,7 +27,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 PANEL_TZ = timezone(timedelta(hours=1))
 EASTERN = ZoneInfo("America/New_York")
@@ -820,7 +820,8 @@ class Handler(BaseHTTPRequestHandler):
         base = f"http://{self.headers.get('Host')}"
         if path == "/get.php" and not iptv_login_ok(q.get("username"), q.get("password")):
             return self.send({"error": "unauthorized"}, status=401)
-        lines = [f'#EXTM3U url-tvg="{base}/xmltv.php?username=u&password=p"']
+        login = urlencode({"username": q.get("username", "u"), "password": q.get("password", "p")})
+        lines = [f'#EXTM3U url-tvg="{base}/xmltv.php?{login}"']
         for i in range(1, CHANNELS + 1):
             epg = f' tvg-id="ch{i}.uk"' if i % 10 else ""
             group = "UK" if i <= 30 else "Sports"
