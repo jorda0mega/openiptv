@@ -1244,6 +1244,13 @@ final class AppModel {
             await Lane.embyFiles.whenAllowed(for: interest) { _ = await self?.previewStills(plan.itemId) }
         }))
 
+    #if DEBUG
+    /// UI tests: what was fetched so far, counts only.
+    var aheadCounts: String {
+        "plans \(plans.fetched) starts \(FileStarts.shelf.fetched) files \(ServerSubtitles.beside.fetched) copies \(ServerSubtitles.inFile.fetched)"
+    }
+    #endif
+
     private func preparePage(_ target: Target, _ interest: Interest) async {
         guard case let .title(id, kind) = target else { return }
         await Lane.emby.whenAllowed(for: interest) {
