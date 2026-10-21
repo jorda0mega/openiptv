@@ -162,6 +162,8 @@ final class StreamRelay: @unchecked Sendable {
         lock.withLock {
             startReads.requests += 1
             startReads.cached += cached
+            startLog.append(StartRead(at: CFAbsoluteTimeGetCurrent() - startBegan, range: range, cache: cache, device: cached))
+            startReadOf[ObjectIdentifier(connection)] = startLog.count - 1
         }
         #endif
         if let cache, cache.claimIndex() {
@@ -199,16 +201,52 @@ final class StreamRelay: @unchecked Sendable {
 
     private var startReads = (requests: 0, cached: Int64(0), fetches: 0, fetched: Int64(0), firstByte: 0.0)
 
+    /// One of the player's reads since the file opened: when, what it asked
+    /// for, and how much came from the device and from the server.
+    private struct StartRead {
+        let at: Double
+        let range: String?
+        let cache: ByteCache?
+        let device: Int64
+        var server: Int64 = 0
+
+        /// "120 ms at 62.51% 8.39 MB: device 8.39, server 0.00", where in
+        /// the file by its size.
+        var readout: String {
+            let parts = (range ?? "bytes=0-").dropFirst(6).split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+            let from = Int64(parts.first ?? "") ?? 0, to = parts.count == 2 ? Int64(parts[1]) : nil
+            let place = cache?.total.map { String(format: "%.2f%%", Double(from) / Double($0) * 100) } ?? "?"
+            let asked = to.map { String(format: "%.2f MB", Double($0 - from + 1) / 1e6) } ?? "to the end"
+            return String(format: "%.0f ms at %@ %@: device %.2f, server %.2f", at * 1000, place, asked,
+                          Double(device) / 1e6, Double(server) / 1e6)
+        }
+    }
+
+    private var startLog: [StartRead] = []
+    private var startReadOf: [ObjectIdentifier: Int] = [:]
+    private var startBegan = CFAbsoluteTimeGetCurrent()
+
     func beginStartReads() {
-        lock.withLock { startReads = (0, 0, 0, 0, 0) }
+        lock.withLock {
+            startReads = (0, 0, 0, 0, 0)
+            startLog = []
+            startReadOf = [:]
+            startBegan = CFAbsoluteTimeGetCurrent()
+        }
     }
 
     var serverBytes: Int64 { lock.withLock { startReads.fetched } }
 
     var startReadsReadout: String {
-        let reads = lock.withLock { startReads }
+        let (reads, log) = lock.withLock { (startReads, startLog) }
+        let each = log.prefix(12).map(\.readout).joined(separator: "; ")
         return String(format: "reads %d, from the device %.1f MB, from the server %d reads %.1f MB first byte up to %.0f ms",
                       reads.requests, Double(reads.cached) / 1e6, reads.fetches, Double(reads.fetched) / 1e6, reads.firstByte * 1000)
+            + (each.isEmpty ? "" : " | " + each)
+    }
+
+    fileprivate func startRead(for connection: NWConnection) -> Int? {
+        lock.withLock { startReadOf[ObjectIdentifier(connection)] }
     }
 
     fileprivate func noteFetch(firstByteAfter seconds: Double) {
@@ -218,8 +256,11 @@ final class StreamRelay: @unchecked Sendable {
         }
     }
 
-    fileprivate func noteFetched(_ count: Int) {
-        lock.withLock { startReads.fetched += Int64(count) }
+    fileprivate func noteFetched(_ count: Int, for read: Int?) {
+        lock.withLock {
+            startReads.fetched += Int64(count)
+            if let read, startLog.indices.contains(read) { startLog[read].server += Int64(count) }
+        }
     }
 
     private func noteRead(_ token: String, _ range: String?) {
@@ -337,6 +378,7 @@ final class StreamRelay: @unchecked Sendable {
         let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head)
         #if DEBUG
         relay.relay = self
+        relay.read = startRead(for: connection)
         #endif
         task.delegate = relay
         // The player hung up (a seek): stop downloading what it won't read.
@@ -554,6 +596,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private var offset: Int64?
     #if DEBUG
     weak var relay: StreamRelay?
+    var read: Int?
     private let asked = CFAbsoluteTimeGetCurrent()
     #endif
 
@@ -620,7 +663,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         #if DEBUG
-        relay?.noteFetched(data.count)
+        relay?.noteFetched(data.count, for: read)
         #endif
         if let at = offset {
             cache?.store(data, at: at)
