@@ -514,6 +514,24 @@ final class PhoneHomeStabilityTests: XCTestCase {
         }
     }
 
+    /// A real server's Continue Watching pictures are 16:9: cut to the card,
+    /// one still made the card's element 302 points wide, 31 past each side
+    /// and over the next card (VoiceOver's box, and what it reads at a touch).
+    func testContinueCardWithAWidePictureIsTheCardsSize() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["wide_pictures": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launch()
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'"))
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 15), "no Continue Watching card")
+        sleep(3)
+        shot("wide pictures")
+        for card in cards.allElementsBoundByIndex {
+            XCTAssertEqual(card.frame.width, 240, accuracy: 1, "Continue Watching card \(card.identifier): \(card.frame)")
+        }
+    }
+
     /// The white area around a point of the screen (in points): how far
     /// white runs across and up and down from it.
     private func whiteRun(_ shot: XCUIScreenshot, through point: CGPoint) -> CGSize {
