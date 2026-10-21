@@ -34,11 +34,13 @@ final class FilmStartTests: XCTestCase {
         let tags: Range<Int64>
 
         init(header firstCluster: Int64 = 4096, points: [Point] = Film.points(), seeks extra: [(id: UInt32, position: UInt64)] = [],
-             tags tagBytes: Int = 0) {
+             tags tagBytes: Int = 0, chapters chapterBytes: Int = 0) {
             let ebml = Self.element(0x1A45DFA3, Self.element(0x4282, Array("matroska".utf8)))
             let segmentStart = Int64(ebml.count + 12)
             let clusters = (points.flatMap(\.positions).map(\.cluster).max() ?? 0) + 1
-            let cuesAt = firstCluster + Int64(clusters) * Self.clusterSize
+            let chaptersAt = firstCluster + Int64(clusters) * Self.clusterSize
+            let chapters = chapterBytes > 0 ? Self.element(0x1043A770, [UInt8](repeating: 0, count: chapterBytes)) : []
+            let cuesAt = chaptersAt + Int64(chapters.count)
             let index = Self.element(0x1C53BB6B, points.flatMap { point in
                 Self.element(0xBB, Self.element(0xB3, Self.uint(UInt64(point.ms))) + point.positions.flatMap { position in
                     let at = firstCluster + Int64(position.cluster) * Self.clusterSize + position.into - segmentStart
@@ -55,7 +57,7 @@ final class FilmStartTests: XCTestCase {
             }
             var head = ebml + [0x18, 0x53, 0x80, 0x67] + Self.size(Int(total - segmentStart))
             head += Self.element(0x114D9B74, seek(0x1C53BB6B, UInt64(cuesAt - segmentStart)) + seek(0x1254C367, UInt64(tagsAt - segmentStart))
-                + extra.flatMap { seek($0.id, $0.position) })
+                + (chapters.isEmpty ? [] : seek(0x1043A770, UInt64(chaptersAt - segmentStart))) + extra.flatMap { seek($0.id, $0.position) })
             head += Self.element(0x1549A966, Self.element(0x2AD7B1, Self.uint(1_000_000)))
             head += Self.element(0x1654AE6B, Self.track(Self.video, type: 1) + Self.track(Self.subtitles, type: 0x11))
             // Fonts and cover art (Attachments) can push the clusters past the first read.
@@ -64,7 +66,7 @@ final class FilmStartTests: XCTestCase {
             head += [0x1F, 0x43, 0xB6, 0x75] + Self.size(Int(Self.clusterSize) - 12)
             // Tags follow the Cues, as mkvmerge writes them.
             self.firstCluster = firstCluster
-            parts = [(0, head), (cuesAt, index), (tagsAt, tagged)]
+            parts = [(0, head), (chaptersAt, chapters), (cuesAt, index), (tagsAt, tagged)]
             cues = cuesAt..<tagsAt
             tags = tagsAt..<total
         }
@@ -137,8 +139,8 @@ final class FilmStartTests: XCTestCase {
         }
     }
 
-    private func assertAllFetched(_ reads: [(String, Range<Int64>)], _ fetched: [Range<Int64>], file: StaticString = #filePath,
-                                  line: UInt = #line) {
+    private func assertAllFetched(_ reads: [(String, Range<Int64>)], _ fetched: [Range<Int64>], again: Int64 = 0,
+                                  file: StaticString = #filePath, line: UInt = #line) {
         let sorted = fetched.sorted { $0.lowerBound < $1.lowerBound }
         for (name, read) in reads {
             let covered = sorted.reduce(read.lowerBound) { reached, range in
@@ -148,7 +150,7 @@ final class FilmStartTests: XCTestCase {
                                         file: file, line: line)
         }
         let needed = merged(reads.map(\.1))
-        XCTAssertLessThanOrEqual(fetched.reduce(0) { $0 + $1.count }, needed.reduce(0) { $0 + $1.count },
+        XCTAssertLessThanOrEqual(fetched.reduce(0) { $0 + $1.count }, needed.reduce(0) { $0 + $1.count } + Int(again),
                                  "fetched more than opening it reads", file: file, line: line)
     }
 
@@ -237,6 +239,19 @@ final class FilmStartTests: XCTestCase {
         let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.5))
         XCTAssertTrue(ok, "the film's start wasn't fetched")
         assertAllFetched(opening(film, start: film.cluster(150)), fetched)
+    }
+
+    /// Chapters (or tags) before the index can fill the 32 MB read after the
+    /// clusters, the index starting near its end and running on past it.
+    func testAnIndexRunningPastThe32MBAfterTheClustersIsFetchedWhole() async {
+        let film = Film(chapters: (32 << 20) - 4096 - 12)
+        let (ok, fetched) = await fetchedAhead(film, for: playback(at: 300.5))
+        XCTAssertTrue(ok, "the film's start wasn't fetched")
+        let first = StreamRelay.firstRead, tailAt = film.cluster(Film.keyframesMS.count)
+        // The index's first 64 KB are asked for again: 4 KB of them came with the 32 MB.
+        assertAllFetched([("first read", 0..<first), ("header", 0..<film.firstCluster), ("32 MB after the clusters", tailAt..<tailAt + (32 << 20)),
+                          ("index", film.cues), ("read from the first cluster", film.firstCluster..<film.firstCluster + first),
+                          ("start", film.cluster(150)..<film.cluster(150) + first + StreamRelay.readSize)], fetched, again: 4096)
     }
 
     func testTheOldWayFetchesWhatItDidBefore() async {
