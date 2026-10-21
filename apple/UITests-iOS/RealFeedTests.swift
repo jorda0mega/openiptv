@@ -244,6 +244,52 @@ final class RealFeedTests: XCTestCase {
         XCTAssertGreaterThan(later, at + 3, "the title doesn't play on (\(at) → \(later))")
     }
 
+    /// Continue Watching as the viewer sees it now (diagnostic): the first
+    /// card stays on screen 4 s, then plays, then English subtitles are
+    /// turned on. Counts and times only: what the app fetched before the
+    /// tap, the tap to the first frame, the subtitle tap to the first line.
+    func testPrepareAheadAsSeenNow() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 45), "no Continue Watching card")
+        sleep(4)
+        let counts = app.staticTexts["debug-ahead"].firstMatch
+        print("REAL ahead before the tap: \(counts.exists ? counts.label : "no readout")")
+        card.tap()
+        let start = app.staticTexts["debug-start"].firstMatch
+        var parts: [Substring] = []
+        for _ in 0..<120 where parts.count < 4 {
+            usleep(250_000)
+            parts = start.exists ? start.label.split(separator: " ") : []
+        }
+        print("REAL tap to first frame: \(parts.count == 4 ? "\(parts[1]) s (\(parts[0]))" : "no start in 30 s")")
+        XCTAssertEqual(parts.count, 4, "the title didn't start")
+        sleep(6)
+        let timing = app.staticTexts["debug-subs-timing"].firstMatch
+        let events = { timing.exists ? timing.label.components(separatedBy: " | ") : [] }
+        let before = events().filter { $0.hasPrefix("switch ") }.count
+        showControls()
+        app.buttons["Audio and Subtitles"].firstMatch.tap()
+        let off = app.buttons["Off"].firstMatch
+        XCTAssertTrue(off.waitForExistence(timeout: 5), "no subtitles menu")
+        let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).allElementsBoundByIndex
+            .first { $0.frame.minY > off.frame.minY }
+        try XCTUnwrap(english, "no English subtitles").tap()
+        var shown: String?
+        for _ in 0..<80 where shown == nil {
+            usleep(250_000)
+            let switched = events().filter { $0.hasPrefix("switch ") }.dropFirst(before).first
+            let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
+            shown = n.flatMap { n in events().first { $0.hasPrefix("shown ") && $0.split(separator: " ").contains(n) } }
+        }
+        let after = shown?.split(separator: " ").first { $0.hasPrefix("after=") }.flatMap { Double($0.dropFirst(6)) }
+        let switched = events().filter { $0.hasPrefix("switch ") }.dropFirst(before).first ?? "no switch"
+        let stall = events().filter { $0.hasPrefix("rebuffer ") }.last ?? "no stall"
+        print("REAL subtitle tap to first line: \(after.map { String(format: "%.2f s", $0 / 1000) } ?? "no line in 20 s") | \(switched) | \(stall)")
+        shot("subtitles on")
+    }
+
     /// Sports as the viewer sees it now (diagnostic): every game row, then
     /// the first ten live ones tried in turn, playing or not.
     func testSportsAsSeenNow() throws {

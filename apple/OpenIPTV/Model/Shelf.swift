@@ -242,6 +242,10 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     private var entries: [Key: Entry] = [:]
+    #if DEBUG
+    /// Fetches sent, for the UI tests' readout.
+    private(set) var fetched = 0
+    #endif
     private let policy: Policy
     private let disk: Disk?
     private let now: @Sendable () -> Date
@@ -358,6 +362,9 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             try await policy.lane.enter(job.ticket)
             if case .waiting? = entries[key], entries[key]?.job === job { entries[key] = .fetching(job) }
             do {
+                #if DEBUG
+                fetched += 1
+                #endif
                 let value = try await fetch(key)
                 policy.lane.leave(job.ticket)
                 return (value, now())

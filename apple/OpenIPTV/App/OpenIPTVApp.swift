@@ -100,6 +100,16 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("debug-stop")
         }
+        // UI tests: what was fetched so far (see AppModel.aheadCounts).
+        .overlay(alignment: .bottomTrailing) {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                Text(model.aheadCounts)
+                    .font(.caption2)
+                    .opacity(0.02)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("debug-ahead")
+            }
+        }
         #endif
         #if DEBUG && os(iOS)
         // UI tests: what Picture in Picture is doing.
