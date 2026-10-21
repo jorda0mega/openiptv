@@ -6,14 +6,19 @@ enum PlaylistKeys {
         guard headers.contains(where: { $0.hasPrefix("X-Emby-Token:") }) else { return "not an Emby stream" }
         guard let top = await read(master, headers) else { return "master unread" }
         let found = addresses(top)
-        var keyed = 0, total = 0
+        var keyed = 0, total = 0, elsewhere = 0
         for uri in found.filter({ $0.lowercased().contains(".m3u8") }).prefix(3) {
-            guard let variant = URL(string: uri, relativeTo: master)?.absoluteURL, let text = await read(variant, headers) else { continue }
+            guard let variant = URL(string: uri, relativeTo: master)?.absoluteURL else { continue }
+            guard HTTP.sameServer(variant, master) else {
+                elsewhere += 1
+                continue
+            }
+            guard let text = await read(variant, headers) else { continue }
             let inside = addresses(text)
             keyed += inside.filter(hasKey).count
             total += inside.count
         }
-        return "master \(found.filter(hasKey).count)/\(found.count) variants \(keyed)/\(total)"
+        return "master \(found.filter(hasKey).count)/\(found.count) variants \(keyed)/\(total)" + (elsewhere > 0 ? " elsewhere \(elsewhere)" : "")
     }
 
     private static func hasKey(_ uri: String) -> Bool {
