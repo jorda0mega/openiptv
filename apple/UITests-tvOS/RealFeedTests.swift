@@ -36,7 +36,7 @@ final class RealFeedTests: XCTestCase {
         // going: a 20 s sleep got the test runner stopped by the watchdog.
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "the lineup loads")], timeout: 20)
         shot("launched")
-        print("REAL focus at launch: \(focused())")
+        say("REAL focus at launch: \(focused())")
         // Into the page once it's there (the real lineup can take a minute).
         for _ in 0..<12 where focused() == "Live TV" || focused() == "nothing" {
             press(.down)
@@ -57,36 +57,49 @@ final class RealFeedTests: XCTestCase {
 
         let cards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'player.watchon.' AND identifier != 'player.watchon.tab'"))
         var game: String?
-        for _ in 0..<8 {
+        var onSeveral = 0
+        for _ in 0..<40 where game == nil && onSeveral < 8 {
             let label = focused()
-            press(.select)
-            _ = waitForCopy(timeout: 15)
-            let state = waitForState(timeout: 25)
-            for _ in 0..<2 where state == "playing" && !cards.firstMatch.exists { press(.select) }
-            print("REAL tried \(label): \(state), \(cards.firstMatch.exists ? "Watch On" : "one channel")")
-            if state == "playing", cards.firstMatch.exists {
-                game = label
+            if label.firstMatch(of: #/\d+ channels/#) != nil {
+                onSeveral += 1
+                press(.select)
+                _ = waitForCopy(timeout: 15)
+                let state = waitForState(timeout: 25)
+                for _ in 0..<2 where state == "playing" && !cards.firstMatch.exists { press(.select) }
+                say("REAL tried \(label): \(state), \(cards.firstMatch.exists ? "Watch On" : "one channel")")
+                if state == "playing", cards.firstMatch.exists {
+                    game = label
+                    break
+                }
+                press(.menu)
+                // Back on the card before moving on (a Right while focus is
+                // still coming back is lost, and the same game is tried again).
+                for _ in 0..<20 where !focused().contains(", ") { usleep(250_000) }
+            }
+            let before = focused()
+            press(.right)
+            if focused() == before {
+                say("REAL end of the row")
                 break
             }
-            press(.menu)
-            // Back on the card before moving on (a Right while focus is
-            // still coming back is lost, and the same game is tried again).
-            for _ in 0..<20 where !focused().contains(", ") { usleep(250_000) }
-            press(.right)
         }
-        let name = try XCTUnwrap(game, "no live game on more than one channel")
-        print("REAL game: \(name)")
+        guard onSeveral > 0 else {
+            say("REAL no game on 2+ channels")
+            throw XCTSkip("no game on 2+ channels")
+        }
+        let name = try XCTUnwrap(game, "no live game on 2+ channels played")
+        say("REAL game: \(name)")
         XCTAssertGreaterThanOrEqual(cards.count, 2, "Watch On has one channel")
-        for card in cards.allElementsBoundByIndex { print("REAL choice: \(card.label)") }
+        for card in cards.allElementsBoundByIndex { say("REAL choice: \(card.label)") }
         shot("watch on")
         let started = liveCopy()
-        print("REAL first channel: \(started)")
+        say("REAL first channel: \(started)")
         press(.right)
         press(.select)
         let deadline = Date().addingTimeInterval(10)
         while liveCopy() == started, Date() < deadline { usleep(250_000) }
-        XCTAssertNotEqual(liveCopy(), started, "Right and Select didn't switch")
-        print("REAL picked: \(liveCopy()) (\(waitForState(timeout: 20)))")
+        XCTAssertTrue(liveCopy() != started, "Right and Select didn't switch")
+        say("REAL picked: \(liveCopy()) (\(waitForState(timeout: 20)))")
         shot("picked")
         press(.menu)
     }
@@ -96,7 +109,11 @@ final class RealFeedTests: XCTestCase {
     private func press(_ button: XCUIRemote.Button) {
         remote.press(button)
         sleep(1)
-        print("REAL focus after \(button.rawValue): \(focused())")
+        say("REAL focus after \(button.rawValue): \(focused())")
+    }
+
+    private func say(_ line: String) {
+        print(line.replacing(#/tok=\w+/#, with: "tok=#"))
     }
 
     private func focused() -> String {
