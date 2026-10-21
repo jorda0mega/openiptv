@@ -143,7 +143,7 @@ ROWS = [
     ("xtream_formats=m3u8 (account)", {"xtream_formats": "m3u8"}, {"OPENIPTV_PROBE_IDS": "", "OPENIPTV_PROBE_ACCOUNT": "1"},
      lambda o, rest, _: ("m3u8=yes ts=no", " ".join(f"{k}={v}" for k, v in rest["account"][0].items()),
                          rest["account"][0].get("m3u8") == "yes" and rest["account"][0].get("ts") == "no")),
-    ("xtream_max_connections=0 (account)", {"xtream_max_connections": 0}, {"OPENIPTV_PROBE_IDS": "", "OPENIPTV_PROBE_ACCOUNT": "1"},
+    ("xtream_max_connections=0, API by POST only (account)", {"xtream_max_connections": 0, "xtream_post_only": 1}, {"OPENIPTV_PROBE_IDS": "", "OPENIPTV_PROBE_ACCOUNT": "1"},
      lambda o, rest, _: ("max_conn=unlimited", f"max_conn={rest['account'][0].get('max_conn')}",
                          rest["account"][0].get("max_conn") == "unlimited")),
     ("none, .m3u8", {}, {"OPENIPTV_PROBE_EXT": "m3u8"},
@@ -184,6 +184,8 @@ ROWS = [
     pick("live-pick, pick=1, OPENIPTV_PICK_ALWAYS=CNN", {"pick": 1}, {"OPENIPTV_PICK_ALWAYS": "CNN"},
          "live=6 twins=2 always=4 requests=2", "3011,3031,3001,3002,3022,3023,3051,3052,3041,3063"),
     pick("live-pick, no games, no ESPN", {}, {}, "live=0 twins=0 always=2 requests=2", "1,2"),
+    pick("live-pick, pick=1, API by POST only", {"pick": 1, "xtream_post_only": 1}, {},
+         "live=6 twins=2 always=4 requests=2", "3011,3031,3001,3002,3022,3023,3041,3043,3063,3051"),
 ]
 
 
