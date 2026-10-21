@@ -343,8 +343,7 @@ struct MoviePlayerView: View {
     @State private var lastSeek = Date.distantPast
     /// Picks original vs a server-converted lower bitrate to avoid stalls.
     @State private var governor: QualityGovernor?
-    /// Shown briefly when the quality changes.
-    @State private var qualityNote: String?
+    @State private var message: String?
     /// The converted bitrate playing before a switch back to the original,
     /// to return to if the original won't open.
     @State private var revertTo: Int?
@@ -436,8 +435,8 @@ struct MoviePlayerView: View {
                     .accessibilityIdentifier("Skip Intro")
             }
             #endif
-            if let qualityNote, !controlsVisible {
-                Text(qualityNote)
+            if let message, !controlsVisible {
+                Text(message)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -929,10 +928,10 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// An error, a quality change, or how fast it started (briefly).
+    /// An error, a short message, or how fast it started (briefly).
     private var note: (text: String, color: Color)? {
         if let error { return (error, .red) }
-        if let qualityNote { return (qualityNote, .yellow) }
+        if let message { return (message, .yellow) }
         if let timing { return (timing, .white.opacity(0.6)) }
         #if DEBUG
         if prefs.performanceStats, !stats.isEmpty { return (stats, .white.opacity(0.6)) }
@@ -1082,13 +1081,6 @@ struct MoviePlayerView: View {
                 apply(.converted(bitrate))
             }
         }
-        // UI tests (OPENREEL_DEBUG_NOTE_AFTER=seconds): a quality note then.
-        if let after = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NOTE_AFTER"].flatMap(Double.init) {
-            Task {
-                try? await Task.sleep(for: .seconds(after))
-                note("Lower quality for a smoother picture")
-            }
-        }
         #endif
         if let (warmPlayer, _) = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
@@ -1187,13 +1179,11 @@ struct MoviePlayerView: View {
             // from the start, converted from `at` on): played from `at`.
             offset = 0
             player.load(url, headers: playback.fallbackHeaders, start: at, file: false, tracks: playback.tracks, sameFilm: 0)
-            note("Lower quality to keep playing smoothly")
         case .original:
             revertTo = lastConverted
             offset = 0
             player.load(playback.url, headers: playback.headers, start: at, file: true,
                         readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks, sameFilm: 0)
-            note("Back to full quality")
         }
     }
 
@@ -1206,8 +1196,6 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// A quality change or a short message: a small note at the top for a
-    /// few seconds (it brought up every control for four seconds mid-film).
     /// The next episode, in this player screen (at the end, as the Apple TV
     /// app's "Play Next Episode" does).
     private func playNext(_ episode: EmbyItem) {
@@ -1231,11 +1219,13 @@ struct MoviePlayerView: View {
         }
     }
 
+    /// A small note at the top for a few seconds (not the controls: they
+    /// came up for four seconds mid-film).
     private func note(_ text: String) {
-        withAnimation(.easeOut(duration: 0.2)) { qualityNote = text }
+        withAnimation(.easeOut(duration: 0.2)) { message = text }
         Task {
             try? await Task.sleep(for: .seconds(4))
-            if qualityNote == text { withAnimation(.easeIn(duration: 0.3)) { qualityNote = nil } }
+            if message == text { withAnimation(.easeIn(duration: 0.3)) { message = nil } }
         }
     }
 
@@ -1327,7 +1317,6 @@ struct MoviePlayerView: View {
                 governor?.revert(to: bitrate)
                 offset = 0
                 player?.load(url, headers: playback.fallbackHeaders, start: position, file: false, tracks: playback.tracks, sameFilm: 0)
-                note("Staying at lower quality")
                 return
             }
             // A converted version the server won't make: go back to the
@@ -1336,7 +1325,6 @@ struct MoviePlayerView: View {
                 governor = nil
                 offset = 0
                 player?.load(playback.url, headers: playback.headers, start: position, file: true, tracks: playback.tracks, sameFilm: 0)
-                note("Couldn't lower the quality; playing the original")
                 return
             }
             if !started, attempt < playback.fallbacks.count {
