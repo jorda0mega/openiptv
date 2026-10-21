@@ -845,11 +845,11 @@ final class RealFeedTests: XCTestCase {
     }
 
     /// Each card started cold (nothing got ready ahead), ready (3 s on
-    /// screen) and ready as before its whole start was got ready
+    /// screen) and ready the old way, before its whole start was got ready
     /// (`-oldReadyStart YES`), in turns so no kind always goes first.
     private func startCards(_ ids: [String], _ shipped: [String]) throws {
         let kinds: [(name: String, arguments: [String])] = [
-            ("cold", ["-noPrepareAhead", "YES"]), ("ready", []), ("ready as before", ["-oldReadyStart", "YES"]),
+            ("cold", ["-noPrepareAhead", "YES"]), ("ready", []), ("ready (old way)", ["-oldReadyStart", "YES"]),
         ]
         for (n, id) in ids.enumerated() {
             for kind in n % 2 == 0 ? kinds : kinds.reversed() {
