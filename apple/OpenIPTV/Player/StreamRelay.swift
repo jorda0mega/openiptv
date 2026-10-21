@@ -916,10 +916,10 @@ enum Matroska {
     /// contents: the one holding the last keyframe at or before it, else
     /// the first (a film whose first keyframe is a moment in, from 0 s).
     static func clusterPosition(in d: [UInt8], at seconds: Double, scale: UInt64) -> Int64? {
-        guard let (element, el) = id(d, 0), element == cuesID, let (size, sl) = size(d, el), let size else { return nil }
+        guard let (element, el) = id(d, 0), element == cuesID, let (length, sl) = size(d, el), let length else { return nil }
         let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(scale))
         var before: (time: UInt64, position: UInt64)?, after: (time: UInt64, position: UInt64)?
-        for (child, point) in children(d, from: el + sl, to: min(d.count, el + sl + Int(size))) where child == cuePointID {
+        for (child, point) in children(d, from: el + sl, to: min(d.count, el + sl + Int(length))) where child == cuePointID {
             let fields = children(d, from: point.startIndex, to: point.endIndex)
             guard let time = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }),
                   let positions = fields.first(where: { $0.0 == cueTrackPositionsID }),
