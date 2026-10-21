@@ -805,9 +805,11 @@ final class RealFeedTests: XCTestCase {
     /// A lower quality 10 s into the first Continue Watching card, the
     /// server converting from there: its open the old way (-oldConvertedStart)
     /// and now, in turn, each split into the server's waits and the rest
-    /// (TEST_RUNNER_CONVERTED_RUNS pairs, 1 unless set).
+    /// (TEST_RUNNER_CONVERTED_RUNS pairs, 1 unless set; the film from
+    /// TEST_RUNNER_CONVERTED_AT seconds when set).
     func testConvertedStartAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = ProcessInfo.processInfo.environment["CONVERTED_AT"]
         let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
         app.launchArguments = shipped
         app.launch()
