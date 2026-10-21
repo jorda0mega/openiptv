@@ -96,27 +96,6 @@ enum Matroska {
         return value.reduce(0) { $0 << 8 | UInt64($1) }
     }
 
-    /// Where the Cues start in the file, from the SeekHead at its start.
-    static func cuesOffset(in d: [UInt8]) -> Int64? {
-        guard let (ebml, il) = id(d, 0), ebml == ebmlID, let (headerSize, sl) = self.size(d, il), let header = headerSize else { return nil }
-        var i = il + sl + Int(header)
-        guard let (segment, gl) = id(d, i), segment == segmentID, let (_, zl) = self.size(d, i + gl) else { return nil }
-        let segmentStart = i + gl + zl
-        i = segmentStart
-        while let (element, el) = id(d, i), let (length, ll) = self.size(d, i + el), let length, length < 1 << 31 {
-            let body = i + el + ll
-            if element == clusterID { return nil }
-            if element == seekHeadID {
-                for (target, position) in seeks(d, from: body, to: min(body + Int(length), d.count)) where target == cuesID {
-                    return Int64(segmentStart) + Int64(position)
-                }
-                return nil
-            }
-            i = body + Int(length)
-        }
-        return nil
-    }
-
     /// The SeekHead's entries: an element's ID and where it is.
     private static func seeks(_ d: [UInt8], from: Int, to end: Int) -> [(UInt32, UInt64)] {
         var found: [(UInt32, UInt64)] = []
@@ -143,7 +122,9 @@ enum Matroska {
 
     private static let largest: Int64 = 32 << 20
 
-    static func fetchStart(at seconds: Double, fetch: (Int64, Int64) async -> (data: Data, total: Int64)?) async -> Bool {
+    typealias Fetch = (Int64, Int64) async -> (data: Data, total: Int64)?
+
+    static func fetchStart(at seconds: Double, fetch: Fetch) async -> Bool {
         let first = StreamRelay.firstRead
         guard let (head, total) = await fetch(0, first), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total
         else { return false }
@@ -165,9 +146,8 @@ enum Matroska {
         if let tail, cues >= tailAt {
             index = [UInt8](tail.dropFirst(Int(cues - tailAt)))
         } else {
-            guard let probe = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](probe.data.prefix(16))),
-                  let whole = await fetch(cues, min(length, min(largest, total - cues))) else { return false }
-            index = [UInt8](whole.data)
+            guard let fetched = await fetchIndex(at: cues, total: total, fetch: fetch) else { return false }
+            index = fetched
         }
         guard let cluster = clusterPosition(in: index, at: seconds, scale: layout.timecodeScale) else { return false }
         let at = layout.segmentStart + cluster
@@ -179,17 +159,27 @@ enum Matroska {
     #if DEBUG
     /// The old ranges, but the cluster is the new choice. A film from the
     /// start gets its first cluster, which the old fetch skipped.
-    static func fetchStartAsBefore(at seconds: Double, fetch: (Int64, Int64) async -> (data: Data, total: Int64)?) async -> Bool {
-        guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head)), let cues = layout.cues, cues < total,
-              let first = await fetch(cues, min(1 << 16, total - cues)), let length = elementLength([UInt8](first.data.prefix(16))),
-              let index = await fetch(cues, min(length, min(largest, total - cues))),
-              let cluster = clusterPosition(in: [UInt8](index.data), at: seconds, scale: layout.timecodeScale)
+    static func fetchStartAsBefore(at seconds: Double, fetch: Fetch) async -> Bool {
+        guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head)), let cues = layout.cues,
+              let index = await fetchIndex(at: cues, total: total, fetch: fetch),
+              let cluster = clusterPosition(in: index, at: seconds, scale: layout.timecodeScale)
         else { return false }
         let at = layout.segmentStart + cluster
         guard at < total else { return false }
         return await fetch(at, min(StreamRelay.readSize, total - at)) != nil
     }
     #endif
+
+    /// The Cues at `cues`: 64 KB, which holds most films' whole index, then
+    /// the rest, to 32 MB.
+    static func fetchIndex(at cues: Int64, total: Int64, fetch: Fetch) async -> [UInt8]? {
+        guard cues < total, let probe = await fetch(cues, min(1 << 16, total - cues)),
+              let length = elementLength([UInt8](probe.data.prefix(16))) else { return nil }
+        let end = min(cues + min(length, largest), total), next = cues + Int64(probe.data.count)
+        guard end > next else { return [UInt8](probe.data.prefix(Int(end - cues))) }
+        guard let rest = await fetch(next, end - next) else { return nil }
+        return [UInt8](probe.data + rest.data)
+    }
 
     /// The whole length (header and contents) of the element at the start.
     static func elementLength(_ d: [UInt8]) -> Int64? {

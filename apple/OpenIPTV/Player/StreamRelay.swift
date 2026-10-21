@@ -415,15 +415,7 @@ final class StreamRelay: @unchecked Sendable {
         #if DEBUG
         let started = CFAbsoluteTimeGetCurrent()
         #endif
-        let fetch = { [self] (from: Int64, count: Int64) in
-            await withCheckedContinuation { done in
-                queue.async { [self] in
-                    ensure(route, cache, from: from, count: count, ahead: key) { bytes, total in
-                        done.resume(returning: bytes.flatMap { data in total.map { (data, $0) } })
-                    }
-                }
-            }
-        }
+        let fetch = fetcher(route, cache, ahead: key)
         #if DEBUG
         // The old fetch took the whole second below the resume point.
         let fetched = Self.oldReadyStart
@@ -442,6 +434,19 @@ final class StreamRelay: @unchecked Sendable {
     #if DEBUG
     private static var oldReadyStart: Bool { UserDefaults.standard.bool(forKey: "oldReadyStart") }
     #endif
+
+    /// `ensure` for Matroska's reads, which wait for the bytes.
+    private func fetcher(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, ahead key: String? = nil) -> Matroska.Fetch {
+        { [self] from, count in
+            await withCheckedContinuation { done in
+                queue.async { [self] in
+                    ensure(route, cache, from: from, count: count, ahead: key) { bytes, total in
+                        done.resume(returning: bytes.flatMap { data in total.map { (data, $0) } })
+                    }
+                }
+            }
+        }
+    }
 
     /// These bytes of the file in the cache (fetched unless already there),
     /// then `then` with them and the file's size (nil: failed). `ahead`:
@@ -515,52 +520,20 @@ final class StreamRelay: @unchecked Sendable {
             if tries > 0 { queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache, tries: tries - 1) } }
             return
         }
-        guard let cues = Matroska.cuesOffset(in: [UInt8](head)), cues < total, cache.available(from: cues) == 0 else { return }
+        guard let cues = Matroska.layout(in: [UInt8](head))?.cues, cues < total, cache.available(from: cues) == 0 else { return }
         #if DEBUG
         let started = CFAbsoluteTimeGetCurrent()
         #endif
-        // The element's header and, for most films, all of it; then the rest.
-        let first = min(Int64(1 << 16), total - cues)
-        fetchBytes(route, from: cues, count: first) { [weak self] data in
-            guard let self, let data else { return }
-            cache.store(data, at: cues, evicting: false)
-            guard let length = Matroska.elementLength([UInt8](data.prefix(16))) else { return }
-            let end = min(cues + min(length, 32 << 20), total)
-            let next = cues + Int64(data.count)
+        let fetch = fetcher(route, cache)
+        Task {
+            guard let index = await Matroska.fetchIndex(at: cues, total: total, fetch: fetch) else { return }
             #if DEBUG
-            func done() {
-                NSLog("%@", String(format: "PERF relay index %lld bytes at %lld in %.0f ms", end - cues, cues,
-                                   (CFAbsoluteTimeGetCurrent() - started) * 1000))
-            }
+            NSLog("%@", String(format: "PERF relay index %lld bytes at %lld in %.0f ms", Int64(index.count), cues,
+                               (CFAbsoluteTimeGetCurrent() - started) * 1000))
+            #else
+            _ = index
             #endif
-            guard end > next else {
-                #if DEBUG
-                done()
-                #endif
-                return
-            }
-            self.fetchBytes(route, from: next, count: end - next) { rest in
-                if let rest { cache.store(rest, at: next, evicting: false) }
-                #if DEBUG
-                done()
-                #endif
-            }
         }
-    }
-
-    /// `count` bytes of the file from `from`, from the server (nil: failed).
-    private func fetchBytes(_ route: (url: URL, headers: [(String, String)]), from: Int64, count: Int64,
-                            then: @escaping @Sendable (Data?) -> Void) {
-        var request = URLRequest(url: route.url)
-        request.timeoutInterval = 30
-        for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
-        request.setValue("bytes=\(from)-\(from + count - 1)", forHTTPHeaderField: "Range")
-        let task = HTTP.session.dataTask(with: request) { data, response, _ in
-            let ok = (response as? HTTPURLResponse)?.statusCode == 206 && data?.count == Int(count)
-            then(ok ? data : nil)
-        }
-        task.delegate = HTTP.keyOutOfRedirects
-        task.resume()
     }
 
     private func fail(_ connection: NWConnection, _ status: Int) {
