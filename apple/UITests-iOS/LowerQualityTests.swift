@@ -56,7 +56,9 @@ extension PlayerLookTests {
         XCTAssertGreaterThan(film, asked + 20, "the jump made while the lower quality opened was undone")
     }
 
-    func testALowerQualityClosedAndChosenAgainCarriesOnAtOnce() throws {
+    /// Kept, it came back with the quality chooser taking it for the original,
+    /// which then never went back up.
+    func testALowerQualityClosedAndChosenAgainOpensAfreshWhereItStopped() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
@@ -77,8 +79,8 @@ extension PlayerLookTests {
         sleep(4)
         let later = try XCTUnwrap(position(), "no position")
         print("REOPEN LOWERED closed at \(closed) s, started \(readout), 4 s later at \(later) s")
-        XCTAssertTrue(readout.hasPrefix("warm "), "it opened again from scratch: \(readout)")
-        XCTAssertEqual(later, closed + 4, accuracy: 3, "the bar isn't where the lower quality plays")
+        XCTAssertTrue(readout.hasPrefix("cold "), "the lower quality was kept: \(readout)")
+        XCTAssertEqual(later, closed + 4, accuracy: 3, "it didn't open where it stopped")
     }
 
     func testAJumpBackAfterPictureInPicturePlaysFromThere() throws {
