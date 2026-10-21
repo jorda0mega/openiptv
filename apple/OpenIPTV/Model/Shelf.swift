@@ -115,6 +115,14 @@ final class Lane {
         }
     }
 
+    /// Work ahead with no shelf of its own: run in a turn, or not at all.
+    func whenAllowed(for interest: Interest, _ work: () async -> Void) async {
+        let ticket = Ticket(interest)
+        guard (try? await enter(ticket)) != nil else { return }
+        defer { leave(ticket) }
+        await work()
+    }
+
     func leave(_ ticket: Ticket) {
         guard ticket.running else { return }
         ticket.running = false
@@ -247,7 +255,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         self.fetch = fetch
     }
 
-    func value(for key: Key, ahead interest: Interest? = nil) async throws -> Value {
+    func value(for key: Key) async throws -> Value {
         try Task.checkCancellation()
         switch current(key) {
         case let .kept(value, _)?:
@@ -255,10 +263,10 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         case let .failed(error, _)?:
             throw error
         case let .waiting(job)?, let .fetching(job)?:
-            if interest == nil { policy.lane.playNow(job.ticket) }
+            policy.lane.playNow(job.ticket)
             return try await wait(for: job, key)
         case nil:
-            return try await wait(for: start(key, Lane.Ticket(interest)), key)
+            return try await wait(for: start(key, Lane.Ticket(nil)), key)
         }
     }
 
@@ -288,11 +296,9 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             job = start(key, Lane.Ticket(interest))
         }
         job.holders.insert(interest.id)
-        return try? await wait(for: job, key, keepingJob: false)
-    }
-
-    func hurry(_ key: Key) {
-        if let job = entries[key]?.job { policy.lane.playNow(job.ticket) }
+        let value = try? await wait(for: job, key, keepingJob: false)
+        if Task.isCancelled { release(key, from: interest.id) }
+        return value
     }
 
     func release(_ key: Key, from interest: Interest.ID) {

@@ -159,7 +159,6 @@ struct TVHomeView: View {
 /// seconds; swiping right on More Info shows the next.
 struct TVHero: View {
     @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     let items: [Featured]
     let play: (Card) -> Void
     let open: (Card) -> Void
@@ -207,18 +206,10 @@ struct TVHero: View {
                     Button { play(item.card) } label: {
                         Label(item.card.kind == "Series" ? "Play" : "Play", systemImage: "play.fill")
                             .padding(.horizontal, 14)
+                            .preparesAhead(item.card.playTarget, at: .hero)
                     }
                     .buttonStyle(.glass)
                     .focused($focus, equals: .play)
-                    // Resting on Play: open it in the background, so Select
-                    // starts it at once.
-                    .task(id: focus == .play ? item.card.id : nil) {
-                        guard focus == .play else { return }
-                        try? await Task.sleep(for: .milliseconds(400))
-                        guard !Task.isCancelled else { return }
-                        model.warmUp(item.card.id, kind: item.card.kind, options: prefs.playerProfile.mpvOptions,
-                                     hardwareDecoding: prefs.hardwareDecoding)
-                    }
                     Button { open(item.card) } label: {
                         Label("More Info", systemImage: "info.circle")
                     }
@@ -373,7 +364,6 @@ struct TVTitleArt: View {
 /// them. Select plays; press and hold for the show's page.
 struct TVContinueRow: View {
     @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     let row: HomeRow
     let loadingCard: String?
     let play: (Card) -> Void
@@ -410,6 +400,7 @@ struct TVContinueRow: View {
                                     if loadingCard == card.id { ProgressView() }
                                 }
                                 .tvArtwork()
+                                .preparesAhead(card.playTarget, at: .continueWatching)
                         }
                         .buttonStyle(.borderless)
                         .focused($focused, equals: card.id)
@@ -427,16 +418,9 @@ struct TVContinueRow: View {
         // Up and Down reach the row from anywhere across the screen (they
         // skipped it when no card was straight above or below).
         .focusSection()
-        // Resting on a title: open it in the background (paused where it was
-        // left), so Select starts it at once.
+        // Browsing: a Home built from now on waits for the next moment.
         .task(id: focused) {
-            guard let id = focused, let card = row.cards.first(where: { $0.id == id }) else { return }
-            // Browsing: a Home built from now on waits for the next moment.
-            model.homeBrowsed()
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            model.warmUp(card.episodeId ?? card.id, kind: card.episodeId != nil ? "Episode" : card.kind,
-                         options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+            if focused != nil { model.homeBrowsed() }
         }
     }
 }
@@ -472,6 +456,7 @@ struct TVPosterRow: View {
                                         }
                                     }
                                     .tvArtwork()
+                                    .preparesAhead(card.pageTarget, at: .posterRow)
                             }
                             .buttonStyle(.borderless)
                             .focused($focused, equals: card.id)
@@ -498,18 +483,9 @@ struct TVPosterRow: View {
         // Up and Down reach the row from anywhere across the screen (they
         // went nowhere when no poster was straight above or below).
         .focusSection()
-        // Resting on a poster a moment: fetch its page (and pictures), so
-        // Select opens it complete; then the next one along, where focus
-        // usually goes. Sweeping across posters fetches nothing.
+        // Browsing: a Home built from now on waits for the next moment.
         .task(id: focused) {
-            guard let id = focused, let index = cards.firstIndex(where: { $0.id == id }) else { return }
-            model.homeBrowsed()
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled else { return }
-            model.prefetchTitle(cards[index])
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, index + 1 < cards.count else { return }
-            model.prefetchTitle(cards[index + 1])
+            if focused != nil { model.homeBrowsed() }
         }
     }
 }

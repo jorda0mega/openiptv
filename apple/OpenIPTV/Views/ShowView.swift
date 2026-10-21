@@ -7,6 +7,9 @@ struct ShowRoute: Hashable {
     let id: String
     let title: String
     var episodeId: String? = nil
+
+    /// What the page's main button plays.
+    var playTarget: Target { episodeId.map { .playable(id: $0, kind: "Episode") } ?? .playable(id: id, kind: "Series") }
 }
 
 /// A show: artwork and overview, one button to resume or start the right
@@ -17,7 +20,6 @@ struct ShowRoute: Hashable {
 /// so filtering and jumping are instant.
 struct ShowView: View {
     @Environment(AppModel.self) private var model
-    @Environment(Preferences.self) private var prefs
     @Environment(\.displayScale) private var displayScale
     let route: ShowRoute
     @Binding var playing: PlayerItem?
@@ -187,13 +189,8 @@ struct ShowView: View {
         .navigationTitle(route.title)
         #endif
         .inlineTitle()
+        .task(id: route.id) { await model.ahead.holding(route.playTarget, at: .page) }
         .task {
-            // The main button starts the moment it's tapped.
-            if let episode = route.episodeId {
-                model.warmUp(episode, kind: "Episode", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-            } else {
-                model.warmUp(route.id, kind: "Series", options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
-            }
             // Draw what's already here at once, then refresh behind it.
             if pin == nil { pin = model.pin(route.id) }
             _ = model.cachedShow(route.id)

@@ -211,6 +211,10 @@ struct Card: Codable, Hashable, Identifiable {
     /// Continue Watching: the episode's name, for VoiceOver (the card shows
     /// "S1, E1 · 33m", as in the Apple TV app).
     var episodeName: String? = nil
+
+    /// What a tap on it plays: the episode it's on, else the title.
+    var playTarget: Target { .playable(id: episodeId ?? id, kind: episodeId == nil ? kind : "Episode") }
+    var pageTarget: Target { .title(id: id, kind: kind) }
 }
 
 struct HomeRow: Codable, Hashable, Identifiable {
@@ -361,6 +365,32 @@ struct EmbyPlayback: Hashable, Identifiable {
     struct SubtitleCopy: Hashable, Sendable {
         let streamIndex: Int
         let subtitle: ServerSubtitle
+        var language: String? = nil
+        /// "SDH" and the track's name: words the player reads the kind from.
+        var title = ""
+    }
+
+    /// The server's subtitles the viewer most likely turns on: the plan's
+    /// (their pick for the title, or the languages its sound calls for),
+    /// else the sound's own language.
+    var likelySubtitle: ServerSubtitle? {
+        guard let plan = tracks?.refreshed() else { return nil }
+        let own = subtitleCopies.map { copy in
+            var track = Track(id: copy.streamIndex, kind: .subtitle, title: copy.title, language: copy.language, channels: nil,
+                              forced: false, selected: false)
+            track.ffIndex = copy.streamIndex
+            return (track, copy.subtitle)
+        }
+        let files = subtitleFiles.enumerated().compactMap { n, file -> (Track, ServerSubtitle)? in
+            guard let subtitle = file.server else { return nil }
+            var track = Track(id: -1 - n, kind: .subtitle, title: file.title, language: file.language, channels: nil,
+                              forced: file.title.split(separator: " ").contains("Forced"), selected: false)
+            track.external = true
+            return (track, subtitle)
+        }
+        let candidates = own + files
+        let likely = TrackChoice.likelySubtitle(candidates.map(\.0), plan: plan)
+        return candidates.first { $0.0.id == likely }?.1
     }
 
     /// The same, starting from this second (back from Picture in Picture).

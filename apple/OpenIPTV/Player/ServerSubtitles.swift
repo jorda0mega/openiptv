@@ -127,14 +127,14 @@ enum ServerSubtitles {
         return [.seconds(15), .seconds(60)]
     }
 
-    static func local(_ subtitle: ServerSubtitle, ahead interest: Interest? = nil) async -> URL? {
-        guard let file = try? await shelf(subtitle.kind).value(for: subtitle, ahead: interest) else { return nil }
+    static func local(_ subtitle: ServerSubtitle) async -> URL? {
+        guard let file = try? await shelf(subtitle.kind).value(for: subtitle) else { return nil }
         Task.detached { await store.touch(file) }
         return file
     }
 
-    static func hurry(_ subtitles: [ServerSubtitle]) {
-        for subtitle in subtitles { shelf(subtitle.kind).hurry(subtitle) }
+    static func warm(_ subtitle: ServerSubtitle, for interest: Interest) async {
+        _ = await shelf(subtitle.kind).warm(subtitle, for: interest)
     }
 
     static func forgetAll() async {

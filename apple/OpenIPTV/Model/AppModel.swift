@@ -341,12 +341,12 @@ final class AppModel {
                 stageHome(fresh)
             }
             // The first few things you'd tap on Home are ready before you do:
-            // how to play them, and their pages.
-            let likely = (fresh.featured.map { [$0.card] } ?? []) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(3) }
+            // their pages, and how to play the featured one (the rows' get
+            // ready as they stay on screen).
             let pages = (fresh.spotlight ?? []).map(\.card) + fresh.rows.prefix(2).flatMap { $0.cards.prefix(4) }
             pages.forEach(prefetchTitle)
             prepareRotation()
-            prepare(likely.map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) }, at: .homeForecast)
+            prepare(fresh.featured.map { [$0.card.playTarget] } ?? [], at: .homeForecast)
             if sync { Task { await syncLibrary(emby) } }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
@@ -708,14 +708,14 @@ final class AppModel {
         for (id, kind) in rotation {
             if kind == "Series" { prefetchShows([id]) } else { Task(priority: .utility) { await refreshTitle(id, kind: kind) } }
         }
-        prepare(rotation.map { (id: $0.id, kind: Optional($0.kind)) }, at: .homeForecast)
+        prepare(rotation.map { .playable(id: $0.id, kind: $0.kind) }, at: .homeForecast)
     }
 
     /// Near the end of an episode: the next one's details and how to play it.
     func prepareNext(after playback: EmbyPlayback) {
         Task {
             guard let next = await episode(after: playback) else { return }
-            prepare([(id: next.id, kind: "Episode")], at: .upNext)
+            prepare([.playable(id: next.id, kind: "Episode")], at: .upNext)
         }
     }
 
@@ -1104,8 +1104,6 @@ final class AppModel {
         let row = reconciled(server)
         offerContinue(row, now: returning)
         if afterStop { continueMovesUntil = nil }
-        prepare(Array((row?.cards ?? []).prefix(4)).map { (id: $0.episodeId ?? $0.id, kind: Optional($0.episodeId != nil ? "Episode" : $0.kind)) },
-                at: .continueWatching)
         return false
     }
 
@@ -1116,57 +1114,11 @@ final class AppModel {
 
     // MARK: Warm start
 
-    /// The item most likely to be played next, already opened and paused at
-    /// its resume point in a hidden player, so selecting it starts at once.
-    /// `key` is what was tapped (a show for Play next episode); `playback`
-    /// says which episode or movie is actually open.
-    /// `parked`: the player just closed, kept paused where it stopped.
+    /// A player kept open and paused out of sight, so selecting its title
+    /// starts at once: one that just closed (`parked`), or another copy
+    /// opened for a language picked in the player (see warmSwitch).
     private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback, parked: Bool)?
     private var warmExpiry: Task<Void, Never>?
-    /// The warm-up under way (still working out how to play it): owned, so
-    /// a newer one or a cool-down stops it before it opens a stream nobody
-    /// wants any more.
-    private var warmTask: Task<Void, Never>?
-    private var warming: String?
-
-    func warmUp(_ itemId: String, kind: String?, options: [(String, String)], hardwareDecoding: Bool) {
-        // Opens a stream: only on a connection known to be unmetered, never
-        // while something plays.
-        guard warm?.key != itemId, warming != itemId, !PlaybackActivity.isPlaying,
-              NetworkStatus.shared.knownUnmetered, !Self.noStreamAhead else { return }
-        coolDown()
-        warming = itemId
-        let key = planKey(itemId, kind: kind)
-        // Fetched ahead: waiting for it mustn't promote it to the
-        // connections kept for what's on screen.
-        warmTask = Task(priority: .utility) {
-            let playback = await plans.warm(key, for: Interest(at: .page, .next)).map(withLocalResume)
-            guard !Task.isCancelled, warming == itemId else { return }
-            warming = nil
-            guard let playback, warm == nil else { return }
-            #if DEBUG
-            searchSignposter.emitEvent("warm up player")
-            #endif
-            let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding)
-            player.prepareOffscreen()
-            player.openedAhead(for: Interest(at: .page, .next))
-            player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
-                        tracks: playback.tracks)
-            player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
-            player.addCopies(playback.subtitleCopies)
-            warm = (itemId, player, playback, false)
-            // Its preview stills too, so scrubbing has its pictures from
-            // the first second of playing.
-            // By what plays (a show resolves to one of its episodes).
-            Task(priority: .utility) { _ = await previewStills(playback.itemId) }
-            // Don't hold a connection open for long if it isn't wanted.
-            warmExpiry = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(300))
-                guard !Task.isCancelled else { return }
-                self?.coolDown()
-            }
-        }
-    }
 
     /// The preview stills (BIF) of the last two titles got ready ahead of a
     /// tap, and fetches under way.
@@ -1201,7 +1153,7 @@ final class AppModel {
     /// What plays next in the player screen, opened out of sight and paused
     /// at `playback`'s start (another copy of the title, for a language
     /// only it has): the screen keeps playing meanwhile and hands over once
-    /// its picture is ready (see takeWarm). Unlike warmUp, while something
+    /// its picture is ready (see takeWarm). Unlike work ahead, while something
     /// plays and on any connection: it was asked for.
     func warmSwitch(_ playback: EmbyPlayback, options: [(String, String)], hardwareDecoding: Bool) -> MPVPlayer {
         coolDown()
@@ -1238,7 +1190,6 @@ final class AppModel {
         }
         self.warm = nil
         warmExpiry?.cancel()
-        warm.player.playNow()
         return (warm.player, warm.playback)
     }
 
@@ -1273,34 +1224,39 @@ final class AppModel {
     }
 
     func coolDown() {
-        warmTask?.cancel()
-        warmTask = nil
-        warming = nil
         warmExpiry?.cancel()
         warm?.player.shutdown()
         warm = nil
     }
 
-    /// Continue Watching's titles: how to play each, and the start of each
-    /// file (its header, its index, the part where it resumes) fetched into
-    /// the relay's cache, so a tap starts from the device. A resumed title
-    /// waited for the server three times before its first frame. Only on a
-    /// connection known to be unmetered, never while something plays.
-    func prefetchContinueWatching(_ cards: [Card]) {
-        guard NetworkStatus.shared.knownUnmetered, !PlaybackActivity.isPlaying, !Self.noStreamAhead else { return }
-        let items = cards.prefix(4).compactMap { card -> (id: String, kind: String?)? in
-            if let episode = card.episodeId { return (episode, "Episode") }
-            return card.kind == "Series" ? nil : (card.id, card.kind)
+    /// What a screen shows that may be opened next, got ready while it stays
+    /// there (see Ahead): its page, how to play it, the start of its file
+    /// and its likeliest subtitles.
+    @ObservationIgnored private(set) lazy var ahead = Ahead(Ahead.Work(
+        page: { [weak self] target, interest in await self?.preparePage(target, interest) },
+        plan: { [weak self] target, interest in await self?.preparePlan(target, interest) },
+        fileStart: { start, interest in
+            guard !AppModel.noStreamAhead else { return }
+            _ = await FileStarts.shelf.warm(FileStart(start), for: interest)
+        },
+        subtitle: { subtitle, interest in await ServerSubtitles.warm(subtitle, for: interest) },
+        previews: { [weak self] plan, interest in
+            await Lane.embyFiles.whenAllowed(for: interest) { _ = await self?.previewStills(plan.itemId) }
+        }))
+
+    private func preparePage(_ target: Target, _ interest: Interest) async {
+        guard case let .title(id, kind) = target else { return }
+        await Lane.emby.whenAllowed(for: interest) {
+            if kind == "Series" { prefetchShows([id]) } else { await refreshTitle(id, kind: kind) }
         }
-        let interest = Interest(at: .continueWatching, .likely)
-        for item in items {
-            let key = planKey(item.id, kind: item.kind)
-            Task(priority: .utility) {
-                guard let playback = await plans.warm(key, for: interest).map(withLocalResume),
-                      !PlaybackActivity.isPlaying else { return }
-                StreamRelay.shared.prefetchStart(url: playback.url, headers: playback.headers, at: playback.startSeconds ?? 0)
-            }
+    }
+
+    private func preparePlan(_ target: Target, _ interest: Interest) async -> EmbyPlayback? {
+        let key = switch target {
+        case let .title(id, kind): planKey(id, kind: kind)
+        case let .playable(id, kind): planKey(id, kind: kind)
         }
+        return await plans.warm(key, for: interest).map(withLocalResume)
     }
 
     /// Subtitle files found for a film heard in neither English nor
@@ -1396,12 +1352,9 @@ final class AppModel {
     }
 
     /// Works out how to play these in the background; a later tap uses it.
-    func prepare(_ items: [(id: String, kind: String?)], at place: Place) {
+    func prepare(_ targets: [Target], at place: Place) {
         let interest = Interest(at: place, .likely)
-        for (id, kind) in items {
-            let key = planKey(id, kind: kind)
-            Task { _ = await plans.warm(key, for: interest) }
-        }
+        for target in targets { Task { _ = await preparePlan(target, interest) } }
     }
 
     /// The same item converted by the server at `bitrate`, from `start`,
@@ -1588,6 +1541,7 @@ final class AppModel {
     func signedInToEmby(_ account: EmbyAccount) async {
         accountGeneration += 1
         StreamRelay.shared.forgetAccount()
+        FileStarts.shelf.forgetAll()
         plans.forgetAll()
         // A Home on its way for the old account is dropped, not waited for.
         homeLoad = nil
@@ -1634,6 +1588,7 @@ final class AppModel {
         previews = []
         previewLoads = [:]
         StreamRelay.shared.forgetAccount()
+        FileStarts.shelf.forgetAll()
         await ServerSubtitles.forgetAll()
         habits = Habits()
         AppCache.remove("habits.json")
@@ -1660,6 +1615,7 @@ final class AppModel {
         AppCache.remove(Self.lineupFile)
         library.clear()
         StreamRelay.shared.forgetAccount()
+        FileStarts.shelf.forgetAll()
         plans.forgetAll()
         await ServerSubtitles.forgetAll()
         serverSearchCache = [:]
