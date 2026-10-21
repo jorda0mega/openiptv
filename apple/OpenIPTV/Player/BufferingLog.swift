@@ -4,7 +4,7 @@ import Foundation
 /// UI tests: how a film buffered since it opened. Counts and times only.
 struct BufferingLog {
     private(set) var rebuffers: [Double] = []
-    private(set) var opens: [(converted: Bool, firstFrame: Double)] = []
+    private(set) var opens: [(converted: Bool, firstFrame: Double, waits: ServerWaits?)] = []
     private(set) var jumps: [(seconds: Double, megabytes: Double)] = []
     private(set) var audioSwitches: [Double] = []
     var cacheSeconds = 0.0
@@ -19,9 +19,9 @@ struct BufferingLog {
         stalledSince = nil
     }
 
-    mutating func firstFrame(after seconds: Double) {
+    mutating func firstFrame(after seconds: Double, waits: ServerWaits? = nil) {
         guard let converted = openingConverted else { return }
-        opens.append((converted, seconds))
+        opens.append((converted, seconds, waits))
         openingConverted = nil
     }
 
@@ -53,13 +53,88 @@ struct BufferingLog {
             + (stalledSince == nil ? "" : ", stalled now")]
         parts.append(String(format: "cache %.0f s", cacheSeconds))
         parts.append(String(format: "speed %.1f MB/s", bytesPerSecond / 1e6))
-        parts.append("opens: " + opens.map { String(format: "%@ %.2f s", $0.converted ? "converted" : "original", $0.firstFrame) }
-            .joined(separator: ", "))
+        parts.append("opens: " + opens.map { open in
+            String(format: "%@ %.2f s", open.converted ? "converted" : "original", open.firstFrame)
+                + (open.waits.map { $0.split(of: open.firstFrame) } ?? "")
+        }.joined(separator: ", "))
         if !jumps.isEmpty {
             parts.append("jumps: " + jumps.map { String(format: "%.0f ms %.1f MB", $0.seconds * 1000, $0.megabytes) }.joined(separator: ", "))
         }
         if !audioSwitches.isEmpty { parts.append("audio: \(ms(audioSwitches)) ms") }
         return parts.joined(separator: " | ")
+    }
+}
+
+/// UI tests: the requests of a converted version's open, each from asking
+/// to the server's first line back (its wait for the server). The rest of
+/// the open is the app's and the player's own.
+struct ServerWaits {
+    enum Kind: String { case playlist = "p", segment = "s" }
+    private(set) var waits: [(kind: Kind, from: Double, to: Double)] = []
+    private var asking: [(connection: Int, kind: Kind, from: Double)] = []
+    private var segmentNext = false
+
+    /// ffmpeg names a segment just before it asks for it.
+    mutating func segmentComing() {
+        segmentNext = true
+    }
+
+    mutating func asked(on connection: Int, at now: Double) {
+        asking.append((connection, segmentNext ? .segment : .playlist, now))
+        segmentNext = false
+    }
+
+    mutating func answered(on connection: Int, at now: Double) {
+        guard let index = asking.firstIndex(where: { $0.connection == connection }) ?? asking.indices.first else { return }
+        let asked = asking.remove(at: index)
+        waits.append((asked.kind, asked.from, now))
+    }
+
+    mutating func fetched(_ kind: Kind, from: Double, to: Double) {
+        waits.append((kind, from, to))
+    }
+
+    /// Requests waiting at the same time count once.
+    var server: Double {
+        var total = 0.0, reached = -Double.infinity
+        for wait in waits.sorted(by: { $0.from < $1.from }) {
+            total += max(0, wait.to - max(wait.from, reached))
+            reached = max(reached, wait.to)
+        }
+        return total
+    }
+
+    /// ": server 6020 ms client 3090 ms (p3 p2 s6012)": each wait in the
+    /// order asked, p a playlist, s a segment.
+    func split(of open: Double) -> String {
+        let each = waits.sorted { $0.from < $1.from }.map { "\($0.kind.rawValue)\(Int((($0.to - $0.from) * 1000).rounded()))" }
+        return String(format: ": server %.0f ms client %.0f ms (%@)", server * 1000, max(0, open - server) * 1000,
+                      each.joined(separator: " "))
+    }
+}
+
+/// The converted open under way: ffmpeg's lines about its requests (any
+/// player's, so one open at a time) and the app's own playlist fetches.
+enum OpenRequests {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var current: ServerWaits?
+
+    static func begin() {
+        lock.withLock { current = ServerWaits() }
+    }
+
+    static func note(_ change: (inout ServerWaits) -> Void) {
+        lock.withLock {
+            guard current != nil else { return }
+            change(&current!)
+        }
+    }
+
+    static func finish() -> ServerWaits? {
+        lock.withLock {
+            defer { current = nil }
+            return current
+        }
     }
 }
 #endif

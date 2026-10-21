@@ -13,7 +13,10 @@ enum FFmpegLog {
     nonisolated(unsafe) private static var ledger = FailureLedger()
 
     static func listen() {
-        av_log_set_callback { _, level, format, arguments in
+        av_log_set_callback { context, level, format, arguments in
+            #if DEBUG
+            if let format { FFmpegLog.timeRequests(format, on: context) }
+            #endif
             guard level & 0xff <= AV_LOG_WARNING, let format, StreamFailure.worthReading(format: format), let arguments else { return }
             var text = [CChar](repeating: 0, count: 512)
             vsnprintf(&text, text.count, format, arguments)
@@ -22,6 +25,21 @@ enum FFmpegLog {
             FFmpegLog.lock.withLock { FFmpegLog.ledger.record(failure, at: now) }
         }
     }
+
+    #if DEBUG
+    /// The converted open's requests, by ffmpeg's lines about them (their
+    /// format only: the address is never read).
+    private static func timeRequests(_ format: UnsafePointer<CChar>, on context: UnsafeMutableRawPointer?) {
+        let now = CFAbsoluteTimeGetCurrent(), connection = Int(bitPattern: context)
+        if strncmp(format, "HLS request for url", 19) == 0 {
+            OpenRequests.note { $0.segmentComing() }
+        } else if strncmp(format, "request: ", 9) == 0 {
+            OpenRequests.note { $0.asked(on: connection, at: now) }
+        } else if strncmp(format, "header='", 8) == 0 {
+            OpenRequests.note { $0.answered(on: connection, at: now) }
+        }
+    }
+    #endif
 
     static func began(_ load: FailureLedger.Load) {
         lock.withLock { ledger.began(load) }

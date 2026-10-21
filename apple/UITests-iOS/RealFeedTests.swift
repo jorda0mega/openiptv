@@ -799,15 +799,40 @@ final class RealFeedTests: XCTestCase {
         }
         app.terminate()
 
-        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "10"
+        for old in [true, false] { try sayConvertedStart(ids[0], launch: shipped, old: old) }
+    }
+
+    /// A lower quality 10 s into the first Continue Watching card, the
+    /// server converting from there: its open the old way (-oldConvertedStart)
+    /// and now, in turn, each split into the server's waits and the rest
+    /// (TEST_RUNNER_CONVERTED_RUNS pairs, 1 unless set).
+    func testConvertedStartAsSeenNow() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
+        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
         app.launchArguments = shipped
         app.launch()
-        try bringOnScreen(ids[0], at: 0)
-        app.buttons[ids[0]].tap()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 45), "no Continue Watching")
+        let id = card.identifier
+        app.terminate()
+        let runs = ProcessInfo.processInfo.environment["CONVERTED_RUNS"].flatMap(Int.init) ?? 1
+        for _ in 0..<runs {
+            for old in [true, false] { try sayConvertedStart(id, launch: shipped, old: old) }
+        }
+    }
+
+    private func sayConvertedStart(_ id: String, launch arguments: [String], old: Bool) throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "10"
+        app.launchArguments = arguments + (old ? ["-oldConvertedStart", "YES"] : [])
+        app.launch()
+        try bringOnScreen(id, at: 0)
+        app.buttons[id].tap()
         _ = startParts()
+        let buffering = app.staticTexts["debug-buffering"].firstMatch
         for _ in 0..<60 where !buffering.label.contains("converted ") { sleep(1) }
         sleep(3)
-        say("REAL converted start: \(last("opens", in: buffering.label)) | \(quality.label)")
+        say("REAL converted start\(old ? " (old way)" : ""): \(last("opens", in: buffering.label)) | \(app.staticTexts["debug-quality"].firstMatch.label)")
+        app.terminate()
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
     }
 

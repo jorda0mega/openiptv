@@ -1214,6 +1214,9 @@ struct MoviePlayerView: View {
             revertTo = nil
             lastConverted = bitrate
             guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at, audio: player.audioStreamIndex) else { return }
+            #if DEBUG
+            player.askedForConverted()
+            #endif
             // The server's converted version is the whole film (its playlist
             // from the start, converted from `at` on): played from `at`.
             offset = 0
@@ -1357,6 +1360,9 @@ struct MoviePlayerView: View {
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
                 revertTo = nil
                 governor?.revert(to: bitrate)
+                #if DEBUG
+                player?.askedForConverted()
+                #endif
                 offset = 0
                 player?.load(url, headers: playback.fallbackHeaders, start: position, file: false, tracks: playback.tracks, sameFilm: 0)
                 return
@@ -1374,6 +1380,9 @@ struct MoviePlayerView: View {
                 let next = playback.fallbacks[attempt]
                 attempt += 1
                 let converted = next.path().hasSuffix(".m3u8")
+                #if DEBUG
+                if converted { player?.askedForConverted() }
+                #endif
                 offset = 0
                 player?.load(next, headers: playback.fallbackHeaders, start: playback.startSeconds, file: !converted,
                               tracks: playback.tracks, sameFilm: 0)
