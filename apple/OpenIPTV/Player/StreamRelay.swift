@@ -664,12 +664,17 @@ struct FileStart: Hashable, Sendable {
     /// The tenth of a second MPVPlayer.load tells mpv. A whole second is the
     /// keyframe before, when one falls between.
     let seconds: Double
+    /// How far before it mpv reads for the subtitle line on, with cue
+    /// durations: the larger of the two it is told (demux_mkv.c,
+    /// seek_with_cues). 0: no subtitles planned.
+    let subtitlePreroll: Double
     let url: URL
     let headers: [String]
 
     init(_ playback: EmbyPlayback) {
         itemId = playback.itemId
         seconds = Double(Self.mpvStart(playback.startSeconds ?? 0)) ?? 0
+        subtitlePreroll = TrackChoice.subtitlePreroll(playback.tracks, reopening: false).compactMap { Double($0.value) }.max() ?? 0
         url = playback.url
         headers = playback.headers
     }
@@ -679,7 +684,7 @@ struct FileStart: Hashable, Sendable {
 
     /// What opening it reads before its first frame, through `fetch`.
     func fetch(through fetch: Matroska.Fetch) async -> Bool {
-        await Matroska.fetchStart(at: seconds, fetch: fetch)
+        await Matroska.fetchStart(at: seconds, subtitlePreroll: subtitlePreroll, fetch: fetch)
     }
 
     #if DEBUG
@@ -689,18 +694,21 @@ struct FileStart: Hashable, Sendable {
     }
     #endif
 
-    static func == (a: FileStart, b: FileStart) -> Bool { a.itemId == b.itemId && a.seconds == b.seconds }
+    static func == (a: FileStart, b: FileStart) -> Bool {
+        a.itemId == b.itemId && a.seconds == b.seconds && a.subtitlePreroll == b.subtitlePreroll
+    }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(itemId)
         hasher.combine(seconds)
+        hasher.combine(subtitlePreroll)
     }
 }
 
 extension FileStart: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     var description: String { "file start" }
     var debugDescription: String { description }
-    var customMirror: Mirror { Mirror(self, children: ["seconds": seconds]) }
+    var customMirror: Mirror { Mirror(self, children: ["seconds": seconds, "subtitlePreroll": subtitlePreroll]) }
 }
 
 extension Lane {

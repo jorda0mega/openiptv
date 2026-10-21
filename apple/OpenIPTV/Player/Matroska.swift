@@ -18,6 +18,7 @@ enum Matroska {
     private static let cueTrackPositionsID: UInt32 = 0xB7
     private static let cueClusterPositionID: UInt32 = 0xF1
     private static let cueTrackID: UInt32 = 0xF7
+    private static let cueDurationID: UInt32 = 0xB2
     private static let tracksID: UInt32 = 0x1654AE6B
     private static let trackEntryID: UInt32 = 0xAE
     private static let trackNumberID: UInt32 = 0xD7
@@ -83,14 +84,30 @@ enum Matroska {
         return overflow || at >= total ? nil : at
     }
 
-    /// Where in the file libmpv's cluster for `seconds` starts.
-    static func clusterPosition(in d: [UInt8], at seconds: Double, layout: Layout) -> Int64? {
+    /// Where in the file libmpv starts reading a film told to start at
+    /// `seconds`, and the keyframe it plays from there.
+    static func start(in d: [UInt8], at seconds: Double, subtitlePreroll: Double, layout: Layout) -> (reads: Int64, keyframe: Int64)? {
         let all = cues(in: d, layout: layout)
-        // mpv seeks by the video track's cue entries, else by all of them,
-        // to 5 ms past what it is told, in nanoseconds (demux_mkv.c, demux_mkv_seek).
+        // As demux_mkv.c's demux_mkv_seek and seek_with_cues: by the video
+        // track's cue entries, else by all of them, 5 ms past what it is
+        // told, in nanoseconds.
         let video = all.filter { $0.track == layout.videoTrack }
+        let seekable = video.isEmpty ? all : video
         let target = UInt64(min(max(0, seconds + 0.005) * 1e9 + 0.5, 9e18))
-        return keyframe(in: video.isEmpty ? all : video, at: target, scale: layout.timecodeScale)?.position
+        guard let keyframe = keyframe(in: seekable, at: target, scale: layout.timecodeScale) else { return nil }
+        // With a subtitle on and cue durations, from the earliest cluster
+        // since the last keyframe `subtitlePreroll` back that holds a
+        // subtitle still on at the keyframe.
+        guard subtitlePreroll > 0, all.contains(where: { $0.duration != nil }) else { return (keyframe.position, keyframe.position) }
+        let back = UInt64(min(subtitlePreroll * 1e9 / Double(layout.timecodeScale), 9e18))
+        let earliest = keyframe.time > back ? keyframe.time - back : 0
+        var floor: (time: UInt64, position: Int64) = (0, 0)
+        for cue in seekable where cue.time <= earliest && cue.time >= floor.time { floor = (cue.time, cue.position) }
+        let reads = all.filter { cue in
+            guard case (let end, false) = cue.time.addingReportingOverflow(cue.duration ?? 0) else { return false }
+            return cue.time <= keyframe.time && end > keyframe.time && cue.position >= floor.position && cue.position < keyframe.position
+        }.map(\.position).min()
+        return (reads ?? keyframe.position, keyframe.position)
     }
 
     /// One CueTrackPositions.
@@ -98,6 +115,7 @@ enum Matroska {
         let track: UInt64?
         let time: UInt64
         let position: Int64
+        let duration: UInt64?
     }
 
     private static func cues(in d: [UInt8], layout: Layout) -> [Cue] {
@@ -110,7 +128,8 @@ enum Matroska {
                 let values = children(d, from: positions.startIndex, to: positions.endIndex)
                 guard let position = value(cueClusterPositionID, in: values).flatMap({ inFile($0, from: layout.segmentStart, total: layout.total) })
                 else { continue }
-                found.append(Cue(track: value(cueTrackID, in: values), time: time, position: position))
+                found.append(Cue(track: value(cueTrackID, in: values), time: time, position: position,
+                                 duration: values.first { $0.0 == cueDurationID }.map { uint($0.1) ?? 0 }))
             }
         }
         return found
@@ -180,7 +199,7 @@ enum Matroska {
 
     typealias Fetch = (Int64, Int64) async -> (data: Data, total: Int64)?
 
-    static func fetchStart(at seconds: Double, fetch: Fetch) async -> Bool {
+    static func fetchStart(at seconds: Double, subtitlePreroll: Double, fetch: Fetch) async -> Bool {
         let first = StreamRelay.firstRead
         guard let (head, total) = await fetch(0, first), let layout = layout(in: [UInt8](head), total: total), let cues = layout.cues
         else { return false }
@@ -205,8 +224,9 @@ enum Matroska {
             guard let fetched = await fetchIndex(at: cues, total: total, fetch: fetch) else { return false }
             index = fetched
         }
-        guard let at = clusterPosition(in: index, at: seconds, layout: layout) else { return false }
-        let from = max(at, header), to = min(at + first + StreamRelay.readSize, tailAt)
+        guard let opening = start(in: index, at: seconds, subtitlePreroll: subtitlePreroll, layout: layout) else { return false }
+        let from = max(opening.reads, header)
+        let to = min(opening.keyframe + first + StreamRelay.readSize, opening.reads + largest, tailAt)
         guard from < to else { return true }
         return await fetch(from, to - from) != nil
     }
@@ -217,7 +237,7 @@ enum Matroska {
     static func fetchStartAsBefore(at seconds: Double, fetch: Fetch) async -> Bool {
         guard let (head, total) = await fetch(0, 1 << 18), let layout = layout(in: [UInt8](head), total: total), let cues = layout.cues,
               let index = await fetchIndex(at: cues, total: total, fetch: fetch),
-              let at = clusterPosition(in: index, at: seconds, layout: layout)
+              let at = start(in: index, at: seconds, subtitlePreroll: 0, layout: layout)?.keyframe
         else { return false }
         return await fetch(at, min(StreamRelay.readSize, total - at)) != nil
     }
