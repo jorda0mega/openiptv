@@ -6,19 +6,26 @@ struct ConvertedPlaylist: Sendable {
     let segments: [(seconds: Double, tags: [String], url: URL)]
     let header: [String]
 
-    static func load(_ master: URL, headers: [String]) async -> ConvertedPlaylist? {
-        guard let top = await lines(master, headers), let variant = variant(of: top.lines, at: top.url),
-              let list = await lines(variant, headers) else { return nil }
+    /// `fetch`: a playlist's lines and the address they came from (after
+    /// any redirect).
+    static func load(_ master: URL, headers: [String],
+                     fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> ConvertedPlaylist? {
+        guard let top = await fetch(request(master, headers)), let variant = variant(of: top.lines, at: top.url),
+              let list = await fetch(request(variant, headers)) else { return nil }
         return ConvertedPlaylist(list.lines, at: list.url)
     }
 
-    private static func lines(_ url: URL, _ headers: [String]) async -> (lines: [String], url: URL)? {
+    private static func request(_ url: URL, _ headers: [String]) -> URLRequest {
         var request = HTTP.keyInHeader(URLRequest(url: url))
         request.timeoutInterval = 20
         for header in headers {
             let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             if pair.count == 2 { request.setValue(pair[1], forHTTPHeaderField: pair[0]) }
         }
+        return request
+    }
+
+    private static func lines(_ request: URLRequest) async -> (lines: [String], url: URL)? {
         #if DEBUG
         let asked = CFAbsoluteTimeGetCurrent()
         #endif
