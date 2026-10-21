@@ -661,9 +661,9 @@ struct CoverImage: View {
             }
         }
         .clipped()
-        // Taps only inside its frame: the picture, cut to it, is laid out
-        // whole, and took taps meant for what's beside it (the player's
-        // Info pill above its still).
+        // Taps only inside its frame: the filled picture is drawn past it,
+        // and cutting it to the frame doesn't cut its taps. It took taps
+        // meant for what's beside it (the player's Info pill above its still).
         .contentShape(.rect)
         .task(id: images.first?.url) {
             for candidate in images {
