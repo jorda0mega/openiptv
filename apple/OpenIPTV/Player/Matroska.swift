@@ -28,8 +28,7 @@ enum Matroska {
         let segmentStart: Int64
         let total: Int64
         let firstCluster: Int64?
-        /// Where the walk to the first cluster needs more of the file.
-        let more: Int64?
+        let continueAt: Int64?
         let cues: Int64?
         /// Earliest SeekHead offset after the clusters. libmpv reads that tail on open.
         let pastClusters: Int64?
@@ -75,20 +74,18 @@ enum Matroska {
         let pastClusters = firstCluster.flatMap { first in
             positions.filter { $0.target != clusterID && $0.at > first }.map(\.at).min()
         }
-        let more = firstCluster == nil && i + 12 > d.count ? Int64(i) : nil
-        return Layout(segmentStart: Int64(segmentStart), total: total, firstCluster: firstCluster, more: more,
+        let continueAt = firstCluster == nil && i + 12 > d.count ? Int64(i) : nil
+        return Layout(segmentStart: Int64(segmentStart), total: total, firstCluster: firstCluster, continueAt: continueAt,
                       cues: positions.first { $0.target == cuesID }?.at, pastClusters: pastClusters, timecodeScale: scale, videoTrack: videoTrack)
     }
 
-    /// A position counted from the segment's start, in the file (nil: past its end).
+    /// Counted from the segment's start. Nil when it does not fit in the file.
     private static func inFile(_ position: UInt64, from segmentStart: Int64, total: Int64) -> Int64? {
         guard let position = Int64(exactly: position) else { return nil }
         let (at, overflow) = segmentStart.addingReportingOverflow(position)
         return overflow || at >= total ? nil : at
     }
 
-    /// Where in the file libmpv starts reading a film told to start at
-    /// `seconds`, and the keyframe it plays from there.
     private static func start(in d: [UInt8], at seconds: Double, subtitlePreroll: Double, layout: Layout) -> (reads: Int64, keyframe: Int64)? {
         let all = cues(in: d, layout: layout)
         // As demux_mkv.c's demux_mkv_seek and seek_with_cues: by the video
@@ -113,7 +110,6 @@ enum Matroska {
         return (reads ?? keyframe.position, keyframe.position)
     }
 
-    /// One CueTrackPositions.
     private struct Cue {
         let track: UInt64?
         let time: UInt64
@@ -208,8 +204,8 @@ enum Matroska {
         var head = [UInt8](data)
         guard var layout = layout(in: head, total: total) else { return false }
         // Fonts and cover art (Attachments) can push it past the first read.
-        while layout.firstCluster == nil, let more = layout.more, more < largest {
-            let from = Int64(head.count), to = min(more + (1 << 16), total)
+        while layout.firstCluster == nil, let continueAt = layout.continueAt, continueAt < largest {
+            let from = Int64(head.count), to = min(continueAt + (1 << 16), total)
             guard from < to, let next = await fetch(from, to - from), let longer = Self.layout(in: head + next.data, total: total) else { return false }
             head += next.data
             layout = longer
@@ -272,8 +268,6 @@ enum Matroska {
     }
     #endif
 
-    /// The Cues at `cues`: 64 KB, which holds most films' whole index, then
-    /// the rest, to 32 MB.
     static func fetchIndex(at cues: Int64, total: Int64, fetch: Fetch) async -> [UInt8]? {
         guard cues < total, let probe = await fetch(cues, min(1 << 16, total - cues)),
               let length = elementLength([UInt8](probe.data.prefix(16))) else { return nil }

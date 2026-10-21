@@ -215,7 +215,6 @@ final class StreamRelay: @unchecked Sendable {
         }
     }
 
-    /// A read in the log, and the start it was made for.
     struct StartReadKey {
         let start: Int
         let index: Int
@@ -443,7 +442,6 @@ final class StreamRelay: @unchecked Sendable {
     private static var oldReadyStart: Bool { UserDefaults.standard.bool(forKey: "oldReadyStart") }
     #endif
 
-    /// `ensure` for Matroska's reads, which wait for the bytes.
     private func fetcher(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, ahead key: String? = nil) -> Matroska.Fetch {
         { [self] from, count in
             await withCheckedContinuation { done in
@@ -700,10 +698,8 @@ struct FileStart: Hashable, Sendable {
         headers = playback.headers
     }
 
-    /// The start MPVPlayer.load gives mpv.
     static func mpvStart(_ seconds: Double) -> String { String(format: "%.1f", seconds) }
 
-    /// What opening it reads before its first frame, through `fetch`.
     func fetch(through fetch: Matroska.Fetch) async -> Bool {
         await Matroska.fetchStart(at: seconds, subtitlePreroll: subtitlePreroll, fetch: fetch)
     }

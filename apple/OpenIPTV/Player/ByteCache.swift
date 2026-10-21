@@ -1,8 +1,5 @@
 import Foundation
 
-/// What's been fetched of one file, kept in a sparse temporary file (only
-/// the bytes written take space), up to 1 GB; past that, the bytes
-/// farthest from the newest are let go, but never those fetched ahead.
 final class ByteCache: @unchecked Sendable {
     private static let folder = FileManager.default.temporaryDirectory.appending(path: "relay-cache")
     static let limit: Int64 = 1 << 30
@@ -66,10 +63,7 @@ final class ByteCache: @unchecked Sendable {
     }
     private var indexClaimed = false
 
-    /// `evicting`: may let the bytes farthest from these go to make room.
-    /// `false`, fetched ahead (the file's start, its index and tags, where it
-    /// resumes): lets nothing go, as the index is far from where the film
-    /// plays, and is never let go itself.
+    /// False: fetched ahead. The index is far from where the film plays, so these bytes are never let go.
     func store(_ data: Data, at offset: Int64, evicting: Bool = true) {
         let end = offset + Int64(data.count)
         lock.withLock {
@@ -85,7 +79,6 @@ final class ByteCache: @unchecked Sendable {
         }
     }
 
-    /// Merges a run of bytes with those it touches.
     private static func adding(_ new: Range<Int64>, to ranges: [Range<Int64>]) -> [Range<Int64>] {
         var merged = new
         var kept: [Range<Int64>] = []

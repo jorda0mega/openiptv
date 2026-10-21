@@ -259,13 +259,7 @@ struct MoviePlayerView: View {
     /// How many fallback streams have been tried after the first failed.
     @State private var attempt = 0
     @State private var stream: FilmStream = .whole
-    /// A converted version on its way (its playlists being fetched): any
-    /// other open stops it.
     @State private var convertedOpen: Task<Void, Never>?
-    /// Where in the film the stream's clock starts. Regression: Emby's
-    /// playlist is the whole film whatever second it's asked from (Emby
-    /// 4.9); taken as starting at the second asked from, a lowered quality
-    /// played the film from its beginning, after a pause.
     private var offset: Double { stream.clockStart }
     /// "Started in …" for a few seconds after the first frame (development
     /// builds with the stats on).
@@ -1223,16 +1217,13 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// The file again (the original, or another way the server offers it).
     private func playFile(_ url: URL, headers: [String], at: Double?, readahead: MPVPlayer.Readahead = .live) {
         convertedOpen?.cancel()
         stream = .whole
         player?.load(url, headers: headers, start: at, file: true, readahead: readahead, tracks: playback.tracks, sameFilm: 0)
     }
 
-    /// The server's converted version once its playlists are here (two
-    /// requests): from where the film is then, so a jump meanwhile holds.
-    /// Regression: a jump or another open meanwhile was undone.
+    /// Opens from where the film is once the playlists arrive, so a jump during the wait holds.
     private func playConverted(_ url: URL) {
         guard let player else { return }
         #if DEBUG
@@ -1250,7 +1241,6 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// Every jump (see MPVPlayer.jump): `seek` gets the stream's own second.
     private func jump(to target: Double, seek: (MPVPlayer, Double) -> Void) {
         guard let player else { return }
         stream = player.jump(in: stream, to: target, for: playback) { seek(player, $0) }

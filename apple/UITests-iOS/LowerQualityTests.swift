@@ -4,8 +4,6 @@ import XCTest
 /// segment the film was at (the test server converts as Emby does), so the
 /// player's clock starts there.
 extension PlayerLookTests {
-    /// The film, lowered 15 s in. `settings`: for the test server, besides
-    /// converting as Emby does.
     private func openLowered(_ server: URL, _ settings: [String: String] = [:]) {
         configure(server, ["emby_convert": "1", "convert_delay": "2"].merging(settings) { $1 })
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
@@ -18,9 +16,6 @@ extension PlayerLookTests {
         XCTAssertTrue(buffering.label.contains("converted "), "the lower quality didn't start: \(buffering.label)")
     }
 
-    /// A jump back past where a lower quality began plays from where it
-    /// lands, its pictures where the bar says: the jump opens the version
-    /// again from there; else the jump stopped at the version's start.
     func testJumpBackPastALowerQualitysStartPlaysFromThere() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -40,9 +35,6 @@ extension PlayerLookTests {
         XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
     }
 
-    /// A jump while a lower quality's playlists are on their way holds: the
-    /// version opens where the film is then. Regression: it opened at the
-    /// second it was asked for, and the jump was undone.
     func testAJumpWhileALowerQualityOpensHolds() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -64,9 +56,6 @@ extension PlayerLookTests {
         XCTAssertGreaterThan(film, asked + 20, "the jump made while the lower quality opened was undone")
     }
 
-    /// A lower quality closed and chosen again carries on at once where it
-    /// stopped, the bar where it plays. Regression: one listed from a later
-    /// segment was let go on closing and opened again from scratch.
     func testALowerQualityClosedAndChosenAgainCarriesOnAtOnce() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -92,9 +81,6 @@ extension PlayerLookTests {
         XCTAssertEqual(later, closed + 4, accuracy: 3, "the bar isn't where the lower quality plays")
     }
 
-    /// After Picture in Picture, a jump back past a lower quality's start
-    /// plays from where it lands. Regression: the player came back without
-    /// the version's listing, and the jump stopped at its first segment.
     func testAJumpBackAfterPictureInPicturePlaysFromThere() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")

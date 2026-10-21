@@ -51,8 +51,6 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(segments(text).count, 1)
     }
 
-    /// What each request sent: the address asked and the account's key in
-    /// its header, the master answered from `masterAt` listing `listed`.
     private func requests(listing listed: String, masterAt: URL) async -> [(url: URL, key: String?)] {
         var sent: [(url: URL, key: String?)] = []
         let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&api_key=test-key")!
@@ -71,8 +69,6 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(sent.map(\.key), ["test-key", "test-key"])
     }
 
-    /// The account's key goes to no other server: not to one the master
-    /// was redirected to, nor to one it lists the variant on.
     func testTheAccountsKeyGoesNowhereElse() async {
         let redirected = await requests(listing: "main.m3u8?MediaSourceId=m1&api_key=test-key",
                                         masterAt: URL(string: "https://cdn.example/emby/Videos/m1/master.m3u8")!)

@@ -6,8 +6,6 @@ struct ConvertedPlaylist: Sendable {
     let segments: [(seconds: Double, tags: [String], url: URL)]
     let header: [String]
 
-    /// `fetch`: a playlist's lines and the address they came from (after
-    /// any redirect).
     static func load(_ master: URL, headers: [String],
                      fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> ConvertedPlaylist? {
         guard let top = await fetch(request(master, headers, given: master)), let variant = variant(of: top.lines, at: top.url),
