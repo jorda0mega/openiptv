@@ -9,6 +9,13 @@ enum TileBadge {
         channels > 1 ? .channels(channels) : nil
     }
 
+    static func game(_ state: LiveFailures.GameState) -> TileBadge? {
+        switch state {
+        case let .feedsLeft(left): count(left)
+        case .notPlaying: .notPlaying
+        }
+    }
+
     var spoken: String {
         switch self {
         case let .channels(count): "\(count) channels"

@@ -2149,12 +2149,8 @@ final class AppModel {
         return grouped.count > 1 ? grouped : []
     }
 
-    func gameState(_ entry: LiveOrganizer.Entry) -> (badge: TileBadge?, notPlaying: Bool) {
-        let feeds = groups(of: entry.channels).map { ([$0.option] + $0.others).map(\.id) }
-        let feedsWorthTrying = feeds.filter { !liveFailures.failed($0) }.count
-        let everyFeedFailedHere = !feeds.isEmpty && feedsWorthTrying == 0
-        let notPlaying = liveFailures.gameNotPlaying(entry.channels.map(\.id)) || everyFeedFailedHere
-        return (notPlaying ? .notPlaying : TileBadge.count(feedsWorthTrying), notPlaying)
+    func gameState(_ entry: LiveOrganizer.Entry) -> LiveFailures.GameState {
+        liveFailures.gameState(feeds: groups(of: entry.channels).map { ([$0.option] + $0.others).map(\.id) })
     }
 
     private static let unnamedFeed = WatchOn.Feed(service: LiveOrganizer.serviceName(""))

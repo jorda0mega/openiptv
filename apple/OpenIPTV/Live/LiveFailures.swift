@@ -62,6 +62,17 @@ struct LiveFailures: Equatable {
         ids.contains { sharedGames[$0].map { $0.end(after: sharedGameLife) > now } ?? false }
     }
 
+    enum GameState: Equatable {
+        case feedsLeft(Int)
+        case notPlaying
+    }
+
+    func gameState(feeds: [[String]], at now: Date = Date()) -> GameState {
+        let left = feeds.filter { !failed($0, at: now) }.count
+        let everyFeedFailedHere = !feeds.isEmpty && left == 0
+        return everyFeedFailedHere || gameNotPlaying(feeds.flatMap(\.self), at: now) ? .notPlaying : .feedsLeft(left)
+    }
+
     mutating func gamePlayed(_ ids: [String]) -> [String: Mark] {
         var cleared: [String: Mark] = [:]
         for id in ids {
