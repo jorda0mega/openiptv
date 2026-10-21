@@ -12,6 +12,7 @@ have something to find.
 """
 
 import base64
+import secrets
 import select
 import socket
 import shutil
@@ -92,6 +93,13 @@ AUDIO_REQUESTS = [0, 0]
 # from /mock/mark) lists them. Only action names and category ids, never a
 # login or an address.
 XTREAM_REQUESTS = []
+# A made-up IPTV login for one leak test run (GET /mock/iptv_login?fresh=1):
+# the provider takes it beside u/p, and the simulator's log and the API
+# addresses are searched for it. Never printed or sent back.
+FAKE_LOGIN = {}
+# The address of every player_api.php, xmltv.php and get.php request, with
+# its query: (time, address).
+IPTV_ADDRESSES = []
 LIVE_REQUESTS = []
 LIVE_HELD = {}
 LIVE_LOCK = threading.Lock()
@@ -230,6 +238,24 @@ def subtitle_file(index):
 
 
 _STREAMS = None
+
+
+def iptv_login_ok(username, password):
+    return (username, password) == ("u", "p") or (bool(FAKE_LOGIN) and (username, password) == (FAKE_LOGIN["username"], FAKE_LOGIN["password"]))
+
+
+def iptv_path_login_ok(path, kind):
+    parts = path.split("/")
+    return len(parts) > 4 and parts[1] == kind and iptv_login_ok(parts[2], parts[3])
+
+
+def simulator_log(since):
+    simulator = os.environ.get("OPENIPTV_MOCK_SIMULATOR", "")
+    if not simulator:
+        return ""
+    window = ["--start", datetime.fromtimestamp(since).strftime("%Y-%m-%d %H:%M:%S")] if since else ["--last", "5m"]
+    return subprocess.run(["xcrun", "simctl", "spawn", simulator, "log", "show", *window, "--style", "compact"],
+                          capture_output=True, text=True).stdout
 
 
 def user_agent_word(header):
@@ -495,6 +521,16 @@ class Handler(BaseHTTPRequestHandler):
             body = {k: v[0] for k, v in parse_qs(raw).items()}
         else:
             body = json.loads(raw or "{}")
+        url = urlparse(self.path)
+        if url.path in ("/player_api.php", "/xmltv.php", "/get.php"):
+            IPTV_ADDRESSES.append((time.time(), self.path))
+            fields = {k: v[0] for k, v in parse_qs(url.query).items()}
+            fields.update({k: str(v) for k, v in body.items()})
+            if url.path == "/player_api.php":
+                return self.xtream(fields)
+            if url.path == "/get.php":
+                return self.m3u(url.path, fields)
+            return self.xmltv()
         if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == TOKEN:
             return self.send(b"", status=204)
         if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
@@ -584,6 +620,24 @@ class Handler(BaseHTTPRequestHandler):
             out = subprocess.run(["xcrun", "simctl", "spawn", simulator, "log", "show", "--last", "5m", "--style", "compact"],
                                  capture_output=True, text=True).stdout if simulator else ""
             return self.send({"count": out.count(TOKEN), "read": bool(out)})
+        if path == "/mock/iptv_login":
+            if q.get("fresh") == "1":
+                FAKE_LOGIN.update({"username": "lu" + secrets.token_hex(8), "password": "lp" + secrets.token_hex(8)})
+            return self.send({"set": bool(FAKE_LOGIN)})
+        if path == "/mock/iptv_source":
+            if not FAKE_LOGIN:
+                return self.send({"error": "no login"}, status=404)
+            return self.send({"id": "6F9A1E52-0000-4000-8000-000000000003", "name": "Leak test", "kind": {"xtream": {
+                "server": f"http://{self.headers.get('Host')}/", "username": FAKE_LOGIN["username"], "password": FAKE_LOGIN["password"]}}})
+        if path == "/mock/iptv_leaks":
+            since = float(q.get("since", "0"))
+            log = simulator_log(since)
+            addresses = [a for t, a in IPTV_ADDRESSES if t >= since]
+            def found(text, key):
+                return text.count(FAKE_LOGIN[key]) if FAKE_LOGIN else -1
+            return self.send({"log_read": bool(log), "log_username": found(log, "username"), "log_password": found(log, "password"),
+                              "requests": len(addresses), "address_username": sum(found(a, "username") for a in addresses),
+                              "address_password": sum(found(a, "password") for a in addresses)})
         if path == "/mock/mark":
             return self.send({"t": time.time()})
         if path == "/mock/video_requests":
@@ -626,6 +680,7 @@ class Handler(BaseHTTPRequestHandler):
                 KEY_CHECKS.clear()
                 CANCELLED.clear()
                 XTREAM_REQUESTS.clear()
+                IPTV_ADDRESSES.clear()
                 LIVE_REQUESTS.clear()
                 with LIVE_LOCK:
                     LIVE_HELD.clear()
@@ -646,6 +701,8 @@ class Handler(BaseHTTPRequestHandler):
             if os.environ.get("OPENIPTV_MOCK_LOG") and "/Images/" not in path:
                 print(f"{time.time():.2f} GET {path}", flush=True)
             return self.emby(path[len("/emby"):], q)
+        if path in ("/player_api.php", "/xmltv.php", "/get.php"):
+            IPTV_ADDRESSES.append((time.time(), self.path))
         if path == "/player_api.php":
             return self.xtream(q)
         if path in ("/get.php", "/playlist.m3u"):
@@ -654,7 +711,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.stalker(q)
         if path == "/xmltv.php":
             return self.xmltv()
-        if path.startswith(("/timeshift/u/p/", "/streaming/timeshift.php")):
+        if iptv_path_login_ok(path, "timeshift") or path.startswith("/streaming/timeshift.php"):
             # Catch-up: /timeshift/u/p/{minutes}/{yyyy-MM-dd:HH-mm}/{id}.ts,
             # the start in the panel's time zone.
             parts = path.split("/")
@@ -664,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
             if recording:
                 return self.send_file(recording, "video/mp2t")
             return self.send(b"\x47" * 188 * 64, "video/mp2t")
-        if path.startswith(("/live/u/p/", "/stream/")):
+        if iptv_path_login_ok(path, "live") or path.startswith("/stream/"):
             return self.live(path)
         if path.startswith("/seg/"):
             time.sleep(0.05)
@@ -672,7 +729,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send({"error": "not found"}, status=404)
 
     def xtream(self, q):
-        if q.get("username") != "u" or q.get("password") != "p":
+        if not iptv_login_ok(q.get("username"), q.get("password")):
             return self.send({"user_info": {"auth": 0}})
         now = int(time.time())
         action = q.get("action")
@@ -756,7 +813,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def m3u(self, path, q):
         base = f"http://{self.headers.get('Host')}"
-        if path == "/get.php" and (q.get("username") != "u" or q.get("password") != "p"):
+        if path == "/get.php" and not iptv_login_ok(q.get("username"), q.get("password")):
             return self.send({"error": "unauthorized"}, status=401)
         lines = [f'#EXTM3U url-tvg="{base}/xmltv.php?username=u&password=p"']
         for i in range(1, CHANNELS + 1):
