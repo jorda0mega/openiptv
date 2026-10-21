@@ -73,11 +73,13 @@ enum Matroska {
     /// keyframe at or before it, else the next.
     static func clusterPosition(in d: [UInt8], at seconds: Double, layout: Layout) -> Int64? {
         guard let (element, el) = id(d, 0), element == cuesID, let (length, sl) = size(d, el), let length else { return nil }
-        let target = UInt64(max(0, seconds) * 1_000_000_000 / Double(layout.timecodeScale))
+        // mpv seeks to 5 ms past what it is told, in nanoseconds (demux_mkv.c, demux_mkv_seek).
+        let target = UInt64(min(max(0, seconds + 0.005) * 1e9 + 0.5, 9e18))
         var before: (time: UInt64, position: Int64)?, after: (time: UInt64, position: Int64)?
         for (child, point) in children(d, from: el + sl, to: min(d.count, el + sl + Int(length))) where child == cuePointID {
             let fields = children(d, from: point.startIndex, to: point.endIndex)
-            guard let time = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }),
+            guard let ticks = fields.first(where: { $0.0 == cueTimeID }).flatMap({ uint($0.1) }),
+                  case (let time, false) = ticks.multipliedReportingOverflow(by: layout.timecodeScale),
                   let positions = fields.first(where: { $0.0 == cueTrackPositionsID }),
                   let position = children(d, from: positions.1.startIndex, to: positions.1.endIndex)
                       .first(where: { $0.0 == cueClusterPositionID }).flatMap({ uint($0.1) }),
