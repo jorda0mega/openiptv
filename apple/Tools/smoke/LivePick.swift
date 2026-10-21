@@ -4,8 +4,7 @@ enum LivePick {
     static let slots = 6
 
     static func list(_ login: LiveProbe.Login, _ action: String) async -> Data? {
-        guard let url = login.api(action) else { LiveProbe.say("PICK error=other"); return nil }
-        let r = await LiveProbe.read(url, agent: LiveProbe.agent(.app), cap: 120, keep: 256 << 20)
+        let r = await LiveProbe.read(login.api(action), agent: LiveProbe.agent(.app), cap: 120, keep: 256 << 20)
         let http = r.response?.statusCode ?? 0
         guard http == 200, r.capped == nil, r.error == nil, r.bytes == r.body.count else {
             let headers = r.response != nil || r.metrics?.transactionMetrics.last?.responseStartDate != nil

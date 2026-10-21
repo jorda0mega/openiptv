@@ -279,9 +279,8 @@ if value("OPENIPTV_SMOKE_MODE") == "dump-lineup" {
           let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS"),
           let out = value("OPENIPTV_SMOKE_OUT") else { print("dump: no Xtream login or output path"); exit(1) }
     func api(_ action: String) async -> [[String: Any]] {
-        var parts = URLComponents(url: server.server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [.init(name: "username", value: user), .init(name: "password", value: pass), .init(name: "action", value: action)]
-        var request = URLRequest(url: parts.url!)
+        var request = HTTP.form(server.server.appending(path: "player_api.php"),
+                                [.init(name: "username", value: user), .init(name: "password", value: pass), .init(name: "action", value: action)])
         request.timeoutInterval = 120
         let data = try? await URLSession.shared.data(for: request).0
         return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? []
@@ -308,9 +307,8 @@ if value("OPENIPTV_SMOKE_MODE") == "survey" {
     guard let server = value("OPENIPTV_XTREAM_URL").flatMap({ XtreamProvider.parse($0.split(separator: " ").first.map(String.init) ?? $0) }),
           let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS") else { print("survey: no Xtream login"); exit(1) }
     func api(_ action: String) async -> (Data?, Double) {
-        var parts = URLComponents(url: server.server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [.init(name: "username", value: user), .init(name: "password", value: pass), .init(name: "action", value: action)]
-        var request = URLRequest(url: parts.url!)
+        var request = HTTP.form(server.server.appending(path: "player_api.php"),
+                                [.init(name: "username", value: user), .init(name: "password", value: pass), .init(name: "action", value: action)])
         request.timeoutInterval = 120
         let start = Date()
         let data = try? await URLSession.shared.data(for: request).0
@@ -396,10 +394,8 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
     guard let server = value("OPENIPTV_XTREAM_URL").flatMap({ XtreamProvider.parse($0.split(separator: " ").first.map(String.init) ?? $0) })?.server,
           let user = value("OPENIPTV_XTREAM_USER"), let pass = value("OPENIPTV_XTREAM_PASS") else { print("probe: no Xtream login"); exit(1) }
     func t(_ start: Date) -> String { String(format: "%.2f s", Date().timeIntervalSince(start)) }
-    func api(_ items: [URLQueryItem]) -> URL {
-        var parts = URLComponents(url: server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [.init(name: "username", value: user), .init(name: "password", value: pass)] + items
-        return parts.url!
+    func api(_ items: [URLQueryItem]) -> URLRequest {
+        HTTP.form(server.appending(path: "player_api.php"), [.init(name: "username", value: user), .init(name: "password", value: pass)] + items)
     }
     /// Downloads for at most `cap` seconds: status, encoding, first byte, bytes, rate.
     final class NoRedirect: NSObject, URLSessionTaskDelegate {
@@ -410,9 +406,9 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
             completionHandler(nil)
         }
     }
-    func fetch(_ url: URL, cap: Double, gzip: Bool = true, follow: Bool = true, maxBytes: Int = .max) async
+    func fetch(_ asked: URLRequest, cap: Double, gzip: Bool = true, follow: Bool = true, maxBytes: Int = .max) async
         -> (status: Int, encoding: String, length: String, first: Double, bytes: Int, total: Double, location: String?)? {
-        var request = URLRequest(url: url)
+        var request = asked
         request.timeoutInterval = 30
         request.setValue(gzip ? "gzip" : "identity", forHTTPHeaderField: "Accept-Encoding")
         let config = URLSessionConfiguration.ephemeral
@@ -443,7 +439,7 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
 
     // Account limits.
     let accountStart = Date()
-    if let data = try? await URLSession.shared.data(from: api([])).0,
+    if let data = try? await URLSession.shared.data(for: api([])).0,
        let info = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["user_info"] as? [String: Any] {
         print("== Account (\(t(accountStart)))")
         print("  max connections \(info["max_connections"] ?? "?"), active \(info["active_cons"] ?? "?"), formats \(info["allowed_output_formats"] ?? "?")")
@@ -452,18 +448,16 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
     // Guide: full, compressed or not, and with a day window.
     print("\n== Guide (xmltv.php), up to 90 s each")
     let guide = server.appending(path: "xmltv.php")
-    func guideURL(_ extra: [URLQueryItem]) -> URL {
-        var parts = URLComponents(url: guide, resolvingAgainstBaseURL: false)!
-        parts.queryItems = [.init(name: "username", value: user), .init(name: "password", value: pass)] + extra
-        return parts.url!
+    func guideRequest(_ extra: [URLQueryItem]) -> URLRequest {
+        HTTP.form(guide, [.init(name: "username", value: user), .init(name: "password", value: pass)] + extra)
     }
-    report("full, asking for gzip", await fetch(guideURL([]), cap: 90))
-    report("1 day back, 2 ahead", await fetch(guideURL([.init(name: "prev_days", value: "1"), .init(name: "next_days", value: "2")]), cap: 90))
-    report("0 back, 1 ahead", await fetch(guideURL([.init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")]), cap: 90))
+    report("full, asking for gzip", await fetch(guideRequest([]), cap: 90))
+    report("1 day back, 2 ahead", await fetch(guideRequest([.init(name: "prev_days", value: "1"), .init(name: "next_days", value: "2")]), cap: 90))
+    report("0 back, 1 ahead", await fetch(guideRequest([.init(name: "prev_days", value: "0"), .init(name: "next_days", value: "1")]), cap: 90))
 
     // Channels with an archive; one channel's own schedule.
     let streamsStart = Date()
-    let streamsData = (try? await URLSession.shared.data(from: api([.init(name: "action", value: "get_live_streams")])).0) ?? Data()
+    let streamsData = (try? await URLSession.shared.data(for: api([.init(name: "action", value: "get_live_streams")])).0) ?? Data()
     let streams = (try? JSONSerialization.jsonObject(with: streamsData) as? [[String: Any]]) ?? []
     print("\n== Lineup \(streams.count) channels in \(t(streamsStart))")
     let archived = streams.filter { "\($0["tv_archive"] ?? "")" == "1" }
@@ -471,12 +465,12 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
     guard let pick, let streamId = pick["stream_id"].map({ "\($0)" }) else { print("no archived channel"); exit(0) }
     print("  probing an archived channel (\(archived.count) have archives)")
     let tableStart = Date()
-    let table = (try? await URLSession.shared.data(from: api([.init(name: "action", value: "get_simple_data_table"), .init(name: "stream_id", value: streamId)])).0) ?? Data()
+    let table = (try? await URLSession.shared.data(for: api([.init(name: "action", value: "get_simple_data_table"), .init(name: "stream_id", value: streamId)])).0) ?? Data()
     let listings = ((try? JSONSerialization.jsonObject(with: table) as? [String: Any])?["epg_listings"] as? [[String: Any]]) ?? []
     let withArchive = listings.filter { "\($0["has_archive"] ?? "0")" == "1" }
     print("  own schedule    \(listings.count) programmes (\(withArchive.count) with archive), \(table.count / 1000) KB in \(t(tableStart))")
     let shortStart = Date()
-    let short = (try? await URLSession.shared.data(from: api([.init(name: "action", value: "get_short_epg"), .init(name: "stream_id", value: streamId), .init(name: "limit", value: "4")])).0) ?? Data()
+    let short = (try? await URLSession.shared.data(for: api([.init(name: "action", value: "get_short_epg"), .init(name: "stream_id", value: streamId), .init(name: "limit", value: "4")])).0) ?? Data()
     print("  short guide     \(short.count / 1000) KB in \(t(shortStart))")
 
     // Catch-up: a programme from about two hours ago.
@@ -491,18 +485,18 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
         formatter.dateFormat = "yyyy-MM-dd:HH-mm"
         // Panels expect the start in the server's own time zone.
         var serverZone = TimeZone(identifier: "UTC")!
-        if let data = try? await URLSession.shared.data(from: api([])).0,
+        if let data = try? await URLSession.shared.data(for: api([])).0,
            let info = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["server_info"] as? [String: Any],
            let zone = info["timezone"] as? String, let tz = TimeZone(identifier: zone) { serverZone = tz }
         formatter.timeZone = serverZone
         let stamp = formatter.string(from: Date(timeIntervalSince1970: start))
         var path = server
         for segment in ["timeshift", user, pass, String(minutes), stamp, "\(streamId).ts"] { path.append(path: segment) }
-        report("timeshift path (.ts)", await fetch(path, cap: 4, maxBytes: 1_000_000))
+        report("timeshift path (.ts)", await fetch(URLRequest(url: path), cap: 4, maxBytes: 1_000_000))
         var php = URLComponents(url: server.appending(path: "streaming/timeshift.php"), resolvingAgainstBaseURL: false)!
         php.queryItems = [.init(name: "username", value: user), .init(name: "password", value: pass), .init(name: "stream", value: streamId),
                           .init(name: "start", value: stamp), .init(name: "duration", value: String(minutes))]
-        report("timeshift.php", await fetch(php.url!, cap: 4, maxBytes: 1_000_000))
+        report("timeshift.php", await fetch(URLRequest(url: php.url!), cap: 4, maxBytes: 1_000_000))
         print("  (programme \(minutes) min, starting \(Int((Date().timeIntervalSince1970 - start) / 60)) min ago; server zone \(serverZone.identifier))")
     } else {
         print("  no programme with an archive in the schedule")
@@ -512,20 +506,20 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
     print("\n== Opening a live channel (one at a time)")
     var live = server
     for segment in ["live", user, pass, "\(streamId).ts"] { live.append(path: segment) }
-    let hop = await fetch(live, cap: 3, follow: false, maxBytes: 1)
+    let hop = await fetch(URLRequest(url: live), cap: 3, follow: false, maxBytes: 1)
     report("first hop (no redirect)", hop)
     if let location = hop?.location, let next = URL(string: location, relativeTo: live) {
         print("  redirects to another host: \(next.host() == live.host() ? "no" : "yes")")
-        report("redirect target", await fetch(next, cap: 4, maxBytes: 500_000))
+        report("redirect target", await fetch(URLRequest(url: next), cap: 4, maxBytes: 500_000))
         try? await Task.sleep(for: .seconds(2))
-        report("same target again", await fetch(next, cap: 4, maxBytes: 500_000))
+        report("same target again", await fetch(URLRequest(url: next), cap: 4, maxBytes: 500_000))
     }
     try? await Task.sleep(for: .seconds(2))
-    report("followed (.ts)", await fetch(live, cap: 4, maxBytes: 500_000))
+    report("followed (.ts)", await fetch(URLRequest(url: live), cap: 4, maxBytes: 500_000))
     try? await Task.sleep(for: .seconds(2))
     var hls = server
     for segment in ["live", user, pass, "\(streamId).m3u8"] { hls.append(path: segment) }
-    report("followed (.m3u8 playlist)", await fetch(hls, cap: 4, maxBytes: 200_000))
+    report("followed (.m3u8 playlist)", await fetch(URLRequest(url: hls), cap: 4, maxBytes: 200_000))
     exit(0)
 }
 if value("OPENIPTV_SMOKE_MODE") == "session" {

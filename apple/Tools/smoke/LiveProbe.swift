@@ -20,12 +20,9 @@ enum LiveProbe {
             return url
         }
 
-        func api(_ action: String? = nil) -> URL? {
-            var parts = URLComponents(url: server.appending(path: "player_api.php"), resolvingAgainstBaseURL: false)
-            var items = [URLQueryItem(name: "username", value: username), URLQueryItem(name: "password", value: password)]
-            if let action { items.append(URLQueryItem(name: "action", value: action)) }
-            parts?.queryItems = items
-            return parts?.url
+        func api(_ action: String? = nil) -> URLRequest {
+            let login = [URLQueryItem(name: "username", value: username), URLQueryItem(name: "password", value: password)]
+            return HTTP.form(server.appending(path: "player_api.php"), login + (action.map { [URLQueryItem(name: "action", value: $0)] } ?? []))
         }
     }
 
@@ -173,6 +170,10 @@ enum LiveProbe {
     static var requests = 0
 
     static func read(_ url: URL, agent: String, cap: Double, keep: Int = 0) async -> Reader {
+        await read(URLRequest(url: url), agent: agent, cap: cap, keep: keep)
+    }
+
+    static func read(_ asked: URLRequest, agent: String, cap: Double, keep: Int = 0) async -> Reader {
         requests += 1
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil
@@ -188,7 +189,7 @@ enum LiveProbe {
         let reader = Reader(keep: keep)
         let session = URLSession(configuration: config, delegate: reader, delegateQueue: reader.queue)
         defer { session.invalidateAndCancel() }
-        var request = URLRequest(url: url)
+        var request = asked
         request.setValue(agent, forHTTPHeaderField: "User-Agent")
         let task = session.dataTask(with: request)
         // A tight leeway: asyncAfter's default let a 10 s cap run 0.7 s over.
@@ -305,8 +306,7 @@ enum LiveProbe {
     }
 
     static func account(_ login: Login) async -> String {
-        guard let url = login.api() else { return "PROBE account error=other" }
-        let r = await read(url, agent: agent(.app), cap: 30, keep: 1 << 20)
+        let r = await read(login.api(), agent: agent(.app), cap: 30, keep: 1 << 20)
         let http = r.response?.statusCode ?? 0
         guard http == 200, let root = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
               let info = root["user_info"] as? [String: Any]
