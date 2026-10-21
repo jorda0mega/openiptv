@@ -64,15 +64,15 @@ actor GuideStore {
     /// Downloads and parses every guide URL, keeping programmes for `keep`
     /// (XMLTV channel ids) from 2 h ago to `hoursAhead` from now (today and
     /// tomorrow, so search finds what's coming up too).
-    func refresh(from urls: [URL], keep: Set<String>, hoursAhead: Int64 = 24) async {
-        guard !urls.isEmpty, state != .loading else { return }
+    func refresh(from requests: [URLRequest], keep: Set<String>, hoursAhead: Int64 = 24) async {
+        guard !requests.isEmpty, state != .loading else { return }
         state = .loading
         let now = Int64(Date().timeIntervalSince1970)
         var merged: [String: [Programme]] = [:]
         var lastError: String?
-        for url in urls {
+        for request in requests {
             do {
-                let parsed = try await Self.fetch(url, keep: keep, from: now - 7200, to: now + hoursAhead * 3600)
+                let parsed = try await Self.fetch(request, keep: keep, from: now - 7200, to: now + hoursAhead * 3600)
                 merged.merge(parsed) { $0 + $1 }
             } catch {
                 lastError = SourceError.wrap(error).localizedDescription
@@ -188,8 +188,8 @@ actor GuideStore {
 
     // MARK: Download + parse
 
-    private static func fetch(_ url: URL, keep: Set<String>, from: Int64, to: Int64) async throws -> [String: [Programme]] {
-        let (downloaded, response) = try await HTTP.session.download(from: url)
+    private static func fetch(_ request: URLRequest, keep: Set<String>, from: Int64, to: Int64) async throws -> [String: [Programme]] {
+        let (downloaded, response) = try await HTTP.session.download(for: request)
         defer { try? FileManager.default.removeItem(at: downloaded) }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else { throw SourceError.http(code) }

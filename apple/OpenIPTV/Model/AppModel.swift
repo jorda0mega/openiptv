@@ -1833,7 +1833,7 @@ final class AppModel {
         let multiple = iptv.count > 1
         var cats: [LiveCategory] = []
         var channels: [LiveChannel] = []
-        var guideURLs: [URL] = []
+        var guides: [URLRequest] = []
         for source in iptv {
             if case let .success(lineup)? = results[source.id] {
                 let (ownCategories, ownChannels) = LiveOrganizer.withoutLogin(categories: lineup.categories, channels: lineup.channels)
@@ -1841,7 +1841,7 @@ final class AppModel {
                     LiveCategory(id: $0.id, name: multiple ? "\(source.name) · \($0.name)" : $0.name, channels: $0.channels)
                 }
                 channels += ownChannels
-                guideURLs += lineup.guideURLs
+                guides += lineup.guides
             } else {
                 cats += previousCategories.filter { $0.sourceId == source.id }
                 channels += previousChannels.filter { $0.sourceId == source.id }
@@ -1853,11 +1853,11 @@ final class AppModel {
 
         let keep = Set(channels.compactMap(\.epgId))
         let stale = await guide.isStale()
-        if !guideURLs.isEmpty, force || stale {
+        if !guides.isEmpty, force || stale {
             guideState = .loading
             let guide = guide
             Task.detached {
-                await guide.refresh(from: guideURLs, keep: keep)
+                await guide.refresh(from: guides, keep: keep)
                 await self.guideDidUpdate()
             }
         }

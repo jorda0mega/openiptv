@@ -158,7 +158,7 @@ final class StalkerProvider: LiveProvider, @unchecked Sendable {
             guard let count = counts[id], count > 0 else { return nil }
             return LiveCategory(id: id, name: title, channels: count)
         }
-        return LiveLineup(categories: categories, channels: channels, guideURLs: [])
+        return LiveLineup(categories: categories, channels: channels, guides: [])
     }
 
     func shortEPG(for channel: LiveChannel) async -> [Programme] {

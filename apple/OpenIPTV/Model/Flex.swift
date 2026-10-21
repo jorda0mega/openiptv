@@ -165,6 +165,28 @@ enum HTTP {
         return moved
     }
 
+    static func form(_ url: URL, _ fields: [URLQueryItem]) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(fields.map { "\(formEncoded($0.name))=\(formEncoded($0.value ?? ""))" }.joined(separator: "&").utf8)
+        return request
+    }
+
+    static func loginInForm(_ url: URL) -> URLRequest {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let fields = parts.queryItems, fields.contains(where: { ["username", "password"].contains($0.name.lowercased()) })
+        else { return URLRequest(url: url) }
+        parts.queryItems = nil
+        return form(parts.url!, fields)
+    }
+
+    private static let formSafe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    private static func formEncoded(_ text: String) -> String {
+        text.addingPercentEncoding(withAllowedCharacters: formSafe) ?? ""
+    }
+
     /// The address a server redirects to is the server's choice.
     static func redirected(_ request: URLRequest, from original: URL?) -> URLRequest {
         guard let target = request.url, let original,
