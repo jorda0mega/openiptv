@@ -663,8 +663,8 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 }
 
 /// What's been fetched of one file, kept in a sparse temporary file (only
-/// the bytes written take space), up to 1 GB; past that, what's furthest
-/// behind the newest bytes is let go.
+/// the bytes written take space), up to 1 GB; past that, the bytes
+/// farthest from the newest are let go.
 final class ByteCache: @unchecked Sendable {
     private static let folder = FileManager.default.temporaryDirectory.appending(path: "relay-cache")
     static let limit: Int64 = 1 << 30
@@ -727,12 +727,12 @@ final class ByteCache: @unchecked Sendable {
     }
     private var indexClaimed = false
 
-    /// `evicting`: may let older bytes go to make room (not for the index,
-    /// far from where the film plays).
+    /// `evicting`: may let the bytes farthest from these go to make room
+    /// (not for the index, far from where the film plays).
     func store(_ data: Data, at offset: Int64, evicting: Bool = true) {
         let end = offset + Int64(data.count)
         lock.withLock {
-            if evicting, stored + Int64(data.count) > limit { letGo(before: offset - (64 << 20)) }
+            if evicting { makeRoom(for: Int64(data.count), near: offset) }
             guard stored + Int64(data.count) <= limit else { return }
             do {
                 try handle.seek(toOffset: UInt64(offset))
@@ -758,17 +758,55 @@ final class ByteCache: @unchecked Sendable {
         stored = ranges.reduce(0) { $0 + Int64($1.count) }
     }
 
-    /// Frees the runs that end before `offset` (their disk space too).
-    private func letGo(before offset: Int64) {
-        let old = ranges.filter { $0.upperBound <= offset }
-        guard !old.isEmpty else { return }
-        for range in old {
-            var hole = fpunchhole_t(fp_flags: 0, reserved: 0, fp_offset: off_t(range.lowerBound), fp_length: off_t(range.count))
-            _ = fcntl(handle.fileDescriptor, F_PUNCHHOLE, &hole)
+    /// Frees the bytes farthest from `offset` until `count` more fit, a
+    /// megabyte or more at a time. The player reads on from `offset`, and
+    /// up to its whole read-ahead behind it again (from ten seconds before
+    /// where it plays, for a track it hasn't been reading).
+    private func makeRoom(for count: Int64, near offset: Int64) {
+        #if DEBUG
+        if Self.oldRule { return oldMakeRoom(for: count, near: offset) }
+        #endif
+        let step: Int64 = 1 << 20
+        while stored + count > limit, let first = ranges.first, let last = ranges.last {
+            let excess = stored + count - limit
+            if offset - first.lowerBound >= last.upperBound - offset {
+                let cut = min(first.upperBound, (first.lowerBound + excess + step - 1) / step * step)
+                punch(first.lowerBound..<cut)
+                ranges[0] = cut..<first.upperBound
+            } else {
+                let cut = max(last.lowerBound, (last.upperBound - excess) / step * step)
+                punch(cut..<last.upperBound)
+                ranges[ranges.count - 1] = last.lowerBound..<cut
+            }
+            ranges.removeAll(where: \.isEmpty)
+            stored = ranges.reduce(0) { $0 + Int64($1.count) }
         }
-        ranges.removeAll { $0.upperBound <= offset }
+    }
+
+    /// Gives these bytes' disk space back: whole blocks only, the file
+    /// system frees no part of one.
+    private func punch(_ bytes: Range<Int64>) {
+        let block: Int64 = 4096
+        let from = (bytes.lowerBound + block - 1) / block * block, to = bytes.upperBound / block * block
+        guard to > from else { return }
+        var hole = fpunchhole_t(fp_flags: 0, reserved: 0, fp_offset: off_t(from), fp_length: off_t(to - from))
+        _ = fcntl(handle.fileDescriptor, F_PUNCHHOLE, &hole)
+    }
+
+    #if DEBUG
+    /// The rule before (-oldRelayCache YES, a real run before and after):
+    /// only runs ending 64 MB before `offset` went. A film read straight
+    /// through is one run, so full, it kept nothing new until the player was
+    /// 64 MB further, then let all of it go.
+    private static let oldRule = UserDefaults.standard.bool(forKey: "oldRelayCache")
+
+    private func oldMakeRoom(for count: Int64, near offset: Int64) {
+        guard stored + count > limit else { return }
+        for range in ranges where range.upperBound <= offset - (64 << 20) { punch(range) }
+        ranges.removeAll { $0.upperBound <= offset - (64 << 20) }
         stored = ranges.reduce(0) { $0 + Int64($1.count) }
     }
+    #endif
 }
 
 
