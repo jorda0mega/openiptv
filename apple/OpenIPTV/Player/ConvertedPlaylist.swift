@@ -86,6 +86,8 @@ struct ConvertedPlaylist: Sendable {
         let lines = lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let tagged = lines.filter { $0.contains("URI=") }.count
         guard tagged == 0 else { return .refused("variant has \(tagged) URI= lines") }
+        let masters = lines.filter { line in mastersTags.contains { line.uppercased().hasPrefix($0) } }.count
+        guard masters == 0 else { return .refused("variant has \(masters) master tags") }
         var header: [String] = [], tags: [String] = [], segments: [(seconds: Double, tags: [String], url: URL)] = []
         var ended = false
         for line in lines {
@@ -106,6 +108,11 @@ struct ConvertedPlaylist: Sendable {
         guard !segments.isEmpty else { return .refused("variant lists no segments") }
         return .listed(ConvertedPlaylist(segments: segments, header: header))
     }
+
+    /// A media playlist with one of these is read by the player as a master,
+    /// and the playlists it names are read unchecked.
+    private static let mastersTags = ["#EXT-X-STREAM-INF", "#EXT-X-I-FRAME-STREAM-INF", "#EXT-X-MEDIA:", "#EXT-X-SESSION-DATA",
+                                      "#EXT-X-SESSION-KEY"]
 
     #if DEBUG
     /// The redirects counted for converted versions, and the segments asked.
