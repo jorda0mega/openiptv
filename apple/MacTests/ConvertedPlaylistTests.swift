@@ -136,6 +136,21 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertNil(sent.value(forHTTPHeaderField: "X-Emby-Token"), "the key in its header")
     }
 
+    /// -oldConvertedStart: the player reads the film's first segment, then
+    /// jumps to the second, as it did with Emby's own master. It opened
+    /// that master, and the player sent the key wherever it led.
+    func testTheOldWayListsTheWholeFilmFromHere() throws {
+        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        let local = URL(string: "http://127.0.0.1:8/list.m3u8")!
+        var served: [String] = []
+        let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, old: true) { served.append($0); return local })
+        XCTAssertEqual(opened.address, local, "not served from here")
+        XCTAssertEqual(opened.start, 301.5)
+        XCTAssertEqual(opened.stream.clockStart, 0)
+        XCTAssertEqual(served.map { segments($0).first }, ["https://emby.example/emby/Videos/m1/hls1/main/0.ts?PlaySessionId=p1"])
+        XCTAssertEqual(served.map { segments($0).count }, [200])
+    }
+
     func testTheDebugCountAsksNoOtherServerWithTheKey() async {
         let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
         var asked: [(host: String?, keyed: Bool)] = []
