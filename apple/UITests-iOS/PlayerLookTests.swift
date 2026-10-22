@@ -943,6 +943,9 @@ final class PlayerLookTests: XCTestCase {
         }
         XCTAssertEqual(keyChecks(server, "keyed"), [], "asked with the key in the address")
         XCTAssertEqual(keyChecks(server, "headerless"), [], "asked without the key in a header")
+        // The player follows a redirect anywhere with the key it is given.
+        let player = keyChecks(server, "player")
+        XCTAssertEqual(player, [], "the player asked the server itself: \(Set(player.map { $0.split(separator: ":").first ?? "" }))")
     }
 
     func testSecondPlayAsksForNoSubtitles() throws {

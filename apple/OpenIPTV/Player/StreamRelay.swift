@@ -115,13 +115,13 @@ final class StreamRelay: @unchecked Sendable {
         return URL(string: "http://127.0.0.1:\(port)/\(token)\(ext)")
     }
 
-    func localURL(serving playlist: String) -> URL? {
+    func localURL(serving listed: ConvertedPlaylist.Listed, headers: [String], given: URL) -> URL? {
         start()
         lock.lock()
         defer { lock.unlock() }
         guard let port else { return nil }
         let token = UUID().uuidString.lowercased()
-        playlists.append((token, Data(playlist.utf8)))
+        playlists.append((token, Data(listed.playlist.utf8)))
         if playlists.count > 4 { playlists.removeFirst() }
         return URL(string: "http://127.0.0.1:\(port)/\(token).m3u8")
     }

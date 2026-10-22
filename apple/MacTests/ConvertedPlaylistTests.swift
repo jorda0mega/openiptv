@@ -4,6 +4,7 @@ import XCTest
 final class ConvertedPlaylistTests: XCTestCase {
     private let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&StartTimeTicks=3015000000")!
     private let variant = URL(string: "https://emby.example/emby/Videos/m1/main.m3u8?MediaSourceId=m1&PlaySessionId=p1")!
+    private let key = ["X-Emby-Token: test-key"]
 
     /// Emby's: the whole film from 0:00 in 3 s segments, whatever second it
     /// was asked from.
@@ -31,29 +32,25 @@ final class ConvertedPlaylistTests: XCTestCase {
     /// and then jumped to 5:01, and Emby converted twice (the film's start,
     /// then 5:00), each a wait for its slow first segment.
     func testAConvertedVersionIsListedFromTheSegmentHoldingTheSecond() throws {
-        let list = try listed(emby(segments: 200))
-        let (text, start) = list.listed(from:301.5)
-        XCTAssertEqual(start, 300, "the player's clock 0 isn't where its first segment starts")
-        let listed = segments(text)
-        XCTAssertEqual(listed.first, "https://emby.example/emby/Videos/m1/hls1/main/100.ts?PlaySessionId=p1")
-        XCTAssertEqual(listed.count, 100)
-        XCTAssertTrue(text.contains("#EXT-X-MEDIA-SEQUENCE:100\n"), text)
-        XCTAssertTrue(text.hasSuffix("#EXT-X-ENDLIST\n"))
+        let listed = try listed(emby(segments: 200)).listed(from: 301.5)
+        XCTAssertEqual(listed.clockStart, 300, "the player's clock 0 isn't where its first segment starts")
+        XCTAssertEqual(listed.segments.first?.absoluteString, "https://emby.example/emby/Videos/m1/hls1/main/100.ts?PlaySessionId=p1")
+        XCTAssertEqual(listed.segments.count, 100)
+        XCTAssertEqual(segments(listed.playlist).count, 100)
+        XCTAssertTrue(listed.playlist.contains("#EXT-X-MEDIA-SEQUENCE:100\n"), listed.playlist)
+        XCTAssertTrue(listed.playlist.hasSuffix("#EXT-X-ENDLIST\n"))
     }
 
     func testFromTheStartItIsTheWholeFilm() throws {
-        let list = try listed(emby(segments: 200))
-        let (text, start) = list.listed(from:0)
-        XCTAssertEqual(start, 0)
-        XCTAssertEqual(segments(text).count, 200)
+        let listed = try listed(emby(segments: 200)).listed(from: 0)
+        XCTAssertEqual(listed.clockStart, 0)
+        XCTAssertEqual(listed.segments.count, 200)
     }
 
     func testPastTheEndItIsTheLastSegment() throws {
-        let list = try listed(emby(segments: 200))
-        let (text, start) = list.listed(from:10_000)
-        XCTAssertEqual(start, 597)
-        XCTAssertEqual(segments(text).first, "https://emby.example/emby/Videos/m1/hls1/main/199.ts?PlaySessionId=p1")
-        XCTAssertEqual(segments(text).count, 1)
+        let listed = try listed(emby(segments: 200)).listed(from: 10_000)
+        XCTAssertEqual(listed.clockStart, 597)
+        XCTAssertEqual(listed.segments.map(\.absoluteString), ["https://emby.example/emby/Videos/m1/hls1/main/199.ts?PlaySessionId=p1"])
     }
 
     private func loaded(listing listed: String = "main.m3u8?MediaSourceId=m1", masterAt: URL? = nil,
@@ -105,8 +102,7 @@ final class ConvertedPlaylistTests: XCTestCase {
 
     func testAVersionAllOnTheGivenServerOpens() async {
         guard case let .listed(list) = await loaded().opening else { return XCTFail("not listed") }
-        let hosts = segments(list.listed(from: 4).playlist).map { URL(string: $0)?.host() }
-        XCTAssertEqual(hosts, [String?](repeating: "emby.example", count: 2))
+        XCTAssertEqual(list.listed(from: 4).segments.map { $0.host() }, [String?](repeating: "emby.example", count: 2))
     }
 
     /// One the app can't list again was opened as the server's own master,
@@ -170,7 +166,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     /// With the relay not running, the version opened as the server lists it.
     func testAVersionTheRelayCannotServeDoesNotOpen() throws {
         let list = try listed(emby(segments: 200))
-        XCTAssertNil(FilmStream.converted(master, list, at: 301.5) { _ in nil }, "the server's own master")
+        XCTAssertNil(FilmStream.converted(master, list, at: 301.5, headers: key) { _, _, _ in nil }, "the server's own master")
     }
 
     /// Kept on closing, or back from Picture in Picture, a converted version
@@ -179,7 +175,7 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertTrue(FilmStream.whole.isOriginal)
         let list = try listed(emby(segments: 200))
         for (second, old) in [(0.0, false), (301.5, false), (301.5, true)] {
-            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, old: old) { _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
+            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, headers: key, old: old) { _, _, _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
             XCTAssertFalse(opened.stream.isOriginal, "from \(second)\(old ? ", the old way" : "")")
         }
     }
@@ -217,13 +213,13 @@ final class ConvertedPlaylistTests: XCTestCase {
     func testTheOldWayListsTheWholeFilmFromHere() throws {
         let list = try listed(emby(segments: 200))
         let local = URL(string: "http://127.0.0.1:8/list.m3u8")!
-        var served: [String] = []
-        let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, old: true) { served.append($0); return local })
+        var served: [ConvertedPlaylist.Listed] = []
+        let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, headers: key, old: true) { listed, _, _ in served.append(listed); return local })
         XCTAssertEqual(opened.address, local, "not served from here")
         XCTAssertEqual(opened.start, 301.5)
         XCTAssertEqual(opened.stream.clockStart, 0)
-        XCTAssertEqual(served.map { segments($0).first }, ["https://emby.example/emby/Videos/m1/hls1/main/0.ts?PlaySessionId=p1"])
-        XCTAssertEqual(served.map { segments($0).count }, [200])
+        XCTAssertEqual(served.map { $0.segments.first?.absoluteString }, ["https://emby.example/emby/Videos/m1/hls1/main/0.ts?PlaySessionId=p1"])
+        XCTAssertEqual(served.map(\.segments.count), [200])
     }
 
     /// On the server it was given for too, the key leaves the address under

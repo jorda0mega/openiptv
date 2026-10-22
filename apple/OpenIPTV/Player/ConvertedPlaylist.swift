@@ -156,12 +156,18 @@ struct ConvertedPlaylist: Sendable {
         return (first, clockStart)
     }
 
-    func listed(from second: Double) -> (playlist: String, clockStart: Double) {
+    struct Listed: Sendable {
+        let playlist: String
+        let segments: [URL]
+        let clockStart: Double
+    }
+
+    func listed(from second: Double) -> Listed {
         let (first, clockStart) = first(from: second)
         let tag = "#EXT-X-MEDIA-SEQUENCE:"
         let sequence = header.first { $0.hasPrefix(tag) }.flatMap { Int($0.dropFirst(tag.count)) } ?? 0
         let lines = header.filter { !$0.hasPrefix(tag) } + [tag + String(sequence + first)]
             + segments[first...].flatMap { $0.tags + [$0.url.absoluteString] } + ["#EXT-X-ENDLIST"]
-        return (lines.joined(separator: "\n") + "\n", clockStart)
+        return Listed(playlist: lines.joined(separator: "\n") + "\n", segments: segments[first...].map(\.url), clockStart: clockStart)
     }
 }

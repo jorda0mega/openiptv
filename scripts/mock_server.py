@@ -566,7 +566,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def key_check(self, kind, q):
         headed = self.headers.get("X-Emby-Token") == TOKEN
-        KEY_CHECKS.append((time.time(), kind, "api_key" in q, headed))
+        # The app's own requests name it; the player's (ffmpeg's) don't.
+        player = not self.headers.get("User-Agent", "").startswith("Openreel/")
+        KEY_CHECKS.append((time.time(), kind, "api_key" in q, headed, player))
         return headed
 
     def log_message(self, *args):
@@ -745,7 +747,7 @@ class Handler(BaseHTTPRequestHandler):
             since = float(q.get("since", "0"))
             asked = [r for r in KEY_CHECKS if r[0] >= since]
             return self.send({"items": [r[1] for r in asked], "keyed": [r[1] for r in asked if r[2]],
-                              "headerless": [r[1] for r in asked if not r[3]],
+                              "headerless": [r[1] for r in asked if not r[3]], "player": [r[1] for r in asked if r[4]],
                               "cancelled": [kind for t, kind in CANCELLED if t >= since]})
         if path == "/mock/subtitle_requests":
             since = float(q.get("since", "0"))
