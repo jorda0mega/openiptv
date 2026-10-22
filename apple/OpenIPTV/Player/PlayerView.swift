@@ -1252,13 +1252,14 @@ struct MoviePlayerView: View {
 
     /// The key would go elsewhere, or the playlists couldn't be checked:
     /// the film plays on as it was, and the quality stops adapting, as for
-    /// a version the server won't make.
+    /// a version the server won't make. With nothing playing, it failed as
+    /// an open does.
     private func refuseConverted(_ why: String, _ player: MPVPlayer) {
         #if DEBUG
         convertedReadout = "not opened, " + why
         #endif
+        if player.hasFailed { return handle(.failed("The converted version didn't open.", nil)) }
         governor = nil
-        if player.hasFailed { handle(.failed("The converted version didn't open.", nil)) }
     }
 
     private func jump(to target: Double, seek: (MPVPlayer, Double) -> Void) {
