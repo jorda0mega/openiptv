@@ -43,8 +43,6 @@ final class ByteCacheTests: XCTestCase {
         XCTAssertEqual(cache.available(from: Int64(5 * megabyte)), Int64(7 * megabyte), "the 7 MB just read aren't all kept")
     }
 
-    /// A film opened with nothing fetched ahead: the player reads its index
-    /// itself, with the rest, and the relay then finds it already here.
     func testAnIndexThePlayerReadIsKeptOnceAskedForAhead() throws {
         let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
         let index = Data(repeating: 7, count: 256 << 10)

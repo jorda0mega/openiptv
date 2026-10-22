@@ -8,9 +8,7 @@ struct ConvertedPlaylist: Sendable {
 
     enum Opening: Sendable {
         case listed(ConvertedPlaylist)
-        /// The server's own playlist: one that can't be listed again.
         case whole
-        /// Not with the key: words and counts for the debug readout.
         case refused(String)
     }
 
@@ -32,7 +30,6 @@ struct ConvertedPlaylist: Sendable {
         return ConvertedPlaylist(list.lines, at: list.url).map(Opening.listed) ?? .whole
     }
 
-    /// Its entries and URI= values, as the player resolves them (nil: one it can't).
     private static func addresses(_ lines: [String], at url: URL) -> [URL?] {
         lines.map { $0.trimmingCharacters(in: .whitespaces) }.compactMap { line -> String? in
             guard line.hasPrefix("#") else { return line.isEmpty ? nil : line }

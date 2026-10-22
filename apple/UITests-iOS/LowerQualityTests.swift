@@ -56,8 +56,6 @@ extension PlayerLookTests {
         XCTAssertGreaterThan(film, asked + 20, "the jump made while the lower quality opened was undone")
     }
 
-    /// Kept, it came back with the quality chooser taking it for the original,
-    /// which then never went back up.
     func testALowerQualityClosedAndChosenAgainOpensAfreshWhereItStopped() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -83,14 +81,11 @@ extension PlayerLookTests {
         XCTAssertEqual(later, closed + 4, accuracy: 3, "it didn't open where it stopped")
     }
 
-    /// The window takes the player's stream as it is; a lower quality
-    /// opening meanwhile reopened the player under it, its clock elsewhere.
     func testPictureInPictureWhileALowerQualityOpensKeepsTheBarWithThePictures() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
-        // The playlists arrive while the window holds the picture.
         app.launchEnvironment["OPENREEL_DEBUG_PIP_HOLD"] = "3.5"
         openLowered(server, ["hls_delay": "2"])
         let quality = app.staticTexts["debug-quality"].firstMatch
@@ -116,9 +111,6 @@ extension PlayerLookTests {
         XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
     }
 
-    /// The window's skip back past the version's start opens it again from
-    /// there: the window's clock goes there at once, as the screen's bar
-    /// does, and its next skip counts from there.
     func testASkipBackInTheWindowPastALowerQualitysStartGoesThereAtOnce() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")

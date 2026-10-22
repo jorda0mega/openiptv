@@ -276,8 +276,6 @@ final class FilmStartTests: XCTestCase {
         XCTAssertEqual(fromItsBeginning.ranges, [0..<1 << 18] + index)
     }
 
-    /// The old way kept one fetch for each whole second of a film, whatever
-    /// subtitles were planned.
     func testTheOldWayKeepsOneFetchForEachWholeSecond() {
         UserDefaults.standard.set(true, forKey: "oldReadyStart")
         defer { UserDefaults.standard.removeObject(forKey: "oldReadyStart") }
