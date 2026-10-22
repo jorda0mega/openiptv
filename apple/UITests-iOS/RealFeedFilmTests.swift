@@ -208,14 +208,17 @@ final class RealFeedFilmTests: RealFeedCase {
     }
 
     /// FILM_START_AT is the resume point. A server's place falls between whole seconds.
+    /// FILM_START_ARGUMENTS: launch arguments for every start ("-noPreconnect YES");
+    /// FILM_START_CARDS: how many of Continue Watching's cards (2).
     func testFilmStartsAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         app.launchEnvironment["OPENREEL_DEBUG_START_AT"] = ProcessInfo.processInfo.environment["FILM_START_AT"]
-        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
+        let extra = ProcessInfo.processInfo.environment["FILM_START_ARGUMENTS"]?.split(separator: " ").map(String.init) ?? []
+        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"] + extra
         app.launchArguments = shipped
         app.launch()
         XCTAssertTrue(continueCards.firstMatch.waitForExistence(timeout: 45), "no Continue Watching")
-        let ids = Array(cardIds().prefix(2))
+        let ids = Array(cardIds().prefix(ProcessInfo.processInfo.environment["FILM_START_CARDS"].flatMap(Int.init) ?? 2))
         app.terminate()
         let rounds = ProcessInfo.processInfo.environment["FILM_START_ROUNDS"].flatMap(Int.init) ?? 2
         for _ in 0..<rounds { try startCards(ids, shipped) }
