@@ -71,7 +71,9 @@ CONNECTIONS = set()
 # "redirect_film" and "redirect_segment" ("same" or "elsewhere": each
 # request for the film's file, or for a converted version's segment, is
 # redirected to its own address, on this server or at localhost, which the
-# app takes for another server).
+# app takes for another server), "connect_delay" (seconds before a new
+# connection's first answer: a real server's connect and TLS, about 0.5 s),
+# "plan_delay" (seconds before PlaybackInfo answers: 0.2-4 s on a real one).
 #
 # A slow network and server, apart from CONTROL (a reset keeps it):
 # OPENIPTV_MOCK_PROFILE ("busy", "far" or "worst", as slow_link.PROFILES
@@ -550,6 +552,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         CONNECTIONS.add(self.connection)
+        time.sleep(float(CONTROL.get("connect_delay", 0)))
         try:
             super().handle()
         finally:
@@ -654,6 +657,7 @@ class Handler(BaseHTTPRequestHandler):
         if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
             PLAYBACKINFO_REQUESTS.append((time.time(), item))
+            time.sleep(float(CONTROL.get("plan_delay", 0)))
             width = 3840 if item.startswith("k") else 1920
             streams = file_streams()
             # "copy_audio": "a8:fre": that copy's sound in that language only;
