@@ -160,21 +160,27 @@ extension PlayerLookTests {
         while Date().timeIntervalSince(asked) < 8, pipState() == nil { usleep(200_000) }
         XCTAssertNotNil(pipState(), "Picture in Picture didn't start")
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        board.otherElements["Video"].firstMatch.tap()
+        let window = board.otherElements["Video"].firstMatch
+        window.tap()
+        // The window's middle is its play button.
+        if pipState()?.playing == true { window.tap() }
         let restore = board.buttons["Restore fullscreen"].firstMatch
         XCTAssertTrue(restore.waitForExistence(timeout: 3), "no Restore fullscreen in the window")
         restore.tap()
         sleep(4)
-        controlsUp()
-        app.buttons["Play"].firstMatch.tap()
+        // Paused about 8 s past the version's start: 20 s back is well before it.
         let from = try XCTUnwrap(position(), "no position")
         controlsUp()
         app.buttons["Back 10 seconds"].firstMatch.tap()
-        sleep(8)
+        app.buttons["Back 10 seconds"].firstMatch.tap()
+        sleep(6)
+        controlsUp()
+        app.buttons["Play"].firstMatch.tap()
+        sleep(3)
         let film = try XCTUnwrap(position(), "no position")
         let stream = Double(app.staticTexts["debug-stream-time"].firstMatch.label) ?? -1
-        print("JUMP BACK AFTER PIP from \(from) s: the film at \(film) s, the stream's own second \(stream)")
-        XCTAssertLessThan(film, from - 2, "the jump back stopped at the lower quality's start")
+        print("JUMP BACK AFTER PIP from \(from) s: 3 s after playing on, the film at \(film) s, the stream's own second \(stream)")
+        XCTAssertLessThan(film, from - 10, "the jump back stopped at the lower quality's start")
         XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
     }
 }
