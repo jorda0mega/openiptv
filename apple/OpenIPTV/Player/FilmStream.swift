@@ -16,20 +16,26 @@ enum FilmStream: Sendable {
     #else
     static let oldConvertedStart = false
     #endif
+
+    /// What the player opens for a converted version from `second`.
+    static func converted(_ url: URL, _ list: ConvertedPlaylist?, at second: Double, old: Bool = oldConvertedStart,
+                          serve: (String) -> URL? = StreamRelay.shared.localURL(serving:)) -> (address: URL, start: Double?, stream: FilmStream) {
+        // From the segment's start, at most a segment before `second`: a
+        // jump to `second` read the segment again for a keyframe in it.
+        if let list, !old, case let listed = list.listed(from: second), let local = serve(listed.playlist) {
+            return (local, nil, .listed(url, list, clockStart: listed.clockStart))
+        }
+        return (url, second, .whole)
+    }
 }
 
+#if canImport(UIKit)
 extension MPVPlayer {
     func openConverted(_ url: URL, _ list: ConvertedPlaylist?, at second: Double, for playback: EmbyPlayback) -> FilmStream {
-        if let list, case let listed = list.listed(from: second), let local = StreamRelay.shared.localURL(serving: listed.playlist) {
-            // From the segment's start, at most a segment before `second`: a
-            // jump to `second` read the segment again for a keyframe in it.
-            load(local, headers: playback.fallbackHeaders, file: false, converting: true, tracks: playback.tracks,
-                 sameFilm: listed.clockStart)
-            return .listed(url, list, clockStart: listed.clockStart)
-        }
-        load(url, headers: playback.fallbackHeaders, start: second, file: false, converting: !FilmStream.oldConvertedStart,
-             tracks: playback.tracks, sameFilm: 0)
-        return .whole
+        let opening = FilmStream.converted(url, list, at: second)
+        load(opening.address, headers: playback.fallbackHeaders, start: opening.start, file: false, converting: !FilmStream.oldConvertedStart,
+             tracks: playback.tracks, sameFilm: opening.stream.clockStart)
+        return opening.stream
     }
 
     /// Before its first segment, open the listed version again. Emby converts from the second asked either way.
@@ -44,3 +50,4 @@ extension MPVPlayer {
         return openConverted(url, list, at: second, for: playback)
     }
 }
+#endif

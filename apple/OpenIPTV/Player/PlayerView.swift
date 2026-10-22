@@ -1238,7 +1238,7 @@ struct MoviePlayerView: View {
             guard !Task.isCancelled, self.player === player else { return }
             let list: ConvertedPlaylist?
             switch opening {
-            case let .listed(listed): list = FilmStream.oldConvertedStart ? nil : listed
+            case let .listed(listed): list = listed
             case .whole: list = nil
             case let .refused(why): return refuseConverted(why, player)
             }
