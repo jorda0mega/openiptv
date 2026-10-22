@@ -192,6 +192,21 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(served.map { segments($0).count }, [200])
     }
 
+    /// On the server it was given for too, the key leaves the address under
+    /// any spelling: the system logs the address of a request that fails.
+    func testTheKeyMovesToTheHeaderUnderAnySpelling() {
+        for name in ["api_key", "API_KEY", "Api_Key"] {
+            let given = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?\(name)=test-key&b=1")!
+            let moved = HTTP.keyInHeader(URLRequest(url: given))
+            XCTAssertEqual(moved.url?.query(), "b=1", name)
+            XCTAssertEqual(moved.value(forHTTPHeaderField: "X-Emby-Token"), "test-key", name)
+            let redirect = URLRequest(url: URL(string: "https://emby.example/emby/Videos/m1/main.m3u8?\(name)=test-key")!)
+            let followed = HTTP.redirected(redirect, from: given)
+            XCTAssertNil(followed.url?.query(), name)
+            XCTAssertEqual(followed.value(forHTTPHeaderField: "X-Emby-Token"), "test-key", name)
+        }
+    }
+
     func testTheDebugCountAsksNoOtherServerWithTheKey() async {
         let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
         var asked: [(host: String?, keyed: Bool)] = []
