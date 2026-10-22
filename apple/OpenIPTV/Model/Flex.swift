@@ -156,8 +156,8 @@ enum HTTP {
     /// key and all.
     static func keyInHeader(_ request: URLRequest) -> URLRequest {
         guard let url = request.url, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let key = parts.queryItems?.first(where: { $0.name == "api_key" })?.value else { return request }
-        parts.queryItems = parts.queryItems?.filter { $0.name != "api_key" }
+              let key = parts.queryItems?.first(where: { $0.name.lowercased() == "api_key" })?.value else { return request }
+        parts.queryItems = parts.queryItems?.filter { $0.name.lowercased() != "api_key" }
         if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
         var moved = request
         moved.url = parts.url ?? url

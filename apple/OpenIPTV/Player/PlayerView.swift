@@ -1544,7 +1544,7 @@ struct MoviePlayerView: View {
     private var keyedAddresses: Int {
         let all = [playback.url] + playback.fallbacks + playback.subtitleFiles.map(\.url) + playback.subtitleCopies.map(\.subtitle.address)
             + playback.subtitleReferences.map(\.subtitle.address) + playback.speechStretches.map(\.url)
-        return all.filter { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "api_key" } == true }.count
+        return all.filter { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name.lowercased() == "api_key" } == true }.count
     }
 
     private func debugReadout(_ text: String, _ id: String) -> some View {
