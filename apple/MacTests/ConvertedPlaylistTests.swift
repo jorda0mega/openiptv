@@ -133,6 +133,40 @@ final class ConvertedPlaylistTests: XCTestCase {
         }
     }
 
+    /// A master's tag in the variant made the list given to the player a
+    /// master again, and ffmpeg read the child it names, never checked here.
+    func testAVariantWithAMastersTagDoesNotOpen() async {
+        func tagged(_ tags: [String]) -> [String] {
+            var list = emby(segments: 3)
+            list.insert(contentsOf: tags, at: 5)
+            return list
+        }
+        let cases = [
+            ("a child playlist", tagged(["#EXT-X-STREAM-INF:BANDWIDTH=2000000", "#EXTINF:3.000000, nodesc", "child.m3u8"])),
+            ("a stream's tag", tagged(["#EXT-X-STREAM-INF:BANDWIDTH=2000000"])),
+            ("a rendition", tagged(["#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",NAME=\"en\""])),
+            ("session data", tagged(["#EXT-X-SESSION-DATA:DATA-ID=\"a\",VALUE=\"b\""])),
+        ]
+        for (name, variant) in cases {
+            if case .refused = await loaded(variant: variant).opening {} else { XCTFail("\(name): it opens") }
+        }
+        if case .refused = await loaded().opening { XCTFail("Emby's own variant refused") }
+    }
+
+    /// The same server written in other capitals, or with the root's dot.
+    func testTheSameHostInOtherCapitalsIsTheSameServer() async {
+        let given = URL(string: "https://emby.example/x")!
+        for same in ["https://Emby.Example/y", "HTTPS://EMBY.EXAMPLE:443/y", "https://emby.example./y"] {
+            XCTAssertTrue(HTTP.sameServer(URL(string: same)!, given), same)
+            XCTAssertTrue(HTTP.sameServer(given, URL(string: same)!), same)
+        }
+        XCTAssertFalse(HTTP.sameServer(URL(string: "https://Other.Example/y")!, given))
+        let capitals = URL(string: "https://Emby.Example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
+        let (opening, sent) = await loaded(listing: "https://emby.example/emby/Videos/m1/main.m3u8", master: capitals)
+        if case .refused = opening { XCTFail("refused on its own server") }
+        XCTAssertEqual(sent.map(\.key), ["test-key", "test-key"])
+    }
+
     /// With the relay not running, the version opened as the server lists it.
     func testAVersionTheRelayCannotServeDoesNotOpen() throws {
         let list = try listed(emby(segments: 200))
@@ -204,6 +238,16 @@ final class ConvertedPlaylistTests: XCTestCase {
             let followed = HTTP.redirected(redirect, from: given)
             XCTAssertNil(followed.url?.query(), name)
             XCTAssertEqual(followed.value(forHTTPHeaderField: "X-Emby-Token"), "test-key", name)
+        }
+    }
+
+    /// A name with no value first: the key under the same name after it
+    /// stayed in the address.
+    func testEveryKeyNameLeavesTheAddress() {
+        for query in ["API_KEY&api_key=test-key&b=1", "api_key=&Api_Key=test-key&b=1", "b=1&API_KEY"] {
+            let moved = HTTP.keyInHeader(URLRequest(url: URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?\(query)")!))
+            XCTAssertEqual(moved.url?.query(), "b=1", query)
+            XCTAssertEqual(moved.value(forHTTPHeaderField: "X-Emby-Token"), query.contains("test-key") ? "test-key" : nil, query)
         }
     }
 
