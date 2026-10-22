@@ -9,8 +9,11 @@ enum FilmStream: Sendable {
         return clockStart
     }
 
-    /// Taken for the original file when it comes back from Picture in Picture.
-    var isOriginal: Bool { clockStart == 0 }
+    /// The original file: kept on closing, and adapted from its full quality.
+    var isOriginal: Bool {
+        guard case .whole = self else { return false }
+        return true
+    }
 
     #if DEBUG
     /// UI tests (-oldConvertedStart YES): the converted version as Emby
@@ -20,22 +23,22 @@ enum FilmStream: Sendable {
     static let oldConvertedStart = false
     #endif
 
-    /// What the player opens for a converted version from `second`.
-    static func converted(_ url: URL, _ list: ConvertedPlaylist?, at second: Double, old: Bool = oldConvertedStart,
-                          serve: (String) -> URL? = StreamRelay.shared.localURL(serving:)) -> (address: URL, start: Double?, stream: FilmStream) {
+    /// What the player opens for a converted version from `second`: nil
+    /// when the relay can't serve its list.
+    static func converted(_ url: URL, _ list: ConvertedPlaylist, at second: Double, old: Bool = oldConvertedStart,
+                          serve: (String) -> URL? = StreamRelay.shared.localURL(serving:)) -> (address: URL, start: Double?, stream: FilmStream)? {
         // From the segment's start, at most a segment before `second`: a
         // jump to `second` read the segment again for a keyframe in it.
-        if let list, case let listed = list.listed(from: old ? 0 : second), let local = serve(listed.playlist) {
-            return (local, old ? second : nil, .listed(url, list, clockStart: listed.clockStart))
-        }
-        return (url, second, .whole)
+        let listed = list.listed(from: old ? 0 : second)
+        guard let local = serve(listed.playlist) else { return nil }
+        return (local, old ? second : nil, .listed(url, list, clockStart: listed.clockStart))
     }
 }
 
 #if canImport(UIKit)
 extension MPVPlayer {
-    func openConverted(_ url: URL, _ list: ConvertedPlaylist?, at second: Double, for playback: EmbyPlayback) -> FilmStream {
-        let opening = FilmStream.converted(url, list, at: second)
+    func openConverted(_ url: URL, _ list: ConvertedPlaylist, at second: Double, for playback: EmbyPlayback) -> FilmStream? {
+        guard let opening = FilmStream.converted(url, list, at: second) else { return nil }
         load(opening.address, headers: playback.fallbackHeaders, start: opening.start, file: false, converting: !FilmStream.oldConvertedStart,
              tracks: playback.tracks, sameFilm: opening.stream.clockStart)
         return opening.stream
@@ -43,14 +46,14 @@ extension MPVPlayer {
 
     /// Before its first segment, open the listed version again. Emby converts from the second asked either way.
     func jump(in stream: FilmStream, to second: Double, for playback: EmbyPlayback, seek: (Double) -> Void) -> FilmStream {
-        guard case let .listed(url, list, clockStart) = stream, second < clockStart else {
-            seek(max(0, second - stream.clockStart))
-            return stream
+        if case let .listed(url, list, clockStart) = stream, second < clockStart {
+            #if DEBUG
+            askedForConverted()
+            #endif
+            if let reopened = openConverted(url, list, at: second, for: playback) { return reopened }
         }
-        #if DEBUG
-        askedForConverted()
-        #endif
-        return openConverted(url, list, at: second, for: playback)
+        seek(max(0, second - stream.clockStart))
+        return stream
     }
 }
 #endif
