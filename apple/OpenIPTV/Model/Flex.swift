@@ -204,12 +204,13 @@ enum HTTP {
         return elsewhere
     }
 
-    static func sameServer(_ a: URL, _ b: URL) -> Bool {
-        a.scheme == b.scheme && a.host() == b.host() && port(a) == port(b)
-    }
+    static func sameServer(_ a: URL, _ b: URL) -> Bool { server(a) == server(b) }
 
-    private static func port(_ url: URL) -> Int? {
-        url.port ?? ["http": 80, "https": 443][url.scheme ?? ""]
+    private static func server(_ url: URL) -> (scheme: String?, host: String?, port: Int?) {
+        let scheme = url.scheme?.lowercased()
+        var host = url.host()?.lowercased()
+        if host?.hasSuffix(".") == true { host?.removeLast() }
+        return (scheme, host, url.port ?? ["http": 80, "https": 443][scheme ?? ""])
     }
 
     static let keyOutOfRedirects = KeyOutOfRedirects()
