@@ -156,14 +156,18 @@ enum HTTP {
     /// key and all.
     static func keyInHeader(_ request: URLRequest) -> URLRequest {
         guard let url = request.url, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let key = parts.queryItems?.first(where: { $0.name.lowercased() == "api_key" })?.value else { return request }
-        parts.queryItems = parts.queryItems?.filter { $0.name.lowercased() != "api_key" }
+              let fields = parts.queryItems, fields.contains(where: isKey) else { return request }
+        parts.queryItems = fields.filter { !isKey($0) }
         if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
         var moved = request
         moved.url = parts.url ?? url
-        moved.setValue(key, forHTTPHeaderField: "X-Emby-Token")
+        if let key = fields.first(where: { isKey($0) && $0.value?.isEmpty == false })?.value {
+            moved.setValue(key, forHTTPHeaderField: "X-Emby-Token")
+        }
         return moved
     }
+
+    private static func isKey(_ field: URLQueryItem) -> Bool { field.name.lowercased() == "api_key" }
 
     static func form(_ url: URL, _ fields: [URLQueryItem]) -> URLRequest {
         var request = URLRequest(url: url)
@@ -193,7 +197,7 @@ enum HTTP {
         var elsewhere = request
         elsewhere.setValue(nil, forHTTPHeaderField: "X-Emby-Token")
         if var parts = URLComponents(url: target, resolvingAgainstBaseURL: false), parts.queryItems != nil {
-            parts.queryItems = parts.queryItems?.filter { $0.name.lowercased() != "api_key" }
+            parts.queryItems = parts.queryItems?.filter { !isKey($0) }
             if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
             elsewhere.url = parts.url ?? target
         }
