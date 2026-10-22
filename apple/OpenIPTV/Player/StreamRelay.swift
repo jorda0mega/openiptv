@@ -181,7 +181,7 @@ final class StreamRelay: @unchecked Sendable {
         #if DEBUG
         noteRead(token, range)
         let cachedNow = cache.flatMap { cache in Self.bounds(range, total: cache.total).map { min(cache.available(from: $0.0), $0.1 - $0.0 + 1) } }
-        let read = noteStartRead(range, cache: cache, device: max(0, cachedNow ?? 0))
+        let read = noteStartRead(range, cache: cache, device: max(0, cachedNow ?? 0), address: route.url)
         lock.withLock { startReadOf[ObjectIdentifier(connection)] = read }
         #endif
         if let cache, cache.claimIndex() {
@@ -271,6 +271,9 @@ final class StreamRelay: @unchecked Sendable {
     private var startReadOf: [ObjectIdentifier: StartReadKey] = [:]
     private var startBegan = CFAbsoluteTimeGetCurrent()
     private var starts = 0
+    private var aheadLog: [String: AheadRecord] = [:]
+    private var keptStart: (reason: String, key: String)?
+    private var firstRequest: (index: Int, times: RequestTimes)?
 
     func beginStartReads() {
         lock.withLock {
@@ -279,11 +282,19 @@ final class StreamRelay: @unchecked Sendable {
             startLog = []
             startReadOf = [:]
             startBegan = CFAbsoluteTimeGetCurrent()
+            keptStart = nil
+            firstRequest = nil
         }
     }
 
-    func noteStartRead(_ range: String?, cache: ByteCache?, device: Int64) -> StartReadKey {
-        lock.withLock {
+    func noteStartRead(_ range: String?, cache: ByteCache?, device: Int64, address: URL? = nil) -> StartReadKey {
+        let key = address.map(cacheKey)
+        return lock.withLock {
+            if startLog.isEmpty, let address, let key {
+                let asked = cache.flatMap { cache in Self.bounds(range, total: cache.total).map { $0.1 - $0.0 + 1 } }
+                keptStart = (KeptStart.reason(address: address, key: key, cache: cache, device: device, asked: asked, records: aheadLog,
+                                              at: CFAbsoluteTimeGetCurrent()), key)
+            }
             startReads.requests += 1
             startReads.cached += device
             startLog.append(StartRead(at: CFAbsoluteTimeGetCurrent() - startBegan, range: range, cache: cache, device: device))
@@ -294,11 +305,31 @@ final class StreamRelay: @unchecked Sendable {
     var serverBytes: Int64 { lock.withLock { startReads.fetched } }
 
     var startReadsReadout: String {
-        let (reads, log) = lock.withLock { (startReads, startLog) }
+        let (reads, log, kept, first) = lock.withLock {
+            (startReads, startLog, keptStart.map { ($0.reason, aheadLog[$0.key]?.firstRead) }, firstRequest?.times)
+        }
         let each = log.prefix(12).map(\.readout).joined(separator: "; ")
         return String(format: "reads %d, from the device %.1f MB, from the server %d reads %.1f MB first byte up to %.0f ms",
                       reads.requests, Double(reads.cached) / 1e6, reads.fetches, Double(reads.fetched) / 1e6, reads.firstByte * 1000)
+            + (kept.map { " | kept start: " + $0.0 + ($0.1.map { "; its first read " + $0.readout } ?? "") } ?? "")
+            + (first.map { " | first request: " + $0.readout } ?? "")
             + (each.isEmpty ? "" : " | " + each)
+    }
+
+    func noteRequest(_ metrics: URLSessionTaskMetrics, for read: StartReadKey?) {
+        guard let read, let times = RequestTimes(metrics) else { return }
+        lock.withLock {
+            guard read.start == starts, firstRequest.map({ read.index < $0.index }) ?? true else { return }
+            firstRequest = (read.index, times)
+        }
+    }
+
+    private func noteAhead(_ key: String, _ change: (inout AheadRecord) -> Void) {
+        lock.withLock {
+            guard var record = aheadLog[key] else { return }
+            change(&record)
+            aheadLog[key] = record
+        }
     }
 
     fileprivate func startRead(for connection: NWConnection) -> StartReadKey? {
@@ -370,9 +401,11 @@ final class StreamRelay: @unchecked Sendable {
     /// A file's address without the server's session for one request.
     private func cacheKey(_ url: URL) -> String {
         guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return accountCacheID.value + " " + url.absoluteString }
-        parts.queryItems = parts.queryItems?.filter { !["playsessionid", "api_key"].contains($0.name.lowercased()) }
+        parts.queryItems = parts.queryItems?.filter { !Self.sessionFields.contains($0.name.lowercased()) }
         return accountCacheID.value + " " + (parts.string ?? url.absoluteString)
     }
+
+    static let sessionFields: Set<String> = ["playsessionid", "api_key"]
 
     func forgetAccount() {
         accountCacheID.mutate { $0 = UUID().uuidString }
@@ -476,7 +509,12 @@ final class StreamRelay: @unchecked Sendable {
         let fetch = fetcher(route, cache, ahead: key)
         #if DEBUG
         let started = CFAbsoluteTimeGetCurrent()
+        lock.withLock {
+            aheadLog[key] = AheadRecord(address: route.url, began: started, cache: cache)
+            if aheadLog.count > 12, let oldest = aheadLog.min(by: { $0.value.began < $1.value.began })?.key { aheadLog[oldest] = nil }
+        }
         let fetched = Self.oldReadyStart ? await file.fetchAsBefore(through: fetch) : await file.fetch(through: fetch)
+        noteAhead(key) { $0.finished = fetched }
         if fetched {
             NSLog("%@", String(format: "PERF relay start fetched ahead at %.0f s in %.0f ms", file.seconds, (CFAbsoluteTimeGetCurrent() - started) * 1000))
         }
@@ -522,13 +560,27 @@ final class StreamRelay: @unchecked Sendable {
             if let key, let made { self?.lock.withLock { self?.ahead[key]?.removeAll { $0 === made } } }
             let http = response as? HTTPURLResponse
             let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
+            #if DEBUG
+            if let key { self?.noteAhead(key) { $0.noteAnswer(status: http?.statusCode, bytes: data?.count ?? 0, total: total, known: cache.total) } }
+            #endif
             guard http?.statusCode == 206, let data, !data.isEmpty else { return then(nil, nil) }
             if let total { cache.noteFile(total: total, contentType: http?.value(forHTTPHeaderField: "Content-Type")) }
             cache.store(data, at: from, evicting: false)
             then(data, total ?? cache.total)
         }
         made = task
+        #if DEBUG
+        if let key {
+            noteAhead(key) { $0.asked += 1 }
+            task.delegate = AheadRedirects { [weak self] metrics in
+                self?.noteAhead(key) { $0.firstRead = $0.firstRead ?? RequestTimes(metrics) }
+            }
+        } else {
+            task.delegate = Self.aheadRedirects
+        }
+        #else
         task.delegate = Self.aheadRedirects
+        #endif
         if let key {
             task.priority = URLSessionTask.lowPriority
             lock.withLock { ahead[key, default: []].append(task) }
@@ -713,6 +765,12 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
         })
     }
 
+    #if DEBUG
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        relay?.noteRequest(metrics, for: read)
+    }
+    #endif
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         lock.lock()
         finished = true
@@ -805,6 +863,16 @@ enum FileStarts {
 }
 
 private final class AheadRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    #if DEBUG
+    private let measured: (@Sendable (URLSessionTaskMetrics) -> Void)?
+
+    init(measured: (@Sendable (URLSessionTaskMetrics) -> Void)? = nil) { self.measured = measured }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        measured?(metrics)
+    }
+    #endif
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
         StreamRelay.redirected(request, for: task)
@@ -830,6 +898,94 @@ struct RedirectCount: Sendable {
         sum.redirected += b.redirected
         sum.elsewhere += b.elsewhere
         return sum
+    }
+}
+
+/// Debug builds: a file's fetch ahead, for the start to say what it found
+/// of it. The address is compared, never shown.
+struct AheadRecord {
+    let address: URL
+    let began: Double
+    weak var cache: ByteCache?
+    var asked = 0, answered = 0
+    var failure: String?
+    var finished: Bool?
+    var firstRead: RequestTimes?
+
+    mutating func noteAnswer(status: Int?, bytes: Int, total: Int64?, known: Int64?) {
+        if status != 206 || bytes == 0 {
+            failure = status.map { "status \($0)" + (bytes == 0 ? ", no bytes" : "") } ?? "no answer"
+        } else if let total, let known, total != known {
+            failure = "another size"
+        } else {
+            answered += 1
+        }
+    }
+}
+
+/// Debug builds: whether a start's first read found the start fetched ahead
+/// for it, and why not, in words and counts.
+enum KeptStart {
+    static func reason(address: URL, key: String, cache: ByteCache?, device: Int64, asked: Int64?, records: [String: AheadRecord],
+                       at now: Double) -> String {
+        if device > 0 { return device >= (asked ?? .max) ? "used" : "used in part" }
+        guard let record = records[key] else {
+            let differing = records.values.filter { $0.address.path == address.path }.map { fieldsDiffering($0.address, address) }.min()
+            if let differing { return "unused, key differs in \(differing) field\(differing == 1 ? "" : "s")" }
+            return records.isEmpty ? "unused, nothing fetched ahead" : "unused, none fetched ahead for this file (\(records.count) others)"
+        }
+        guard record.cache != nil, record.cache === cache else { return "unused, let go before the tap" }
+        switch record.finished {
+        case nil:
+            return String(format: "unused, %d of %d reads done at the tap, %.1f s after it began", record.answered, record.asked, now - record.began)
+        case false?:
+            return "unused, stopped after \(record.answered) reads" + (record.failure.map { ": " + $0 } ?? "")
+        case true?:
+            return "unused, done but none kept where the player reads"
+        }
+    }
+
+    /// The query's fields (and the server) told apart by the key, counted.
+    static func fieldsDiffering(_ a: URL, _ b: URL) -> Int {
+        func fields(_ url: URL) -> [String: [String]] {
+            let items = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+                .filter { !StreamRelay.sessionFields.contains($0.name.lowercased()) }
+            return Dictionary(grouping: items) { $0.name.lowercased() }.mapValues { $0.map { $0.value ?? "" }.sorted() }
+        }
+        let (x, y) = (fields(a), fields(b))
+        return Set(x.keys).union(y.keys).filter { x[$0] != y[$0] }.count + (HTTP.sameServer(a, b) ? 0 : 1)
+    }
+}
+
+/// Debug builds: where a request's time went (URLSessionTaskMetrics):
+/// waiting for a connection, opening one, then the server's wait for the
+/// first byte.
+struct RequestTimes: Equatable {
+    var queued = 0.0, dns = 0.0, tcp = 0.0, tls = 0.0, wait = 0.0
+    var reused = false
+    var http: String?
+
+    init(queued: Double, dns: Double, tcp: Double, tls: Double, wait: Double, reused: Bool, http: String?) {
+        (self.queued, self.dns, self.tcp, self.tls, self.wait, self.reused, self.http) = (queued, dns, tcp, tls, wait, reused, http)
+    }
+
+    init?(_ metrics: URLSessionTaskMetrics) {
+        guard let last = metrics.transactionMetrics.last(where: { $0.resourceFetchType == .networkLoad }),
+              let fetched = last.fetchStartDate, let sent = last.requestStartDate, let answered = last.responseStartDate else { return nil }
+        func span(_ from: Date?, _ to: Date?) -> Double {
+            guard let from, let to else { return 0 }
+            return max(0, to.timeIntervalSince(from))
+        }
+        let tls = span(last.secureConnectionStartDate, last.secureConnectionEndDate)
+        self.init(queued: span(fetched, last.domainLookupStartDate ?? last.connectStartDate ?? sent),
+                  dns: span(last.domainLookupStartDate, last.domainLookupEndDate),
+                  tcp: max(0, span(last.connectStartDate, last.connectEndDate) - tls), tls: tls, wait: span(sent, answered),
+                  reused: last.isReusedConnection, http: last.networkProtocolName)
+    }
+
+    var readout: String {
+        String(format: "queued %.0f ms, DNS %.0f ms, TCP %.0f ms, TLS %.0f ms, wait %.0f ms (%@%@)", queued * 1000, dns * 1000, tcp * 1000,
+               tls * 1000, wait * 1000, reused ? "reused" : "new", http.map { ", " + $0 } ?? "")
     }
 }
 #endif

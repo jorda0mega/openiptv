@@ -494,6 +494,9 @@ final class AppModel {
         }
         if !playback.listed { playback = (try? await plans.take(key)) ?? playback }
         playback = withLocalResume(playback)
+        #if DEBUG
+        lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching)
+        #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
         return playback
@@ -1231,6 +1234,7 @@ final class AppModel {
 
     #if DEBUG
     @ObservationIgnored var lastPlanKept = false
+    @ObservationIgnored var lastStartAhead = ""
     /// UI tests: the last switch to another copy's language, timed.
     var debugCopySwitch = ""
     /// UI tests: the search for a film heard in English or Spanish only in

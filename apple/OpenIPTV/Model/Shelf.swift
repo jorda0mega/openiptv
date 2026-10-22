@@ -140,6 +140,12 @@ final class Lane {
         admit()
     }
 
+    #if DEBUG
+    var debugCounts: String { "\(running) under way, \(waiting.count) waiting" }
+
+    func debugAllows(at place: Place) -> Bool { conditions().allows(weight, at: place) }
+    #endif
+
     func withdraw(_ ticket: Ticket) {
         guard waiting.contains(where: { $0 === ticket }) else { return }
         waiting.removeAll { $0 === ticket }
@@ -275,6 +281,16 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     #if DEBUG
     func isKept(_ key: Key) -> Bool {
         if case .kept? = current(key) { true } else { false }
+    }
+
+    func debugState(_ key: Key, at place: Place) -> String {
+        switch current(key) {
+        case .waiting?: "waiting its turn (\(policy.lane.debugCounts))"
+        case .fetching?: "under way"
+        case .kept?: "done"
+        case .failed?: "failed"
+        case nil: policy.lane.debugAllows(at: place) ? "not asked" : "not asked, not allowed now"
+        }
     }
     #endif
 

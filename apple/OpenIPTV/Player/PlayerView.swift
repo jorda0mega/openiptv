@@ -1370,8 +1370,8 @@ struct MoviePlayerView: View {
             startReadout = String(format: "%@ %.1f at %.0f", warmStart ? "warm" : "cold", total, position)
             if let player, !warmStart {
                 let loading = player.startLoadedAt - playback.requestedAt.timeIntervalSinceReferenceDate - playback.resolvedIn
-                startParts = String(format: "plan %.2f s (%@), then %.2f s to the open, ", playback.resolvedIn,
-                                    model.lastPlanKept ? "kept" : "asked", loading) + player.startNote
+                startParts = String(format: "plan %.2f s (%@), start ahead %@, then %.2f s to the open, ", playback.resolvedIn,
+                                    model.lastPlanKept ? "kept" : "asked", model.lastStartAhead, loading) + player.startNote
             }
             #endif
             Task { await loadTrackInfo() }
