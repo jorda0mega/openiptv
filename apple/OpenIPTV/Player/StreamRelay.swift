@@ -588,6 +588,9 @@ final class StreamRelay: @unchecked Sendable {
         task.resume()
     }
 
+    func warmConnection(_ file: FileStart) async {
+    }
+
     /// Something starts playing: what was being fetched ahead for other
     /// files stops (under way and still to come), so it has the connection
     /// to itself; that for `playing` (the same file) goes on.
@@ -859,6 +862,21 @@ enum FileStarts {
             guard await fetch(start) else { throw SourceError.unexpected("The film's start wasn't fetched.") }
             return true
         }
+    }
+}
+
+extension Lane {
+    static let connections = Lane(.light, atOnce: 1, bucket: Bucket(size: 3, refillEvery: .seconds(5), reserve: 0),
+                                  conditions: Conditions.current)
+}
+
+@MainActor
+enum Connections {
+    static let every: Duration = .seconds(10)
+
+    static func keepWarm(_ file: FileStart, for interest: Interest, lane: Lane = .connections, every: Duration = every,
+                         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+                         ping: @escaping @Sendable (FileStart) async -> Void = { await StreamRelay.shared.warmConnection($0) }) async {
     }
 }
 

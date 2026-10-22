@@ -1275,6 +1275,7 @@ final class AppModel {
             guard !AppModel.noStreamAhead else { return }
             _ = await FileStarts.shelf.warm(FileStart(start), for: interest)
         },
+        connection: { start, interest in await Connections.keepWarm(FileStart(start), for: interest) },
         subtitle: { subtitle, interest in await ServerSubtitles.warm(subtitle, for: interest) },
         previews: { [weak self] plan, interest in
             await Lane.embyFiles.whenAllowed(for: interest) { _ = await self?.previewStills(plan.itemId) }

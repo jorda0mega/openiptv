@@ -54,6 +54,8 @@ enum Need: Hashable, Sendable {
     case page
     case plan
     case fileStart
+    /// The connection playback will use, kept open.
+    case connection
     case subtitleFile
     /// The likeliest subtitles, when they are one of the film's own tracks:
     /// the server's copy (it reads the whole film for it).
@@ -67,6 +69,7 @@ final class Ahead {
         var page: @MainActor (Target, Interest) async -> Void
         var plan: @MainActor (Target, Interest) async -> EmbyPlayback?
         var fileStart: @MainActor (EmbyPlayback, Interest) async -> Void
+        var connection: @MainActor (EmbyPlayback, Interest) async -> Void
         var subtitle: @MainActor (ServerSubtitle, Interest) async -> Void
         var previews: @MainActor (EmbyPlayback, Interest) async -> Void
     }
@@ -124,6 +127,7 @@ final class Ahead {
     private func prepare(_ need: Need, of plan: EmbyPlayback, _ interest: Interest) async {
         switch need {
         case .fileStart: await work.fileStart(plan, interest)
+        case .connection: await work.connection(plan, interest)
         case .subtitleFile, .subtitleCopy:
             guard let likely = plan.likelySubtitle, (likely.kind == .beside) == (need == .subtitleFile) else { return }
             await work.subtitle(likely, interest)

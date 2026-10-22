@@ -39,6 +39,7 @@ final class AheadTests: XCTestCase {
                     guard holdFileStart else { return }
                     do { try await Task.sleep(for: .seconds(3600)) } catch { stopped.append("file start") }
                 },
+                connection: { [unowned self] _, _ in asked.append("connection") },
                 subtitle: { [unowned self] subtitle, _ in asked.append(subtitle.kind == .beside ? "subtitle file" : "subtitle copy") },
                 previews: { [unowned self] _, _ in asked.append("previews") })
         }
@@ -86,22 +87,23 @@ final class AheadTests: XCTestCase {
     func testACardOnScreenPastItsDwellGetsItsPlanThenItsStartAndSubtitles() async {
         let asked = await asked(card, at: .continueWatching, stays: .seconds(1))
         XCTAssertEqual(asked.first, "plan")
-        XCTAssertEqual(Set(asked.dropFirst()), ["file start"], "an English film's likely subtitles are its own track: a copy, later")
+        XCTAssertEqual(Set(asked.dropFirst()), ["file start", "connection"],
+                       "an English film's likely subtitles are its own track: a copy, later")
     }
 
     func testALongDwellAddsTheHeavierWork() async {
         let asked = await asked(card, at: .continueWatching, stays: .seconds(3))
-        XCTAssertEqual(Set(asked), ["plan", "file start", "subtitle copy", "previews"])
+        XCTAssertEqual(Set(asked), ["plan", "file start", "connection", "subtitle copy", "previews"])
     }
 
     func testAppleTVFocusClimbsFaster() async {
         let asked = await asked(card, at: .continueWatching, on: .tv, stays: .milliseconds(500))
-        XCTAssertEqual(Set(asked), ["plan", "file start", "subtitle copy", "previews"])
+        XCTAssertEqual(Set(asked), ["plan", "file start", "connection", "subtitle copy", "previews"])
     }
 
     func testAFileBesideTheFilmIsFetchedAtTheFirstStep() async {
         let asked = await asked(card, at: .continueWatching, stays: .seconds(1), plan: film(saved: ("eng", "sdh")))
-        XCTAssertEqual(Set(asked), ["plan", "file start", "subtitle file"])
+        XCTAssertEqual(Set(asked), ["plan", "file start", "connection", "subtitle file"])
     }
 
     func testTheLikeliestSubtitlesAreThePick() {
@@ -173,14 +175,46 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(starts.lock.withLock { starts.asked }, 2, "a start stopped short was kept as done, or a done one fetched again")
     }
 
+    private final class Pings: @unchecked Sendable {
+        private let lock = NSLock()
+        private var made = 0
+        var count: Int { lock.withLock { made } }
+        func ping(_ file: FileStart) async { lock.withLock { made += 1 } }
+    }
+
+    private func conditions(playing: Bool) -> Conditions {
+        Conditions(network: .unmetered, playing: playing, lowPower: false, thermal: .nominal, memoryWarned: false, freeDisk: 10_000_000_000)
+    }
+
+    func testALikelyCardKeepsTheConnectionPlaybackUsesOpenTillItGoes() async {
+        let pings = Pings(), open = conditions(playing: false), screen = Screen(stays: .seconds(25))
+        let warm = Task {
+            await Connections.keepWarm(FileStart(film()), for: Interest(at: .continueWatching, .likely), lane: Lane(.light, atOnce: 1) { open },
+                                       every: .seconds(10), sleep: screen.sleep, ping: pings.ping)
+        }
+        await settle()
+        XCTAssertEqual(pings.count, 3, "opened at once, and used again every 10 s while on screen for 25 s")
+        warm.cancel()
+        await warm.value
+        await settle()
+        XCTAssertEqual(pings.count, 3, "used again after the card went")
+    }
+
+    func testNoConnectionIsKeptOpenWhileSomethingPlays() async {
+        let pings = Pings(), playing = conditions(playing: true)
+        await Connections.keepWarm(FileStart(film()), for: Interest(at: .continueWatching, .likely), lane: Lane(.light, atOnce: 1) { playing },
+                                   every: .seconds(10), sleep: Screen(stays: .seconds(60)).sleep, ping: pings.ping)
+        XCTAssertEqual(pings.count, 0)
+    }
+
     func testEachLikelihoodOnlyAdds() {
         for target in [card, .title(id: "m5", kind: "Movie")] {
             let ladder = [Likelihood.glance, .likely, .next].map { Set(Ahead.needs(target, $0)) }
             XCTAssertTrue(ladder[0].isSubset(of: ladder[1]) && ladder[1].isSubset(of: ladder[2]), "\(target)")
         }
         XCTAssertEqual(Ahead.needs(card, .glance), [.plan])
-        XCTAssertEqual(Ahead.needs(card, .likely), [.plan, .fileStart, .subtitleFile])
-        XCTAssertEqual(Ahead.needs(card, .next), [.plan, .fileStart, .subtitleFile, .subtitleCopy, .previews])
+        XCTAssertEqual(Ahead.needs(card, .likely), [.plan, .fileStart, .connection, .subtitleFile])
+        XCTAssertEqual(Ahead.needs(card, .next), [.plan, .fileStart, .connection, .subtitleFile, .subtitleCopy, .previews])
         XCTAssertEqual(Ahead.needs(.title(id: "m5", kind: "Movie"), .glance), [.page])
         XCTAssertEqual(Ahead.needs(.title(id: "m5", kind: "Movie"), .likely), [.page, .plan, .subtitleFile])
     }
