@@ -1275,7 +1275,10 @@ final class AppModel {
             guard !AppModel.noStreamAhead else { return }
             _ = await FileStarts.shelf.warm(FileStart(start), for: interest)
         },
-        connection: { start, interest in await Connections.keepWarm(FileStart(start), for: interest) },
+        connection: { start, interest in
+            guard !AppModel.noStreamAhead, !AppModel.noPreconnect else { return }
+            await Connections.keepWarm(FileStart(start), for: interest)
+        },
         subtitle: { subtitle, interest in await ServerSubtitles.warm(subtitle, for: interest) },
         previews: { [weak self] plan, interest in
             await Lane.embyFiles.whenAllowed(for: interest) { _ = await self?.previewStills(plan.itemId) }
@@ -1284,7 +1287,8 @@ final class AppModel {
     #if DEBUG
     var aheadCounts: String {
         let now = Conditions.current()
-        return "held \(ahead.held) plans \(plans.fetched) starts \(FileStarts.shelf.fetched) files \(ServerSubtitles.beside.fetched) "
+        return "held \(ahead.held) plans \(plans.fetched) starts \(FileStarts.shelf.fetched) warmed \(StreamRelay.warmed.value) "
+            + "files \(ServerSubtitles.beside.fetched) "
             + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) disk \(now.freeDisk / 1_000_000_000) GB thermal \(now.thermal.rawValue)"
             + (now.lowPower ? " low power" : "") + (now.memoryWarned ? " memory warned" : "") + (now.playing ? " playing" : "")
     }
@@ -2689,6 +2693,14 @@ extension AppModel {
     private nonisolated static var noStreamAhead: Bool { UserDefaults.standard.bool(forKey: "noStreamAhead") }
     #else
     private nonisolated static let noStreamAhead = false
+    #endif
+
+    #if DEBUG
+    /// UI tests: `-noPreconnect YES` keeps no connection open for a likely
+    /// card (the start before it did).
+    private nonisolated static var noPreconnect: Bool { UserDefaults.standard.bool(forKey: "noPreconnect") }
+    #else
+    private nonisolated static let noPreconnect = false
     #endif
 
     #if DEBUG

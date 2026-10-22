@@ -588,8 +588,27 @@ final class StreamRelay: @unchecked Sendable {
         task.resume()
     }
 
+    /// The file's first byte, asked as playback asks for it: the same
+    /// session and server, the key in the header and only to that server.
     func warmConnection(_ file: FileStart) async {
+        let route = Self.route(file.url, file.headers)
+        var request = URLRequest(url: route.url)
+        request.timeoutInterval = 10
+        for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
+        request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+        #if DEBUG
+        Self.warmed.mutate { $0 += 1 }
+        #endif
+        // Read to its end, or the connection closes with it. A whole film
+        // (no range kept) is left unread.
+        guard let (bytes, response) = try? await HTTP.session.bytes(for: request, delegate: Self.aheadRedirects),
+              (response as? HTTPURLResponse)?.statusCode == 206 else { return }
+        do { for try await _ in bytes {} } catch {}
     }
+
+    #if DEBUG
+    static let warmed = Locked(0)
+    #endif
 
     /// Something starts playing: what was being fetched ahead for other
     /// files stops (under way and still to come), so it has the connection
@@ -870,6 +889,8 @@ extension Lane {
                                   conditions: Conditions.current)
 }
 
+/// The connection playback will use, open before the tap: a card's fetch
+/// ahead uses it only while it runs, and a server closes one left idle.
 @MainActor
 enum Connections {
     static let every: Duration = .seconds(10)
@@ -877,6 +898,14 @@ enum Connections {
     static func keepWarm(_ file: FileStart, for interest: Interest, lane: Lane = .connections, every: Duration = every,
                          sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
                          ping: @escaping @Sendable (FileStart) async -> Void = { await StreamRelay.shared.warmConnection($0) }) async {
+        while !Task.isCancelled {
+            var sent = false
+            await lane.whenAllowed(for: interest) {
+                sent = true
+                await ping(file)
+            }
+            guard sent, (try? await sleep(every)) != nil else { return }
+        }
     }
 }
 

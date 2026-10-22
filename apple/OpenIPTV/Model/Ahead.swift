@@ -93,8 +93,8 @@ final class Ahead {
         case (.title, .glance): [.page]
         case (.title, _): [.page, .plan, .subtitleFile]
         case (.playable, .glance): [.plan]
-        case (.playable, .likely): [.plan, .fileStart, .subtitleFile]
-        case (.playable, .next): [.plan, .fileStart, .subtitleFile, .subtitleCopy, .previews]
+        case (.playable, .likely): [.plan, .fileStart, .connection, .subtitleFile]
+        case (.playable, .next): [.plan, .fileStart, .connection, .subtitleFile, .subtitleCopy, .previews]
         }
     }
 
