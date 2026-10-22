@@ -24,7 +24,8 @@ enum FilmStream: Sendable {
     #endif
 
     /// What the player opens for a converted version from `second`: nil
-    /// when the relay can't serve its list.
+    /// when the relay can't serve its list. The relay alone asks the server,
+    /// with `headers`.
     static func converted(_ url: URL, _ list: ConvertedPlaylist, at second: Double, headers: [String], old: Bool = oldConvertedStart,
                           serve: (ConvertedPlaylist.Listed, [String], URL) -> URL? = StreamRelay.shared.localURL(serving:headers:given:))
         -> (address: URL, headers: [String], start: Double?, stream: FilmStream)? {
@@ -32,7 +33,7 @@ enum FilmStream: Sendable {
         // jump to `second` read the segment again for a keyframe in it.
         let listed = list.listed(from: old ? 0 : second)
         guard let local = serve(listed, headers, url) else { return nil }
-        return (local, headers, old ? second : nil, .listed(url, list, clockStart: listed.clockStart))
+        return (local, [], old ? second : nil, .listed(url, list, clockStart: listed.clockStart))
     }
 }
 

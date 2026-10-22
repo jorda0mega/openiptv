@@ -34,7 +34,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     func testAConvertedVersionIsListedFromTheSegmentHoldingTheSecond() throws {
         let listed = try listed(emby(segments: 200)).listed(from: 301.5)
         XCTAssertEqual(listed.clockStart, 300, "the player's clock 0 isn't where its first segment starts")
-        XCTAssertEqual(listed.segments.first?.absoluteString, "https://emby.example/emby/Videos/m1/hls1/main/100.ts?PlaySessionId=p1")
+        XCTAssertEqual(listed.segments.first?.url.absoluteString, "https://emby.example/emby/Videos/m1/hls1/main/100.ts?PlaySessionId=p1")
         XCTAssertEqual(listed.segments.count, 100)
         XCTAssertEqual(segments(listed.playlist).count, 100)
         XCTAssertTrue(listed.playlist.contains("#EXT-X-MEDIA-SEQUENCE:100\n"), listed.playlist)
@@ -50,7 +50,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     func testPastTheEndItIsTheLastSegment() throws {
         let listed = try listed(emby(segments: 200)).listed(from: 10_000)
         XCTAssertEqual(listed.clockStart, 597)
-        XCTAssertEqual(listed.segments.map(\.absoluteString), ["https://emby.example/emby/Videos/m1/hls1/main/199.ts?PlaySessionId=p1"])
+        XCTAssertEqual(listed.segments.map(\.url.absoluteString), ["https://emby.example/emby/Videos/m1/hls1/main/199.ts?PlaySessionId=p1"])
     }
 
     private func loaded(listing listed: String = "main.m3u8?MediaSourceId=m1", masterAt: URL? = nil,
@@ -102,7 +102,7 @@ final class ConvertedPlaylistTests: XCTestCase {
 
     func testAVersionAllOnTheGivenServerOpens() async {
         guard case let .listed(list) = await loaded().opening else { return XCTFail("not listed") }
-        XCTAssertEqual(list.listed(from: 4).segments.map { $0.host() }, [String?](repeating: "emby.example", count: 2))
+        XCTAssertEqual(list.listed(from: 4).segments.map { $0.url.host() }, [String?](repeating: "emby.example", count: 2))
     }
 
     /// One the app can't list again was opened as the server's own master,
@@ -218,7 +218,7 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(opened.address, local, "not served from here")
         XCTAssertEqual(opened.start, 301.5)
         XCTAssertEqual(opened.stream.clockStart, 0)
-        XCTAssertEqual(served.map { $0.segments.first?.absoluteString }, ["https://emby.example/emby/Videos/m1/hls1/main/0.ts?PlaySessionId=p1"])
+        XCTAssertEqual(served.map { $0.segments.first?.url.absoluteString }, ["https://emby.example/emby/Videos/m1/hls1/main/0.ts?PlaySessionId=p1"])
         XCTAssertEqual(served.map(\.segments.count), [200])
     }
 

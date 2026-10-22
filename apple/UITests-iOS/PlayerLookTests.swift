@@ -1765,7 +1765,7 @@ final class PlayerLookTests: XCTestCase {
         listed(server, "mock/subtitle_requests", since: since, field)
     }
 
-    private func keyChecks(_ server: URL, _ field: String) -> [String] {
+    func keyChecks(_ server: URL, _ field: String) -> [String] {
         listed(server, "mock/key_checks", since: 0, field)
     }
 

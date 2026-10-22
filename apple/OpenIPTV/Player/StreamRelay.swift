@@ -28,7 +28,7 @@ final class StreamRelay: @unchecked Sendable {
     private var routes = RelayRoutes()
     /// Converted versions listed from where they play (ConvertedPlaylist),
     /// the last few, by their local token.
-    private var playlists: [(token: String, body: Data)] = []
+    private var playlists: [Converted] = []
     /// What's been fetched of the last few files (the one playing, ones
     /// opened or fetched ahead), by their real address without the
     /// server's per-request session (asked again later, a title's address
@@ -115,15 +115,27 @@ final class StreamRelay: @unchecked Sendable {
         return URL(string: "http://127.0.0.1:\(port)/\(token)\(ext)")
     }
 
+    /// A converted version's list: the player reads it and its segments
+    /// from here, and only the relay asks the server, with `headers`.
     func localURL(serving listed: ConvertedPlaylist.Listed, headers: [String], given: URL) -> URL? {
         start()
         lock.lock()
         defer { lock.unlock() }
         guard let port else { return nil }
         let token = UUID().uuidString.lowercased()
-        playlists.append((token, Data(listed.playlist.utf8)))
+        let segments = Dictionary(uniqueKeysWithValues: listed.segments.map { ($0.name, $0.url) })
+        playlists.append(Converted(token: token, body: Data(listed.playlist.utf8), segments: segments, headers: headers, given: given))
         if playlists.count > 4 { playlists.removeFirst() }
-        return URL(string: "http://127.0.0.1:\(port)/\(token).m3u8")
+        return URL(string: "http://127.0.0.1:\(port)/\(token)/\(Converted.list)")
+    }
+
+    private struct Converted {
+        static let list = "list.m3u8"
+        let token: String
+        let body: Data
+        let segments: [String: URL]
+        let headers: [String]
+        let given: URL
     }
 
     // MARK: Serving
@@ -153,23 +165,18 @@ final class StreamRelay: @unchecked Sendable {
         let request = lines.first?.split(separator: " ") ?? []
         guard request.count >= 2 else { return fail(connection, 400) }
         let method = String(request[0])
-        let token = String(request[1].dropFirst().split(separator: ".").first ?? "")
+        let path = request[1].dropFirst().split(separator: "/")
+        let token = String(path.first?.split(separator: ".").first ?? "")
         lock.lock()
-        let playlist = playlists.first { $0.token == token }?.body
+        let converted = playlists.first { $0.token == token }
         let route = routes.route(token)
         lock.unlock()
-        if let playlist, method == "GET" || method == "HEAD" {
-            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: \(playlist.count)\r\nConnection: close\r\n\r\n"
-            return connection.send(content: Data(head.utf8) + (method == "GET" ? playlist : Data()), contentContext: .finalMessage,
-                                   isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+        if let converted, method == "GET" || method == "HEAD" {
+            return serve(converted, path.dropFirst().first.map(String.init), method: method, range: Self.range(in: lines), connection)
         }
         guard let route, method == "GET" || method == "HEAD" else { return fail(connection, 404) }
 
-        var range: String?
-        for line in lines.dropFirst() {
-            let pair = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            if pair.count == 2, pair[0].caseInsensitiveCompare("Range") == .orderedSame { range = pair[1] }
-        }
+        let range = Self.range(in: lines)
         let cache = method == "GET" ? cache(for: route.url) : nil
         #if DEBUG
         noteRead(token, range)
@@ -202,6 +209,32 @@ final class StreamRelay: @unchecked Sendable {
             }
         }
         fetch(route, method: method, range: range, connection: connection, cache: cache, head: true)
+    }
+
+    private static func range(in head: [String]) -> String? {
+        var range: String?
+        for line in head.dropFirst() {
+            let pair = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            if pair.count == 2, pair[0].caseInsensitiveCompare("Range") == .orderedSame { range = pair[1] }
+        }
+        return range
+    }
+
+    /// A converted version's list, or a segment it names from the server:
+    /// the key goes only to the server the app was given, and not after a
+    /// redirect to another (ffmpeg would follow one anywhere with it).
+    private func serve(_ converted: Converted, _ name: String?, method: String, range: String?, _ connection: NWConnection) {
+        if name == Converted.list {
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: \(converted.body.count)\r\nConnection: close\r\n\r\n"
+            return connection.send(content: Data(head.utf8) + (method == "GET" ? converted.body : Data()), contentContext: .finalMessage,
+                                   isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+        }
+        guard let segment = name.flatMap({ converted.segments[$0] }) else { return fail(connection, 404) }
+        guard HTTP.sameServer(segment, converted.given) else { return fail(connection, 403) }
+        let given = converted.given
+        fetch(Self.route(segment, converted.headers), method: method, range: range, connection: connection, cache: nil, head: true) { request, _ in
+            HTTP.redirected(request, from: given)
+        }
     }
 
     #if DEBUG
@@ -393,14 +426,15 @@ final class StreamRelay: @unchecked Sendable {
     /// From the server: `head` sends its answer's headers to the player
     /// (not when kept bytes have gone first, with their own).
     private func fetch(_ route: (url: URL, headers: [(String, String)]), method: String = "GET", range: String?,
-                       connection: NWConnection, cache: ByteCache?, head: Bool) {
+                       connection: NWConnection, cache: ByteCache?, head: Bool,
+                       redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest = StreamRelay.redirected) {
         var upstream = URLRequest(url: route.url)
         upstream.httpMethod = method
         upstream.timeoutInterval = 30
         for (name, value) in route.headers { upstream.setValue(value, forHTTPHeaderField: name) }
         if let range { upstream.setValue(range, forHTTPHeaderField: "Range") }
         let task = HTTP.session.dataTask(with: upstream)
-        let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head)
+        let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head, redirected: redirected)
         #if DEBUG
         relay.relay = self
         relay.read = startRead(for: connection)
@@ -571,6 +605,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let task: URLSessionDataTask
     private let cache: ByteCache?
     private let sendsHead: Bool
+    private let redirected: @Sendable (URLRequest, URLSessionTask) -> URLRequest
     private let lock = NSLock()
     private var pending = 0
     private var suspended = false
@@ -583,11 +618,13 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let asked = CFAbsoluteTimeGetCurrent()
     #endif
 
-    init(connection: NWConnection, task: URLSessionDataTask, cache: ByteCache?, sendsHead: Bool) {
+    init(connection: NWConnection, task: URLSessionDataTask, cache: ByteCache?, sendsHead: Bool,
+         redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest) {
         self.connection = connection
         self.task = task
         self.cache = cache
         self.sendsHead = sendsHead
+        self.redirected = redirected
     }
 
     func cancel() {
@@ -599,7 +636,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(StreamRelay.redirected(request, for: task))
+        completionHandler(redirected(request, task))
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,

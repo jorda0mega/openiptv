@@ -187,8 +187,8 @@ extension PlayerLookTests {
     /// The film's requests and a lower quality's first segments
     /// (-debugRedirectCounts) the server answered with a redirect, and
     /// those to another server, for the real server's runner. localhost is
-    /// another server to the app: the film, asked there without the key,
-    /// doesn't open.
+    /// another server to the app: the film and the segments, asked there
+    /// without the key, don't open.
     func testRedirectsAreCounted() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
@@ -196,9 +196,10 @@ extension PlayerLookTests {
         configure(server, ["emby_convert": "1", "convert_delay": "2", "redirect_film": "same", "redirect_segment": "elsewhere"])
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
         openFilm(["-debugRedirectCounts", "YES"])
-        waitForTheLowerQuality()
+        for _ in 0..<80 where redirects().asked < 3 { usleep(500_000) }
         sleep(3)
         let lowered = redirects()
+        let player = keyChecks(server, "player")
         app.terminate()
         configure(server, ["redirect_film": "elsewhere", "redirect_segment": ""])
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
@@ -210,6 +211,7 @@ extension PlayerLookTests {
         XCTAssertEqual(lowered.asked, 3, "not the lower quality's first 3 segments")
         XCTAssertEqual(lowered.converted, 3, "segments redirected")
         XCTAssertEqual(lowered.convertedElsewhere, 3, "segments redirected elsewhere")
+        XCTAssertEqual(player, [], "the player asked the server itself")
         XCTAssertGreaterThan(elsewhere.film, 0, "no film redirect counted")
         XCTAssertEqual(elsewhere.filmElsewhere, elsewhere.film, "a redirect elsewhere counted on this server")
     }

@@ -11,9 +11,9 @@ struct ConvertedPlaylist: Sendable {
         case refused(String)
     }
 
-    /// The player sends the key with every request for the version, so it
-    /// opens only as listed again here, every address on the server the app
-    /// was given.
+    /// A version opens only as listed again here, every address on the
+    /// server the app was given: the relay asks for each segment there,
+    /// with the key.
     static func load(_ master: URL, headers: [String],
                      fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> Opening {
         guard let top = await fetch(request(master, headers, given: master)) else { return .refused("master unread") }
@@ -119,7 +119,7 @@ struct ConvertedPlaylist: Sendable {
     static let redirects = Locked((asked: 0, count: RedirectCount()))
 
     /// Debug builds (-debugRedirectCounts YES): the first segments listed
-    /// from `second`, asked as the player asks them, following no redirect.
+    /// from `second`, asked as the relay asks them, following no redirect.
     @discardableResult
     static func countRedirects(_ list: ConvertedPlaylist, from second: Double, headers: [String], given: URL,
                                ask: (URLRequest) async -> HTTPURLResponse? = firstAnswer) async -> (asked: Int, count: RedirectCount) {
@@ -156,9 +156,11 @@ struct ConvertedPlaylist: Sendable {
         return (first, clockStart)
     }
 
+    /// The list the player reads from the relay: each segment by a name
+    /// beside the list, which the relay asks the server for.
     struct Listed: Sendable {
         let playlist: String
-        let segments: [URL]
+        let segments: [(name: String, url: URL)]
         let clockStart: Double
     }
 
@@ -166,8 +168,11 @@ struct ConvertedPlaylist: Sendable {
         let (first, clockStart) = first(from: second)
         let tag = "#EXT-X-MEDIA-SEQUENCE:"
         let sequence = header.first { $0.hasPrefix(tag) }.flatMap { Int($0.dropFirst(tag.count)) } ?? 0
-        let lines = header.filter { !$0.hasPrefix(tag) } + [tag + String(sequence + first)]
-            + segments[first...].flatMap { $0.tags + [$0.url.absoluteString] } + ["#EXT-X-ENDLIST"]
-        return Listed(playlist: lines.joined(separator: "\n") + "\n", segments: segments[first...].map(\.url), clockStart: clockStart)
+        let listed = Array(segments[first...])
+        // ffmpeg reads a segment only with an extension that fits what's in it.
+        let names = listed.indices.map { listed[$0].url.pathExtension.isEmpty ? "\($0)" : "\($0).\(listed[$0].url.pathExtension)" }
+        let body: [String] = zip(listed, names).flatMap { $0.tags + [$1] }
+        let lines = header.filter { !$0.hasPrefix(tag) } + [tag + String(sequence + first)] + body + ["#EXT-X-ENDLIST"]
+        return Listed(playlist: lines.joined(separator: "\n") + "\n", segments: zip(names, listed).map { ($0, $1.url) }, clockStart: clockStart)
     }
 }
