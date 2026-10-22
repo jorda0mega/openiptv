@@ -51,8 +51,6 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertEqual(segments(text).count, 1)
     }
 
-    /// The loader against a made-up server: how the version opens, and
-    /// each request it sent, where to and with which key.
     private func loaded(listing listed: String = "main.m3u8?MediaSourceId=m1", masterAt: URL? = nil,
                         master: URL = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1&api_key=test-key")!,
                         variant: [String]? = nil) async -> (opening: ConvertedPlaylist.Opening, sent: [(url: URL, key: String?)]) {
@@ -111,7 +109,6 @@ final class ConvertedPlaylistTests: XCTestCase {
         }
     }
 
-    /// An address with no port is on the scheme's own: 443 for https, 80 for http.
     func testAPortWrittenOutIsTheSameServer() async {
         let bare = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
         let written = URL(string: "https://emby.example:443/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!

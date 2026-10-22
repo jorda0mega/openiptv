@@ -1176,7 +1176,7 @@ final class AppModel {
     /// open at `start` (one opened at another second, say before the last
     /// stop reached the server, would play from there: "the same frame
     /// again").
-    func takeWarm(_ itemId: String, at start: Double?) -> (MPVPlayer, EmbyPlayback)? {
+    func takeWarm(_ itemId: String, at start: Double?) -> MPVPlayer? {
         guard let warm, warm.playback.itemId == itemId else { return nil }
         // Failed meanwhile (the connection lost, the app away): the title
         // opens afresh. Handed over, it waited for a start that never came.
@@ -1190,7 +1190,7 @@ final class AppModel {
         }
         self.warm = nil
         warmExpiry?.cancel()
-        return (warm.player, warm.playback)
+        return warm.player
     }
 
     /// Keeps a player that just closed, paused where it stopped, for five

@@ -749,7 +749,6 @@ struct MoviePlayerView: View {
         // The picture's way out changes (a moment's refresh): not a stall
         // to lower the quality for.
         trackSwitched()
-        // The window takes the stream as it is now.
         convertedOpen?.cancel()
         PictureInPicture.shared.start(player, playback: playback, stream: stream, position: position, total: total, paused: paused,
                                       started: {
@@ -1113,7 +1112,7 @@ struct MoviePlayerView: View {
             }
         }
         #endif
-        if let (warmPlayer, _) = model.takeWarm(playback.itemId, at: playback.startSeconds) {
+        if let warmPlayer = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
             PlaybackAudio.activate()
@@ -1250,10 +1249,6 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// The key would go elsewhere, or the playlists couldn't be checked:
-    /// the film plays on as it was, and the quality stops adapting, as for
-    /// a version the server won't make. With nothing playing, it failed as
-    /// an open does.
     private func refuseConverted(_ why: String, _ player: MPVPlayer) {
         #if DEBUG
         convertedReadout = "not opened, " + why
@@ -1520,9 +1515,7 @@ struct MoviePlayerView: View {
         #endif
         // Kept, paused here, for a moment: chosen again, it carries on at
         // once (it closed, and the next tap waited for the server and a
-        // new stream, then started where the server last heard). Not a
-        // version listed from a segment: the quality chooser would take it
-        // for the original.
+        // new stream, then started where the server last heard).
         if let player {
             if started, error == nil, case .whole = stream { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
         }
