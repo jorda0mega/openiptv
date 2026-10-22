@@ -22,8 +22,8 @@ enum FilmStream: Sendable {
                           serve: (String) -> URL? = StreamRelay.shared.localURL(serving:)) -> (address: URL, start: Double?, stream: FilmStream) {
         // From the segment's start, at most a segment before `second`: a
         // jump to `second` read the segment again for a keyframe in it.
-        if let list, !old, case let listed = list.listed(from: second), let local = serve(listed.playlist) {
-            return (local, nil, .listed(url, list, clockStart: listed.clockStart))
+        if let list, case let listed = list.listed(from: old ? 0 : second), let local = serve(listed.playlist) {
+            return (local, old ? second : nil, .listed(url, list, clockStart: listed.clockStart))
         }
         return (url, second, .whole)
     }
