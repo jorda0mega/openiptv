@@ -9,6 +9,9 @@ enum FilmStream: Sendable {
         return clockStart
     }
 
+    /// Taken for the original file when it comes back from Picture in Picture.
+    var isOriginal: Bool { clockStart == 0 }
+
     #if DEBUG
     /// UI tests (-oldConvertedStart YES): the converted version as Emby
     /// lists it, the whole film from 0:00.

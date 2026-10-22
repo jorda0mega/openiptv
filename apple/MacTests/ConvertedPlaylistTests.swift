@@ -102,10 +102,46 @@ final class ConvertedPlaylistTests: XCTestCase {
         guard case let .listed(list) = await loaded().opening else { return XCTFail("not listed") }
         let hosts = segments(list.listed(from: 4).playlist).map { URL(string: $0)?.host() }
         XCTAssertEqual(hosts, [String?](repeating: "emby.example", count: 2))
-        var keyed = emby(segments: 3)
-        keyed.insert("#EXT-X-KEY:METHOD=AES-128,URI=\"key\"", at: 5)
-        for (name, variant) in [("a key on the server", keyed), ("still growing", Array(emby(segments: 3).dropLast()))] {
-            if case .whole = await loaded(variant: variant).opening {} else { XCTFail("\(name): not the server's own playlist") }
+    }
+
+    /// One the app can't list again was opened as the server's own master,
+    /// and ffmpeg read addresses the app never checked: later segments and
+    /// keys of a list still growing, or the last URI= of a tag, unescaped.
+    func testAVersionThatCannotBeListedAgainDoesNotOpen() async {
+        func tagged(_ tag: String) -> [String] {
+            var list = emby(segments: 3)
+            list.insert(tag, at: 5)
+            return list
+        }
+        var unread = emby(segments: 3)
+        unread[7] = "#EXTINF:three, nodesc"
+        let cases = [
+            ("still growing", Array(emby(segments: 3).dropLast())),
+            ("a key on the server", tagged("#EXT-X-KEY:METHOD=AES-128,URI=\"key\"")),
+            ("an X-URI before the URI", tagged("#EXT-X-KEY:METHOD=AES-128,X-URI=\"key\",URI=\"https://cdn.example/key\"")),
+            ("an escaped address", tagged("#EXT-X-KEY:METHOD=AES-128,URI=\"\\/\\/cdn.example/key\"")),
+            ("two URI=", tagged("#EXT-X-KEY:METHOD=AES-128,URI=\"key\",URI=\"https://cdn.example/key\"")),
+            ("a segment unread", unread),
+        ]
+        for (name, variant) in cases {
+            if case .refused = await loaded(variant: variant).opening {} else { XCTFail("\(name): it opens") }
+        }
+    }
+
+    /// With the relay not running, the version opened as the server lists it.
+    func testAVersionTheRelayCannotServeDoesNotOpen() throws {
+        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        XCTAssertNil(FilmStream.converted(master, list, at: 301.5) { _ in nil }, "the server's own master")
+    }
+
+    /// Kept on closing, or back from Picture in Picture, a converted version
+    /// taken for the original got a quality chooser that never went back up.
+    func testAConvertedVersionIsNeverTheOriginal() throws {
+        XCTAssertTrue(FilmStream.whole.isOriginal)
+        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        for (second, old) in [(0.0, false), (301.5, false), (301.5, true)] {
+            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, old: old) { _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
+            XCTAssertFalse(opened.stream.isOriginal, "from \(second)\(old ? ", the old way" : "")")
         }
     }
 
@@ -161,12 +197,5 @@ final class ConvertedPlaylistTests: XCTestCase {
                 : emby(segments: 3).joined(separator: "\n")
         }
         XCTAssertEqual(asked.filter(\.keyed).map(\.host), ["emby.example", "emby.example"])
-    }
-
-    func testAPlaylistStillGrowingOrWithKeysIsLeftAsItIs() {
-        XCTAssertNil(ConvertedPlaylist(Array(emby(segments: 3).dropLast()), at: variant), "still growing")
-        var keyed = emby(segments: 3)
-        keyed.insert("#EXT-X-KEY:METHOD=AES-128,URI=\"key\"", at: 5)
-        XCTAssertNil(ConvertedPlaylist(keyed, at: variant), "a key at another address")
     }
 }

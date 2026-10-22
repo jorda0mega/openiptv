@@ -1163,7 +1163,7 @@ struct MoviePlayerView: View {
         player = back.player
         trackSwitched()
         back.player.drawOnScreen()
-        if governor == nil, prefs.adaptiveQuality, offset == 0 { governor = QualityGovernor(original: playback.bitrate) }
+        if governor == nil, prefs.adaptiveQuality, back.stream.isOriginal { governor = QualityGovernor(original: playback.bitrate) }
         Task { await loadTrackInfo() }
         thumbnailTask = Task { await loadThumbnails() }
         if paused { showControls(autoHide: false) } else { showControls() }
