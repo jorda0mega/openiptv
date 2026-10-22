@@ -183,4 +183,41 @@ extension PlayerLookTests {
         XCTAssertLessThan(film, from - 10, "the jump back stopped at the lower quality's start")
         XCTAssertEqual(stream, film, accuracy: 2, "the pictures aren't where the bar says")
     }
+
+    /// The film's requests and a lower quality's first segments
+    /// (-debugRedirectCounts) the server answered with a redirect, and
+    /// those to another server, for the real server's runner. localhost is
+    /// another server to the app: the film, asked there without the key,
+    /// doesn't open.
+    func testRedirectsAreCounted() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        defer { configure(server, ["reset": "1"]) }
+        configure(server, ["emby_convert": "1", "convert_delay": "2", "redirect_film": "same", "redirect_segment": "elsewhere"])
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "15"
+        openFilm(["-debugRedirectCounts", "YES"])
+        waitForTheLowerQuality()
+        sleep(3)
+        let lowered = redirects()
+        app.terminate()
+        configure(server, ["redirect_film": "elsewhere", "redirect_segment": ""])
+        app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
+        openFilm(["-debugRedirectCounts", "YES"])
+        let elsewhere = redirects()
+        print("REDIRECTS the film here, segments elsewhere: \(lowered); the film elsewhere: \(elsewhere)")
+        XCTAssertGreaterThan(lowered.film, 0, "no film redirect counted")
+        XCTAssertEqual(lowered.filmElsewhere, 0, "a redirect on this server counted elsewhere")
+        XCTAssertEqual(lowered.asked, 3, "not the lower quality's first 3 segments")
+        XCTAssertEqual(lowered.converted, 3, "segments redirected")
+        XCTAssertEqual(lowered.convertedElsewhere, 3, "segments redirected elsewhere")
+        XCTAssertGreaterThan(elsewhere.film, 0, "no film redirect counted")
+        XCTAssertEqual(elsewhere.filmElsewhere, elsewhere.film, "a redirect elsewhere counted on this server")
+    }
+
+    /// "film 2 (0 elsewhere) | converted 3 (3 elsewhere) of 3 asked"
+    private func redirects() -> (film: Int, filmElsewhere: Int, converted: Int, convertedElsewhere: Int, asked: Int) {
+        let numbers = app.staticTexts["debug-redirects"].firstMatch.label.split { !$0.isNumber }.compactMap { Int($0) }
+        guard numbers.count == 5 else { return (-1, -1, -1, -1, -1) }
+        return (numbers[0], numbers[1], numbers[2], numbers[3], numbers[4])
+    }
 }

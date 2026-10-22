@@ -41,6 +41,12 @@ extension MPVPlayer {
         guard let opening = FilmStream.converted(url, list, at: second) else { return nil }
         load(opening.address, headers: playback.fallbackHeaders, start: opening.start, file: false, converting: !FilmStream.oldConvertedStart,
              tracks: playback.tracks, sameFilm: opening.stream.clockStart)
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "debugRedirectCounts") {
+            let (headers, from) = (playback.fallbackHeaders, opening.stream.clockStart)
+            Task.detached { await ConvertedPlaylist.countRedirects(list, from: from, headers: headers, given: url) }
+        }
+        #endif
         return opening.stream
     }
 
