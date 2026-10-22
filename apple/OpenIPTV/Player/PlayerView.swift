@@ -1236,16 +1236,17 @@ struct MoviePlayerView: View {
         convertedOpen = Task {
             let opening = await ConvertedPlaylist.load(url, headers: headers)
             guard !Task.isCancelled, self.player === player else { return }
-            let list: ConvertedPlaylist?
             switch opening {
-            case let .listed(listed): list = listed
-            case .whole: list = nil
-            case let .refused(why): return refuseConverted(why, player)
+            case let .refused(why): refuseConverted(why, player)
+            case let .listed(list):
+                guard let opened = player.openConverted(url, list, at: position, for: playback) else {
+                    return refuseConverted("relay not running", player)
+                }
+                // The stream playing reports where it was for a moment after
+                // the clock moves: the bar stays put meanwhile.
+                jumpUntil = Date().addingTimeInterval(1.5)
+                stream = opened
             }
-            // The stream playing reports where it was for a moment after the
-            // clock moves: the bar stays put meanwhile.
-            jumpUntil = Date().addingTimeInterval(1.5)
-            stream = player.openConverted(url, list, at: position, for: playback)
         }
     }
 
@@ -1517,7 +1518,7 @@ struct MoviePlayerView: View {
         // once (it closed, and the next tap waited for the server and a
         // new stream, then started where the server last heard).
         if let player {
-            if started, error == nil, case .whole = stream { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
+            if started, error == nil, stream.isOriginal { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
         }
         player = nil
         let noted = closedAt != nil

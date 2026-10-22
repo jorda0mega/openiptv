@@ -8,14 +8,12 @@ struct ConvertedPlaylist: Sendable {
 
     enum Opening: Sendable {
         case listed(ConvertedPlaylist)
-        case whole
         case refused(String)
     }
 
     /// The player sends the key with every request for the version, so it
-    /// opens only when every address the playlists name is on the server
-    /// the app was given. The master names one: the player reads every
-    /// variant it lists.
+    /// opens only as listed again here, every address on the server the app
+    /// was given.
     static func load(_ master: URL, headers: [String],
                      fetch: (URLRequest) async -> (lines: [String], url: URL)? = lines) async -> Opening {
         guard let top = await fetch(request(master, headers, given: master)) else { return .refused("master unread") }
@@ -27,7 +25,7 @@ struct ConvertedPlaylist: Sendable {
         let inside = addresses(list.lines, at: list.url)
         let out = elsewhere([list.url] + inside, from: master)
         guard out == 0 else { return .refused("variant \(out) of \(inside.count + 1) elsewhere") }
-        return ConvertedPlaylist(list.lines, at: list.url).map(Opening.listed) ?? .whole
+        return listing(list.lines, at: list.url)
     }
 
     private static func addresses(_ lines: [String], at url: URL) -> [URL?] {
@@ -81,28 +79,32 @@ struct ConvertedPlaylist: Sendable {
             .flatMap { URL(string: $0, relativeTo: url)?.absoluteURL }
     }
 
-    /// nil for a playlist that can't be listed again from elsewhere: one
-    /// still growing (no end), or with tags pointing to other addresses
-    /// (keys, a first part to read before each segment).
-    init?(_ lines: [String], at url: URL) {
+    /// Refused for a playlist that can't be listed again from elsewhere: one
+    /// still growing (no end), with tags pointing to other addresses (keys,
+    /// a first part to read before each segment), or a segment unread.
+    static func listing(_ lines: [String], at url: URL) -> Opening {
+        let lines = lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let tagged = lines.filter { $0.contains("URI=") }.count
+        guard tagged == 0 else { return .refused("variant has \(tagged) URI= lines") }
         var header: [String] = [], tags: [String] = [], segments: [(seconds: Double, tags: [String], url: URL)] = []
         var ended = false
-        for line in lines.map({ $0.trimmingCharacters(in: .whitespaces) }) where !line.isEmpty {
-            if line.contains("URI=") { return nil }
+        for line in lines {
             if line == "#EXT-X-ENDLIST" {
                 ended = true
             } else if line.hasPrefix("#") {
                 if segments.isEmpty, tags.isEmpty, !line.hasPrefix("#EXTINF:") { header.append(line) } else { tags.append(line) }
             } else {
                 guard let seconds = tags.first(where: { $0.hasPrefix("#EXTINF:") }).flatMap({ Double($0.dropFirst(8).prefix { $0 != "," }) }),
-                      let segment = URL(string: line, relativeTo: url)?.absoluteURL else { return nil }
+                      let segment = URL(string: line, relativeTo: url)?.absoluteURL else {
+                    return .refused("variant segment \(segments.count + 1) unread")
+                }
                 segments.append((seconds, tags, segment))
                 tags = []
             }
         }
-        guard ended, !segments.isEmpty else { return nil }
-        self.header = header
-        self.segments = segments
+        guard ended else { return .refused("variant still growing at \(segments.count) segments") }
+        guard !segments.isEmpty else { return .refused("variant lists no segments") }
+        return .listed(ConvertedPlaylist(segments: segments, header: header))
     }
 
     func listed(from second: Double) -> (playlist: String, clockStart: Double) {

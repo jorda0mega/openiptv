@@ -12,6 +12,11 @@ final class ConvertedPlaylistTests: XCTestCase {
             + (0..<segments).flatMap { ["#EXTINF:3.000000, nodesc", "hls1/main/\($0).ts?PlaySessionId=p1"] } + ["#EXT-X-ENDLIST"]
     }
 
+    private func listed(_ lines: [String]) throws -> ConvertedPlaylist {
+        let list: ConvertedPlaylist? = if case let .listed(list) = ConvertedPlaylist.listing(lines, at: variant) { list } else { nil }
+        return try XCTUnwrap(list, "not listed")
+    }
+
     private func segments(_ text: String) -> [String] {
         text.split(separator: "\n").filter { !$0.hasPrefix("#") }.map(String.init)
     }
@@ -26,7 +31,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     /// and then jumped to 5:01, and Emby converted twice (the film's start,
     /// then 5:00), each a wait for its slow first segment.
     func testAConvertedVersionIsListedFromTheSegmentHoldingTheSecond() throws {
-        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        let list = try listed(emby(segments: 200))
         let (text, start) = list.listed(from:301.5)
         XCTAssertEqual(start, 300, "the player's clock 0 isn't where its first segment starts")
         let listed = segments(text)
@@ -37,14 +42,14 @@ final class ConvertedPlaylistTests: XCTestCase {
     }
 
     func testFromTheStartItIsTheWholeFilm() throws {
-        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        let list = try listed(emby(segments: 200))
         let (text, start) = list.listed(from:0)
         XCTAssertEqual(start, 0)
         XCTAssertEqual(segments(text).count, 200)
     }
 
     func testPastTheEndItIsTheLastSegment() throws {
-        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        let list = try listed(emby(segments: 200))
         let (text, start) = list.listed(from:10_000)
         XCTAssertEqual(start, 597)
         XCTAssertEqual(segments(text).first, "https://emby.example/emby/Videos/m1/hls1/main/199.ts?PlaySessionId=p1")
@@ -130,7 +135,7 @@ final class ConvertedPlaylistTests: XCTestCase {
 
     /// With the relay not running, the version opened as the server lists it.
     func testAVersionTheRelayCannotServeDoesNotOpen() throws {
-        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        let list = try listed(emby(segments: 200))
         XCTAssertNil(FilmStream.converted(master, list, at: 301.5) { _ in nil }, "the server's own master")
     }
 
@@ -138,7 +143,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     /// taken for the original got a quality chooser that never went back up.
     func testAConvertedVersionIsNeverTheOriginal() throws {
         XCTAssertTrue(FilmStream.whole.isOriginal)
-        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        let list = try listed(emby(segments: 200))
         for (second, old) in [(0.0, false), (301.5, false), (301.5, true)] {
             let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, old: old) { _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
             XCTAssertFalse(opened.stream.isOriginal, "from \(second)\(old ? ", the old way" : "")")
@@ -176,7 +181,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     /// jumps to the second, as it did with Emby's own master. It opened
     /// that master, and the player sent the key wherever it led.
     func testTheOldWayListsTheWholeFilmFromHere() throws {
-        let list = try XCTUnwrap(ConvertedPlaylist(emby(segments: 200), at: variant))
+        let list = try listed(emby(segments: 200))
         let local = URL(string: "http://127.0.0.1:8/list.m3u8")!
         var served: [String] = []
         let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, old: true) { served.append($0); return local })
