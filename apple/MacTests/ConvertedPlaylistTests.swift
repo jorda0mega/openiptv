@@ -207,6 +207,43 @@ final class ConvertedPlaylistTests: XCTestCase {
         }
     }
 
+    /// Debug builds count the film's redirects, and those to another
+    /// server, for the real server's runner.
+    func testTheRelayCountsTheFilmsRedirects() {
+        let task = URLSession.shared.dataTask(with: URL(string: "https://emby.example/emby/Videos/m1/stream.mkv?static=true")!)
+        var same = URLRequest(url: URL(string: "https://emby.example/emby/Videos/m1/stream.mkv?static=true&again=1")!)
+        same.setValue("test-key", forHTTPHeaderField: "X-Emby-Token")
+        var away = URLRequest(url: URL(string: "https://cdn.example/m1.mkv")!)
+        away.setValue("test-key", forHTTPHeaderField: "X-Emby-Token")
+        let before = StreamRelay.redirects.value
+        XCTAssertEqual(StreamRelay.redirected(same, for: task).value(forHTTPHeaderField: "X-Emby-Token"), "test-key")
+        XCTAssertNil(StreamRelay.redirected(away, for: task).value(forHTTPHeaderField: "X-Emby-Token"))
+        let after = StreamRelay.redirects.value
+        XCTAssertEqual(after.redirected - before.redirected, 2, "redirected")
+        XCTAssertEqual(after.elsewhere - before.elsewhere, 1, "elsewhere")
+    }
+
+    /// The player follows a segment's redirect with the key: the count asks
+    /// the segments it asks first, and follows none.
+    func testTheConvertedCountAsksTheFirstSegmentsListed() async throws {
+        let list = try listed(emby(segments: 200))
+        let answers: [String: (status: Int, location: String?)] = [
+            "100.ts": (302, "https://emby.example/emby/Videos/m1/hls1/main/100.ts?again=1"),
+            "101.ts": (302, "https://cdn.example/101.ts"),
+            "102.ts": (200, nil),
+        ]
+        var asked: [URL] = []
+        let found = await ConvertedPlaylist.countRedirects(list, from: 301.5, headers: ["X-Emby-Token: test-key"], given: master) { request in
+            guard let url = request.url, let answer = answers[url.lastPathComponent] else { return nil }
+            asked.append(url)
+            return HTTPURLResponse(url: url, statusCode: answer.status, httpVersion: "HTTP/1.1", headerFields: answer.location.map { ["Location": $0] })
+        }
+        XCTAssertEqual(asked.map(\.lastPathComponent), ["100.ts", "101.ts", "102.ts"], "not the segments the player asks first")
+        XCTAssertEqual(found.asked, 3)
+        XCTAssertEqual(found.count.redirected, 2, "redirected")
+        XCTAssertEqual(found.count.elsewhere, 1, "elsewhere")
+    }
+
     func testTheDebugCountAsksNoOtherServerWithTheKey() async {
         let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
         var asked: [(host: String?, keyed: Bool)] = []

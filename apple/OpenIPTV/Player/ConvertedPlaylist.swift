@@ -107,6 +107,18 @@ struct ConvertedPlaylist: Sendable {
         return .listed(ConvertedPlaylist(segments: segments, header: header))
     }
 
+    #if DEBUG
+    /// The redirects counted for converted versions, and the segments asked.
+    static let redirects = Locked((asked: 0, count: RedirectCount()))
+
+    /// Debug builds (-debugRedirectCounts YES): the first segments listed
+    /// from `second`, asked as the player asks them, following no redirect.
+    static func countRedirects(_ list: ConvertedPlaylist, from second: Double, headers: [String], given: URL,
+                               ask: (URLRequest) async -> HTTPURLResponse?) async -> (asked: Int, count: RedirectCount) {
+        (0, RedirectCount())
+    }
+    #endif
+
     func listed(from second: Double) -> (playlist: String, clockStart: Double) {
         var first = 0, clockStart = 0.0
         while first < segments.count - 1, clockStart + segments[first].seconds <= second {

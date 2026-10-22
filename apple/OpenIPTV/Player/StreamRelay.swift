@@ -48,6 +48,15 @@ final class StreamRelay: @unchecked Sendable {
     private static let keptFiles = 6
     static let firstRead: Int64 = 512 << 10
     static let readSize: Int64 = 8 << 20
+    #if DEBUG
+    /// The film's requests the server answered with a redirect.
+    static let redirects = Locked(RedirectCount())
+    #endif
+
+    /// The key goes only to the server the film was asked from.
+    static func redirected(_ request: URLRequest, for task: URLSessionTask) -> URLRequest {
+        HTTP.redirected(request, from: task.originalRequest?.url)
+    }
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
     func start() {
@@ -752,3 +761,19 @@ enum FileStarts {
         }
     }
 }
+
+#if DEBUG
+/// Debug builds: requests the server answered with a redirect, and those
+/// sent to another server than the one asked.
+struct RedirectCount: Sendable {
+    private(set) var redirected = 0, elsewhere = 0
+
+    mutating func note(_ target: URL?, from asked: URL?) {
+        redirected += 1
+        if let target, let asked, HTTP.sameServer(target, asked) { return }
+        elsewhere += 1
+    }
+
+    var readout: String { "\(redirected) (\(elsewhere) elsewhere)" }
+}
+#endif
