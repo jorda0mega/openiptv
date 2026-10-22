@@ -116,7 +116,7 @@ final class RealFeedFilmTests: RealFeedCase {
 
     private func sayConvertedStart(_ id: String, launch arguments: [String], old: Bool) throws {
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = "10"
-        app.launchArguments = arguments + (old ? ["-oldConvertedStart", "YES"] : [])
+        app.launchArguments = arguments + ["-debugRedirectCounts", "YES"] + (old ? ["-oldConvertedStart", "YES"] : [])
         app.launch()
         try bringOnScreen(id, at: 0)
         app.buttons[id].tap()
@@ -124,6 +124,7 @@ final class RealFeedFilmTests: RealFeedCase {
         for _ in 0..<60 where !(readout("debug-buffering") ?? "").contains("converted ") { sleep(1) }
         sleep(3)
         say("REAL converted start\(old ? " (old way)" : ""): \(last("opens", in: readout("debug-buffering") ?? "")) | \(readout("debug-quality") ?? "no readout")")
+        say("REAL redirects\(old ? " (old way)" : ""): \(readout("debug-redirects") ?? "no readout")")
         app.terminate()
         app.launchEnvironment["OPENREEL_DEBUG_LOWER_AFTER"] = nil
     }

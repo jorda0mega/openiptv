@@ -476,6 +476,7 @@ struct MoviePlayerView: View {
                         debugReadout(player?.stopwatch.readout ?? "", "debug-subs-timing")
                         debugReadout(player?.bufferingReadout ?? "", "debug-buffering")
                         debugReadout(StreamRelay.shared.startReadsReadout, "debug-relay")
+                        debugReadout(redirectsReadout, "debug-redirects")
                         debugReadout(model.debugCopySwitch, "debug-copy-switch")
                         #endif
                     }
@@ -1545,6 +1546,13 @@ struct MoviePlayerView: View {
         let all = [playback.url] + playback.fallbacks + playback.subtitleFiles.map(\.url) + playback.subtitleCopies.map(\.subtitle.address)
             + playback.subtitleReferences.map(\.subtitle.address) + playback.speechStretches.map(\.url)
         return all.filter { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name.lowercased() == "api_key" } == true }.count
+    }
+
+    /// The film's requests, and a converted version's first segments
+    /// (-debugRedirectCounts YES), the server answered with a redirect.
+    private var redirectsReadout: String {
+        let converted = ConvertedPlaylist.redirects.value
+        return "film \(StreamRelay.redirects.value.readout) | converted \(converted.count.readout) of \(converted.asked) asked"
     }
 
     private func debugReadout(_ text: String, _ id: String) -> some View {

@@ -66,7 +66,11 @@ CONNECTIONS = set()
 # a conversion's first segment), "convert_clock" (see converted_segment),
 # "resume_movies" ("1,2,3": those films in Continue Watching after the
 # rest, each stopped 5 minutes in), "wide_pictures" ("1": Thumb and Backdrop
-# pictures 16:9, as a real server's are, not the 2:3 of a poster).
+# pictures 16:9, as a real server's are, not the 2:3 of a poster),
+# "redirect_film" and "redirect_segment" ("same" or "elsewhere": each
+# request for the film's file, or for a converted version's segment, is
+# redirected to its own address, on this server or at localhost, which the
+# app takes for another server).
 CONTROL = {}
 CONTROL.update({k: v[0] for k, v in parse_qs(os.environ.get("OPENIPTV_MOCK_SET", "")).items()})
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
@@ -982,6 +986,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def redirected(self, switch, q):
+        """Redirects the request as CONTROL[switch] says, once: False when it doesn't."""
+        where = CONTROL.get(switch)
+        if where not in ("same", "elsewhere") or "redirected" in q:
+            return False
+        host = self.headers.get("Host", "")
+        if where == "elsewhere":
+            host = host.replace("127.0.0.1", "localhost")
+        url = urlparse(self.path)
+        self.redirect(f"http://{host}{url.path}?{url.query + '&' if url.query else ''}redirected=1")
+        return True
+
     def refuse(self, status):
         self.send_response(status)
         self.send_header("Content-Length", "0")
@@ -1195,6 +1211,8 @@ class Handler(BaseHTTPRequestHandler):
                 lines += [f"#EXTINF:{SEGMENT}.000000, nodesc", f"hls1/main/{n}.ts?PlaySessionId={q.get('PlaySessionId', '')}"]
             return self.send(("\n".join(lines + ["#EXT-X-ENDLIST"]) + "\n").encode(), ctype="application/vnd.apple.mpegurl")
         if converting and path.startswith("/Videos/") and "/hls1/main/" in path and path.endswith(".ts"):
+            if self.redirected("redirect_segment", q):
+                return
             item, n = path.split("/")[2], int(os.path.basename(path)[:-3])
             if not self.key_check(f"segment:{n}", q):
                 return self.send({"error": "unauthorized"}, status=401)
@@ -1303,6 +1321,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(out, "application/x-subrip")
             return self.send({"error": "not found"}, status=404)
         if path.startswith("/Videos/") and "/stream" in path:
+            if self.redirected("redirect_film", q):
+                return
             print(f"{time.time():.2f} stream {path.split('/')[2]} {self.headers.get('Range', '')}", flush=True)
             VIDEO_REQUESTS.append((time.time(), path.split('/')[2]))
             first, _, last = self.headers.get("Range", "")[6:].partition("-")

@@ -55,8 +55,13 @@ final class StreamRelay: @unchecked Sendable {
 
     /// The key goes only to the server the film was asked from.
     static func redirected(_ request: URLRequest, for task: URLSessionTask) -> URLRequest {
-        HTTP.redirected(request, from: task.originalRequest?.url)
+        #if DEBUG
+        redirects.mutate { $0.note(request.url, from: task.originalRequest?.url) }
+        #endif
+        return HTTP.redirected(request, from: task.originalRequest?.url)
     }
+
+    private static let aheadRedirects = AheadRedirects()
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
     func start() {
@@ -489,7 +494,7 @@ final class StreamRelay: @unchecked Sendable {
             then(data, total ?? cache.total)
         }
         made = task
-        task.delegate = HTTP.keyOutOfRedirects
+        task.delegate = Self.aheadRedirects
         if let key {
             task.priority = URLSessionTask.lowPriority
             lock.withLock { ahead[key, default: []].append(task) }
@@ -594,7 +599,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(HTTP.redirected(request, from: task.originalRequest?.url))
+        completionHandler(StreamRelay.redirected(request, for: task))
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
@@ -762,6 +767,13 @@ enum FileStarts {
     }
 }
 
+private final class AheadRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        StreamRelay.redirected(request, for: task)
+    }
+}
+
 #if DEBUG
 /// Debug builds: requests the server answered with a redirect, and those
 /// sent to another server than the one asked.
@@ -775,5 +787,12 @@ struct RedirectCount: Sendable {
     }
 
     var readout: String { "\(redirected) (\(elsewhere) elsewhere)" }
+
+    static func + (a: RedirectCount, b: RedirectCount) -> RedirectCount {
+        var sum = a
+        sum.redirected += b.redirected
+        sum.elsewhere += b.elsewhere
+        return sum
+    }
 }
 #endif

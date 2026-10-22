@@ -113,18 +113,44 @@ struct ConvertedPlaylist: Sendable {
 
     /// Debug builds (-debugRedirectCounts YES): the first segments listed
     /// from `second`, asked as the player asks them, following no redirect.
+    @discardableResult
     static func countRedirects(_ list: ConvertedPlaylist, from second: Double, headers: [String], given: URL,
-                               ask: (URLRequest) async -> HTTPURLResponse?) async -> (asked: Int, count: RedirectCount) {
-        (0, RedirectCount())
+                               ask: (URLRequest) async -> HTTPURLResponse? = firstAnswer) async -> (asked: Int, count: RedirectCount) {
+        var asked = 0, count = RedirectCount()
+        for segment in list.segments[list.first(from: second).index...].prefix(3) {
+            asked += 1
+            guard let answer = await ask(request(segment.url, headers, given: given)), (300..<400).contains(answer.statusCode) else { continue }
+            count.note(answer.value(forHTTPHeaderField: "Location").flatMap { URL(string: $0, relativeTo: segment.url)?.absoluteURL }, from: given)
+        }
+        redirects.mutate { $0 = ($0.asked + asked, $0.count + count) }
+        return (asked, count)
+    }
+
+    private static func firstAnswer(_ request: URLRequest) async -> HTTPURLResponse? {
+        guard let (bytes, response) = try? await HTTP.session.bytes(for: request, delegate: NoRedirect()) else { return nil }
+        bytes.task.cancel()
+        return response as? HTTPURLResponse
+    }
+
+    private final class NoRedirect: NSObject, URLSessionTaskDelegate, Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? {
+            nil
+        }
     }
     #endif
 
-    func listed(from second: Double) -> (playlist: String, clockStart: Double) {
+    private func first(from second: Double) -> (index: Int, clockStart: Double) {
         var first = 0, clockStart = 0.0
         while first < segments.count - 1, clockStart + segments[first].seconds <= second {
             clockStart += segments[first].seconds
             first += 1
         }
+        return (first, clockStart)
+    }
+
+    func listed(from second: Double) -> (playlist: String, clockStart: Double) {
+        let (first, clockStart) = first(from: second)
         let tag = "#EXT-X-MEDIA-SEQUENCE:"
         let sequence = header.first { $0.hasPrefix(tag) }.flatMap { Int($0.dropFirst(tag.count)) } ?? 0
         let lines = header.filter { !$0.hasPrefix(tag) } + [tag + String(sequence + first)]
