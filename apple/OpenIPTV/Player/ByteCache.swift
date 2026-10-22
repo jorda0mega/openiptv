@@ -85,6 +85,49 @@ final class ByteCache: @unchecked Sendable {
         lock.withLock { fetchedAhead = Self.adding(bytes, to: fetchedAhead) }
     }
 
+    private var coming: [Range<Int64>] = []
+    private var waiting: [(id: UUID, offset: Int64, then: @Sendable () -> Void)] = []
+
+    /// Asked for from the server: a read from inside them waits for them.
+    func expect(_ bytes: Range<Int64>) {
+        lock.withLock { coming.append(bytes) }
+    }
+
+    /// Here now, or not coming: the reads waiting for them go on.
+    func arrived(_ bytes: Range<Int64>) {
+        let going = lock.withLock { () -> [@Sendable () -> Void] in
+            if let index = coming.firstIndex(of: bytes) { coming.remove(at: index) }
+            let free = waiting.filter { wait in !coming.contains { $0.contains(wait.offset) } }
+            waiting.removeAll { wait in free.contains { $0.id == wait.id } }
+            return free.map(\.then)
+        }
+        going.forEach { $0() }
+    }
+
+    /// Whether the `count` bytes from `offset` are on their way in one read
+    /// of just those bytes, and not here yet; if so, `then` runs once they
+    /// are, once they aren't coming, or after `limit`. Begun first, that
+    /// read lands no later than the same one asked now; one covering less
+    /// leaves a second trip to the server, and a larger one lands later.
+    func whenHere(_ offset: Int64, needing count: Int64, within limit: Duration, then: @escaping @Sendable () -> Void) -> Bool {
+        let id = UUID()
+        let waits = lock.withLock { () -> Bool in
+            guard !ranges.contains(where: { $0.contains(offset) }),
+                  coming.contains(where: { $0.lowerBound == offset && $0.count == count }) else { return false }
+            waiting.append((id, offset, then))
+            return true
+        }
+        guard waits else { return false }
+        DispatchQueue.global().asyncAfter(deadline: .now() + limit / .seconds(1)) { [weak self] in
+            let late = self?.lock.withLock { () -> (@Sendable () -> Void)? in
+                guard let index = self?.waiting.firstIndex(where: { $0.id == id }) else { return nil }
+                return self?.waiting.remove(at: index).then
+            }
+            late?()
+        }
+        return true
+    }
+
     private static func adding(_ new: Range<Int64>, to ranges: [Range<Int64>]) -> [Range<Int64>] {
         var merged = new
         var kept: [Range<Int64>] = []

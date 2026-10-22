@@ -180,13 +180,27 @@ final class StreamRelay: @unchecked Sendable {
         let cache = method == "GET" ? cache(for: route.url) : nil
         #if DEBUG
         noteRead(token, range)
-        let cachedNow = cache.flatMap { cache in Self.bounds(range, total: cache.total).map { min(cache.available(from: $0.0), $0.1 - $0.0 + 1) } }
-        let read = noteStartRead(range, cache: cache, device: max(0, cachedNow ?? 0), address: route.url)
+        let read = noteStartRead(range, cache: cache, device: Self.kept(range, in: cache), address: route.url)
         lock.withLock { startReadOf[ObjectIdentifier(connection)] = read }
         #endif
         if let cache, cache.claimIndex() {
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache) }
         }
+        serve(route, method: method, range: range, connection: connection, cache: cache)
+    }
+
+    /// The same bytes on their way, asked for ahead of the tap, are waited
+    /// for (up to 3 s), not asked for again: on a server 1-3 s a read, the
+    /// read under way at the tap is the start's first.
+    private func serve(_ route: (url: URL, headers: [(String, String)]), method: String, range: String?, connection: NWConnection,
+                       cache: ByteCache?, waitedSince: Double? = nil) {
+        let since = waitedSince ?? CFAbsoluteTimeGetCurrent()
+        if let cache, let (from, count) = Self.asked(range), cache.whenHere(from, needing: count, within: .seconds(3), then: { [weak self] in
+            self?.queue.async { self?.serve(route, method: method, range: range, connection: connection, cache: cache, waitedSince: since) }
+        }) { return }
+        #if DEBUG
+        if let waitedSince { noteWaited(connection, device: Self.kept(range, in: cache), for: CFAbsoluteTimeGetCurrent() - waitedSince) }
+        #endif
         // Already here from the start of what's asked: those bytes at once,
         // then the rest from the server.
         if let cache, let (from, to) = Self.bounds(range, total: cache.total), let total = cache.total {
@@ -249,8 +263,9 @@ final class StreamRelay: @unchecked Sendable {
         let at: Double
         let range: String?
         weak var cache: ByteCache?
-        let device: Int64
+        var device: Int64
         var server: Int64 = 0
+        var waited: Double?
 
         var readout: String {
             let parts = (range ?? "bytes=0-").dropFirst(6).split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
@@ -258,7 +273,7 @@ final class StreamRelay: @unchecked Sendable {
             let place = cache?.total.map { String(format: "%.2f%%", Double(from) / Double($0) * 100) } ?? "?"
             let asked = to.map { String(format: "%.2f MB", Double($0 - from + 1) / 1e6) } ?? "to the end"
             return String(format: "%.0f ms at %@ %@: device %.2f, server %.2f", at * 1000, place, asked,
-                          Double(device) / 1e6, Double(server) / 1e6)
+                          Double(device) / 1e6, Double(server) / 1e6) + (waited.map { String(format: " after waiting %.0f ms", $0 * 1000) } ?? "")
         }
     }
 
@@ -324,6 +339,24 @@ final class StreamRelay: @unchecked Sendable {
         }
     }
 
+    /// A read that waited for the bytes asked for ahead.
+    private func noteWaited(_ connection: NWConnection, device: Int64, for seconds: Double) {
+        lock.withLock {
+            guard let read = startReadOf[ObjectIdentifier(connection)], read.start == starts else { return }
+            startReads.cached += device
+            startLog[read.index].device += device
+            startLog[read.index].waited = seconds
+            guard read.index == 0 else { return }
+            keptStart?.reason += String(format: device > 0 ? "; used: the first read waited %.0f ms for it" : "; the first read waited %.0f ms, then asked the server",
+                                        seconds * 1000)
+        }
+    }
+
+    private static func kept(_ range: String?, in cache: ByteCache?) -> Int64 {
+        guard let cache, let (from, to) = bounds(range, total: cache.total) else { return 0 }
+        return max(0, min(cache.available(from: from), to - from + 1))
+    }
+
     private func noteAhead(_ key: String, _ change: (inout AheadRecord) -> Void) {
         lock.withLock {
             guard var record = aheadLog[key] else { return }
@@ -362,6 +395,16 @@ final class StreamRelay: @unchecked Sendable {
         lock.unlock()
     }
     #endif
+
+    /// Where a plain range starts and how many bytes it asks for (to the
+    /// end: as many as there are).
+    private static func asked(_ range: String?) -> (from: Int64, count: Int64)? {
+        guard let range, range.hasPrefix("bytes=") else { return nil }
+        let parts = range.dropFirst(6).split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, let from = Int64(parts[0]) else { return nil }
+        guard let to = Int64(parts[1]) else { return (from, .max) }
+        return to >= from ? (from, to - from + 1) : nil
+    }
 
     /// The bytes asked for, from where to where (both included), when it's
     /// one plain range and the file's size is known.
@@ -526,6 +569,11 @@ final class StreamRelay: @unchecked Sendable {
 
     #if DEBUG
     static var oldReadyStart: Bool { UserDefaults.standard.bool(forKey: "oldReadyStart") }
+    /// -noWaitForAhead YES: the player asks the server again for bytes on
+    /// their way (the start before).
+    static var noWaitForAhead: Bool { UserDefaults.standard.bool(forKey: "noWaitForAhead") }
+    #else
+    static let noWaitForAhead = false
     #endif
 
     private func fetcher(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, ahead key: String? = nil) -> Matroska.Fetch {
@@ -556,6 +604,7 @@ final class StreamRelay: @unchecked Sendable {
         for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("bytes=\(from)-\(from + count - 1)", forHTTPHeaderField: "Range")
         var made: URLSessionDataTask?
+        let asked = from..<from + count
         let task = HTTP.session.dataTask(with: request) { [weak self] data, response, _ in
             if let key, let made { self?.lock.withLock { self?.ahead[key]?.removeAll { $0 === made } } }
             let http = response as? HTTPURLResponse
@@ -563,9 +612,13 @@ final class StreamRelay: @unchecked Sendable {
             #if DEBUG
             if let key { self?.noteAhead(key) { $0.noteAnswer(status: http?.statusCode, bytes: data?.count ?? 0, total: total, known: cache.total) } }
             #endif
-            guard http?.statusCode == 206, let data, !data.isEmpty else { return then(nil, nil) }
+            guard http?.statusCode == 206, let data, !data.isEmpty else {
+                cache.arrived(asked)
+                return then(nil, nil)
+            }
             if let total { cache.noteFile(total: total, contentType: http?.value(forHTTPHeaderField: "Content-Type")) }
             cache.store(data, at: from, evicting: false)
+            cache.arrived(asked)
             then(data, total ?? cache.total)
         }
         made = task
@@ -583,7 +636,12 @@ final class StreamRelay: @unchecked Sendable {
         #endif
         if let key {
             task.priority = URLSessionTask.lowPriority
-            lock.withLock { ahead[key, default: []].append(task) }
+            // Asked ahead of the tap, not after: a read the player asks for
+            // then has a head start.
+            if lock.withLock({ () -> Bool in
+                ahead[key, default: []].append(task)
+                return key != playingFile
+            }), !Self.noWaitForAhead { cache.expect(asked) }
         }
         task.resume()
     }
@@ -612,18 +670,19 @@ final class StreamRelay: @unchecked Sendable {
 
     /// Something starts playing: what was being fetched ahead for other
     /// files stops (under way and still to come), so it has the connection
-    /// to itself; that for `playing` (the same file) goes on.
+    /// to itself; that for `playing` (the same file) goes on, as playback:
+    /// the player waits for it.
     func stopAhead(keeping playing: URL?) {
         let keep = playing.map(cacheKey)
-        let stopping: [URLSessionDataTask] = lock.withLock {
+        let (stopping, going) = lock.withLock {
             playingFile = keep
             let others = aheadFiles.filter { $0 != keep }
             stoppedAhead.formUnion(others)
             aheadFiles.subtract(others)
-            let tasks = others.flatMap { ahead.removeValue(forKey: $0) ?? [] }
-            return tasks
+            return (others.flatMap { ahead.removeValue(forKey: $0) ?? [] }, keep.flatMap { ahead[$0] } ?? [])
         }
         stopping.forEach { $0.cancel() }
+        going.forEach { $0.priority = URLSessionTask.defaultPriority }
         #if DEBUG
         if !stopping.isEmpty { NSLog("%@", "PERF relay stopped \(stopping.count) fetches ahead") }
         #endif
@@ -984,7 +1043,7 @@ enum KeptStart {
         guard record.cache != nil, record.cache === cache else { return "unused, let go before the tap" }
         switch record.finished {
         case nil:
-            return String(format: "unused, %d of %d reads done at the tap, %.1f s after it began", record.answered, record.asked, now - record.began)
+            return String(format: "not done at the tap, %d of %d reads done, %.1f s after it began", record.answered, record.asked, now - record.began)
         case false?:
             return "unused, stopped after \(record.answered) reads" + (record.failure.map { ": " + $0 } ?? "")
         case true?:

@@ -61,4 +61,42 @@ final class ByteCacheTests: XCTestCase {
         XCTAssertEqual(cache.available(from: 0), Int64(6 * megabyte), "the bytes read after the jump aren't all kept")
         XCTAssertLessThanOrEqual(cache.available(from: Int64(50 * megabyte)), Int64(2 * megabyte), "more than the limit is kept")
     }
+
+    func testAReadWaitsForTheSameBytesOnTheirWayAndGoesOnIfTheyDontCome() throws {
+        let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
+        let one = Int64(megabyte)
+        XCTAssertFalse(cache.whenHere(0, needing: one, within: .seconds(5)) {}, "waited for bytes nobody asked for")
+        let here = expectation(description: "the read goes on once they're here"), lost = expectation(description: "and when they don't come")
+        cache.expect(0..<one)
+        cache.expect(one..<2 * one)
+        XCTAssertTrue(cache.whenHere(0, needing: one, within: .seconds(5)) { here.fulfill() })
+        XCTAssertTrue(cache.whenHere(one, needing: one, within: .seconds(5)) { lost.fulfill() })
+        cache.store(megabyte(0), at: 0)
+        cache.arrived(0..<one)
+        cache.arrived(one..<2 * one)
+        wait(for: [here, lost], timeout: 1)
+        XCTAssertEqual(cache.available(from: 0), one)
+        XCTAssertFalse(cache.whenHere(0, needing: one, within: .seconds(5)) {}, "waited for bytes already here")
+    }
+
+    /// A read of the index's place that waited 2.5 s for the 64 KB asked
+    /// there ahead still had to ask the server for the rest, 2.7 s more.
+    func testAReadDoesntWaitForPartOfItsBytesNorForMore() throws {
+        let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
+        cache.expect(0..<(64 << 10))
+        XCTAssertFalse(cache.whenHere(0, needing: 512 << 10, within: .seconds(5)) {}, "waited for part of what it asks")
+        cache.expect(Int64(megabyte)..<Int64(9 * megabyte))
+        XCTAssertFalse(cache.whenHere(Int64(megabyte), needing: 512 << 10, within: .seconds(5)) {}, "waited for 8 MB landing whole")
+        XCTAssertFalse(cache.whenHere(Int64(2 * megabyte), needing: 512 << 10, within: .seconds(5)) {}, "waited from inside a read")
+    }
+
+    func testAReadWaitsNoLongerThanItsLimit() throws {
+        let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
+        let late = expectation(description: "the read goes on at its limit")
+        late.assertForOverFulfill = true
+        cache.expect(0..<Int64(megabyte))
+        XCTAssertTrue(cache.whenHere(0, needing: Int64(megabyte), within: .milliseconds(100)) { late.fulfill() })
+        wait(for: [late], timeout: 1)
+        cache.arrived(0..<Int64(megabyte))
+    }
 }

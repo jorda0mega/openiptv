@@ -69,6 +69,24 @@ final class KeptStartUseTests: XCTestCase {
         XCTAssertEqual(server.ranges.filter { $0 == "bytes=0-524287" }.count, 1, "the first read asked the server again for bytes on their way")
         _ = await ahead.value
     }
+
+    /// Asked once the film plays, a read ahead goes no faster than the
+    /// player's own: waiting for it (all at once, at its end) would hold
+    /// the start back.
+    func testAReadAskedAheadAfterTheTapIsNotWaitedFor() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0.5)
+        let relay = StreamRelay()
+        let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
+        relay.stopAhead(keeping: film.url)
+        let ahead = Task { await relay.fetchStart(FileStart(film)) }
+        for _ in 0..<100 where server.ranges.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+        read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
+        let (bytes, _) = try await URLSession(configuration: .ephemeral).data(for: read)
+        XCTAssertEqual(bytes.count, 524_288)
+        XCTAssertEqual(server.ranges.filter { $0 == "bytes=0-524287" }.count, 2, "the player waited for a read asked after the tap")
+        _ = await ahead.value
+    }
 }
 
 #if DEBUG
@@ -90,7 +108,7 @@ final class KeptStartTests: XCTestCase {
         var record = AheadRecord(address: film, began: 10, cache: cache)
         record.asked = 2
         record.answered = 1
-        XCTAssertEqual(reason(cache: cache, ["k": record]), "unused, 1 of 2 reads done at the tap, 2.4 s after it began")
+        XCTAssertEqual(reason(cache: cache, ["k": record]), "not done at the tap, 1 of 2 reads done, 2.4 s after it began")
         record.finished = false
         record.noteAnswer(status: 200, bytes: 9, total: nil, known: 100)
         XCTAssertEqual(reason(cache: cache, ["k": record]), "unused, stopped after 1 reads: status 200")
