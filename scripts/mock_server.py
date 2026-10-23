@@ -455,6 +455,8 @@ _RECORDED = None
 SEGMENT = 3
 CONVERSIONS = {}
 _CONVERSIONS_LOCK = threading.Lock()
+# What each item's conversion was asked for: (VideoBitrate, MaxWidth).
+QUALITIES = {}
 
 
 def restart_conversion(item, segment, bitrate=None):
@@ -476,8 +478,10 @@ def converted_segment(item, n):
         first, began = n, time.time()
     time.sleep(max(0.0, began + delay + (n - first) * SEGMENT / 4 - time.time()))
     timestamp_flags = ["-output_ts_offset", str((n - first) * SEGMENT)] if CONTROL.get("convert_clock") == "restart" else ["-copyts"]
+    bitrate, width = QUALITIES.get(item, (None, None))
+    quality = (["-maxrate", bitrate, "-bufsize", bitrate] if bitrate else []) + (["-vf", f"scale='min({width},iw)':-2"] if width else [])
     return subprocess.run(["ffmpeg", "-v", "error", "-ss", str(n * SEGMENT), "-t", str(SEGMENT), "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
-                           "-c:v", "libx264", "-preset", "ultrafast", "-g", "72", "-c:a", "aac", "-b:a", "32k", *timestamp_flags,
+                           "-c:v", "libx264", "-preset", "ultrafast", *quality, "-g", "72", "-c:a", "aac", "-b:a", "32k", *timestamp_flags,
                            "-f", "mpegts", "-"], capture_output=True).stdout
 
 
@@ -660,7 +664,9 @@ class Handler(BaseHTTPRequestHandler):
                               [{"Type": "Audio", "Index": 1 + n, "Language": language, "Codec": "aac"}
                                # "+" arrives as a space (a query's way).
                                for n, language in enumerate(languages.replace("+", " ").split())]
-            return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": 8000000,
+            # The app picks a quality from the file's bitrate.
+            bitrate = int(os.environ.get("OPENIPTV_MOCK_BITRATE", "8000000"))
+            return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": bitrate,
                                                 "SupportsDirectPlay": True, "SupportsDirectStream": True,
                                                 "MediaStreams": [{"Type": "Video", "Width": width}] + streams}],
                               "PlaySessionId": "ps1"})
@@ -1245,6 +1251,7 @@ class Handler(BaseHTTPRequestHandler):
         if converting and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             time.sleep(float(CONTROL.get("hls_delay", 0)))
             start = int(int(q.get("StartTimeTicks", "0")) / 10_000_000 / SEGMENT)
+            QUALITIES[path.split("/")[2]] = (q.get("VideoBitrate"), q.get("MaxWidth"))
             restart_conversion(path.split("/")[2], start, q.get("MaxStreamingBitrate"))
             variant = f"main.m3u8?MediaSourceId={q.get('MediaSourceId', '')}&PlaySessionId={q.get('PlaySessionId', '')}"
             return self.send(f"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=480x270\n{variant}\n".encode(),
