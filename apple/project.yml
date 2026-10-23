@@ -182,7 +182,7 @@ targets:
   OpenIPTV UITests:
     type: bundle.ui-testing
     platform: iOS
-    sources: [UITests-iOS]
+    sources: [UITests-iOS, UITests-Shared]
     dependencies:
       - target: OpenIPTV
     settings:
@@ -193,10 +193,11 @@ targets:
 
   # The Siri Remote against the app on an Apple TV simulator (focus, the
   # player's remote): xcodebuild test -scheme "OpenIPTV TV UITests".
+  # UITests-Shared: flows both platforms run, each driving it its own way.
   OpenIPTV TV UITests:
     type: bundle.ui-testing
     platform: tvOS
-    sources: [UITests-tvOS]
+    sources: [UITests-tvOS, UITests-Shared]
     dependencies:
       - target: OpenIPTV TV
     settings:

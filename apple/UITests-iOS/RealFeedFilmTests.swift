@@ -5,7 +5,7 @@ import XCTest
 /// audio track, each kind of subtitles), a film heard in a language only
 /// another copy has, and the converted version's start. Counts and times
 /// only.
-final class RealFeedFilmTests: RealFeedCase {
+final class RealFeedFilmTests: RealFeedCase, FilmLink {
     func testFilmBufferingAsSeenNow() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
         let shipped = app.launchArguments + ["-forgetTrackChoices", "YES"]
@@ -47,83 +47,10 @@ final class RealFeedFilmTests: RealFeedCase {
     }
 
     /// The baseline on one link (the runner's LINKS, through the throttling
-    /// proxy): what a viewer sees today, with the server's own state at each
-    /// launch (-debugServerProbe YES) on every line.
+    /// proxy): the shared flow (FilmLink), a card on screen and a tap.
     func testFilmOnThisLink() throws {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = nil
-        let shipped = app.launchArguments + ["-forgetTrackChoices", "YES", "-debugServerProbe", "YES"]
-        app.launchArguments = shipped
-        app.launch()
-        XCTAssertTrue(continueCards.firstMatch.waitForExistence(timeout: 90), "no Continue Watching")
-        let id = try XCTUnwrap(cardIds().first, "no Continue Watching")
-        app.terminate()
-
-        for (kind, arguments) in [("ready", [String]()), ("cold", ["-noPrepareAhead", "YES"])] {
-            app.launchArguments = shipped + arguments
-            app.launch()
-            try bringOnScreen(id, at: 0)
-            let server = serverState()
-            if kind == "ready" { sleep(3) }
-            app.buttons[id].tap()
-            say("REAL link start \(kind): \(startParts(within: 180)) | \(server)")
-            app.terminate()
-        }
-
-        // The jump comes this long after the tap, after the first two minutes unless the start took long.
-        let jumpAt: Double = 200
-        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = String(Int(jumpAt))
-        app.launchArguments = shipped
-        app.launch()
-        try bringOnScreen(id, at: 0)
-        let server = serverState()
-        app.buttons[id].tap()
-        let tapped = Date()
-        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = nil
-        say("REAL link playback start: \(startParts(within: 180)) | \(server)")
-        func buffering() -> String { readout("debug-buffering") ?? "" }
-        var decided: Double?, lowerFrame: Double?
-        let playing = min(120, jumpAt - 2 - Date().timeIntervalSince(tapped)), began = Date()
-        while Date().timeIntervalSince(began) < playing {
-            usleep(500_000)
-            if decided == nil, readout("debug-quality")?.hasPrefix("converted") == true { decided = Date().timeIntervalSince(tapped) }
-            if lowerFrame == nil, field("opens", in: buffering()).contains(where: { $0.hasPrefix("converted") }) {
-                lowerFrame = Date().timeIntervalSince(tapped)
-            }
-        }
-        // "rebuffers 2: 1234 567 ms": how many, and each one's length.
-        let pauses = buffering().components(separatedBy: " | ").first { $0.hasPrefix("rebuffers") } ?? "rebuffers: no readout"
-        let read = serverMB()
-        say("REAL link first \(Int(playing)) s: \(pauses.replacingOccurrences(of: "rebuffers", with: "pauses")) | "
-            + String(format: "film %.1f MB from the server, %.2f MB/s since the tap | ", read, read / Date().timeIntervalSince(tapped))
-            + "\(readout("debug-quality") ?? "no readout") | \(server)")
-        say("REAL link lower quality: " + (decided.map { String(format: "decided %.1f s after the tap, ", $0) } ?? "not decided, ")
-            + (lowerFrame.map { String(format: "its first frame %.1f s after the tap", $0) } ?? "no frame of it") + " | \(server)")
-
-        while field("jumps", in: buffering()).isEmpty, Date().timeIntervalSince(tapped) < jumpAt + 60 { usleep(500_000) }
-        say("REAL link jump +5 min: \(field("jumps", in: buffering()).first ?? "none in 60 s") to the next frame (MB from the server) | \(server)")
-        sleep(25)
-
-        if !openTrackMenu() {
-            say("REAL link audio: not measured, the menu didn't open | \(server)")
-        } else if let other = buttonsOnScreen({ $0.identifier == "audio-track" }).first {
-            let rebuffers = count("rebuffers", in: buffering())
-            tap(other.frame)
-            for _ in 0..<40 where !buffering().contains("audio:") { usleep(250_000) }
-            sleep(3)
-            say("REAL link audio, another track in the file: \(last("audio", in: buffering())) to its sound, "
-                + "pauses \(count("rebuffers", in: buffering()) - rebuffers) | \(server)")
-        } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-            say("REAL link audio: no other track | \(server)")
-        }
-        say("REAL link subtitles: \(pickSubtitles(1) ?? "none") | \(server)")
-        app.terminate()
-    }
-
-    /// The server's own state at this launch, read before the tap.
-    private func serverState() -> String {
-        for _ in 0..<120 where (readout("debug-server") ?? "").isEmpty { usleep(250_000) }
-        return readout("debug-server").flatMap { $0.isEmpty ? nil : $0 } ?? "server: no reading in 30 s"
+        try filmOnThisLink()
     }
 
     private func playAndSwitch(_ id: String, launch arguments: [String], for seconds: Double, way: String) throws {
@@ -151,23 +78,23 @@ final class RealFeedFilmTests: RealFeedCase {
             say("REAL jump\(way) \(name): \(jump) to the next frame (MB from the server)")
         }
 
-        if !openTrackMenu() {
+        switch audioPick() {
+        case .noMenu:
             say("REAL audio\(way), another track in the file: not measured, the menu didn't open")
-        } else if let other = buttonsOnScreen({ $0.identifier == "audio-track" }).first {
+        case .nothing:
+            say("REAL audio\(way), another track in the file: none")
+        case let .ready(pick):
             let back = readsBack(), rebuffers = count("rebuffers", in: buffering())
-            tap(other.frame)
+            pick()
             for _ in 0..<40 where !buffering().contains("audio:") { usleep(250_000) }
             sleep(3)
             say("REAL audio\(way), another track in the file: \(last("audio", in: buffering())) to its sound, "
                 + "rebuffers \(count("rebuffers", in: buffering()) - rebuffers), reads back \(readsBack() - back)")
-        } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-            say("REAL audio\(way), another track in the file: none")
         }
 
         var kinds: [String: String] = [:]
         for entry in 1...6 {
-            guard let line = pickSubtitles(entry), !line.hasPrefix("not measured") else { break }
+            guard let line = subtitleSwitch(entry), !line.hasPrefix("not measured") else { break }
             let kind = line.split(separator: " ").first { $0.hasPrefix("to=") }.map(String.init) ?? "to=?"
             let hidden = line.contains("hidden=yes") ? " hidden" : ""
             if kinds[kind + hidden] == nil { kinds[kind + hidden] = line }
@@ -297,44 +224,6 @@ final class RealFeedFilmTests: RealFeedCase {
                                          index + 1, shown.minY, shown.maxY, shown.minX, shown.maxX, area.minY, area.maxY))
     }
 
-    private func startParts(within seconds: Int = 60) -> String {
-        var parts: [Substring] = []
-        for _ in 0..<(seconds * 4) where parts.count < 4 {
-            usleep(250_000)
-            parts = readout("debug-start")?.split(separator: " ") ?? []
-        }
-        guard parts.count == 4 else { return "no start in \(seconds) s" }
-        let player = parts[0] == "warm" ? "a kept player" : "a new player"
-        return "tap to first frame \(parts[1]) s at \(parts[3]) s (\(player)) | \(readout("debug-start-parts") ?? "no parts")"
-    }
-
-    private func relayMB(_ part: String) -> Double {
-        guard let relay = readout("debug-relay"), let range = relay.range(of: part + #" ([0-9.]+) MB"#, options: .regularExpression) else { return 0 }
-        return Double(relay[range].split(separator: " ").dropLast().last ?? "") ?? 0
-    }
-
-    private func serverMB() -> Double {
-        guard let relay = readout("debug-relay"), let range = relay.range(of: #"from the server \d+ reads ([0-9.]+) MB"#, options: .regularExpression)
-        else { return 0 }
-        return Double(relay[range].split(separator: " ").dropLast().last ?? "") ?? 0
-    }
-
-    private func count(_ part: String, in readout: String) -> Int {
-        let field = readout.components(separatedBy: " | ").first { $0.hasPrefix(part) } ?? ""
-        return Int(field.split(separator: " ").dropFirst().first?.trimmingCharacters(in: [":", ","]) ?? "") ?? 0
-    }
-
-    private func field(_ part: String, in readout: String) -> [String] {
-        guard let field = readout.components(separatedBy: " | ").first(where: { $0.hasPrefix(part + ":") }) else { return [] }
-        return field.dropFirst(part.count + 2).components(separatedBy: ", ")
-    }
-
-    private func last(_ part: String, in readout: String) -> String {
-        let field = readout.components(separatedBy: " | ").first { $0.hasPrefix(part) } ?? ""
-        if part == "opens" { return field.components(separatedBy: ", ").last ?? "none" }
-        return field.split(separator: " ").dropLast().last.map { "\($0) ms" } ?? "none"
-    }
-
     private func buttonsOnScreen(_ keep: (XCUIElementSnapshot) -> Bool = { _ in true }) -> [XCUIElementSnapshot] {
         var found: [XCUIElementSnapshot] = []
         func collect(_ element: XCUIElementSnapshot) {
@@ -367,35 +256,34 @@ final class RealFeedFilmTests: RealFeedCase {
 
     /// The menu is read from one snapshot and tapped where its entry was:
     /// it's built again when a track arrives.
-    private func pickSubtitles(_ entry: Int) -> String? {
-        let events = { self.readout("debug-subs-timing")?.components(separatedBy: " | ") ?? [] }
-        func readsBack() -> Int { Int(readout("debug-reads-back") ?? "") ?? 0 }
-        let before = events().filter { $0.hasPrefix("switch ") }.count
-        guard openTrackMenu() else { return "not measured, the menu didn't open" }
+    func subtitlePick(_ entry: Int) -> TrackPick {
+        guard openTrackMenu() else { return .noMenu }
         let buttons = buttonsOnScreen()
-        guard let off = buttons.first(where: { $0.label == "Off" || $0.identifier == "Off" })?.frame else { return nil }
+        guard let off = buttons.first(where: { $0.label == "Off" || $0.identifier == "Off" })?.frame else { return .nothing }
         let below = buttons.filter { $0.frame.minY > off.minY && abs($0.frame.minX - off.minX) < 1 && abs($0.frame.width - off.width) < 1 }
             .map(\.frame).sorted { $0.minY < $1.minY }
         guard entry <= below.count else {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-            return nil
+            return .nothing
         }
-        let place = below[entry - 1]
-        let (device, server, back) = (relayMB("from the device"), serverMB(), readsBack())
-        tap(place)
-        var switched: String?, shown: String?
-        for _ in 0..<80 where shown == nil {
-            usleep(250_000)
-            switched = events().filter { $0.hasPrefix("switch ") }.dropFirst(before).first
-            let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
-            shown = n.flatMap { n in events().first { $0.hasPrefix("shown ") && $0.split(separator: " ").contains(n) } }
-        }
-        sleep(2)
-        let n = switched?.split(separator: " ").first { $0.hasPrefix("n=") }
-        let stalls = events().filter { $0.hasPrefix("rebuffer ") && n.map($0.split(separator: " ").contains) == true }
-        let after = shown?.split(separator: " ").first { $0.hasPrefix("after=") }.map(String.init) ?? "no line in 20 s"
-        let read = String(format: "read %.1f MB from the device, %.1f MB from the server, %d reads back", relayMB("from the device") - device,
-                          serverMB() - server, readsBack() - back)
-        return ([switched ?? "no switch", after] + (stalls.isEmpty ? ["no stall"] : stalls) + [read]).joined(separator: " ; ")
+        return .ready { self.tap(below[entry - 1]) }
     }
+
+    func audioPick() -> TrackPick {
+        guard openTrackMenu() else { return .noMenu }
+        guard let other = buttonsOnScreen({ $0.identifier == "audio-track" }).first else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            return .nothing
+        }
+        return .ready { self.tap(other.frame) }
+    }
+
+    func firstCard() throws -> String {
+        XCTAssertTrue(continueCards.firstMatch.waitForExistence(timeout: 90), "no Continue Watching")
+        return try XCTUnwrap(cardIds().first, "no Continue Watching")
+    }
+
+    func bring(_ id: String) throws { try bringOnScreen(id, at: 0) }
+
+    func play(_ id: String) { app.buttons[id].tap() }
 }

@@ -24,6 +24,9 @@ class RealFeedCase: XCTestCase {
         // so where they are in a title stays as it was.
         app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", ProcessInfo.processInfo.environment["REAL_FEED_CACHE"] ?? "real"]
         if ProcessInfo.processInfo.environment["LOW_DISK"] == "1" { app.launchArguments += ["-lowDisk", "YES"] }
+        // A phone network on purpose (NETWORK: metered or lowData), and what the setting for one lets films fetch ahead.
+        if let network = ProcessInfo.processInfo.environment["NETWORK"], network != "unmetered" { app.launchArguments += ["-debugNetwork", network] }
+        if let films = ProcessInfo.processInfo.environment["PHONE_FILMS"], !films.isEmpty { app.launchArguments += ["-phoneNetworkFilms", films] }
         XCUIDevice.shared.orientation = .portrait
     }
 
