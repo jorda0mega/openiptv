@@ -42,5 +42,14 @@
       "stall": {"every_s": 10, "s": [0.5, 1]}
     }
   },
+  "phone": {
+    "link": {
+      "connect_s": [0.12, 0.24],
+      "round_trip_s": [0.06, 0.12],
+      "mbit_s": {"low": 5, "high": 20, "every_s": 5},
+      "stall": {"every_s": 30, "s": [1, 2]},
+      "network_change_s": [120, 300]
+    }
+  },
   "busy": "real-busy"
 }
