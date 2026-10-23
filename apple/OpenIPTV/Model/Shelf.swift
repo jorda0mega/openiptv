@@ -53,6 +53,10 @@ struct Conditions: Equatable, Sendable {
 
     enum Refusal: Equatable, Sendable, CustomStringConvertible {
         case network(Network)
+        case lowDataMode
+        case phoneNetworkNone
+        case usedToday
+        case notTheRestedStart
         case disk(free: Int64, needs: Int64)
         case playing
         case lowPower
@@ -62,6 +66,10 @@ struct Conditions: Equatable, Sendable {
         var description: String {
             switch self {
             case let .network(network): "network \(network)"
+            case .lowDataMode: "Low Data Mode"
+            case .phoneNetworkNone: "phone network: None"
+            case .usedToday: "phone network: today's \(PhoneNetworkFilms.dailyBytes / 1_000_000) MB used"
+            case .notTheRestedStart: "phone network: only the start of the card you rest on"
             case let .disk(free, needs): String(format: "disk %.1f GB, needs %.1f GB", Double(free) / 1e9, Double(needs) / 1e9)
             case .playing: "playing"
             case .lowPower: "low power"
@@ -85,15 +93,25 @@ struct Conditions: Equatable, Sendable {
     }
 
     func refusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Refusal? {
-        if network == .constrained { return .network(network) }
+        if network == .constrained { return .lowDataMode }
         if [.serious, .critical].contains(thermal) { return .thermal(thermal) }
         if memoryWarned { return .memoryWarned }
         if playing { return weight == .light && place == .upNext ? nil : .playing }
         if [.light, .iptv].contains(weight) { return nil }
-        if network != .unmetered { return .network(network) }
+        if network == .unknown { return .network(network) }
+        if network == .expensive, let refusal = phoneNetworkRefusal(weight, at: place, likelihood) { return refusal }
         if weight == .bytes, freeDisk.bytes < freeDisk.neededAhead { return .disk(free: freeDisk.bytes, needs: freeDisk.neededAhead) }
         if [.heavy, .player].contains(weight), lowPower { return .lowPower }
         return nil
+    }
+
+    private func phoneNetworkRefusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Refusal? {
+        switch phoneNetwork {
+        case .none: .phoneNetworkNone
+        case .daily where ![.bytes, .files].contains(weight) || !place.isRestedOn(at: likelihood): .notTheRestedStart
+        case .daily where usedToday >= PhoneNetworkFilms.dailyBytes: .usedToday
+        case .daily, .wifi: nil
+        }
     }
 }
 

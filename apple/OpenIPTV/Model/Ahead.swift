@@ -48,6 +48,12 @@ extension Place {
     }
 
     var heldWhileOpen: Bool { self == .page || self == .homeForecast }
+
+    /// The likely rung of a ladder that waits first: the card the user
+    /// rests on, not a row's forecast, the top result or a page.
+    func isRestedOn(at likelihood: Likelihood, on platform: Platform = .current) -> Bool {
+        likelihood == .likely && ladder(on: platform).contains { $0.likelihood == .likely && $0.after > .zero }
+    }
 }
 
 enum Need: Hashable, Sendable {
