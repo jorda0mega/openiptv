@@ -291,6 +291,7 @@
 		EAC30F65A7C729D3E2CC42C0 /* TVLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B020D0F87B72E286D9A48D /* TVLiveView.swift */; };
 		ECC397953BA77A1CE3C3E530 /* SpeechHeard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0888A0AF0DE6B28F24365AE1 /* SpeechHeard.swift */; };
 		ECFE41EC6137470B9E7408E7 /* lcms2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */; };
+		EE6C77D0BC4998F0C86B983D /* PhoneNetworkSettingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE16AB8534590206FE6057B /* PhoneNetworkSettingTests.swift */; };
 		EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DF96B743FAE66F816DD9294 /* Platform.swift */; };
 		EF729A91220E6C66170831E6 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5EDE0462D2DCE22124164E8 /* Metal.framework */; };
 		F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9236570FD5D04A7FE5B59AB8 /* Artwork.swift */; };
@@ -463,6 +464,7 @@
 		C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = gnutls.xcframework; path = Vendor/gnutls.xcframework; sourceTree = "<group>"; };
 		C8BBE98FBA505A36A33CB129 /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 		CAA4B1BF351599B34F4442FD /* Libswscale.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libswscale.xcframework; path = Vendor/Libswscale.xcframework; sourceTree = "<group>"; };
+		CAE16AB8534590206FE6057B /* PhoneNetworkSettingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneNetworkSettingTests.swift; sourceTree = "<group>"; };
 		CBF9B0D6D8D57792C2CC377E /* IPTVLoginLeakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPTVLoginLeakTests.swift; sourceTree = "<group>"; };
 		CC1500ACB77AA629F7F047BF /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
 		CCC8B73B30FA5CF3FB502D43 /* RealFeedFilmTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealFeedFilmTests.swift; sourceTree = "<group>"; };
@@ -802,6 +804,7 @@
 				DF6B4562433675D1F763C59F /* LowerQualityTests.swift */,
 				60039C18093C4A9478614C1B /* PersonPageTests.swift */,
 				FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */,
+				CAE16AB8534590206FE6057B /* PhoneNetworkSettingTests.swift */,
 				DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */,
 				1512DD4E28DAAD7ADF7E915A /* PrepareAheadTests.swift */,
 				CCC8B73B30FA5CF3FB502D43 /* RealFeedFilmTests.swift */,
@@ -1122,6 +1125,7 @@
 				C476E7219798091C15B0C498 /* LowerQualityTests.swift in Sources */,
 				201B09174ED3CF5739821CA4 /* PersonPageTests.swift in Sources */,
 				790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */,
+				EE6C77D0BC4998F0C86B983D /* PhoneNetworkSettingTests.swift in Sources */,
 				DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */,
 				679B1E1CB1D8E950DC8E10EE /* PrepareAheadTests.swift in Sources */,
 				1094A33DDB56CCAB0D7D56E3 /* RealFeedFilmTests.swift in Sources */,
