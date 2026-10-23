@@ -35,8 +35,9 @@ n = json.load(sys.stdin)
 if n["profile"] != "none" or n.get("link", "none") != "none":
     s, l = n["server"], n["net"]
     print("test server %s over %s: %d reads, %d hung, %d reset, %d conversions, %d refused, %d subtitle extractions | "
-          "link %s MB/s while sending, %.1f MB, %d stalls, %d network changes" % (n["profile"], n["link"], s["reads"], s["hangs"],
-          s["resets"], s["conversions"], s["refused"], s["extractions"], l["mb_s"] or "-", l["mb"], l["stalls"], l["changes"]))'
+          "link %s MB/s while carrying data, %.1f MB, %d stalls (%.1f s waited), %d network changes" % (n["profile"], n["link"],
+          s["reads"], s["hangs"], s["resets"], s["conversions"], s["refused"], s["extractions"], l["mb_s"] or "-", l["mb"],
+          l["stalls"], l["stalled_s"], l["changes"]))'
 }
 [ $(free_mb) -ge 3500 ] || { echo "$(free_mb) MB free, a build needs 3500: not run"; exit 1; }
 cd $APPLE

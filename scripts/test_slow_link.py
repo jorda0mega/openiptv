@@ -156,8 +156,10 @@ class Links(unittest.TestCase):
         self.assertAlmostEqual(average, 0.5, delta=0.08)
         self.assertTrue(all(2 * 125e3 <= r <= 8 * 125e3 for r in rates))
         self.assertGreater(max(rates) / min(rates), 3)
-        self.assertAlmostEqual(link.readout()["mb_s"], average, delta=0.02)
-        self.assertAlmostEqual(link.readout()["stalls"], 900 / 20, delta=8)
+        done = link.readout()
+        self.assertAlmostEqual(done["stalls"], 900 / 20, delta=8)
+        self.assertAlmostEqual(done["stalled_s"], done["stalls"] * 3, delta=3)
+        self.assertAlmostEqual(done["mb_s"], sent / 1e6 / (self.clock.now - began - done["stalled_s"]), delta=0.02)
 
     def test_far_carries_a_megabyte_a_second_between_its_stalls(self):
         link = slow_link.Link("far")
@@ -228,6 +230,7 @@ class Profile:
 LIVE = {
     "paced": {"server": {"connect_s": 0.3, "answer_s": 0.1, "plan_s": 1.0, "first_byte_s": 0.5, "read_mb_s": 2},
               "link": {"round_trip_s": 0.2, "mbit_s": 400, "network_change_s": 8}},
+    "hanging": {"server": {"hang": {"one_in": 1, "s": 1.5}}},
     "faulty": {"server": {"read_mb_s": 2, "reset": {"one_in": 1}, "convert_first_s": 0.5, "convert_segment_s": 0.1,
                           "convert_refused": 1}},
 }
@@ -299,6 +302,18 @@ class TestServer(unittest.TestCase):
         self.assertEqual((net["profile"], net["link"]), ("paced", "paced"))
         self.assertEqual((net["server"]["reads"], net["net"]["changes"]), (1, 1))
 
+    def test_a_read_hangs_within_its_first_512_kb_however_much_was_asked(self):
+        self.control("/mock/profile?name=hanging")
+        connection = http.client.HTTPConnection("127.0.0.1", PORT, timeout=60)
+        connection.request("GET", "/emby/Videos/m7/stream?Static=true", headers={"X-Emby-Token": "tok", "Range": "bytes=0-"})
+        answer = connection.getresponse()
+        asked = time.monotonic()
+        answer.read(slow_link.FAULT_SPAN)
+        took = time.monotonic() - asked
+        connection.close()
+        self.assertGreater(took, 1.5)
+        self.assertEqual(self.control("/mock/net")["server"]["hangs"], 1)
+
     def test_faulty_a_read_is_reset_and_a_conversion_refused_once_as_it_starts(self):
         self.control("/mock/profile?name=faulty")
         self.control("/mock/set?emby_convert=1")
@@ -307,6 +322,9 @@ class TestServer(unittest.TestCase):
         self.assertEqual(answer.status, 206)
         self.assertLess(len(body), 4_000_000)
         connection = http.client.HTTPConnection("127.0.0.1", PORT, timeout=60)
+        _, answer, body, _ = self.ask(connection, "GET", "/emby/Videos/m7/stream?Static=true", {"Range": "bytes=0-"})
+        self.assertLess(len(body), slow_link.FAULT_SPAN)
+        connection = http.client.HTTPConnection("127.0.0.1", PORT, timeout=60)
         self.ask(connection, "GET", "/emby/Videos/m7/master.m3u8?VideoBitrate=2000000&MediaSourceId=ms-m7")
         refused = self.ask(connection, "GET", "/emby/Videos/m7/hls1/main/0.ts")[1].status
         _, made, segment, _ = self.ask(connection, "GET", "/emby/Videos/m7/hls1/main/0.ts")
@@ -314,7 +332,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual((refused, made.status), (503, 200))
         self.assertAlmostEqual(len(segment), 2_000_000 * 3 / 8, delta=50_000)
         net = self.control("/mock/net")
-        self.assertEqual((net["server"]["resets"], net["server"]["refused"]), (1, 1))
+        self.assertEqual((net["server"]["resets"], net["server"]["refused"]), (2, 1))
         self.control("/mock/set?reset=1")
         self.control("/mock/profile?name=none")
 

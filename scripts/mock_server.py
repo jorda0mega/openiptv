@@ -1233,25 +1233,27 @@ class Handler(BaseHTTPRequestHandler):
             if rng:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.end_headers()
-            read, hung = self.read, False
+            read, span = self.read, min(end - start + 1, slow_link.FAULT_SPAN)
+            hang = int(read.hang_at * span) if read and read.hang_at is not None else None
+            reset = int(read.reset_at * span) if read and read.reset_at is not None else None
             if read:
                 self.link.rate = read.rate
             with open(file_path, "rb") as f:
                 f.seek(start)
                 left = end - start + 1
                 while left > 0:
-                    done = 1 - left / (end - start + 1)
-                    if read and read.hang_at is not None and not hung and done >= read.hang_at:
+                    sent = end - start + 1 - left
+                    if hang is not None and sent >= hang:
                         self.server_half.count("hangs")
                         time.sleep(read.hang)
-                        hung = True
-                    if read and read.reset_at is not None and done >= read.reset_at:
+                        hang = None
+                    if reset is not None and sent >= reset:
                         self.server_half.count("resets")
                         close([self.connection], abrupt=True)
                         self.close_connection = True
                         return
                     at = f.tell()
-                    chunk = f.read(min(262144, left))
+                    chunk = f.read(min([262144, left] + [p - sent for p in (hang, reset) if p is not None and p > sent]))
                     if not chunk:
                         break
                     self.wfile.write(chunk)

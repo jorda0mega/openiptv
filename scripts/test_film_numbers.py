@@ -20,7 +20,7 @@ BASELINE = """\
 [none] REAL link lower quality: decided 3.1 s after the tap, its first frame 10.6 s after the tap | server: connect 0.51 s, first byte 0.20 s
 [none] REAL link jump +5 min: 273 ms 0.3 MB to the next frame (MB from the server) | server: connect 0.51 s, first byte 0.20 s
 [none] REAL link subtitles: switch t=245169 n=2 from=off to=own lang=eng hidden=yes ; after=900 ; no stall ; read 0.0 MB from the device | server: connect 0.51 s, first byte 0.20 s
-[none] test server real-quiet over real-quiet: 140 reads, 0 hung, 0 reset, 2 conversions, 0 refused, 0 subtitle extractions | link - MB/s while sending, 300.0 MB, 0 stalls, 0 network changes
+[none] test server real-quiet over real-quiet: 140 reads, 0 hung, 0 reset, 2 conversions, 0 refused, 0 subtitle extractions | link - MB/s while carrying data, 300.0 MB, 0 stalls (0.0 s waited), 0 network changes
 """
 
 AS_SEEN_NOW = """\

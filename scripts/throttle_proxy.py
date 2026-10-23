@@ -209,8 +209,8 @@ def main():
         print(f"proxy {name}: {TOTALS['tunnels']} tunnels, {TOTALS['requests']} plain requests "
               f"({TOTALS['playlists']} playlists, {TOTALS['segments']} segments), "
               f"{TOTALS['down'] / 1e6:.1f} MB down, {TOTALS['up'] / 1e6:.1f} MB up, {TOTALS['failed']} failed "
-              f"({', '.join(sorted(FAILURES)) or 'none'}) | link {done['mb_s'] or '-'} MB/s while sending, "
-              f"{done['stalls']} stalls, {done['changes']} network changes", flush=True)
+              f"({', '.join(sorted(FAILURES)) or 'none'}) | link {done['mb_s'] or '-'} MB/s while carrying data, "
+              f"{done['stalls']} stalls ({done['stalled_s']} s waited), {done['changes']} network changes", flush=True)
         os._exit(0)
 
     signal.signal(signal.SIGTERM, stop)

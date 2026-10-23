@@ -56,7 +56,7 @@ LINES = [
     (r"REAL (?:link )?subtitles[^:]*: switch .*?(no line in \d+ s)", [("subtitle switch: no line", "count", "one")]),
     (r"REAL (?:link )?subtitles[^:]*: switch .*?(rebuffer)", [("subtitle switch: stalls", "count", "one")]),
     (r"== link \S+ .*?(\d+) MB free", [("Mac free disk", "MB", 1)]),
-    (r"test server .*?link ([\d.]+) MB/s while sending", [("link: MB/s while sending", "MB/s", 1)]),
+    (r"test server .*?link ([\d.]+) MB/s while carrying data", [("link: MB/s while carrying data", "MB/s", 1)]),
     (r"test server .*?(\d+) network changes", [("link: network changes", "count", 1)]),
     (r"server: connect ([\d.]+) s, first byte ([\d.]+) s$", [("server probe: connect", "s", 1), ("server probe: first byte", "s", 2)]),
 ]

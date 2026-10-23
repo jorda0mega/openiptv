@@ -35,6 +35,7 @@ import time
 from typing import NamedTuple, Optional
 
 PIECE = 16 << 10
+FAULT_SPAN = 512 << 10
 PROFILES_FILE = os.environ.get("OPENIPTV_NET_PROFILES") or os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                         "net_profiles.json")
 
@@ -73,8 +74,10 @@ def opens_file(path):
 
 class Read(NamedTuple):
     """A file read as the server answers it: its first byte, its pace (bytes
-    a second), and the share of it after which it hangs (for `hang` s) or its
-    connection is reset."""
+    a second), and how far into it it hangs (for `hang` s) or its connection
+    is reset: a share of its first FAULT_SPAN bytes, the least the app's relay
+    asks at once, so a fault comes before the player has moved on, however
+    much was asked."""
     number: int
     first_byte: float
     rate: float
@@ -163,7 +166,7 @@ class Link:
             self.fade = self.next_fade(self.began)
         self.swings = random.Random(f"{seed}:rate")
         self.rate, self.rate_until = math.inf, self.began
-        self.counts = dict(connections=0, stalls=0, changes=0, sent=0, busy_s=0.0)
+        self.counts = dict(connections=0, stalls=0, changes=0, sent=0, carrying_s=0.0, stalled_s=0.0)
         self.timer = None
         if self.p.get("network_change_s") and on_change:
             self.timer = threading.Timer(draw(self.p["network_change_s"], random.Random(f"{seed}:change")),
@@ -209,20 +212,22 @@ class Link:
                 self.counts["stalls"] += 1
                 self.fade = self.next_fade(self.fade[1])
             if self.fade[0] <= at:
+                self.counts["stalled_s"] += self.fade[1] - at
                 at = self.fade[1]
             connection.due = at + size / connection.rate
-            free = at + size / self.rate_at(at)
-            self.counts["busy_s"] += free - max(now, self.due)
+            self.due = at + size / self.rate_at(at)
+            self.counts["carrying_s"] += self.due - at
             self.counts["sent"] += size
-            self.due = free
             return at
 
     def readout(self):
-        """What it has done, numbers only: MB/s while it was sending (stalls in)."""
+        """What it has done, numbers only: its pace while it carried data, and
+        the seconds data waited on its stalls."""
         with self.lock:
             counts = dict(self.counts)
-        sent, busy = counts.pop("sent") / 1e6, counts.pop("busy_s")
-        return counts | {"mb": round(sent, 1), "mb_s": round(sent / busy, 2) if "mbit_s" in self.p and busy > 0 else None}
+        sent, carrying = counts.pop("sent") / 1e6, counts.pop("carrying_s")
+        return counts | {"mb": round(sent, 1), "stalled_s": round(counts["stalled_s"], 1),
+                         "mb_s": round(sent / carrying, 2) if "mbit_s" in self.p and carrying > 0 else None}
 
 
 class Connection:
