@@ -23,8 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import slow_link  # noqa: E402
 
-SERVER_KEYS = {"base", "connect_s", "answer_s", "plan_s", "first_byte_s", "read_mb_s", "convert_first_s", "convert_segment_s",
-               "subtitle_extract_s", "hang", "reset", "convert_refused"}
+SERVER_KEYS = {"base", "connect_s", "answer_s", "plan_s", "launch", "first_byte_s", "read_mb_s", "convert_first_s",
+               "convert_segment_s", "subtitle_extract_s", "hang", "reset", "convert_refused"}
 LINK_KEYS = {"connect_s", "round_trip_s", "mbit_s", "stall", "network_change_s", "offline", "metered_after_change"}
 PORT = 8858
 FILM = os.environ.get("OPENIPTV_MOCK_VIDEO", "/tmp/openiptv/net-media/net.mkv")
@@ -111,6 +111,23 @@ class Reads(unittest.TestCase):
         self.assertAlmostEqual(len(hangs), 120, delta=35)
         self.assertAlmostEqual(len(resets), 200, delta=45)
         self.assertTrue(all(15 <= r.hang <= 20 for r in hangs))
+
+
+class Launches(unittest.TestCase):
+    def test_a_fresh_installs_first_three_launches_wait_14_to_28_s_for_a_plan_then_none(self):
+        server, rng = slow_link.Server("real-quiet"), slow_link.random.Random(1)
+        waits = []
+        for launch in range(4):
+            at = 1000.0 + 100 * launch
+            server.home_asked(at)
+            server.home_asked(at + 5)
+            waits.append((server.answer(True, rng, at + 25), server.answer(True, rng, at + 40), server.answer(False, rng, at + 1)))
+        self.assertEqual(server.counts["launches"], 4)
+        for plan, after, other in waits[:3]:
+            self.assertTrue(14 <= plan <= 28)
+            self.assertTrue(0.2 <= after <= 0.6, "after the window")
+            self.assertTrue(0.15 <= other <= 0.19, "only PlaybackInfo waits")
+        self.assertTrue(0.2 <= waits[3][0] <= 0.6, "a fourth launch finds the server quiet")
 
 
 class Conversions(unittest.TestCase):

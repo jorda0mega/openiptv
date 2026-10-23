@@ -6,6 +6,7 @@
       "first_byte_s": [0.17, 0.23],
       "read_mb_s": [3.5, 15],
       "plan_s": [0.2, 0.6],
+      "launch": {"launches": 3, "s": [28, 32], "plan_s": [14, 28]},
       "convert_first_s": [1.1, 1.5],
       "convert_segment_s": [0.17, 2.8],
       "subtitle_extract_s": [60, 75]

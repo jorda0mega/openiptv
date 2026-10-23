@@ -75,7 +75,9 @@ CONNECTIONS = set()
 # redirected to its own address, on this server or at localhost, which the
 # app takes for another server), "connect_delay" (seconds before a new
 # connection's first answer: a real server's connect and TLS, about 0.5 s),
-# "plan_delay" (seconds before PlaybackInfo answers: 0.2-4 s on a real one).
+# "plan_delay" (seconds before PlaybackInfo answers: 0.2-4 s on a real one),
+# "copies" ("m7": that film has a second copy, c7, in another library: the
+# same IMDb id, the same picture width).
 #
 # A real server's timing and a slow network, apart from CONTROL (a reset
 # keeps it): OPENIPTV_MOCK_PROFILE (a name in net_profiles.json: real-quiet,
@@ -603,6 +605,8 @@ class Handler(BaseHTTPRequestHandler):
                     return False
                 time.sleep(max(0.0, link.offline_until(time.monotonic()) - time.monotonic()))
                 first, server, rng = not self.link.answered, self.server_half, self.link.answers
+                if path == "/emby/Users/U1/Items" and "IsResumable" in urlparse(self.path).query:
+                    server.home_asked(time.time())
                 wait = self.link.wait_before_answer() + (server.setup(rng) if first else 0)
                 if opens_file(path) and server.p:
                     self.read = server.read()
@@ -1288,6 +1292,8 @@ class Handler(BaseHTTPRequestHandler):
                            "BackdropImageTags": [backdrop_tag(f"b{i}")]} | (
             # Where it was last stopped (reported), as on Emby.
             {"UserData": {"PlaybackPositionTicks": POSITIONS[f"m{i}"]}} if POSITIONS.get(f"m{i}") else {})
+        copies = set(filter(None, CONTROL.get("copies", "").split(",")))
+        copied = lambda film: film | ({"ProviderIds": {"Imdb": "tt90000" + film["Id"][1:].zfill(2)}} if film["Id"] in copies else {})
         # Each episode has its own still (a frame from it), but every fifth,
         # to check the fall back to the show's art.
         episode = lambda i: {"Id": f"e{i}", "Name": f"Episode {i}", "Type": "Episode", "SeriesId": "s1",
@@ -1329,7 +1335,7 @@ class Handler(BaseHTTPRequestHandler):
                                         {"StartPositionTicks": int(start * 1e7), "Name": "Intro", "MarkerType": "IntroStart"},
                                         {"StartPositionTicks": int(end * 1e7), "Name": "Intro End", "MarkerType": "IntroEnd"}]
                 return self.send(item)
-            return self.send(movie(int(item_id[1:])) | {"RunTimeTicks": MOVIE_TICKS})
+            return self.send(copied(movie(int(item_id[1:]))) | {"Id": item_id, "RunTimeTicks": MOVIE_TICKS})
         if path.startswith("/Shows/") and path.endswith("/Seasons"):
             return self.send({"Items": [{"Id": f"season{n}", "Name": f"Season {n}", "Type": "Season", "IndexNumber": n,
                                          "UserData": {"Played": n == 1}} for n in (1, 2)]})
@@ -1523,7 +1529,8 @@ class Handler(BaseHTTPRequestHandler):
             # Big enough to page: real libraries run to 100k+ titles.
             extra = [{"Id": f"x{i}", "Name": f"Library Title {i:05d}", "Type": "Movie", "ProductionYear": 2000 + i % 25,
                       "ImageTags": {"Primary": f"t{i % 40}"}} for i in range(23000)]
-            everything = shows + known + [movie(i) for i in range(40)] + extra
+            films = [copied(movie(i)) for i in range(40)]
+            everything = shows + known + films + [film | {"Id": "c" + film["Id"][1:]} for film in films if "ProviderIds" in film] + extra
             start, limit = int(q.get("StartIndex", 0)), int(q.get("Limit", 100))
             time.sleep(0.5)  # a page takes a while on a real server
             while start > 0 and CONTROL.get("library_hold") == "1":

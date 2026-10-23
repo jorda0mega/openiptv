@@ -8,8 +8,11 @@ it, the home link inside: "connect_s" for a new connection (TCP and TLS),
 "answer_s" before any answer, "plan_s" before PlaybackInfo's, "first_byte_s"
 before a file read's, "read_mb_s" each read's pace, "convert_first_s" to a
 converted version's first segment, "convert_segment_s" to make each next one,
-"subtitle_extract_s" to take one of the film's own subtitle tracks out, and
-its faults: "hang" ({one_in, s}: a read stops that long, part way), "reset"
+"subtitle_extract_s" to take one of the film's own subtitle tracks out,
+"launch" ({launches, s, plan_s}: after each of a fresh install's first
+`launches` launches, for `s`, PlaybackInfo takes `plan_s`; a launch is the
+app asking for Continue Watching after LAUNCH_QUIET_S without), and its
+faults: "hang" ({one_in, s}: a read stops that long, part way), "reset"
 ({one_in}: a read's connection reset part way), "convert_refused" (503s each
 time a conversion starts). Its link half is a network in between:
 "connect_s" more for each new connection, "round_trip_s" for each request,
@@ -42,6 +45,7 @@ from typing import NamedTuple, Optional
 PIECE = 16 << 10
 FAULT_SPAN = 512 << 10
 OFFLINE_HOURS = 2
+LAUNCH_QUIET_S = 20
 PROFILES_FILE = os.environ.get("OPENIPTV_NET_PROFILES") or os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                         "net_profiles.json")
 
@@ -122,7 +126,8 @@ class Server:
     def __init__(self, name, seed=1):
         self.name, self.seed, self.p = name, seed, half(name, "server")
         self.lock = threading.Lock()
-        self.counts = dict(reads=0, hangs=0, resets=0, conversions=0, refused=0, extractions=0)
+        self.counts = dict(reads=0, hangs=0, resets=0, conversions=0, refused=0, extractions=0, launches=0)
+        self.asked_home, self.launch_until = -math.inf, -math.inf
 
     def count(self, key):
         with self.lock:
@@ -132,8 +137,23 @@ class Server:
     def setup(self, rng):
         return draw(self.p.get("connect_s"), rng)
 
-    def answer(self, plan, rng):
+    def home_asked(self, now):
+        """The app asked for Continue Watching at `now`: a launch after a quiet spell."""
+        launch = self.p.get("launch")
+        with self.lock:
+            quiet, self.asked_home = now - self.asked_home >= LAUNCH_QUIET_S, now
+            if not quiet:
+                return
+            self.counts["launches"] += 1
+            number = self.counts["launches"]
+            if launch and number <= launch["launches"]:
+                self.launch_until = now + draw(launch["s"], random.Random(f"{self.seed}:launch:{number}"))
+
+    def answer(self, plan, rng, now=None):
         """The server's wait before an answer that isn't a file read's: PlaybackInfo's if `plan`."""
+        launch = self.p.get("launch")
+        if plan and launch and (time.time() if now is None else now) < self.launch_until:
+            return draw(launch["plan_s"], rng)
         return draw(self.p.get("plan_s" if plan else "answer_s"), rng)
 
     def read(self):
