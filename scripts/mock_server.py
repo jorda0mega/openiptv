@@ -605,8 +605,8 @@ class Handler(BaseHTTPRequestHandler):
                     return False
                 time.sleep(max(0.0, link.offline_until(time.monotonic()) - time.monotonic()))
                 first, server, rng = not self.link.answered, self.server_half, self.link.answers
-                if path == "/emby/Users/U1/Items" and "IsResumable" in urlparse(self.path).query:
-                    server.home_asked(time.time())
+                if self.headers.get("X-Openreel-Launch"):
+                    server.launched(self.headers["X-Openreel-Launch"], time.time())
                 wait = self.link.wait_before_answer() + (server.setup(rng) if first else 0)
                 if opens_file(path) and server.p:
                     self.read = server.read()

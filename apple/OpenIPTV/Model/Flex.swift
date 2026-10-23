@@ -128,9 +128,16 @@ enum HTTP {
         config.httpMaximumConnectionsPerHost = connections
         #if DEBUG
         throughDebugProxy(config)
+        config.httpAdditionalHeaders?["X-Openreel-Launch"] = launch
         #endif
         return URLSession(configuration: config)
     }
+
+    #if DEBUG
+    /// This launch, for the test server: a fresh install's first launches
+    /// find the real server slow on PlaybackInfo (net_profiles.json, launch).
+    private static let launch = UUID().uuidString
+    #endif
 
     #if DEBUG
     /// UI tests (OPENREEL_DEBUG_PROXY=127.0.0.1:8859): the throttling proxy

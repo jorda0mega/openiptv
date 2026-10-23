@@ -114,20 +114,20 @@ class Reads(unittest.TestCase):
 
 
 class Launches(unittest.TestCase):
-    def test_a_fresh_installs_first_three_launches_wait_14_to_28_s_for_a_plan_then_none(self):
+    def test_a_fresh_installs_first_three_launches_hold_each_plan_to_28_to_40_s_in(self):
         server, rng = slow_link.Server("real-quiet"), slow_link.random.Random(1)
         waits = []
         for launch in range(4):
             at = 1000.0 + 100 * launch
-            server.home_asked(at)
-            server.home_asked(at + 5)
-            waits.append((server.answer(True, rng, at + 25), server.answer(True, rng, at + 40), server.answer(False, rng, at + 1)))
+            server.launched(f"launch {launch}", at)
+            server.launched(f"launch {launch}", at + 5)
+            waits.append((at + 10 + server.answer(True, rng, at + 10), server.answer(True, rng, at + 41), server.answer(False, rng, at + 1)))
         self.assertEqual(server.counts["launches"], 4)
-        for plan, after, other in waits[:3]:
-            self.assertTrue(14 <= plan <= 28)
+        for (answered, after, other), launch in zip(waits[:3], range(3)):
+            self.assertTrue(1028.2 + 100 * launch <= answered <= 1040.6 + 100 * launch, answered)
             self.assertTrue(0.2 <= after <= 0.6, "after the window")
             self.assertTrue(0.15 <= other <= 0.19, "only PlaybackInfo waits")
-        self.assertTrue(0.2 <= waits[3][0] <= 0.6, "a fourth launch finds the server quiet")
+        self.assertTrue(0.2 <= waits[3][0] - 1310 <= 0.6, "a fourth launch finds the server quiet")
 
 
 class Conversions(unittest.TestCase):
