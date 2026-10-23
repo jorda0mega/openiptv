@@ -26,7 +26,7 @@ final class PlanCopiesTests: XCTestCase {
             return (200, ["Content-Type": "application/json"], """
                 {"Id": "\(ids[n])", "Name": "Film", "Type": "Movie", "RunTimeTicks": 72000000000,
                  "ProductionLocations": ["United States of America"],
-                 "UserData": {"PlaybackPositionTicks": 600000000, "LastPlayedDate": "2026-10-0\(n + 1)T00:00:00Z"}}
+                 "UserData": {"PlaybackPositionTicks": \((n + 1) * 300_000_000), "LastPlayedDate": "2026-10-0\(n + 1)T00:00:00Z"}}
                 """)
         })
         let account = EmbyAccount(serverURL: URL(string: "http://127.0.0.1:\(server.port)")!, serverName: "test", userId: "U1",
@@ -50,5 +50,30 @@ final class PlanCopiesTests: XCTestCase {
         XCTAssertLessThan(quick.wait, 0.3)
         let readout = clock.readout(tap: clock.asked)
         XCTAssertFalse(Self.ids.contains(where: readout.contains) || readout.contains("127.0.0.1"), "an id or an address in the readout")
+    }
+
+    func testACopyThatFitsPlaysWithoutWaitingForASlowOne() async throws {
+        let (server, client) = try server(info: [0, 4], width: [1920, 1920])
+        defer { server.stop() }
+        let began = ContinuousClock.now
+        let playback = try await client.playback(versions: Self.ids, kind: "Movie", maxWidth: 1920)
+        let took = ContinuousClock.now - began
+        XCTAssertEqual(playback.itemId, Self.ids[0])
+        XCTAssertLessThan(took, .seconds(2), "the plan waited \(took) for the slow copy")
+        XCTAssertEqual(playback.copyIds, Self.ids, "the slow copy is still one of the title's copies")
+    }
+
+    func testASharperCopyInTimeIsStillTheOnePlayed() async throws {
+        let (server, client) = try server(info: [0, 0.5], width: [1280, 1920])
+        defer { server.stop() }
+        let playback = try await client.playback(versions: Self.ids, kind: "Movie", maxWidth: 1920)
+        XCTAssertEqual(playback.itemId, Self.ids[1])
+    }
+
+    func testTheCopyWatchedLastSetsTheStartEvenWhenItsPlanIsLate() async throws {
+        let (server, client) = try server(info: [0, 4], width: [1920, 1920])
+        defer { server.stop() }
+        let playback = try await client.playback(versions: Self.ids, kind: "Movie", maxWidth: 1920)
+        XCTAssertEqual(playback.startSeconds, 60, "the second copy, watched last, was left at 60 s")
     }
 }
