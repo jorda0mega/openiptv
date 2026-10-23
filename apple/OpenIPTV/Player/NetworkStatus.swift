@@ -130,11 +130,37 @@ extension Conditions {
 final class PhoneNetworkUse: @unchecked Sendable {
     static let shared = PhoneNetworkUse(defaults: .standard)
 
-    init(defaults: UserDefaults, calendar: Calendar = .autoupdatingCurrent) {}
+    private static let key = "phoneNetworkUse"
+    private let defaults: UserDefaults
+    private let calendar: Calendar
+    private let lock = NSLock()
+    private var kept: (day: String, bytes: Int64)
 
-    func usedToday(at now: Date = Date()) -> Int64 { 0 }
+    init(defaults: UserDefaults, calendar: Calendar = .autoupdatingCurrent) {
+        self.defaults = defaults
+        self.calendar = calendar
+        let stored = defaults.dictionary(forKey: Self.key)
+        kept = (stored?["day"] as? String ?? "", (stored?["bytes"] as? NSNumber)?.int64Value ?? 0)
+    }
 
-    func noteArrived(_ bytes: Int, over network: Conditions.Network, at now: Date = Date()) {}
+    func usedToday(at now: Date = Date()) -> Int64 {
+        let today = day(of: now)
+        return lock.withLock { kept.day == today ? kept.bytes : 0 }
+    }
+
+    func noteArrived(_ bytes: Int, over network: Conditions.Network, at now: Date = Date()) {
+        guard network == .expensive, bytes > 0 else { return }
+        let today = day(of: now)
+        lock.withLock {
+            kept = (today, (kept.day == today ? kept.bytes : 0) + Int64(bytes))
+            defaults.set(["day": kept.day, "bytes": kept.bytes], forKey: Self.key)
+        }
+    }
+
+    private func day(of date: Date) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return "\(parts.year ?? 0)-\(parts.month ?? 0)-\(parts.day ?? 0)"
+    }
 }
 
 @MainActor
