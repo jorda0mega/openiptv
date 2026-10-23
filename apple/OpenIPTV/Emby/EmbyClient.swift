@@ -771,19 +771,12 @@ struct EmbyClient {
     /// another library counts as a copy too (Dragon Ball Z's English one).
     func playback(versions ids: [String], kind: String?, maxWidth: Int?,
                   showCopies: @escaping @Sendable (String) -> [String] = { _ in [] }) async throws -> EmbyPlayback {
-        var copies: [(item: EmbyItem, info: PlaybackInfo?)]
+        var copies: [Copy]
         if ids.count == 1 || kind == "Series" {
             let (item, info) = try await resolve(ids[0], kind: kind)
             copies = [(item, info)]
         } else {
-            copies = await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
-                for (order, id) in ids.enumerated() {
-                    group.addTask { (try? await resolve(id, kind: kind)).map { (order, $0.0, $0.1) } }
-                }
-                var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
-                for await copy in group { if let copy { out.append(copy) } }
-                return out.sorted { $0.order < $1.order }.map { ($0.item, $0.info) }
-            }
+            copies = ["Movie", "Episode", "Video"].contains(kind) ? await inTime(ids, maxWidth: maxWidth) : await resolved(ids, kind: kind)
             guard !copies.isEmpty else { return try await playback(itemId: ids[0], kind: kind) }
         }
         if copies.count == 1, copies[0].item.kind == "Episode", let show = copies[0].item.seriesId {
@@ -793,30 +786,104 @@ struct EmbyClient {
         return await choose(copies, kind: copies[0].item.kind == "Episode" ? "Episode" : kind, maxWidth: maxWidth)
     }
 
-    /// The copy to play, ready (see playback(versions:)).
-    private func choose(_ copies: [(item: EmbyItem, info: PlaybackInfo?)], kind: String?, maxWidth: Int?) async -> EmbyPlayback {
-        func width(_ info: PlaybackInfo?) -> Int { info?.MediaSources?.first?.videoWidth ?? 0 }
-        func sound(_ info: PlaybackInfo?) -> [String] {
-            (info?.MediaSources?.first?.MediaStreams ?? []).filter { $0.Type == "Audio" }
-                .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }.compactMap { $0.Language.flatMap(TrackChoice.normalized) }
+    typealias Copy = (item: EmbyItem, info: PlaybackInfo?)
+
+    private func resolved(_ ids: [String], kind: String?) async -> [Copy] {
+        await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
+            for (order, id) in ids.enumerated() {
+                group.addTask { (try? await resolve(id, kind: kind)).map { (order, $0.0, $0.1) } }
+            }
+            var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
+            for await copy in group { if let copy { out.append(copy) } }
+            return out.sorted { $0.order < $1.order }.map { ($0.item, $0.info) }
         }
+    }
+
+    /// Every copy's item (each holds where it was left off), and their
+    /// PlaybackInfo until a copy meets the rule choose() applies; the others
+    /// then get `grace` more, and one still out is played without (the
+    /// slowest copy no longer sets the start).
+    private func inTime(_ ids: [String], maxWidth: Int?) async -> [Copy] {
+        enum Arrival { case item(Int, EmbyItem?), info(Int, PlaybackInfo?), timeUp }
+        return await withTaskGroup(of: Arrival.self) { group in
+            for (order, id) in ids.enumerated() {
+                group.addTask { .item(order, try? await get("Users/\(account.userId)/Items/\(id)", [])) }
+                group.addTask { .info(order, try? await playbackInfo(id, startSeconds: nil)) }
+            }
+            var items: [Int: EmbyItem?] = [:], infos: [Int: PlaybackInfo?] = [:]
+            var graceBegun = Self.waitsForEveryCopy
+            func copies() -> [Copy] {
+                items.sorted { $0.key < $1.key }.compactMap { order, item in item.map { ($0, infos[order] ?? nil) } }
+            }
+            arrivals: while let arrival = await group.next() {
+                switch arrival {
+                case let .item(order, item): items[order] = item
+                case let .info(order, info): infos[order] = info
+                case .timeUp: break arrivals
+                }
+                if items.count == ids.count, infos.count == ids.count { break }
+                guard !graceBegun, items.count == ids.count, !copies().isEmpty else { continue }
+                let (copy, fits) = Self.chosen(copies(), maxWidth: maxWidth)
+                if fits, copy.info != nil {
+                    graceBegun = true
+                    group.addTask {
+                        try? await Task.sleep(for: Self.grace)
+                        return .timeUp
+                    }
+                }
+            }
+            group.cancelAll()
+            return copies()
+        }
+    }
+
+    private static let grace = Duration.seconds(1)
+
+    #if DEBUG
+    /// -oldPlanWait YES: a title with several copies waits for every copy's
+    /// PlaybackInfo (the start before).
+    private static var waitsForEveryCopy: Bool { UserDefaults.standard.bool(forKey: "oldPlanWait") }
+    #else
+    private static let waitsForEveryCopy = false
+    #endif
+
+    private static func width(_ info: PlaybackInfo?) -> Int { info?.MediaSources?.first?.videoWidth ?? 0 }
+
+    private static func sound(_ info: PlaybackInfo?) -> [String] {
+        (info?.MediaSources?.first?.MediaStreams ?? []).filter { $0.Type == "Audio" }
+            .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }.compactMap { $0.Language.flatMap(TrackChoice.normalized) }
+    }
+
+    private static func keys(_ copies: [Copy]) -> [String] {
         var keys: [String] = []
         for copy in copies where !keys.contains(copy.item.seriesId ?? copy.item.id) { keys.append(copy.item.seriesId ?? copy.item.id) }
-        var chosen = copies[0]
-        if copies.count > 1 {
-            // The copies with the sound the title calls for (English, or
-            // Spanish for a Spanish-made one, or the viewer's choice in any
-            // copy), before a sharper one without it: a French-only copy
-            // left no English or Spanish to pick while another copy had
-            // it. None has it (or none says): all of them.
-            let first = copies[0]
-            let wanted = TrackChoice.wantedAudio(countries: first.item.productionLocations ?? [], original: sound(first.info).first,
-                                                 heard: Set(copies.flatMap { sound($0.info) }), keys: keys)
-            let speaking = copies.filter { sound($0.info).contains(wanted) }
-            let pool = speaking.isEmpty ? copies : speaking
-            let fitting = pool.filter { maxWidth == nil || width($0.info) <= maxWidth! }
-            chosen = fitting.max { width($0.info) < width($1.info) } ?? pool.min { width($0.info) < width($1.info) }!
+        return keys
+    }
+
+    /// The copy heard in the language the title calls for (English, or
+    /// Spanish for a Spanish-made one, or the viewer's choice in any copy)
+    /// before a sharper one without it: a French-only copy left no English
+    /// or Spanish to pick while another copy had it. None has it (or none
+    /// says): all of them. Of those, the sharpest up to `maxWidth` (`fits`),
+    /// else the least sharp.
+    private static func chosen(_ copies: [Copy], maxWidth: Int?) -> (copy: Copy, fits: Bool) {
+        guard copies.count > 1 else { return (copies[0], maxWidth.map { width(copies[0].info) <= $0 } ?? true) }
+        let first = copies[0]
+        let wanted = TrackChoice.wantedAudio(countries: first.item.productionLocations ?? [], original: sound(first.info).first,
+                                             heard: Set(copies.flatMap { sound($0.info) }), keys: keys(copies))
+        let speaking = copies.filter { sound($0.info).contains(wanted) }
+        let pool = speaking.isEmpty ? copies : speaking
+        if let sharpest = pool.filter({ maxWidth == nil || width($0.info) <= maxWidth! }).max(by: { width($0.info) < width($1.info) }) {
+            return (sharpest, true)
         }
+        return (pool.min { width($0.info) < width($1.info) }!, false)
+    }
+
+    /// The copy to play, ready (see playback(versions:)).
+    private func choose(_ copies: [Copy], kind: String?, maxWidth: Int?) async -> EmbyPlayback {
+        let sound = Self.sound
+        let keys = Self.keys(copies)
+        let chosen = Self.chosen(copies, maxWidth: maxWidth).copy
         // Resume where any copy was left off most recently.
         var resume = copies
             .filter { Self.resumePoint($0.item) != nil }

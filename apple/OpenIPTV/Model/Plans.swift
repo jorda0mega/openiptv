@@ -71,7 +71,9 @@ final class PlanClock: Sendable {
     func readout(tap: Date) -> String {
         func line(_ request: Request) -> String {
             let name = request.copy.map { "copy \($0) \(request.info ? "info" : "item")" } ?? "other"
-            let took = request.answered.map { String(format: "%.2f s", $0.timeIntervalSince(request.sent)) } ?? "no answer"
+            let took = request.answered.map {
+                String(format: request.times == nil ? "no answer in %.2f s" : "%.2f s", $0.timeIntervalSince(request.sent))
+            } ?? "no answer"
             let times = request.times.map {
                 String(format: ", queued %.2f, connect %.2f, wait %.2f, transfer %.2f", $0.queued, $0.connect, $0.wait, $0.transfer)
             } ?? ""
