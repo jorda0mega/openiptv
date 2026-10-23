@@ -66,17 +66,20 @@ struct Conditions: Equatable, Sendable {
     var freeDisk: Int64
 
     func allows(_ weight: Weight, at place: Place) -> Bool {
-        if network == .constrained || [.serious, .critical].contains(thermal) || memoryWarned { return false }
-        if playing { return weight == .light && place == .upNext }
-        switch weight {
-        case .light, .iptv: return true
-        case .files, .images: return network == .unmetered
-        case .bytes: return network == .unmetered && freeDisk >= 2_000_000_000
-        case .heavy, .player: return network == .unmetered && !lowPower
-        }
+        refusal(weight, at: place) == nil
     }
 
-    func refusal(_ weight: Weight, at place: Place) -> Refusal? { nil }
+    func refusal(_ weight: Weight, at place: Place) -> Refusal? {
+        if network == .constrained { return .network(network) }
+        if [.serious, .critical].contains(thermal) { return .thermal(thermal) }
+        if memoryWarned { return .memoryWarned }
+        if playing { return weight == .light && place == .upNext ? nil : .playing }
+        if [.light, .iptv].contains(weight) { return nil }
+        if network != .unmetered { return .network(network) }
+        if weight == .bytes, freeDisk < 2_000_000_000 { return .disk(free: freeDisk, needs: 2_000_000_000) }
+        if [.heavy, .player].contains(weight), lowPower { return .lowPower }
+        return nil
+    }
 }
 
 struct Bucket: Sendable {
@@ -165,7 +168,7 @@ final class Lane {
     #if DEBUG
     var debugCounts: String { "\(running) under way, \(waiting.count) waiting" }
 
-    func debugAllows(at place: Place) -> Bool { conditions().allows(weight, at: place) }
+    func debugRefusal(at place: Place) -> Conditions.Refusal? { conditions().refusal(weight, at: place) }
     #endif
 
     func withdraw(_ ticket: Ticket) {
@@ -311,7 +314,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         case .fetching?: "under way"
         case .kept?: "done"
         case .failed?: "failed"
-        case nil: policy.lane.debugAllows(at: place) ? "not asked" : "not asked, not allowed now"
+        case nil: policy.lane.debugRefusal(at: place).map { "not asked, not allowed now: \($0)" } ?? "not asked"
         }
     }
     #endif

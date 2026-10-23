@@ -1291,6 +1291,7 @@ final class AppModel {
             + "files \(ServerSubtitles.beside.fetched) "
             + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) disk \(now.freeDisk / 1_000_000_000) GB thermal \(now.thermal.rawValue)"
             + (now.lowPower ? " low power" : "") + (now.memoryWarned ? " memory warned" : "") + (now.playing ? " playing" : "")
+            + (Lane.fileStarts.debugRefusal(at: .continueWatching).map { " | starts not allowed: \($0)" } ?? "")
     }
     #endif
 
