@@ -77,12 +77,14 @@ struct Conditions: Equatable, Sendable {
     var thermal: ProcessInfo.ThermalState
     var memoryWarned: Bool
     var freeDisk: FreeDisk
+    var phoneNetwork = PhoneNetworkFilms.none
+    var usedToday: Int64 = 0
 
-    func allows(_ weight: Weight, at place: Place) -> Bool {
-        refusal(weight, at: place) == nil
+    func allows(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Bool {
+        refusal(weight, at: place, likelihood) == nil
     }
 
-    func refusal(_ weight: Weight, at place: Place) -> Refusal? {
+    func refusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Refusal? {
         if network == .constrained { return .network(network) }
         if [.serious, .critical].contains(thermal) { return .thermal(thermal) }
         if memoryWarned { return .memoryWarned }
@@ -137,7 +139,7 @@ final class Lane {
         if ticket.running { return }
         try Task.checkCancellation()
         if ticket.plays { return start(ticket) }
-        guard let interest = ticket.interest, conditions().allows(weight, at: interest.place) else { throw CancellationError() }
+        guard let interest = ticket.interest, conditions().allows(weight, at: interest.place, interest.likelihood) else { throw CancellationError() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { turn in
                 ticket.turn = turn
@@ -181,7 +183,7 @@ final class Lane {
     #if DEBUG
     var debugCounts: String { "\(running) under way, \(waiting.count) waiting" }
 
-    func debugRefusal(at place: Place) -> Conditions.Refusal? { conditions().refusal(weight, at: place) }
+    func debugRefusal(at place: Place, _ likelihood: Likelihood) -> Conditions.Refusal? { conditions().refusal(weight, at: place, likelihood) }
     #endif
 
     func withdraw(_ ticket: Ticket) {
@@ -206,7 +208,7 @@ final class Lane {
 
     private func admit() {
         let now = conditions()
-        for ticket in waiting where !now.allows(weight, at: ticket.interest?.place ?? .page) { withdraw(ticket) }
+        for ticket in waiting where !now.allows(weight, at: ticket.interest?.place ?? .page, ticket.interest?.likelihood ?? .next) { withdraw(ticket) }
         refillTokens()
         while running < atOnce, hasToken, let next = waiting.min(by: goesBefore) {
             waiting.removeAll { $0 === next }
@@ -321,13 +323,13 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         if case .kept? = current(key) { true } else { false }
     }
 
-    func debugState(_ key: Key, at place: Place) -> String {
+    func debugState(_ key: Key, at place: Place, _ likelihood: Likelihood) -> String {
         switch current(key) {
         case .waiting?: "waiting its turn (\(policy.lane.debugCounts))"
         case .fetching?: "under way"
         case .kept?: "done"
         case .failed?: "failed"
-        case nil: policy.lane.debugRefusal(at: place).map { "not asked, not allowed now: \($0)" } ?? "not asked"
+        case nil: policy.lane.debugRefusal(at: place, likelihood).map { "not asked, not allowed now: \($0)" } ?? "not asked"
         }
     }
     #endif

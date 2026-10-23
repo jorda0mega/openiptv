@@ -38,6 +38,14 @@ enum PlayerProfile: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+/// What gets films ready ahead of a tap on a phone network.
+enum PhoneNetworkFilms: String, CaseIterable, Identifiable, Sendable {
+    case none, daily, wifi
+    var id: String { rawValue }
+
+    static let dailyBytes: Int64 = 150_000_000
+}
+
 /// Everything the user can tune, persisted in UserDefaults.
 @Observable
 @MainActor

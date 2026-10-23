@@ -495,7 +495,7 @@ final class AppModel {
         if !playback.listed { playback = (try? await plans.take(key)) ?? playback }
         playback = withLocalResume(playback)
         #if DEBUG
-        lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching)
+        lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely)
         #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
@@ -1292,7 +1292,7 @@ final class AppModel {
             + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) " + String(format: "disk %.1f GB", Double(now.freeDisk.bytes) / 1e9)
             + " thermal \(now.thermal.rawValue)"
             + (now.lowPower ? " low power" : "") + (now.memoryWarned ? " memory warned" : "") + (now.playing ? " playing" : "")
-            + (Lane.fileStarts.debugRefusal(at: .continueWatching).map { " | starts not allowed: \($0)" } ?? "")
+            + (Lane.fileStarts.debugRefusal(at: .continueWatching, .likely).map { " | starts not allowed: \($0)" } ?? "")
     }
     #endif
 

@@ -182,7 +182,7 @@ final class AheadTests: XCTestCase {
         let start = FileStart(film())
         let fetched = await shelf.warm(start, for: Interest(at: .continueWatching, .likely))
         XCTAssertNil(fetched)
-        XCTAssertEqual(shelf.debugState(start, at: .continueWatching), "not asked, not allowed now: disk 1.2 GB, needs 2.0 GB")
+        XCTAssertEqual(shelf.debugState(start, at: .continueWatching, .likely), "not asked, not allowed now: disk 1.2 GB, needs 2.0 GB")
     }
 
     func testAnAppleTVNeedsRoomForWhatTheFetchAheadWritesNotTwoGigabytes() async {
@@ -192,7 +192,7 @@ final class AheadTests: XCTestCase {
             let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { [device] in device }) { _ in true }
             let start = FileStart(film())
             let fetched = await shelf.warm(start, for: Interest(at: .continueWatching, .likely))
-            return (fetched, shelf.debugState(start, at: .continueWatching))
+            return (fetched, shelf.debugState(start, at: .continueWatching, .likely))
         }
         let tv = await ahead(1_200_000_000, countsPurgeable: false)
         XCTAssertEqual(tv.fetched, true, "an Apple TV with 1.2 GB free now, its caches not counted, fetched no card ahead")
@@ -210,7 +210,7 @@ final class AheadTests: XCTestCase {
         UserDefaults.standard.set(true, forKey: "lowDisk")
         defer { UserDefaults.standard.removeObject(forKey: "lowDisk") }
         let refused = await shelf.warm(start, for: interest)
-        let state = shelf.debugState(start, at: .continueWatching)
+        let state = shelf.debugState(start, at: .continueWatching, .likely)
         UserDefaults.standard.removeObject(forKey: "lowDisk")
         let fetched = await shelf.warm(start, for: interest)
         XCTAssertNil(refused, "fetched ahead with -lowDisk YES")

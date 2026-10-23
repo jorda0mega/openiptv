@@ -475,7 +475,7 @@ final class ShelfTests: XCTestCase {
         func allowed(_ change: (inout Conditions) -> Void, at place: Place = .posterRow) -> [Weight] {
             var conditions = open
             change(&conditions)
-            return weights.filter { conditions.allows($0, at: place) }
+            return weights.filter { conditions.allows($0, at: place, .likely) }
         }
         XCTAssertEqual(allowed { _ in }, weights)
         XCTAssertEqual(allowed { $0.network = .expensive }, [.light, .iptv])
@@ -496,14 +496,14 @@ final class ShelfTests: XCTestCase {
             var conditions = open
             change(&conditions)
             for each in [Weight.light, .files, .heavy, .bytes, .images, .player, .iptv] {
-                XCTAssertEqual(conditions.allows(each, at: .continueWatching), conditions.refusal(each, at: .continueWatching) == nil,
-                               "allows and refusal disagree for \(each)")
+                XCTAssertEqual(conditions.allows(each, at: .continueWatching, .likely),
+                               conditions.refusal(each, at: .continueWatching, .likely) == nil, "allows and refusal disagree for \(each)")
             }
-            return conditions.refusal(weight, at: .continueWatching)?.description
+            return conditions.refusal(weight, at: .continueWatching, .likely)?.description
         }
         XCTAssertNil(refusal { _ in })
-        XCTAssertEqual(refusal { $0.network = .expensive }, "network expensive")
-        XCTAssertEqual(refusal { $0.network = .constrained }, "network constrained")
+        XCTAssertEqual(refusal { $0.network = .expensive }, "phone network: None")
+        XCTAssertEqual(refusal { $0.network = .constrained }, "Low Data Mode")
         XCTAssertEqual(refusal { $0.network = .unknown }, "network unknown")
         XCTAssertEqual(refusal { $0.freeDisk.bytes = 1_234_000_000 }, "disk 1.2 GB, needs 2.0 GB")
         XCTAssertEqual(refusal { $0.playing = true }, "playing")
@@ -511,5 +511,91 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(refusal { $0.thermal = .serious }, "thermal serious")
         XCTAssertEqual(refusal { $0.thermal = .critical }, "thermal critical")
         XCTAssertEqual(refusal { $0.memoryWarned = true }, "memory warning")
+    }
+
+    private func onPhoneNetwork(_ choice: PhoneNetworkFilms, used: Int64 = 0, _ change: (inout Conditions) -> Void = { _ in }) -> Conditions {
+        var conditions = open
+        conditions.network = .expensive
+        conditions.phoneNetwork = choice
+        conditions.usedToday = used
+        change(&conditions)
+        return conditions
+    }
+
+    private let everyWeight: [Weight] = [.light, .files, .heavy, .bytes, .images, .player, .iptv]
+    private let everyPlace: [Place] = [.posterRow, .grid, .moreLikeThis, .person, .searchResult, .searchTop, .continueWatching, .hero,
+                                       .episodeRow, .page, .upNext, .homeForecast, .liveRow, .liveLookahead]
+
+    private func allowed(_ conditions: Conditions, at place: Place = .continueWatching, _ likelihood: Likelihood = .likely) -> [Weight] {
+        everyWeight.filter { conditions.allows($0, at: place, likelihood) }
+    }
+
+    func testOnAPhoneNetworkNoneFetchesNoFilmFileOrPicture() {
+        for place in everyPlace {
+            for likelihood in [Likelihood.glance, .likely, .next] {
+                XCTAssertEqual(allowed(onPhoneNetwork(.none), at: place, likelihood), [.light, .iptv], "\(place) \(likelihood)")
+            }
+        }
+    }
+
+    func testOnAPhoneNetworkADayFetchesOnlyTheStartOfTheCardYouRestOn() {
+        let daily = onPhoneNetwork(.daily)
+        XCTAssertEqual(allowed(daily, at: .continueWatching, .likely), [.light, .files, .bytes, .iptv])
+        XCTAssertEqual(allowed(daily, at: .episodeRow, .likely), [.light, .files, .bytes, .iptv])
+        XCTAssertEqual(allowed(daily, at: .continueWatching, .next), [.light, .iptv], "the next rung: the copy and the previews")
+        XCTAssertEqual(allowed(daily, at: .episodeRow, .glance), [.light, .iptv])
+        XCTAssertEqual(allowed(daily, at: .homeForecast, .likely), [.light, .iptv], "a row's first card, forecast")
+        XCTAssertEqual(allowed(daily, at: .searchTop, .likely), [.light, .iptv], "the top result, shown at once")
+        XCTAssertEqual(allowed(daily, at: .page, .next), [.light, .iptv])
+        XCTAssertEqual(allowed(onPhoneNetwork(.daily) { $0.freeDisk.bytes = 1_000_000_000 }), [.light, .files, .iptv])
+    }
+
+    func testOnAPhoneNetworkADayUsedUpIsNone() {
+        XCTAssertEqual(allowed(onPhoneNetwork(.daily, used: PhoneNetworkFilms.dailyBytes - 1)), [.light, .files, .bytes, .iptv])
+        for place in everyPlace {
+            for likelihood in [Likelihood.glance, .likely, .next] {
+                XCTAssertEqual(allowed(onPhoneNetwork(.daily, used: PhoneNetworkFilms.dailyBytes), at: place, likelihood),
+                               allowed(onPhoneNetwork(.none), at: place, likelihood), "\(place) \(likelihood)")
+            }
+        }
+    }
+
+    func testOnAPhoneNetworkAsOnWiFiIsTheWiFiRule() {
+        let changes: [(inout Conditions) -> Void] = [{ _ in }, { $0.freeDisk.bytes = 1_000_000_000 }, { $0.lowPower = true }]
+        for change in changes {
+            var wifi = open
+            change(&wifi)
+            for place in everyPlace {
+                for likelihood in [Likelihood.glance, .likely, .next] {
+                    XCTAssertEqual(allowed(onPhoneNetwork(.wifi, used: 10 * PhoneNetworkFilms.dailyBytes, change), at: place, likelihood),
+                                   allowed(wifi, at: place, likelihood), "\(place) \(likelihood)")
+                }
+            }
+        }
+    }
+
+    func testWiFiAndLowDataModeAreTheSameWhateverTheChoice() {
+        for choice in PhoneNetworkFilms.allCases {
+            for place in everyPlace {
+                XCTAssertEqual(allowed(onPhoneNetwork(choice, used: PhoneNetworkFilms.dailyBytes) { $0.network = .unmetered }, at: place),
+                               allowed(open, at: place), "\(choice) \(place)")
+                XCTAssertEqual(allowed(onPhoneNetwork(choice) { $0.network = .constrained }, at: place), [], "\(choice) \(place)")
+            }
+        }
+    }
+
+    func testAPhoneNetworkRefusalNamesTheChoice() {
+        func refusal(_ conditions: Conditions, of weight: Weight = .bytes, at place: Place = .continueWatching,
+                     _ likelihood: Likelihood = .likely) -> String? {
+            conditions.refusal(weight, at: place, likelihood)?.description
+        }
+        XCTAssertEqual(refusal(onPhoneNetwork(.none)), "phone network: None")
+        XCTAssertNil(refusal(onPhoneNetwork(.daily)))
+        XCTAssertEqual(refusal(onPhoneNetwork(.daily, used: PhoneNetworkFilms.dailyBytes)), "phone network: today's 150 MB used")
+        XCTAssertEqual(refusal(onPhoneNetwork(.daily), at: .homeForecast), "phone network: only the start of the card you rest on")
+        XCTAssertEqual(refusal(onPhoneNetwork(.daily), .next), "phone network: only the start of the card you rest on")
+        XCTAssertEqual(refusal(onPhoneNetwork(.daily), of: .heavy), "phone network: only the start of the card you rest on")
+        XCTAssertNil(refusal(onPhoneNetwork(.wifi)))
+        XCTAssertEqual(refusal(onPhoneNetwork(.wifi) { $0.network = .constrained }), "Low Data Mode")
     }
 }
