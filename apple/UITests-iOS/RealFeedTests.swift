@@ -21,12 +21,17 @@ class RealFeedCase: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_PROXY"] = ProcessInfo.processInfo.environment["PROXY"]
         app.launchEnvironment["OPENREEL_DEBUG_PROXY_PLAIN"] = ProcessInfo.processInfo.environment["PROXY_PLAIN"]
         // The viewer's own account: playing reports nothing to the server,
-        // so where they are in a title stays as it was.
-        app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", ProcessInfo.processInfo.environment["REAL_FEED_CACHE"] ?? "real"]
-        if ProcessInfo.processInfo.environment["LOW_DISK"] == "1" { app.launchArguments += ["-lowDisk", "YES"] }
+        // so where they are in a title stays as it was. The test server's
+        // own account may hear (MOCK_REPORTS=1).
+        let environment = ProcessInfo.processInfo.environment
+        app.launchArguments = (environment["MOCK_REPORTS"] == "1" ? [] : ["-readOnlyServer", "YES"])
+            + ["-cacheFolder", environment["REAL_FEED_CACHE"] ?? "real"]
+        if environment["LOW_DISK"] == "1" { app.launchArguments += ["-lowDisk", "YES"] }
         // A phone network on purpose (NETWORK: metered or lowData), and what the setting for one lets films fetch ahead.
-        if let network = ProcessInfo.processInfo.environment["NETWORK"], network != "unmetered" { app.launchArguments += ["-debugNetwork", network] }
-        if let films = ProcessInfo.processInfo.environment["PHONE_FILMS"], !films.isEmpty { app.launchArguments += ["-phoneNetworkFilms", films] }
+        if let network = environment["NETWORK"], network != "unmetered" { app.launchArguments += ["-debugNetwork", network] }
+        if let films = environment["PHONE_FILMS"], !films.isEmpty { app.launchArguments += ["-phoneNetworkFilms", films] }
+        // Launch arguments for every launch ("-oldPlanWait YES"): one run the way before.
+        app.launchArguments += (environment["APP_ARGUMENTS"] ?? "").split(separator: " ").map(String.init)
         XCUIDevice.shared.orientation = .portrait
     }
 

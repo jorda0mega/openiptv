@@ -136,8 +136,9 @@ class Server:
     def setup(self, rng):
         return draw(self.p.get("connect_s"), rng)
 
-    def launched(self, launch, now):
-        """A request of the app's launch `launch` (its X-Openreel-Launch) at `now`."""
+    def launched(self, launch, now, launches=None):
+        """A request of the app's launch `launch` (its X-Openreel-Launch) at `now`;
+        `launches` in place of the profile's."""
         window = self.p.get("launch")
         with self.lock:
             if launch in self.launches:
@@ -145,7 +146,7 @@ class Server:
             self.launches.add(launch)
             self.counts["launches"] += 1
             number = self.counts["launches"]
-            if window and number <= window["launches"]:
+            if window and number <= (launches or window["launches"]):
                 self.launch_until = now + draw(window["s"], random.Random(f"{self.seed}:launch:{number}"))
 
     def answer(self, plan, rng, now=None):

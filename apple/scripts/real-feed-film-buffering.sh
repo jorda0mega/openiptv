@@ -18,6 +18,9 @@
 # override). Each folder is held from its build to its last run (<folder>.lock), and builds wait for
 # the simulator lock too. Each platform's section, and each run, starts with the build stamp of the
 # app it runs (scripts/build-stamp.sh), and says whether it is this tree's.
+# APP_ARGUMENTS: launch arguments for every launch ("-oldPlanWait YES -noPlanForecast YES
+# -waitForPlaybackInfo YES": the plan as before). MOCK_REPORTS=1: the app reports where playing got to (the
+# test server's account only).
 set -u
 APPLE=$(cd "$(dirname "$0")/.." && pwd)
 WORKTREE=$(basename "$(git -C $APPLE rev-parse --show-toplevel)")
@@ -40,6 +43,8 @@ typeset -A APP=(ios Debug-iphonesimulator/OpenIPTV.app tvos Debug-appletvsimulat
 held=()
 export TEST_RUNNER_REAL_FEED=${FEED:-http://127.0.0.1:8799}
 export TEST_RUNNER_FILM_BUFFERING_SECONDS=${SECONDS_PLAYED:-240}
+export TEST_RUNNER_APP_ARGUMENTS=${APP_ARGUMENTS:-}
+[ -n "${MOCK:-}" ] && export TEST_RUNNER_MOCK_REPORTS=${MOCK_REPORTS:-0}
 export TEST_RUNNER_LOW_DISK=${LOW_DISK:-0}
 free_mb() { df -m /tmp | awk 'NR == 2 { print $4 }'; }
 stop_proxy() { kill $(lsof -t -iTCP:$PROXY_PORT -sTCP:LISTEN) 2>/dev/null && sleep 1; }

@@ -77,7 +77,8 @@ CONNECTIONS = set()
 # connection's first answer: a real server's connect and TLS, about 0.5 s),
 # "plan_delay" (seconds before PlaybackInfo answers: 0.2-4 s on a real one),
 # "copies" ("m7": that film has a second copy, c7, in another library: the
-# same IMDb id, the same picture width).
+# same IMDb id, the same picture width), "launches" ("99": that many of the
+# app's launches have the profile's launch spell, in place of its count).
 #
 # A real server's timing and a slow network, apart from CONTROL (a reset
 # keeps it): OPENIPTV_MOCK_PROFILE (a name in net_profiles.json: real-quiet,
@@ -632,7 +633,7 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(max(0.0, link.offline_until(time.monotonic()) - time.monotonic()))
                 first, server, rng = not self.link.answered, self.server_half, self.link.answers
                 if self.headers.get("X-Openreel-Launch"):
-                    server.launched(self.headers["X-Openreel-Launch"], time.time())
+                    server.launched(self.headers["X-Openreel-Launch"], time.time(), int(CONTROL.get("launches", 0)) or None)
                 wait = self.link.wait_before_answer() + (server.setup(rng) if first else 0)
                 if opens_file(path) and server.p:
                     self.read = server.read()
