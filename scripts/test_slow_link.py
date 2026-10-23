@@ -167,6 +167,23 @@ class Links(unittest.TestCase):
         sent, _ = self.send(link, 300)
         self.assertAlmostEqual(sent / (self.clock.now - began) / 1e6, 1 - 0.75 / 10, delta=0.05)
 
+    def test_a_phone_network_swings_5_to_20_mbit_with_a_short_stall_now_and_then(self):
+        link = slow_link.Link("phone")
+        began = self.clock.now
+        sent, rates = self.send(link, 900)
+        self.assertTrue(all(5 * 125e3 <= r <= 20 * 125e3 for r in rates))
+        self.assertGreater(max(rates) / min(rates), 3)
+        self.assertAlmostEqual(sent / (self.clock.now - began) / 1e6, 1.35 * (1 - 1.5 / 30), delta=0.15)
+        done = link.readout()
+        self.assertAlmostEqual(done["stalls"], 900 / 30, delta=6)
+        self.assertTrue(done["stalls"] * 1 <= done["stalled_s"] <= done["stalls"] * 2 + 2)
+        connection = link.connection()
+        trips = [connection.round_trip() for _ in range(200)]
+        self.assertTrue(all(0.06 <= t <= 0.12 for t in trips))
+        self.assertGreater(statistics.pstdev(trips), 0.01, "no jitter")
+        self.assertEqual(slow_link.half("phone", "server"), {})
+        self.assertEqual(slow_link.half("phone", "link")["network_change_s"], [120, 300])
+
     def test_the_link_repeats_with_the_seed(self):
         first, _ = self.send(slow_link.Link("worst", seed=3), 200)
         self.clock.now = 1000.0
