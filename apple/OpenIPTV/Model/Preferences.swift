@@ -45,6 +45,22 @@ enum PhoneNetworkFilms: String, CaseIterable, Identifiable, Sendable {
 
     static let dailyBytes: Int64 = 150_000_000
 
+    var title: String {
+        switch self {
+        case .none: "None"
+        case .daily: "\(Self.dailyBytes / 1_000_000) MB a day"
+        case .wifi: "As on Wi-Fi"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .none: "Films load when you tap them. Uses the least data."
+        case .daily: "The film you rest on, about 10 MB each."
+        case .wifi: "Up to 3 films, 10–30 MB each, no daily limit."
+        }
+    }
+
     static let key = "phoneNetworkFilms"
     /// An Apple TV shows no such setting, so it keeps None.
     static let standard: PhoneNetworkFilms = Platform.current == .tv ? .none : .daily

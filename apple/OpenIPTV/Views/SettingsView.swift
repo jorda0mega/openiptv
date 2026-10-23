@@ -9,6 +9,7 @@ struct SettingsView: View {
     var asSheet = false
     @State private var adding: AddSheet?
     @State private var confirmForget = false
+    @AppStorage(PhoneNetworkFilms.key) private var phoneNetworkFilms = PhoneNetworkFilms.standard
 
     var body: some View {
         NavigationStack {
@@ -169,6 +170,25 @@ struct SettingsView: View {
         } footer: {
             Text(prefs.playerProfile.detail + " Applies to the next channel or video you open.")
         }
+        #if os(iOS)
+        Section {
+            Picker("Get films ready", selection: $phoneNetworkFilms) {
+                ForEach(PhoneNetworkFilms.allCases) { choice in
+                    VStack {
+                        Text(choice.title)
+                        Text(choice.detail)
+                    }
+                    .tag(choice)
+                }
+            }
+        } header: {
+            Text("Phone network")
+        } footer: {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                Text(PhoneNetworkFilms.footer(usedToday: PhoneNetworkUse.shared.usedToday()))
+            }
+        }
+        #endif
         Section {
             LabeledContent("Audio", value: "English; Spanish for titles made in Spanish")
             LabeledContent("Subtitles", value: "Off, unless the audio is in neither")
