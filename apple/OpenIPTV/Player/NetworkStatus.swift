@@ -125,6 +125,18 @@ extension Conditions {
     }
 }
 
+/// Bytes fetched ahead over a phone network, kept on this device with the
+/// local day they came on: no title, address or login.
+final class PhoneNetworkUse: @unchecked Sendable {
+    static let shared = PhoneNetworkUse(defaults: .standard)
+
+    init(defaults: UserDefaults, calendar: Calendar = .autoupdatingCurrent) {}
+
+    func usedToday(at now: Date = Date()) -> Int64 { 0 }
+
+    func noteArrived(_ bytes: Int, over network: Conditions.Network, at now: Date = Date()) {}
+}
+
 @MainActor
 enum MemoryWarnings {
     private static var last: ContinuousClock.Instant?

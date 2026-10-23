@@ -44,6 +44,8 @@ enum PhoneNetworkFilms: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 
     static let dailyBytes: Int64 = 150_000_000
+
+    static func footer(usedToday: Int64) -> String { "" }
 }
 
 /// Everything the user can tune, persisted in UserDefaults.
