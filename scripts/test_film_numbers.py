@@ -32,8 +32,28 @@ REAL jump -30 s: 346 ms 4.2 MB to the next frame (MB from the server)
 REAL subtitles to=own: switch t=308832 n=2 from=own to=own lang=es hidden=no ; no line in 20 s ; no stall ; read 583.7 MB from the device
 """
 
+TWO_PLATFORMS = """\
+== ios none unmetered 09:10, 4100 MB free
+[ios none unmetered] REAL link start ready: tap to first frame 1.1 s at 216 s (a new player) | plan 0.00 s (kept), start ahead done; took ahead: open 9.62 MB in 4 reads, rest 0.31 MB in 3 reads, then 0.12 s to the open, open 0.50 s, first frame 0.10 s after | server: connect 0.51 s, first byte 0.19 s
+[ios phone metered daily] REAL link start ready: tap to first frame 2.9 s at 216 s (a new player) | plan 0.00 s (kept), start ahead not asked, not allowed now: network expensive; took ahead: open 0.00 MB in 0 reads, rest 0.00 MB in 2 reads, then 0.14 s to the open, open 2.10 s | server: connect 0.51 s, first byte 0.19 s
+[tvos none unmetered] REAL link start ready: tap to first frame 1.4 s at 216 s (a new player) | plan 0.00 s (kept), start ahead done; took ahead: open 9.80 MB in 5 reads, rest 0.00 MB in 1 read, then 0.10 s to the open, open 0.70 s | server: connect 0.51 s, first byte 0.19 s
+"""
+
 
 class Extract(unittest.TestCase):
+    def test_each_platform_and_network_apart_and_what_a_card_took_ahead(self):
+        numbers = film_numbers.extract(TWO_PLATFORMS.splitlines(), "real-quiet", None)
+        self.assertEqual(numbers["real-quiet"]["start ready: tap to first frame"]["values"], [1.1])
+        self.assertEqual(numbers["real-quiet"]["start ready: MB ahead, the open's own reads"]["values"], [9.62])
+        self.assertEqual(numbers["real-quiet"]["start ready: reads ahead, the open's own"]["values"], [4.0])
+        self.assertEqual(numbers["real-quiet"]["start ready: MB ahead, the rest"]["values"], [0.31])
+        self.assertEqual(numbers["real-quiet"]["start ready: open"]["values"], [0.5])
+        metered = numbers["real-quiet metered daily"]
+        self.assertEqual(metered["start ready: tap to first frame"]["values"], [2.9])
+        self.assertEqual(metered["start ready: MB ahead, the open's own reads"]["values"], [0.0])
+        self.assertEqual(metered["start ready: reads ahead, the rest"]["values"], [2.0])
+        self.assertEqual(numbers["real-quiet tvos"]["start ready: reads ahead, the rest"]["values"], [1.0])
+
     def test_the_baseline_split_by_the_servers_own_state(self):
         numbers = film_numbers.extract(BASELINE.splitlines(), "probe", None)
         quiet, busy = numbers["real-quiet"], numbers["real-busy"]
