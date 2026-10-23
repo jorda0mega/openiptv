@@ -55,6 +55,15 @@ final class PhoneNetworkUseTests: XCTestCase {
         XCTAssertEqual(store(device).usedToday(at: october(24, 10, 0)), 0)
     }
 
+    func testTheChoiceIsReadFromTheDeviceAndALaunchArgument() {
+        let device = defaults()
+        XCTAssertEqual(PhoneNetworkFilms.chosen(in: device), .daily, "the default for everyone")
+        for (given, choice) in [("none", PhoneNetworkFilms.none), ("daily", .daily), ("wifi", .wifi), ("unheard of", .daily)] {
+            device.set(given, forKey: "phoneNetworkFilms")
+            XCTAssertEqual(PhoneNetworkFilms.chosen(in: device), choice, given)
+        }
+    }
+
     func testTheFooterSaysWhatWasUsedToday() {
         XCTAssertEqual(PhoneNetworkFilms.footer(usedToday: 0),
                        "Gets the start of the film you rest on ready, about 10 MB each, so it plays at once when you tap it. "

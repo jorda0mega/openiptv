@@ -115,6 +115,11 @@ struct Conditions: Equatable, Sendable {
     }
 }
 
+enum FetchAhead {
+    /// A shelf's fetch begun for an interest, ahead of a tap, not for a play.
+    @TaskLocal static var isUnderWay = false
+}
+
 struct Bucket: Sendable {
     let size: Int
     let refillEvery: Duration

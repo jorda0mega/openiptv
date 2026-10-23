@@ -137,6 +137,17 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(fetches.asked, 1)
     }
 
+    func testAFetchKnowsWhetherItBeganAheadOfATap() async throws {
+        let ahead = Locked<[String: Bool]>([:])
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60))) { key in
+            ahead.mutate { $0[key] = FetchAhead.isUnderWay }
+            return 1
+        }
+        _ = await shelf.warm("rested on", for: Interest(at: .continueWatching, .likely))
+        _ = try await shelf.value(for: "tapped")
+        XCTAssertEqual(ahead.value, ["rested on": true, "tapped": false])
+    }
+
     func testPlayJoinsAWarmUpUnderWay() async throws {
         let fetches = Fetches(held: true)
         let shelf = shelf(fetches)

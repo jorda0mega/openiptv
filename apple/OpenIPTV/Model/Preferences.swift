@@ -45,6 +45,8 @@ enum PhoneNetworkFilms: String, CaseIterable, Identifiable, Sendable {
 
     static let dailyBytes: Int64 = 150_000_000
 
+    static func chosen(in defaults: UserDefaults = .standard) -> PhoneNetworkFilms { .none }
+
     static func footer(usedToday: Int64) -> String {
         "Gets the start of the film you rest on ready, about 10 MB each, so it plays at once when you tap it. "
             + "Used today: \(Int((Double(usedToday) / 1e6).rounded())) MB. Low Data Mode turns this off."
