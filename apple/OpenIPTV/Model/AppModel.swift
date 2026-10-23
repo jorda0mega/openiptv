@@ -1289,7 +1289,8 @@ final class AppModel {
         let now = Conditions.current()
         return "held \(ahead.held) plans \(plans.fetched) starts \(FileStarts.shelf.fetched) warmed \(StreamRelay.warmed.value) "
             + "files \(ServerSubtitles.beside.fetched) "
-            + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) disk \(now.freeDisk.bytes / 1_000_000_000) GB thermal \(now.thermal.rawValue)"
+            + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) " + String(format: "disk %.1f GB", Double(now.freeDisk.bytes) / 1e9)
+            + " thermal \(now.thermal.rawValue)"
             + (now.lowPower ? " low power" : "") + (now.memoryWarned ? " memory warned" : "") + (now.playing ? " playing" : "")
             + (Lane.fileStarts.debugRefusal(at: .continueWatching).map { " | starts not allowed: \($0)" } ?? "")
     }

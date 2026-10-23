@@ -43,6 +43,12 @@ struct Conditions: Equatable, Sendable {
     struct FreeDisk: Equatable, Sendable {
         var bytes: Int64
         var countsPurgeable: Bool
+
+        /// Two cards at once (Lane.fileStarts) write at most four reads of
+        /// 32 MB each (Matroska.largest), about 0.27 GB: an Apple TV needs
+        /// that and as much again. A phone keeps 2 GB of its room for
+        /// important use.
+        var neededAhead: Int64 { countsPurgeable ? 2_000_000_000 : 500_000_000 }
     }
 
     enum Refusal: Equatable, Sendable, CustomStringConvertible {
@@ -83,7 +89,7 @@ struct Conditions: Equatable, Sendable {
         if playing { return weight == .light && place == .upNext ? nil : .playing }
         if [.light, .iptv].contains(weight) { return nil }
         if network != .unmetered { return .network(network) }
-        if weight == .bytes, freeDisk.bytes < 2_000_000_000 { return .disk(free: freeDisk.bytes, needs: 2_000_000_000) }
+        if weight == .bytes, freeDisk.bytes < freeDisk.neededAhead { return .disk(free: freeDisk.bytes, needs: freeDisk.neededAhead) }
         if [.heavy, .player].contains(weight), lowPower { return .lowPower }
         return nil
     }
