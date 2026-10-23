@@ -40,6 +40,11 @@ TWO_PLATFORMS = """\
 """
 
 
+PLANNED = """\
+[none] REAL link start ready: tap to first frame 27.0 s at 216 s (a new player) | plan 25.60 s (asked), then 0.18 s to the open, open 1.10 s, first frame 0.20 s after | relay reads 5 | plan: under way at the tap, asked -2.40 s, played copy 1 of 2 copies; copy 1 item 0.31 s [sent -2.40 s, queued 0.00, connect 0.40, wait 0.29, transfer 0.01, 9 under way, 4 pages]; copy 1 info 27.90 s [sent -2.40 s, queued 14.00, connect 0.00, wait 13.80, transfer 0.02, 10 under way, 4 pages]; copy 2 item 0.30 s [sent -2.40 s, queued 0.00, connect 0.00, wait 0.28, transfer 0.01, 11 under way, 3 pages] | server: connect 2.63 s, first byte 0.17 s
+"""
+
+
 class Extract(unittest.TestCase):
     def test_each_platform_and_network_apart_and_what_a_card_took_ahead(self):
         numbers = film_numbers.extract(TWO_PLATFORMS.splitlines(), "real-quiet", None)
@@ -53,6 +58,17 @@ class Extract(unittest.TestCase):
         self.assertEqual(metered["start ready: MB ahead, the open's own reads"]["values"], [0.0])
         self.assertEqual(metered["start ready: reads ahead, the rest"]["values"], [2.0])
         self.assertEqual(numbers["real-quiet tvos"]["start ready: reads ahead, the rest"]["values"], [1.0])
+    def test_the_plan_request_by_request(self):
+        quiet = film_numbers.extract(PLANNED.splitlines(), "probe", None)["real-quiet"]
+        self.assertEqual(quiet["start ready: plan"]["values"], [25.6])
+        self.assertEqual(quiet["start ready: open"]["values"], [1.1])
+        self.assertEqual(quiet["start ready: plan: copies"]["values"], [2.0])
+        self.assertEqual(quiet["start ready: plan: slowest item"]["values"], [0.31])
+        self.assertEqual(quiet["start ready: plan: slowest PlaybackInfo"]["values"], [27.9])
+        self.assertEqual(quiet["start ready: plan: longest queued"]["values"], [14.0])
+        self.assertEqual(quiet["start ready: plan: longest server wait"]["values"], [13.8])
+        self.assertEqual(quiet["start ready: plan: most under way"]["values"], [11.0])
+        self.assertEqual(quiet["start ready: plan: most library pages"]["values"], [4.0])
 
     def test_the_baseline_split_by_the_servers_own_state(self):
         numbers = film_numbers.extract(BASELINE.splitlines(), "probe", None)

@@ -93,7 +93,15 @@ final class AppModel {
     private var serverSearchCache: [String: [Card]] = [:]
     @ObservationIgnored private(set) lazy var plans = Plans.shelf { [weak self] key in
         guard let (emby, shows) = await self?.planSource() else { throw SourceError.unexpected("Add your Emby server in Settings.") }
+        #if DEBUG
+        let clock = PlanClock(copies: key.versions)
+        await self?.notePlanClock(clock, for: key)
+        return try await PlanClock.$current.withValue(clock) {
+            try await emby.playback(versions: key.versions, kind: key.kind, maxWidth: AppModel.maxWidth, showCopies: shows)
+        }
+        #else
         return try await emby.playback(versions: key.versions, kind: key.kind, maxWidth: AppModel.maxWidth, showCopies: shows)
+        #endif
     }
     private var visible: Set<String> = []
     /// The rows just below the last one scrolled to, fetched ahead.
@@ -485,6 +493,7 @@ final class AppModel {
         let key = planKey(itemId, kind: kind)
         #if DEBUG
         lastPlanKept = plans.isKept(key)
+        let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
         #endif
         var playback: EmbyPlayback
         do {
@@ -496,6 +505,11 @@ final class AppModel {
         playback = withLocalResume(playback)
         #if DEBUG
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
+        lastPlan = debugPlanClocks[key].map { clock in
+            let copy = key.versions.firstIndex(of: playback.itemId).map { "copy \($0 + 1)" } ?? "another item"
+            return "\(planAtTheTap) at the tap, " + String(format: "asked %+.2f s, ", clock.asked.timeIntervalSince(started))
+                + "played \(copy) of " + clock.readout(tap: started)
+        } ?? "no plan clock"
         #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
@@ -1235,6 +1249,13 @@ final class AppModel {
     #if DEBUG
     @ObservationIgnored var lastPlanKept = false
     @ObservationIgnored var lastStartAhead = ""
+    /// The last start's plan, request by request (PlanClock).
+    @ObservationIgnored var lastPlan = ""
+    @ObservationIgnored private var debugPlanClocks: [PlanKey: PlanClock] = [:]
+
+    private func notePlanClock(_ clock: PlanClock, for key: PlanKey) {
+        debugPlanClocks[key] = clock
+    }
     /// UI tests: the last switch to another copy's language, timed.
     var debugCopySwitch = ""
     /// UI tests: the search for a film heard in English or Spanish only in

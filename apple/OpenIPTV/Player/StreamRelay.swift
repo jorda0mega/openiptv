@@ -1095,6 +1095,8 @@ struct RequestTimes: Equatable {
     var queued = 0.0, dns = 0.0, tcp = 0.0, tls = 0.0, wait = 0.0
     var reused = false
     var http: String?
+    /// From the first byte of the answer to its last.
+    var transfer = 0.0
 
     init(queued: Double, dns: Double, tcp: Double, tls: Double, wait: Double, reused: Bool, http: String?) {
         (self.queued, self.dns, self.tcp, self.tls, self.wait, self.reused, self.http) = (queued, dns, tcp, tls, wait, reused, http)
@@ -1112,7 +1114,10 @@ struct RequestTimes: Equatable {
                   dns: span(last.domainLookupStartDate, last.domainLookupEndDate),
                   tcp: max(0, span(last.connectStartDate, last.connectEndDate) - tls), tls: tls, wait: span(sent, answered),
                   reused: last.isReusedConnection, http: last.networkProtocolName)
+        transfer = span(answered, last.responseEndDate)
     }
+
+    var connect: Double { dns + tcp + tls }
 
     var readout: String {
         String(format: "queued %.0f ms, DNS %.0f ms, TCP %.0f ms, TLS %.0f ms, wait %.0f ms (%@%@)", queued * 1000, dns * 1000, tcp * 1000,

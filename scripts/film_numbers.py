@@ -43,6 +43,18 @@ START_PARTS = [
     ("MB ahead, the rest", "MB", r"took ahead: .*?rest ([\d.]+) MB"),
     ("reads ahead, the rest", "count", r"took ahead: .*?rest [\d.]+ MB in (\d+) read"),
 ]
+# The start's plan, request by request (-debug builds' " | plan: " part): the
+# slowest or longest of each.
+PLAN = re.compile(r" \| plan: (.*?)(?= \| server: |$)")
+PLAN_PARTS = [
+    ("plan: copies", "count", r"of (\d+) cop(?:y|ies);"),
+    ("plan: slowest item", "s", r"copy \d+ item ([\d.]+) s"),
+    ("plan: slowest PlaybackInfo", "s", r"copy \d+ info ([\d.]+) s"),
+    ("plan: longest queued", "s", r"queued ([\d.]+),"),
+    ("plan: longest server wait", "s", r"wait ([\d.]+),"),
+    ("plan: most under way", "count", r"(\d+) under way"),
+    ("plan: most library pages", "count", r"(\d+) pages\]"),
+]
 KEPT = [("used", r"kept start: used(?! in part)"), ("used in part", r"kept start: used in part"),
         ("not done at the tap", r"kept start: not done at the tap"), ("unused", r"kept start: unused")]
 LINES = [
@@ -98,6 +110,11 @@ def line_numbers(line):
             part = re.search(pattern, start.group(3))
             if part:
                 found.append((f"{kind}: {name}", unit, float(part.group(1)) * (scale[0] if scale else 1)))
+        plan = PLAN.search(start.group(3))
+        for name, unit, pattern in PLAN_PARTS if plan else []:
+            numbers = [float(n) for n in re.findall(pattern, plan.group(1))]
+            if numbers:
+                found.append((f"{kind}: {name}", unit, max(numbers)))
         kept = next((name for name, pattern in KEPT if re.search(pattern, line)), None)
         if kept:
             for name, _ in KEPT:

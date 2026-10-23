@@ -627,6 +627,10 @@ struct EmbyClient {
         var request = URLRequest(url: parts.url!)
         request.timeoutInterval = 60
         authorize(&request)
+        #if DEBUG
+        PlanClock.pagesUnderWay.mutate { $0 += 1 }
+        defer { PlanClock.pagesUnderWay.mutate { $0 -= 1 } }
+        #endif
         let data = try await HTTP.data(request)
         return try await Task.detached(priority: .utility) {
             let page = try JSONDecoder().decode(Page.self, from: data)
