@@ -1244,6 +1244,9 @@ struct EmbyClient {
         authorize(&request)
         guard let (data, response) = try? await HTTP.ahead.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        #if DEBUG
+        AheadTaken.note(itemId, .rest, bytes: data.count)
+        #endif
         return data
     }
 

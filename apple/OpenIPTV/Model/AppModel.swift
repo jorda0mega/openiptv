@@ -495,7 +495,7 @@ final class AppModel {
         if !playback.listed { playback = (try? await plans.take(key)) ?? playback }
         playback = withLocalResume(playback)
         #if DEBUG
-        lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely)
+        lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started

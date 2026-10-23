@@ -553,7 +553,7 @@ final class StreamRelay: @unchecked Sendable {
         #if DEBUG
         let started = CFAbsoluteTimeGetCurrent()
         lock.withLock {
-            aheadLog[key] = AheadRecord(address: route.url, began: started, cache: cache)
+            aheadLog[key] = AheadRecord(address: route.url, began: started, cache: cache, itemId: file.itemId)
             if aheadLog.count > 12, let oldest = aheadLog.min(by: { $0.value.began < $1.value.began })?.key { aheadLog[oldest] = nil }
         }
         let fetched = Self.oldReadyStart ? await file.fetchAsBefore(through: fetch) : await file.fetch(through: fetch)
@@ -611,7 +611,12 @@ final class StreamRelay: @unchecked Sendable {
             let http = response as? HTTPURLResponse
             let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
             #if DEBUG
-            if let key { self?.noteAhead(key) { $0.noteAnswer(status: http?.statusCode, bytes: data?.count ?? 0, total: total, known: cache.total) } }
+            if let key, let self {
+                noteAhead(key) { $0.noteAnswer(status: http?.statusCode, bytes: data?.count ?? 0, total: total, known: cache.total) }
+                if http?.statusCode == 206, let data, let item = lock.withLock({ self.aheadLog[key]?.itemId }) {
+                    AheadTaken.note(item, .open, bytes: data.count)
+                }
+            }
             #endif
             guard http?.statusCode == 206, let data, !data.isEmpty else {
                 cache.arrived(asked)
@@ -663,6 +668,9 @@ final class StreamRelay: @unchecked Sendable {
         guard let (bytes, response) = try? await HTTP.session.bytes(for: request, delegate: Self.aheadRedirects),
               (response as? HTTPURLResponse)?.statusCode == 206 else { return }
         do { for try await _ in bytes {} } catch {}
+        #if DEBUG
+        AheadTaken.note(file.itemId, .rest, bytes: 1)
+        #endif
     }
 
     #if DEBUG
@@ -1033,6 +1041,7 @@ struct AheadRecord {
     var failure: String?
     var finished: Bool?
     var firstRead: RequestTimes?
+    var itemId: String?
 
     mutating func noteAnswer(status: Int?, bytes: Int, total: Int64?, known: Int64?) {
         if status != 206 || bytes == 0 {

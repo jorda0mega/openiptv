@@ -197,6 +197,9 @@ enum ServerSubtitles {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw SourceError.http(code) }
             guard !data.isEmpty else { throw SourceError.unexpected("The server's answer was empty.") }
+            #if DEBUG
+            if let item = AheadTaken.itemId(in: subtitle.address) { AheadTaken.note(item, .rest, bytes: data.count) }
+            #endif
             let file = file(for: subtitle)
             guard try await store.publish(data, as: file, since: generation) else { throw CancellationError() }
             return file
