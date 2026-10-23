@@ -9,8 +9,9 @@ final class PlanCopiesTests: XCTestCase {
     /// `info`: each copy's PlaybackInfo wait, by its place in `ids`;
     /// `width`: the picture's width in each; `itemSource`: the protocol of
     /// the source in each copy's item, as Emby lists it in an item's full
-    /// record (nil: the item lists none).
-    private func server(info: [Double], width: [Int] = [1280, 1920], itemSource: String? = nil) throws -> (LocalServer, EmbyClient) {
+    /// record (nil: the item lists none); `failing`: answered 500.
+    private func server(info: [Double], width: [Int] = [1280, 1920], itemSource: String? = nil,
+                        failing: @escaping @Sendable (String) -> Bool = { _ in false }) throws -> (LocalServer, EmbyClient) {
         let ids = Self.ids
         func copy(_ target: String) -> Int? { ids.firstIndex { target.contains("/\($0)") } }
         func source(_ n: Int, _ protocolName: String) -> String {
@@ -24,7 +25,7 @@ final class PlanCopiesTests: XCTestCase {
             guard target.contains("/PlaybackInfo"), let n = copy(target) else { return 0 }
             return info[n]
         }, answer: { target in
-            guard let n = copy(target) else { return (404, [:], "{}") }
+            guard let n = copy(target), !failing(target) else { return (500, [:], "{}") }
             if target.contains("/PlaybackInfo") {
                 return (200, ["Content-Type": "application/json"],
                         "{\"PlaySessionId\": \"ps\(n)\", \"MediaSources\": [\(source(n, itemSource ?? "File"))]}")
@@ -106,6 +107,21 @@ final class PlanCopiesTests: XCTestCase {
         let playback = try await client.playback(versions: Self.ids, kind: "Movie", maxWidth: 1920)
         XCTAssertLessThan(ContinuousClock.now - began, .seconds(1))
         XCTAssertEqual(playback.itemId, Self.ids[1], "the sharper copy")
+    }
+
+    func testACopyWhoseItemOrPlanFailsLeavesTheOtherToPlay() async throws {
+        for failing in ["/Items/\(Self.ids[1])", "/\(Self.ids[1])/PlaybackInfo"] {
+            let (server, client) = try server(info: [0, 0], width: [1920, 1920], failing: { $0.contains(failing) })
+            defer { server.stop() }
+            let plan = Task { try await client.playback(versions: Self.ids, kind: "Movie", maxWidth: 1920) }
+            let late = Task {
+                try await Task.sleep(for: .seconds(5))
+                plan.cancel()
+            }
+            let playback = try await plan.value
+            late.cancel()
+            XCTAssertEqual(playback.itemId, Self.ids[0], "with \(failing) failing")
+        }
     }
 
     func testARemoteFileStillWaitsForPlaybackInfo() async throws {
