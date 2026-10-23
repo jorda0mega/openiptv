@@ -175,6 +175,16 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(starts.lock.withLock { starts.asked }, 2, "a start stopped short was kept as done, or a done one fetched again")
     }
 
+    func testARefusedFileStartSaysWhichConditionRefusedIt() async {
+        var full = conditions(playing: false)
+        full.freeDisk = 1_234_000_000
+        let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { [full] in full }) { _ in true }
+        let start = FileStart(film())
+        let fetched = await shelf.warm(start, for: Interest(at: .continueWatching, .likely))
+        XCTAssertNil(fetched)
+        XCTAssertEqual(shelf.debugState(start, at: .continueWatching), "not asked, not allowed now: disk 1.2 GB, needs 2.0 GB")
+    }
+
     private final class Pings: @unchecked Sendable {
         private let lock = NSLock()
         private var made = 0

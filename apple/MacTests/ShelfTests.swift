@@ -490,4 +490,26 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(allowed { $0.lowPower = true }, [.light, .files, .bytes, .images, .iptv])
         XCTAssertEqual(allowed { $0.freeDisk = 1_000_000_000 }, [.light, .files, .heavy, .images, .player, .iptv])
     }
+
+    func testEachRefusalNamesItsCondition() {
+        func refusal(_ change: (inout Conditions) -> Void, of weight: Weight = .bytes) -> String? {
+            var conditions = open
+            change(&conditions)
+            for each in [Weight.light, .files, .heavy, .bytes, .images, .player, .iptv] {
+                XCTAssertEqual(conditions.allows(each, at: .continueWatching), conditions.refusal(each, at: .continueWatching) == nil,
+                               "allows and refusal disagree for \(each)")
+            }
+            return conditions.refusal(weight, at: .continueWatching)?.description
+        }
+        XCTAssertNil(refusal { _ in })
+        XCTAssertEqual(refusal { $0.network = .expensive }, "network expensive")
+        XCTAssertEqual(refusal { $0.network = .constrained }, "network constrained")
+        XCTAssertEqual(refusal { $0.network = .unknown }, "network unknown")
+        XCTAssertEqual(refusal { $0.freeDisk = 1_234_000_000 }, "disk 1.2 GB, needs 2.0 GB")
+        XCTAssertEqual(refusal { $0.playing = true }, "playing")
+        XCTAssertEqual(refusal({ $0.lowPower = true }, of: .heavy), "low power")
+        XCTAssertEqual(refusal { $0.thermal = .serious }, "thermal serious")
+        XCTAssertEqual(refusal { $0.thermal = .critical }, "thermal critical")
+        XCTAssertEqual(refusal { $0.memoryWarned = true }, "memory warning")
+    }
 }

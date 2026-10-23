@@ -38,6 +38,26 @@ final class Interest: Identifiable, Sendable {
 struct Conditions: Equatable, Sendable {
     enum Network: Sendable { case unknown, unmetered, expensive, constrained }
 
+    enum Refusal: Equatable, Sendable, CustomStringConvertible {
+        case network(Network)
+        case disk(free: Int64, needs: Int64)
+        case playing
+        case lowPower
+        case thermal(ProcessInfo.ThermalState)
+        case memoryWarned
+
+        var description: String {
+            switch self {
+            case let .network(network): "network \(network)"
+            case let .disk(free, needs): String(format: "disk %.1f GB, needs %.1f GB", Double(free) / 1e9, Double(needs) / 1e9)
+            case .playing: "playing"
+            case .lowPower: "low power"
+            case let .thermal(state): state == .critical ? "thermal critical" : "thermal serious"
+            case .memoryWarned: "memory warning"
+            }
+        }
+    }
+
     var network: Network
     var playing: Bool
     var lowPower: Bool
@@ -55,6 +75,8 @@ struct Conditions: Equatable, Sendable {
         case .heavy, .player: return network == .unmetered && !lowPower
         }
     }
+
+    func refusal(_ weight: Weight, at place: Place) -> Refusal? { nil }
 }
 
 struct Bucket: Sendable {
