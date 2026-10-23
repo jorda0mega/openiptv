@@ -35,6 +35,7 @@ let package = Package(
                 "Model/Plans.swift",
                 "Model/Preferences.swift",
                 "Model/Sources.swift",
+                "Player/AheadTaken.swift",
                 "Player/BufferingLog.swift",
                 "Player/ByteCache.swift",
                 "Player/ConvertedPlaylist.swift",

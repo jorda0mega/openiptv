@@ -137,4 +137,26 @@ final class KeptStartTests: XCTestCase {
         XCTAssertEqual(times.readout, "queued 0 ms, DNS 3 ms, TCP 121 ms, TLS 380 ms, wait 190 ms (new, h2)")
     }
 }
+
+/// The start line says what its card took from the server before the tap,
+/// so a phone network's cost per card is read off each run.
+final class AheadTakenTests: XCTestCase {
+    func testACardSaysWhatItTookAheadTheOpensOwnReadsApartFromTheRest() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0)
+        let item = "taken-\(UUID().uuidString)"
+        let film = FileStart(EmbyPlayback(itemId: item, title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200))
+        let relay = StreamRelay()
+        XCTAssertEqual(AheadTaken.readout(item), "took ahead: open 0.00 MB in 0 reads, rest 0.00 MB in 0 reads")
+        // A film of zeros: its first read, then no layout to go on with.
+        _ = await relay.fetchStart(film)
+        await relay.warmConnection(film)
+        AheadTaken.note(item, .rest, bytes: 41_000)
+        XCTAssertEqual(AheadTaken.readout(item), "took ahead: open 0.52 MB in 1 read, rest 0.04 MB in 2 reads")
+    }
+
+    func testASubtitleOrStillsAddressNamesItsTitle() {
+        XCTAssertEqual(AheadTaken.itemId(in: URL(string: "http://server/emby/Videos/m5/ms-m5/Subtitles/3/Stream.srt")!), "m5")
+        XCTAssertNil(AheadTaken.itemId(in: URL(string: "http://server/emby/Items/m5")!))
+    }
+}
 #endif
