@@ -20,7 +20,7 @@ final class NetworkStatus: @unchecked Sendable {
     /// unmetered: nothing is fetched speculatively).
     private var known = false
     private var networkValue = Conditions.Network.unknown
-    private var freeDiskRead: (bytes: Int64, at: ContinuousClock.Instant)?
+    private var freeDiskRead: (free: Conditions.FreeDisk, at: ContinuousClock.Instant)?
     #if DEBUG && canImport(Libmpv)
     private var path: NWPath?
     #endif
@@ -99,17 +99,18 @@ final class NetworkStatus: @unchecked Sendable {
     /// Live TV keeps what's been watched on disk only with plenty of room
     /// (8 GB free): the file grows with the session until it closes.
     var roomForTimeshift: Bool {
-        freeDisk >= 8_000_000_000
+        freeDisk.bytes >= 8_000_000_000
     }
 
-    var freeDisk: Int64 {
-        if let read = lock.withLock({ freeDiskRead }), ContinuousClock.now - read.at < .seconds(60) { return read.bytes }
+    var freeDisk: Conditions.FreeDisk {
+        if let read = lock.withLock({ freeDiskRead }), ContinuousClock.now - read.at < .seconds(60) { return read.free }
         let caches = FileManager.default.temporaryDirectory
         #if os(tvOS)
-        let free = Int64((try? caches.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0)
+        let free = Conditions.FreeDisk(bytes: Int64((try? caches.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0),
+                                       countsPurgeable: false)
         #else
-        let free = (try? caches.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
-            .volumeAvailableCapacityForImportantUsage ?? 0
+        let free = Conditions.FreeDisk(bytes: (try? caches.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage ?? 0, countsPurgeable: true)
         #endif
         lock.withLock { freeDiskRead = (free, .now) }
         return free

@@ -38,6 +38,13 @@ final class Interest: Identifiable, Sendable {
 struct Conditions: Equatable, Sendable {
     enum Network: Sendable { case unknown, unmetered, expensive, constrained }
 
+    /// iOS reads the room for important use, which counts what the system
+    /// can purge; tvOS has no key for it and reads only what is free now.
+    struct FreeDisk: Equatable, Sendable {
+        var bytes: Int64
+        var countsPurgeable: Bool
+    }
+
     enum Refusal: Equatable, Sendable, CustomStringConvertible {
         case network(Network)
         case disk(free: Int64, needs: Int64)
@@ -63,7 +70,7 @@ struct Conditions: Equatable, Sendable {
     var lowPower: Bool
     var thermal: ProcessInfo.ThermalState
     var memoryWarned: Bool
-    var freeDisk: Int64
+    var freeDisk: FreeDisk
 
     func allows(_ weight: Weight, at place: Place) -> Bool {
         refusal(weight, at: place) == nil
@@ -76,7 +83,7 @@ struct Conditions: Equatable, Sendable {
         if playing { return weight == .light && place == .upNext ? nil : .playing }
         if [.light, .iptv].contains(weight) { return nil }
         if network != .unmetered { return .network(network) }
-        if weight == .bytes, freeDisk < 2_000_000_000 { return .disk(free: freeDisk, needs: 2_000_000_000) }
+        if weight == .bytes, freeDisk.bytes < 2_000_000_000 { return .disk(free: freeDisk.bytes, needs: 2_000_000_000) }
         if [.heavy, .player].contains(weight), lowPower { return .lowPower }
         return nil
     }

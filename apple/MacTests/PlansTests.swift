@@ -5,7 +5,7 @@ import XCTest
 final class PlansTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
     private let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
-                                  memoryWarned: false, freeDisk: 10_000_000_000)
+                                  memoryWarned: false, freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
     private let film = PlanKey(itemId: "m5", kind: "Movie", versions: ["m5"])
 
     private final class Server: @unchecked Sendable {

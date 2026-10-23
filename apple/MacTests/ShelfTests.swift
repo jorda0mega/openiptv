@@ -5,7 +5,7 @@ import XCTest
 final class ShelfTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
     private let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
-                                  memoryWarned: false, freeDisk: 10_000_000_000)
+                                  memoryWarned: false, freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
 
     private func lane(atOnce: Int = 2, bucket: Bucket? = nil) -> Lane {
         let open = open
@@ -488,7 +488,7 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(allowed { $0.playing = true }, [])
         XCTAssertEqual(allowed({ $0.playing = true }, at: .upNext), [.light])
         XCTAssertEqual(allowed { $0.lowPower = true }, [.light, .files, .bytes, .images, .iptv])
-        XCTAssertEqual(allowed { $0.freeDisk = 1_000_000_000 }, [.light, .files, .heavy, .images, .player, .iptv])
+        XCTAssertEqual(allowed { $0.freeDisk.bytes = 1_000_000_000 }, [.light, .files, .heavy, .images, .player, .iptv])
     }
 
     func testEachRefusalNamesItsCondition() {
@@ -505,7 +505,7 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(refusal { $0.network = .expensive }, "network expensive")
         XCTAssertEqual(refusal { $0.network = .constrained }, "network constrained")
         XCTAssertEqual(refusal { $0.network = .unknown }, "network unknown")
-        XCTAssertEqual(refusal { $0.freeDisk = 1_234_000_000 }, "disk 1.2 GB, needs 2.0 GB")
+        XCTAssertEqual(refusal { $0.freeDisk.bytes = 1_234_000_000 }, "disk 1.2 GB, needs 2.0 GB")
         XCTAssertEqual(refusal { $0.playing = true }, "playing")
         XCTAssertEqual(refusal({ $0.lowPower = true }, of: .heavy), "low power")
         XCTAssertEqual(refusal { $0.thermal = .serious }, "thermal serious")

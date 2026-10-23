@@ -156,7 +156,7 @@ final class AheadTests: XCTestCase {
         }
         let starts = Starts(completes: false)
         let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal, memoryWarned: false,
-                              freeDisk: 10_000_000_000)
+                              freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
         let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { open }) { _ in
             starts.lock.withLock {
                 starts.asked += 1
@@ -177,12 +177,30 @@ final class AheadTests: XCTestCase {
 
     func testARefusedFileStartSaysWhichConditionRefusedIt() async {
         var full = conditions(playing: false)
-        full.freeDisk = 1_234_000_000
+        full.freeDisk.bytes = 1_234_000_000
         let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { [full] in full }) { _ in true }
         let start = FileStart(film())
         let fetched = await shelf.warm(start, for: Interest(at: .continueWatching, .likely))
         XCTAssertNil(fetched)
         XCTAssertEqual(shelf.debugState(start, at: .continueWatching), "not asked, not allowed now: disk 1.2 GB, needs 2.0 GB")
+    }
+
+    func testAnAppleTVNeedsRoomForWhatTheFetchAheadWritesNotTwoGigabytes() async {
+        func ahead(_ free: Int64, countsPurgeable: Bool) async -> (fetched: Bool?, state: String) {
+            var device = conditions(playing: false)
+            device.freeDisk = .init(bytes: free, countsPurgeable: countsPurgeable)
+            let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { [device] in device }) { _ in true }
+            let start = FileStart(film())
+            let fetched = await shelf.warm(start, for: Interest(at: .continueWatching, .likely))
+            return (fetched, shelf.debugState(start, at: .continueWatching))
+        }
+        let tv = await ahead(1_200_000_000, countsPurgeable: false)
+        XCTAssertEqual(tv.fetched, true, "an Apple TV with 1.2 GB free now, its caches not counted, fetched no card ahead")
+        let fullTV = await ahead(400_000_000, countsPurgeable: false)
+        XCTAssertNil(fullTV.fetched)
+        XCTAssertEqual(fullTV.state, "not asked, not allowed now: disk 0.4 GB, needs 0.5 GB")
+        let phone = await ahead(1_200_000_000, countsPurgeable: true)
+        XCTAssertNil(phone.fetched, "a phone fetched ahead with under 2 GB of room for important use")
     }
 
     private final class Pings: @unchecked Sendable {
@@ -193,7 +211,8 @@ final class AheadTests: XCTestCase {
     }
 
     private func conditions(playing: Bool) -> Conditions {
-        Conditions(network: .unmetered, playing: playing, lowPower: false, thermal: .nominal, memoryWarned: false, freeDisk: 10_000_000_000)
+        Conditions(network: .unmetered, playing: playing, lowPower: false, thermal: .nominal, memoryWarned: false,
+                   freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
     }
 
     func testALikelyCardKeepsTheConnectionPlaybackUsesOpenTillItGoes() async {
