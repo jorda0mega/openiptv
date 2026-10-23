@@ -477,6 +477,7 @@ private struct RowPage: View {
 /// through, the episode and what's left. Tap plays; press and hold for the
 /// show or film.
 private struct ContinueRow: View {
+    @Environment(AppModel.self) private var model
     let row: HomeRow
     let loadingCard: String?
     let play: (Card) -> Void
@@ -515,6 +516,7 @@ private struct ContinueRow: View {
             .scrollIndicators(.hidden)
         }
         .preparesAhead(row.cards.first?.playTarget, at: .homeForecast)
+        .task(id: row.cards.map(\.id)) { await model.forecastPlans(row.cards) }
     }
 
     /// As in the Apple TV app (measured at 3x from it): the picture fills

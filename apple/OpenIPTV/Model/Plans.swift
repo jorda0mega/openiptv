@@ -24,7 +24,15 @@ enum Plans {
         Shelf(.init(lane: lane ?? .emby, lifetime: .seconds(180), failureKept: .zero), now: now, fetch: fetch)
     }
 
-    static func forecast(_ keys: [PlanKey], on shelf: Shelf<PlanKey, EmbyPlayback>) async {}
+    /// Home's Continue Watching: every card's plan, in the row's order and
+    /// one at a time (the server can be slow right after a launch, and the
+    /// row's other requests go on meanwhile), each at the least likelihood,
+    /// so a card held on screen or tapped goes first.
+    static func forecast(_ keys: [PlanKey], on shelf: Shelf<PlanKey, EmbyPlayback>) async {
+        for key in keys where !Task.isCancelled {
+            _ = await shelf.warm(key, for: Interest(at: .continueWatching, .glance))
+        }
+    }
 }
 
 #if DEBUG

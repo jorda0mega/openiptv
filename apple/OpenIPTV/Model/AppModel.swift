@@ -1325,13 +1325,22 @@ final class AppModel {
     }
 
     private func preparePlan(_ target: Target, _ interest: Interest) async -> EmbyPlayback? {
-        let key = switch target {
+        let account = accountGeneration
+        let plan = await plans.warm(planKey(target), for: interest).map(withLocalResume)
+        return account == accountGeneration ? plan : nil
+    }
+
+    private func planKey(_ target: Target) -> PlanKey {
+        switch target {
         case let .title(id, kind): planKey(id, kind: kind)
         case let .playable(id, kind): planKey(id, kind: kind)
         }
-        let account = accountGeneration
-        let plan = await plans.warm(key, for: interest).map(withLocalResume)
-        return account == accountGeneration ? plan : nil
+    }
+
+    /// Continue Watching's cards' plans as the row shows (Plans.forecast).
+    func forecastPlans(_ cards: [Card]) async {
+        guard !Self.noPrepareAhead, !Self.noPlanForecast else { return }
+        await Plans.forecast(cards.map { planKey($0.playTarget) }, on: plans)
     }
 
     /// Subtitle files found for a film heard in neither English nor
@@ -2716,6 +2725,14 @@ extension AppModel {
     private nonisolated static var noStreamAhead: Bool { UserDefaults.standard.bool(forKey: "noStreamAhead") }
     #else
     private nonisolated static let noStreamAhead = false
+    #endif
+
+    #if DEBUG
+    /// UI tests: `-noPlanForecast YES` asks a Continue Watching card's plan
+    /// only when it stays on screen (the start before).
+    private nonisolated static var noPlanForecast: Bool { UserDefaults.standard.bool(forKey: "noPlanForecast") }
+    #else
+    private nonisolated static let noPlanForecast = false
     #endif
 
     #if DEBUG

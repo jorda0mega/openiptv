@@ -421,6 +421,7 @@ struct TVContinueRow: View {
         .task(id: focused) {
             if focused != nil { model.homeBrowsed() }
         }
+        .task(id: row.cards.map(\.id)) { await model.forecastPlans(row.cards) }
     }
 }
 
