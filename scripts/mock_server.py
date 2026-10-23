@@ -1336,7 +1336,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/Users/U1/Items/") and path.count("/") == 4 and not path.endswith(("/Latest", "/Resume")):
             item_id = path.rsplit("/", 1)[1]
             if item_id in KNOWN_BY_ID:
-                item = known_item(KNOWN_BY_ID[item_id], played=item_id == "a9")
+                item = known_item(KNOWN_BY_ID[item_id], played=item_id == "a9") | {"MediaSources": [media_source(item_id)]}
                 if "People" in q.get("Fields", ""):
                     item["People"] = [{"Name": n, "Type": t, "Id": "p_" + n.replace(" ", "_")} for n, t in CAST.get(item_id, [])]
                 return self.send(item)
@@ -1348,7 +1348,7 @@ class Handler(BaseHTTPRequestHandler):
                                   "Overview": "Real cases solved with forensic science.",
                                   "ImageTags": {"Primary": "p"}, "BackdropImageTags": ["b"]})
             if item_id.startswith("e"):
-                item = episode(int(item_id[1:])) | {"RunTimeTicks": 18000000000}
+                item = episode(int(item_id[1:])) | {"RunTimeTicks": 18000000000, "MediaSources": [media_source(item_id)]}
                 # "intro": "start,end" seconds, marked as Emby's intro
                 # detection marks them (chapters with a MarkerType).
                 if CONTROL.get("intro"):
