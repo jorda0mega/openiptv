@@ -33,6 +33,22 @@ final class ByteCacheTests: XCTestCase {
         XCTAssertEqual(cache.available(from: 0), 0, "the first bytes are still kept, over the limit")
     }
 
+    /// The store is in the app's temporary folder, which tvOS empties when
+    /// it needs room. Emptied while a film plays, its open file still reads
+    /// and takes more, and the next film's store is made again.
+    func testAStoreEmptiedFromUnderAPlayingFilmStillReadsAndTheNextIsMade() throws {
+        let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
+        read(0...1, into: cache)
+        ByteCache.removeLeftovers()
+        let folder = FileManager.default.temporaryDirectory.appending(path: "relay-cache").path()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder), "the folder wasn't emptied")
+        read(2...3, into: cache)
+        XCTAssertEqual(cache.read(0, 4 * megabyte), (0...3).reduce(into: Data()) { $0.append(megabyte($1)) })
+        let next = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)), "no store for the next film")
+        read(0...0, into: next)
+        XCTAssertEqual(next.read(0, megabyte), megabyte(0))
+    }
+
     func testTheIndexFetchedAheadIsKeptWhenTheFilmFillsTheStore() throws {
         let cache = try XCTUnwrap(ByteCache(limit: Int64(8 * megabyte)))
         let index = Data(repeating: 7, count: 256 << 10)
