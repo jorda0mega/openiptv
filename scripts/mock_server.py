@@ -18,6 +18,7 @@ import socket
 import shutil
 import subprocess
 import json
+import math
 import threading
 import os
 import struct
@@ -28,7 +29,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
-from slow_link import PROFILES, Link, ShapedWriter, opens_file
+import slow_link
+from slow_link import Conversion, Link, ShapedWriter, opens_file
 
 PANEL_TZ = timezone(timedelta(hours=1))
 EASTERN = ZoneInfo("America/New_York")
@@ -75,27 +77,24 @@ CONNECTIONS = set()
 # connection's first answer: a real server's connect and TLS, about 0.5 s),
 # "plan_delay" (seconds before PlaybackInfo answers: 0.2-4 s on a real one).
 #
-# A slow network and server, apart from CONTROL (a reset keeps it):
-# OPENIPTV_MOCK_PROFILE ("busy", "far" or "worst", as slow_link.PROFILES
-# sets them; GET /mock/profile?name= switches, "none" for none, and closes
-# every other connection so the next ones take it). OPENIPTV_MOCK_SEED (1
-# unless set; ?seed= too) fixes every random draw, so a run repeats.
-# Per connection: "connect" s before its first answer (the TCP and TLS
-# handshakes); "connection_rate" bytes a second (one TCP window a round
-# trip, a long link's limit: two to four connections in parallel get past
-# it, up to the link's rate). Per request: "request" (low, high s) before
-# every answer, drawn per request (the round trip); "first_byte" (low, high
-# s): the server's own wait before it sends a file (the film's or its
-# sound's stream, under /Videos/ or /Audio/; a converted version keeps its
-# own pace, see converted_segment), drawn per request. Per link:
-# "link_rate" bytes a second, for every connection together; "link_stall"
-# (about every s, shortest, longest s): every connection stops at once (a
-# radio fading). /mock/ requests go at full speed, and the film's own pace
-# in send_file is off.
+# A real server's timing and a slow network, apart from CONTROL (a reset
+# keeps it): OPENIPTV_MOCK_PROFILE (a name in net_profiles.json: real-quiet,
+# real-busy, worst, far; busy is real-busy) takes the profile's server half,
+# and its link half unless OPENIPTV_MOCK_LINK names another profile's ("none"
+# when the throttling proxy carries the link). GET /mock/profile?name=&link=
+# switches ("none" for none) and closes every other connection so the next
+# ones take it; GET /mock/net says what each half has done, counts only.
+# OPENIPTV_MOCK_SEED (1 unless set; ?seed= too) fixes every random draw, so a
+# run repeats. slow_link.py defines each part. Under a profile, /mock/
+# requests go at full speed, the film's own pace in send_file is off, a
+# converted version is made at the profile's pace in segments of the
+# bitrate asked, and the film's own subtitle tracks wait for their
+# extraction.
 CONTROL = {}
 CONTROL.update({k: v[0] for k, v in parse_qs(os.environ.get("OPENIPTV_MOCK_SET", "")).items()})
 SEED = int(os.environ.get("OPENIPTV_MOCK_SEED", "1"))
-LINK = [Link(os.environ["OPENIPTV_MOCK_PROFILE"], SEED) if os.environ.get("OPENIPTV_MOCK_PROFILE") else None]
+# The profile's (Server, Link), or None.
+FAR = [None]
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
 DOWN_UNTIL = [0.0]
@@ -461,27 +460,45 @@ _CONVERSIONS_LOCK = threading.Lock()
 QUALITIES = {}
 
 
+def server_half():
+    return FAR[0] and FAR[0][0].p and FAR[0][0]
+
+
 def restart_conversion(item, segment, bitrate=None):
+    server = server_half()
+    conversion = server.conversion(segment, time.time()) if server else \
+        Conversion(segment, time.time(), float(CONTROL.get("convert_delay", 6)), SEGMENT / 4)
     with _CONVERSIONS_LOCK:
-        CONVERSIONS[item] = (segment, time.time())
+        CONVERSIONS[item] = conversion
     print(f"{time.time():.2f} convert {item} from {segment * SEGMENT} s" + (f" at {bitrate} b/s" if bitrate else ""), flush=True)
+    return conversion
 
 
 def converted_segment(item, n):
     """Segment n of the film converted as Emby does: made in turn after a
-    slow first one ("convert_delay" s), four times faster than it plays. Asked
-    for one behind it or far ahead, the conversion starts again there."""
-    delay = float(CONTROL.get("convert_delay", 6))
+    slow first one ("convert_delay" s), four times faster than it plays, or
+    at the profile's pace. Asked for one behind it or far ahead, the
+    conversion starts again there. None: refused, as a busy server refuses a
+    conversion as it starts."""
     with _CONVERSIONS_LOCK:
-        first, began = CONVERSIONS.get(item, (None, 0.0))
-        made = max(0.0, (time.time() - began - delay) * 4 / SEGMENT)
-    if first is None or n < first or n > first + made + 12:
-        restart_conversion(item, n)
-        first, began = n, time.time()
-    time.sleep(max(0.0, began + delay + (n - first) * SEGMENT / 4 - time.time()))
-    timestamp_flags = ["-output_ts_offset", str((n - first) * SEGMENT)] if CONTROL.get("convert_clock") == "restart" else ["-copyts"]
+        conversion = CONVERSIONS.get(item)
+        made = conversion.made(time.time()) if conversion else 0
+    if conversion is None or n < conversion.first or n > conversion.first + made + 12:
+        conversion = restart_conversion(item, n)
+    with _CONVERSIONS_LOCK:
+        if conversion.refuse():
+            server_half().count("refused")
+            return None
+        ready = conversion.ready_at(n)
+    time.sleep(max(0.0, ready - time.time()))
+    timestamp_flags = ["-output_ts_offset", str((n - conversion.first) * SEGMENT)] if CONTROL.get("convert_clock") == "restart" else ["-copyts"]
     bitrate, width = QUALITIES.get(item, (None, None))
-    quality = (["-maxrate", bitrate, "-bufsize", bitrate] if bitrate else []) + (["-vf", f"scale='min({width},iw)':-2"] if width else [])
+    if bitrate and server_half():
+        video = str(int(int(bitrate) * 0.85))
+        quality = ["-maxrate", video, "-bufsize", video, "-muxrate", bitrate]
+    else:
+        quality = ["-maxrate", bitrate, "-bufsize", bitrate] if bitrate else []
+    quality += ["-vf", f"scale='min({width},iw)':-2"] if width else []
     return subprocess.run(["ffmpeg", "-v", "error", "-ss", str(n * SEGMENT), "-t", str(SEGMENT), "-i", os.environ["OPENIPTV_MOCK_VIDEO"],
                            "-c:v", "libx264", "-preset", "ultrafast", *quality, "-g", "72", "-c:a", "aac", "-b:a", "32k", *timestamp_flags,
                            "-f", "mpegts", "-"], capture_output=True).stdout
@@ -514,34 +531,80 @@ def note_video_sent(path, start, end):
         VIDEO_SENT[path] = sorted(kept + [tuple(merged)])
 
 
+def close(connections, abrupt):
+    for connection in list(connections):
+        try:
+            if abrupt:
+                connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            connection.shutdown(socket.SHUT_RDWR)
+            connection.close()
+        except OSError:
+            pass
+
+
+def network_change():
+    """Every open connection dropped at once, and every conversion with them."""
+    close(CONNECTIONS, abrupt=True)
+    with _CONVERSIONS_LOCK:
+        CONVERSIONS.clear()
+
+
+def take_profile(name, link=None, seed=SEED):
+    """Profile `name`'s server half, over `link`'s link half (name's own unless given)."""
+    if FAR[0]:
+        FAR[0][1].stop()
+    link = link or name
+    FAR[0] = (slow_link.Server(name, seed), Link(link, seed, on_change=network_change)) if "none" != name or "none" != link else None
+    EXTRACTIONS.clear()
+
+
+# When each of the film's own subtitle tracks ("item:index") is out, under a profile.
+EXTRACTIONS = {}
+
+
+def extraction_wait(track):
+    server = server_half()
+    if not server:
+        return 0.0
+    now = time.time()
+    with _CONVERSIONS_LOCK:
+        if track not in EXTRACTIONS:
+            server.count("extractions")
+            EXTRACTIONS[track] = now + server.extraction(track)
+        return max(0.0, EXTRACTIONS[track] - now)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def setup(self):
         super().setup()
-        self.link = LINK[0] and LINK[0].connection()
+        self.server_half, link = FAR[0] or (None, None)
+        self.link = link and link.connection()
+        self.read = None
         if self.link:
             self.wfile = ShapedWriter(self.wfile, self.link)
 
     def parse_request(self):
         if not super().parse_request():
             return False
+        self.read = None
         if self.link:
             path = urlparse(self.path).path
             self.wfile.on = not path.startswith("/mock/")
             if self.wfile.on:
-                time.sleep(self.link.wait_before_answer(opens_file(path)))
+                first, server, rng = not self.link.answered, self.server_half, self.link.answers
+                wait = self.link.wait_before_answer() + (server.setup(rng) if first else 0)
+                if opens_file(path) and server.p:
+                    self.read = server.read()
+                    wait += self.read.first_byte
+                else:
+                    wait += server.answer(self.command == "POST" and "/PlaybackInfo" in path, rng)
+                time.sleep(wait)
         return True
 
     def close_others(self, abrupt):
-        for connection in list(CONNECTIONS - {self.connection}):
-            try:
-                if abrupt:
-                    connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
-                connection.shutdown(socket.SHUT_RDWR)
-                connection.close()
-            except OSError:
-                pass
+        close(CONNECTIONS - {self.connection}, abrupt)
 
     def handle(self):
         if time.time() < DOWN_UNTIL[0]:
@@ -695,12 +758,18 @@ class Handler(BaseHTTPRequestHandler):
             self.close_others(q.get("abrupt") == "1")
             return self.send({"closed": True})
         if path == "/mock/profile":
-            name = q.get("name", "none")
-            if name != "none" and name not in PROFILES:
+            name, link = q.get("name", "none"), q.get("link")
+            if {name, link or name} - set(slow_link.profiles()) - {"none"}:
                 return self.send({"error": "no such profile"}, status=400)
-            LINK[0] = Link(name, int(q.get("seed", SEED))) if name in PROFILES else None
+            take_profile(name, link, int(q.get("seed", SEED)))
             self.close_others(False)
-            return self.send({"profile": name})
+            return self.send({"profile": name, "link": link or name})
+        if path == "/mock/net":
+            if not FAR[0]:
+                return self.send({"profile": "none"})
+            server, link = FAR[0]
+            return self.send({"profile": server.name, "link": link.name, "seed": server.seed,
+                              "server": dict(server.counts), "net": link.readout()})
         if path == "/mock/down":
             # Gone down for "seconds": every connection dropped at once.
             DOWN_UNTIL[0] = time.time() + float(q.get("seconds", "10"))
@@ -1136,7 +1205,8 @@ class Handler(BaseHTTPRequestHandler):
     def send_file(self, file_path, ctype="video/x-matroska", kind=None):
         """A real video with Range support, like Emby's static stream, slowed
         to roughly a home connection (~200 ms per request, ~10 MB/s) unless
-        a profile slows the connection."""
+        a profile paces it: at its read's pace, hung or reset part way as
+        the read says."""
         size = os.path.getsize(file_path)
         start, end = 0, size - 1
         rng = self.headers.get("Range", "")
@@ -1163,10 +1233,23 @@ class Handler(BaseHTTPRequestHandler):
             if rng:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.end_headers()
+            read, hung = self.read, False
+            if read:
+                self.link.rate = read.rate
             with open(file_path, "rb") as f:
                 f.seek(start)
                 left = end - start + 1
                 while left > 0:
+                    done = 1 - left / (end - start + 1)
+                    if read and read.hang_at is not None and not hung and done >= read.hang_at:
+                        self.server_half.count("hangs")
+                        time.sleep(read.hang)
+                        hung = True
+                    if read and read.reset_at is not None and done >= read.reset_at:
+                        self.server_half.count("resets")
+                        close([self.connection], abrupt=True)
+                        self.close_connection = True
+                        return
                     at = f.tell()
                     chunk = f.read(min(262144, left))
                     if not chunk:
@@ -1178,6 +1261,9 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             if kind:
                 CANCELLED.append((time.time(), kind))
+        finally:
+            if self.link:
+                self.link.rate = math.inf
 
     def emby(self, path, q):
         if path == "/System/Info/Public":
@@ -1278,7 +1364,16 @@ class Handler(BaseHTTPRequestHandler):
             item, n = path.split("/")[2], int(os.path.basename(path)[:-3])
             if not self.key_check(f"segment:{n}", q):
                 return self.send({"error": "unauthorized"}, status=401)
-            return self.send(converted_segment(item, n), ctype="video/mp2t")
+            segment = converted_segment(item, n)
+            if segment is None:
+                return self.send({"error": "unavailable"}, status=503)
+            try:
+                return self.send(segment, ctype="video/mp2t")
+            except (BrokenPipeError, ConnectionResetError):
+                # Dropped: Emby stops the conversion, and the next request starts it again.
+                with _CONVERSIONS_LOCK:
+                    CONVERSIONS.pop(item, None)
+                raise
         if hls and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             time.sleep(float(CONTROL.get("hls_delay", 0)))
             # As the real Emby answers a master asked with the key in a
@@ -1372,7 +1467,7 @@ class Handler(BaseHTTPRequestHandler):
             # One of the film's own tracks, extracted as SRT (as Emby does).
             video = os.environ.get("OPENIPTV_MOCK_VIDEO")
             if index < 100 and video and shutil.which("ffmpeg"):
-                time.sleep(float(CONTROL.get("reference_delay", 0)))
+                time.sleep(float(CONTROL.get("reference_delay", 0)) + extraction_wait(track))
                 if self.client_gone():
                     SUBTITLES_CUT.append((time.time(), track))
                     self.close_connection = True
@@ -1508,4 +1603,6 @@ class Server(ThreadingHTTPServer):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+    if os.environ.get("OPENIPTV_MOCK_PROFILE"):
+        take_profile(os.environ["OPENIPTV_MOCK_PROFILE"], os.environ.get("OPENIPTV_MOCK_LINK"))
     Server(("127.0.0.1", port), Handler).serve_forever()

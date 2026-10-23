@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""A local proxy that carries the app's connections over a slow link
-(slow_link.PROFILES), to see a real server through a bad network.
+"""A local proxy that carries the app's connections over a slow link (a
+profile's link half, slow_link.py), to see a real server through a bad
+network.
 
     python3 scripts/throttle_proxy.py 8859 worst [seed]
 
 HTTPS comes as CONNECT: a tunnel the TLS goes through untouched, so the
-proxy never sees a request or a key. The tunnel waits the profile's
-connect before it opens, everything the app sends arrives a round trip
-late, and what comes back goes at the connection's and the link's pace,
-with their stalls. The first byte is the real server's own. Plain HTTP (the
-test server) comes as requests: each waits as the test server's own
-profile would make it wait, first byte included, so app, proxy and a test
-server with no profile show the whole profile.
+proxy never sees a request or a key. The tunnel waits the link's handshakes
+before it opens, everything the app sends arrives a round trip late, and
+what comes back goes at the link's pace, with its stalls; at the network
+change every tunnel is dropped at once. The server half is the server's
+own: the real one's, or the test server's profile (with link=none, so the
+link is carried once). Plain HTTP (the test server) comes as requests, each
+a round trip late and its connection's first the handshakes too.
 
 Prints counts only, at the end: never a host, an address or a request.
 """
@@ -19,17 +20,19 @@ Prints counts only, at the end: never a host, an address or a request.
 import os
 import signal
 import socket
+import struct
 import sys
 import threading
 import time
 from collections import deque
 from urllib.parse import urlsplit
 
-from slow_link import Link, opens_file
+from slow_link import Link
 
 TOTALS = {"tunnels": 0, "requests": 0, "playlists": 0, "segments": 0, "failed": 0, "down": 0, "up": 0}
 FAILURES = set()
 LOCK = threading.Lock()
+OPEN = set()
 
 
 def count(key, n=1):
@@ -87,9 +90,11 @@ def serve(client, link):
         client.close()
         return
     down = threading.Thread(target=pump_down, args=(upstream, client, connection), daemon=True)
+    with LOCK:
+        OPEN.update((client, upstream))
     try:
         if tunnel:
-            time.sleep(link.profile.connect)
+            time.sleep(connection.handshake())
             client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
             count("tunnels")
             down.start()
@@ -101,6 +106,8 @@ def serve(client, link):
     except (OSError, EOFError):
         pass
     finally:
+        with LOCK:
+            OPEN.difference_update((client, upstream))
         for sock in (client, upstream):
             try:
                 sock.shutdown(socket.SHUT_RDWR)
@@ -109,8 +116,20 @@ def serve(client, link):
             sock.close()
 
 
+def drop_all():
+    """The network change: every open connection dropped at once."""
+    with LOCK:
+        dropped = list(OPEN)
+    for sock in dropped:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
 def forward(reader, head, upstream, connection, server):
-    """Plain HTTP, one request at a time, each held as the profile says."""
+    """Plain HTTP, one request at a time, each held as the link says."""
     while True:
         line, fields = head.split(b"\r\n", 1)
         method, target, version = line.split(b" ", 2)
@@ -120,7 +139,7 @@ def forward(reader, head, upstream, connection, server):
         path = (origin.path or "/") + (f"?{origin.query}" if origin.query else "")
         length = next((int(f.split(b":", 1)[1]) for f in fields.split(b"\r\n") if f.lower().startswith(b"content-length:")), 0)
         body = reader.exactly(length)
-        time.sleep(connection.wait_before_answer(opens_file(origin.path)))
+        time.sleep(connection.wait_before_answer())
         upstream.sendall(b" ".join([method, path.encode(), version]) + b"\r\n" + fields + body)
         count("requests")
         count("playlists", origin.path.endswith(".m3u8"))
@@ -183,13 +202,15 @@ def delay_up(reader, upstream, delay):
 def main():
     port, name = int(sys.argv[1]), sys.argv[2]
     seed = int(sys.argv[3]) if len(sys.argv) > 3 else 1
-    link = Link(name, seed)
+    link = Link(name, seed, on_change=drop_all)
 
     def stop(*_):
+        done = link.readout()
         print(f"proxy {name}: {TOTALS['tunnels']} tunnels, {TOTALS['requests']} plain requests "
               f"({TOTALS['playlists']} playlists, {TOTALS['segments']} segments), "
               f"{TOTALS['down'] / 1e6:.1f} MB down, {TOTALS['up'] / 1e6:.1f} MB up, {TOTALS['failed']} failed "
-              f"({', '.join(sorted(FAILURES)) or 'none'})", flush=True)
+              f"({', '.join(sorted(FAILURES)) or 'none'}) | link {done['mb_s'] or '-'} MB/s while sending, "
+              f"{done['stalls']} stalls, {done['changes']} network changes", flush=True)
         os._exit(0)
 
     signal.signal(signal.SIGTERM, stop)

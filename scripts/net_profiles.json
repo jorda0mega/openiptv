@@ -1,0 +1,46 @@
+{
+  "real-quiet": {
+    "server": {
+      "connect_s": 0.5,
+      "answer_s": [0.15, 0.19],
+      "first_byte_s": [0.17, 0.23],
+      "read_mb_s": [3.5, 15],
+      "plan_s": [0.2, 0.6],
+      "convert_first_s": [1.1, 1.5],
+      "convert_segment_s": [0.17, 2.8],
+      "subtitle_extract_s": [60, 75]
+    }
+  },
+  "real-busy": {
+    "server": {
+      "base": "real-quiet",
+      "first_byte_s": {"median": 0.9, "spread": 1.0, "low": 0.4, "high": 9},
+      "plan_s": [0.2, 1.8],
+      "convert_first_s": [1.1, 5.9]
+    }
+  },
+  "worst": {
+    "server": {
+      "base": "real-busy",
+      "plan_s": [1.8, 4.1],
+      "hang": {"one_in": 50, "s": [15, 20]},
+      "reset": {"one_in": 30},
+      "convert_refused": 1
+    },
+    "link": {
+      "connect_s": 0.8,
+      "round_trip_s": [0.4, 0.4],
+      "mbit_s": {"low": 2, "high": 8, "every_s": 5},
+      "stall": {"every_s": 20, "s": [3, 3]},
+      "network_change_s": [120, 300]
+    }
+  },
+  "far": {
+    "link": {
+      "round_trip_s": [0.08, 0.15],
+      "mbit_s": 8,
+      "stall": {"every_s": 10, "s": [0.5, 1]}
+    }
+  },
+  "busy": "real-busy"
+}

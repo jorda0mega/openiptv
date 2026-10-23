@@ -1,91 +1,252 @@
-"""Slow-network profiles, shared by the test server (OPENIPTV_MOCK_PROFILE)
-and the throttling proxy (throttle_proxy.py). The test server's CONTROL
-comment says what each part does per connection, per request and per link.
-Every random draw comes from the seed, so a run repeats."""
+"""Timing profiles, shared by the test server (OPENIPTV_MOCK_PROFILE) and the
+throttling proxy (throttle_proxy.py), read from net_profiles.json (or the file
+OPENIPTV_NET_PROFILES names): times and rates only, taken from the real
+server's printed runs.
 
+A profile has two halves. Its server half is the far end as the device sees
+it, the home link inside: "connect_s" for a new connection (TCP and TLS),
+"answer_s" before any answer, "plan_s" before PlaybackInfo's, "first_byte_s"
+before a file read's, "read_mb_s" each read's pace, "convert_first_s" to a
+converted version's first segment, "convert_segment_s" to make each next one,
+"subtitle_extract_s" to take one of the film's own subtitle tracks out, and
+its faults: "hang" ({one_in, s}: a read stops that long, part way), "reset"
+({one_in}: a read's connection reset part way), "convert_refused" (503s each
+time a conversion starts). Its link half is a network in between:
+"connect_s" more for each new connection, "round_trip_s" for each request,
+"mbit_s" for every connection together ({low, high, every_s}: it swings),
+"stall" ({every_s, s}: every connection stops at once, about that often) and
+"network_change_s" (once a run, that long in: every open connection dropped
+at once). The test server takes the server half, and the link half unless
+the proxy carries it; the proxy takes only the link half.
+
+A spec is a number; [low, high], drawn evenly; or {median, spread, low,
+high}, drawn heavy-tailed (lognormal) and held within. A profile that is a
+name is that profile; "base" in a half puts the half's numbers over that
+profile's. Every draw comes from the seed: a connection's from its number, a
+read's from its number, a conversion's from its start's number, the link's
+from its own, so a run repeats."""
+
+import json
+import math
+import os
 import random
 import threading
 import time
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple, Optional
 
 PIECE = 16 << 10
+PROFILES_FILE = os.environ.get("OPENIPTV_NET_PROFILES") or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                        "net_profiles.json")
 
 
-class Profile(NamedTuple):
-    connect: float = 0.0
-    request: Tuple[float, float] = (0.0, 0.0)
-    first_byte: Optional[Tuple[float, float]] = None
-    connection_rate: float = 0.0
-    link_rate: float = 0.0
-    link_stall: Optional[Tuple[float, float, float]] = None
+def profiles():
+    with open(PROFILES_FILE) as f:
+        return json.load(f)
 
 
-PROFILES = {
-    "busy": Profile(connect=0.5, first_byte=(2, 9), connection_rate=10e6, link_rate=10e6),
-    "far": Profile(request=(0.08, 0.15), connection_rate=1e6, link_rate=1e6, link_stall=(10, 0.5, 1)),
-    "worst": Profile(connect=0.5, request=(0.4, 0.4), first_byte=(2, 9), connection_rate=0.25e6, link_rate=0.5e6,
-                     link_stall=(20, 3, 3)),
-}
+def half(name, part, table=None):
+    """Profile `name`'s "server" or "link" half: {} when it has none."""
+    if name == "none":
+        return {}
+    table = table or profiles()
+    entry = table[name]
+    if isinstance(entry, str):
+        return half(entry, part, table)
+    own = dict(entry.get(part) or {})
+    base = own.pop("base", None)
+    return {**(half(base, part, table) if base else {}), **own}
+
+
+def draw(spec, rng):
+    if spec is None:
+        return 0.0
+    if isinstance(spec, (int, float)):
+        return float(spec)
+    if isinstance(spec, list):
+        return rng.uniform(*spec)
+    return min(spec["high"], max(spec["low"], rng.lognormvariate(math.log(spec["median"]), spec["spread"])))
 
 
 def opens_file(path):
     return ("/Videos/" in path or "/Audio/" in path) and "/stream" in path
 
 
-class Link:
+class Read(NamedTuple):
+    """A file read as the server answers it: its first byte, its pace (bytes
+    a second), and the share of it after which it hangs (for `hang` s) or its
+    connection is reset."""
+    number: int
+    first_byte: float
+    rate: float
+    hang_at: Optional[float]
+    hang: float
+    reset_at: Optional[float]
+
+
+class Conversion:
+    """A converted version started at segment `first`: its first segment
+    ready `first_s` after it began, each next one `segment_s` after the last,
+    and `refusals` 503s before it answers."""
+
+    def __init__(self, first, began, first_s, segment_s, rng=None, refusals=0):
+        self.first, self.segment_s, self.rng, self.refusals = first, segment_s, rng, refusals
+        self.ready = [began + draw(first_s, rng)]
+
+    def ready_at(self, n):
+        while len(self.ready) <= n - self.first:
+            self.ready.append(self.ready[-1] + draw(self.segment_s, self.rng))
+        return self.ready[n - self.first]
+
+    def made(self, now):
+        while self.ready[-1] <= now:
+            self.ready_at(self.first + len(self.ready))
+        return sum(1 for at in self.ready if at <= now)
+
+    def refuse(self):
+        self.refusals -= 1
+        return self.refusals >= 0
+
+
+class Server:
+    """A profile's server half, and what it has done (`counts`)."""
+
     def __init__(self, name, seed=1):
-        self.name, self.profile, self.seed = name, PROFILES[name], seed
+        self.name, self.seed, self.p = name, seed, half(name, "server")
+        self.lock = threading.Lock()
+        self.counts = dict(reads=0, hangs=0, resets=0, conversions=0, refused=0, extractions=0)
+
+    def count(self, key):
+        with self.lock:
+            self.counts[key] += 1
+            return self.counts[key]
+
+    def setup(self, rng):
+        return draw(self.p.get("connect_s"), rng)
+
+    def answer(self, plan, rng):
+        """The server's wait before an answer that isn't a file read's: PlaybackInfo's if `plan`."""
+        return draw(self.p.get("plan_s" if plan else "answer_s"), rng)
+
+    def read(self):
+        number = self.count("reads")
+        rng = random.Random(f"{self.seed}:read:{number}")
+        hang, reset = self.p.get("hang"), self.p.get("reset")
+        first_byte, rate = draw(self.p.get("first_byte_s"), rng), draw(self.p.get("read_mb_s"), rng) * 1e6
+        hangs, hang_at, hang_s = rng.random(), rng.random(), draw(hang and hang["s"], rng)
+        resets, reset_at = rng.random(), rng.random()
+        return Read(number, first_byte, rate or math.inf,
+                    hang_at if hang and hangs < 1 / hang["one_in"] else None, hang_s,
+                    reset_at if reset and resets < 1 / reset["one_in"] else None)
+
+    def conversion(self, first, began):
+        number = self.count("conversions")
+        return Conversion(first, began, self.p.get("convert_first_s"), self.p.get("convert_segment_s"),
+                          random.Random(f"{self.seed}:convert:{number}"), self.p.get("convert_refused", 0))
+
+    def extraction(self, track):
+        return draw(self.p.get("subtitle_extract_s"), random.Random(f"{self.seed}:extract:{track}"))
+
+
+class Link:
+    """A profile's link half for every connection over it, and what it has
+    done (`counts`). `on_change` drops every open connection at the network
+    change."""
+
+    def __init__(self, name, seed=1, on_change=None):
+        self.name, self.seed, self.p = name, seed, half(name, "link")
         self.lock = threading.Lock()
         self.due = 0.0
-        self.opened = 0
+        self.began = time.monotonic()
         self.fades = random.Random(f"{seed}:link")
-        self.fade = (float("inf"), float("inf"))
-        if self.profile.link_stall:
-            self.fade = self.next_fade(time.monotonic())
+        self.fade = (math.inf, math.inf)
+        if self.p.get("stall"):
+            self.fade = self.next_fade(self.began)
+        self.swings = random.Random(f"{seed}:rate")
+        self.rate, self.rate_until = math.inf, self.began
+        self.counts = dict(connections=0, stalls=0, changes=0, sent=0, busy_s=0.0)
+        self.timer = None
+        if self.p.get("network_change_s") and on_change:
+            self.timer = threading.Timer(draw(self.p["network_change_s"], random.Random(f"{seed}:change")),
+                                         self.change, [on_change])
+            self.timer.daemon = True
+            self.timer.start()
+
+    def change(self, on_change):
+        with self.lock:
+            self.counts["changes"] += 1
+        on_change()
+
+    def stop(self):
+        if self.timer:
+            self.timer.cancel()
 
     def next_fade(self, after):
-        every, shortest, longest = self.profile.link_stall
-        start = after + self.fades.uniform(every * 0.75, every * 1.25)
-        return start, start + self.fades.uniform(shortest, longest)
+        stall = self.p["stall"]
+        start = after + self.fades.uniform(stall["every_s"] * 0.75, stall["every_s"] * 1.25)
+        return start, start + draw(stall["s"], self.fades)
+
+    def rate_at(self, at):
+        """Bytes a second for every connection together at `at`."""
+        spec = self.p.get("mbit_s")
+        if not isinstance(spec, dict):
+            return spec * 125e3 if spec else math.inf
+        while self.rate_until <= at:
+            self.rate_until += self.swings.uniform(spec["every_s"] * 0.75, spec["every_s"] * 1.25)
+            self.rate = spec["low"] * (spec["high"] / spec["low"]) ** self.swings.random() * 125e3
+        return self.rate
 
     def connection(self):
         with self.lock:
-            self.opened += 1
-            return Connection(self, self.opened)
+            self.counts["connections"] += 1
+            return Connection(self, self.counts["connections"])
 
     def book(self, connection, size):
         """When `size` more bytes of `connection` may go."""
-        p = self.profile
         with self.lock:
-            at = max(time.monotonic(), connection.due, self.due)
+            now = time.monotonic()
+            at = max(now, connection.due, self.due)
             while self.fade[1] <= at:
+                self.counts["stalls"] += 1
                 self.fade = self.next_fade(self.fade[1])
             if self.fade[0] <= at:
                 at = self.fade[1]
-            connection.due = at + size / p.connection_rate
-            self.due = at + size / p.link_rate
+            connection.due = at + size / connection.rate
+            free = at + size / self.rate_at(at)
+            self.counts["busy_s"] += free - max(now, self.due)
+            self.counts["sent"] += size
+            self.due = free
             return at
+
+    def readout(self):
+        """What it has done, numbers only: MB/s while it was sending (stalls in)."""
+        with self.lock:
+            counts = dict(self.counts)
+        sent, busy = counts.pop("sent") / 1e6, counts.pop("busy_s")
+        return counts | {"mb": round(sent, 1), "mb_s": round(sent / busy, 2) if "mbit_s" in self.p and busy > 0 else None}
 
 
 class Connection:
+    """One connection over a link: its writes go at the link's pace and no
+    faster than the read under way (`rate`, the server's pace); its round
+    trips and the server's waits are drawn from its number."""
+
     def __init__(self, link, number):
         self.link = link
-        self.first_bytes = random.Random(f"{link.seed}:{number}:first")
-        self.round_trips = random.Random(f"{link.seed}:{number}:trips")
+        self.draws = random.Random(f"{link.seed}:{number}:trips")
+        self.answers = random.Random(f"{link.seed}:{number}:answers")
         self.due = 0.0
+        self.rate = math.inf
         self.answered = False
 
     def round_trip(self):
-        return self.round_trips.uniform(*self.link.profile.request)
+        return draw(self.link.p.get("round_trip_s"), self.draws)
 
-    def wait_before_answer(self, opens_file):
-        """Seconds before this request's answer may start: the connection's
-        setup on its first, the round trip on each, and the server's own
-        wait when it opens a file."""
-        p = self.link.profile
-        wait = self.round_trip() + (0 if self.answered else p.connect)
-        if opens_file and p.first_byte:
-            wait += self.first_bytes.uniform(*p.first_byte)
+    def handshake(self):
+        return draw(self.link.p.get("connect_s"), self.draws)
+
+    def wait_before_answer(self):
+        """The link's part: the round trip, and the handshakes on the first request."""
+        wait = self.round_trip() + (0 if self.answered else self.handshake())
         self.answered = True
         return wait
 
