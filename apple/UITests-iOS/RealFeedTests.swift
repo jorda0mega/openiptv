@@ -23,6 +23,7 @@ class RealFeedCase: XCTestCase {
         // The viewer's own account: playing reports nothing to the server,
         // so where they are in a title stays as it was.
         app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", ProcessInfo.processInfo.environment["REAL_FEED_CACHE"] ?? "real"]
+        if ProcessInfo.processInfo.environment["LOW_DISK"] == "1" { app.launchArguments += ["-lowDisk", "YES"] }
         XCUIDevice.shared.orientation = .portrait
     }
 

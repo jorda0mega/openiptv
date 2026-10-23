@@ -7,7 +7,8 @@
 # goes through the proxy untouched. MOCK (the test server's address): each run takes PROFILE's
 # server half (the link's own profile unless set), and its link half too on the none link, set
 # afresh as the run starts; after it, what the test server did, counts only. Each run says the
-# Mac's free disk: the app fetches no film ahead under 2 GB.
+# Mac's free disk: the app fetches no film ahead under 2 GB. LOW_DISK=1: the app reads it as under
+# 2 GB whatever it is (-lowDisk YES), to copy a run where that refused every card.
 set -u
 APPLE=$(cd "$(dirname "$0")/.." && pwd)
 DD=${DD:-/tmp/openiptv/dd-ios}
@@ -19,6 +20,7 @@ BUILD_LOCK=/tmp/openiptv/build.lock
 PROXY_PORT=${PROXY_PORT:-8859}
 export TEST_RUNNER_REAL_FEED=${FEED:-http://127.0.0.1:8799}
 export TEST_RUNNER_FILM_BUFFERING_SECONDS=${SECONDS_PLAYED:-240}
+export TEST_RUNNER_LOW_DISK=${LOW_DISK:-0}
 free_mb() { df -m /tmp | awk 'NR == 2 { print $4 }'; }
 stop_proxy() { kill $(lsof -t -iTCP:$PROXY_PORT -sTCP:LISTEN) 2>/dev/null && sleep 1; }
 
@@ -56,7 +58,7 @@ echo $OWNER > $LOCK/owner
 trap 'stop_proxy; xcrun simctl shutdown $PHONE 2>/dev/null; xcrun simctl erase $PHONE 2>/dev/null; rm -rf $LOCK' EXIT INT TERM HUP
 for link in ${=LINKS:-none far worst}; do
   [ $(free_mb) -ge 1500 ] || { echo "$(free_mb) MB free: stopped before the $link run"; exit 1; }
-  echo "== link $link $(date '+%H:%M'), $(free_mb) MB free"
+  echo "== link $link $(date '+%H:%M'), $(free_mb) MB free$([ $TEST_RUNNER_LOW_DISK = 1 ] && echo ', the app reads it as low')"
   unset TEST_RUNNER_PROXY TEST_RUNNER_PROXY_PLAIN
   if [ $link != none ]; then
     python3 -u $APPLE/../scripts/throttle_proxy.py $PROXY_PORT $link > /tmp/openiptv/proxy-$PROXY_PORT.log 2>&1 &

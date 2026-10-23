@@ -926,11 +926,22 @@ extension FileStart: CustomStringConvertible, CustomDebugStringConvertible, Cust
 }
 
 extension Lane {
+    /// UI tests: `-lowDisk YES` reads the disk as half what a card's fetch
+    /// ahead needs, as on a Mac under 2 GB free.
     static let fileStarts = Lane(.bytes, atOnce: 2) { Conditions.current().forFetchAhead }
 }
 
 extension Conditions {
-    var forFetchAhead: Conditions { self }
+    var forFetchAhead: Conditions {
+        #if DEBUG
+        guard UserDefaults.standard.bool(forKey: "lowDisk") else { return self }
+        var low = self
+        low.freeDisk.bytes = min(freeDisk.bytes, freeDisk.neededAhead / 2)
+        return low
+        #else
+        return self
+        #endif
+    }
 }
 
 @MainActor
