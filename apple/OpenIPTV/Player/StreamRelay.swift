@@ -926,7 +926,11 @@ extension FileStart: CustomStringConvertible, CustomDebugStringConvertible, Cust
 }
 
 extension Lane {
-    static let fileStarts = Lane(.bytes, atOnce: 2, conditions: Conditions.current)
+    static let fileStarts = Lane(.bytes, atOnce: 2) { Conditions.current().forFetchAhead }
+}
+
+extension Conditions {
+    var forFetchAhead: Conditions { self }
 }
 
 @MainActor

@@ -203,6 +203,21 @@ final class AheadTests: XCTestCase {
         XCTAssertNil(phone.fetched, "a phone fetched ahead with under 2 GB of room for important use")
     }
 
+    func testLowDiskRefusesAFileStartAheadThatWouldGoWithoutIt() async {
+        let open = conditions(playing: false)
+        let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { [open] in open.forFetchAhead }) { _ in true }
+        let start = FileStart(film()), interest = Interest(at: .continueWatching, .likely)
+        UserDefaults.standard.set(true, forKey: "lowDisk")
+        defer { UserDefaults.standard.removeObject(forKey: "lowDisk") }
+        let refused = await shelf.warm(start, for: interest)
+        let state = shelf.debugState(start, at: .continueWatching)
+        UserDefaults.standard.removeObject(forKey: "lowDisk")
+        let fetched = await shelf.warm(start, for: interest)
+        XCTAssertNil(refused, "fetched ahead with -lowDisk YES")
+        XCTAssertEqual(state, "not asked, not allowed now: disk 1.0 GB, needs 2.0 GB")
+        XCTAssertEqual(fetched, true, "not fetched ahead without -lowDisk")
+    }
+
     private final class Pings: @unchecked Sendable {
         private let lock = NSLock()
         private var made = 0
