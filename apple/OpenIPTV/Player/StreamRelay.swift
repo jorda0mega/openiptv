@@ -607,6 +607,7 @@ final class StreamRelay: @unchecked Sendable {
         let asked = from..<from + count
         let task = HTTP.session.dataTask(with: request) { [weak self] data, response, _ in
             if let key, let made { self?.lock.withLock { self?.ahead[key]?.removeAll { $0 === made } } }
+            if key != nil, let data { PhoneNetworkUse.shared.noteArrived(data.count, over: NetworkStatus.shared.network) }
             let http = response as? HTTPURLResponse
             let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
             #if DEBUG

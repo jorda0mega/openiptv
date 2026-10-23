@@ -448,7 +448,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
                 #if DEBUG
                 fetched += 1
                 #endif
-                let value = try await fetch(key)
+                let value = try await FetchAhead.$isUnderWay.withValue(!job.ticket.plays) { try await fetch(key) }
                 policy.lane.leave(job.ticket)
                 return (value, now())
             } catch {

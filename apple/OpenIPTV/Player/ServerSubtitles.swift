@@ -193,6 +193,7 @@ enum ServerSubtitles {
         let generation = await store.generation
         do {
             let (data, response) = try await session.data(for: request(for: subtitle), delegate: HTTP.keyOutOfRedirects)
+            if FetchAhead.isUnderWay { PhoneNetworkUse.shared.noteArrived(data.count, over: NetworkStatus.shared.network) }
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw SourceError.http(code) }
             guard !data.isEmpty else { throw SourceError.unexpected("The server's answer was empty.") }

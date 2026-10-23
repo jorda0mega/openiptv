@@ -28,11 +28,21 @@ final class NetworkStatus: @unchecked Sendable {
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
+            var (expensive, constrained) = (path.isExpensive, path.isConstrained)
+            #if DEBUG
+            // UI tests: -debugNetwork metered or lowData. The simulator's
+            // link is the Mac's, never a phone network.
+            switch UserDefaults.standard.string(forKey: "debugNetwork") {
+            case "metered": expensive = true
+            case "lowData": constrained = true
+            default: break
+            }
+            #endif
             lock.lock()
             satisfied = path.status == .satisfied
-            unmeteredValue = satisfied && !path.isExpensive && !path.isConstrained
+            unmeteredValue = satisfied && !expensive && !constrained
             known = true
-            networkValue = path.status != .satisfied ? .unknown : path.isConstrained ? .constrained : path.isExpensive ? .expensive : .unmetered
+            networkValue = path.status != .satisfied ? .unknown : constrained ? .constrained : expensive ? .expensive : .unmetered
             #if DEBUG && canImport(Libmpv)
             self.path = path
             #endif
@@ -121,7 +131,8 @@ extension Conditions {
     @MainActor static func current() -> Conditions {
         Conditions(network: NetworkStatus.shared.network, playing: PlaybackActivity.isPlaying,
                    lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, thermal: ProcessInfo.processInfo.thermalState,
-                   memoryWarned: MemoryWarnings.recent, freeDisk: NetworkStatus.shared.freeDisk)
+                   memoryWarned: MemoryWarnings.recent, freeDisk: NetworkStatus.shared.freeDisk,
+                   phoneNetwork: .chosen(), usedToday: PhoneNetworkUse.shared.usedToday())
     }
 }
 
