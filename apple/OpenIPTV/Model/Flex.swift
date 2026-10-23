@@ -126,8 +126,29 @@ enum HTTP {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": "Openreel/\(appVersion)"]
         config.httpMaximumConnectionsPerHost = connections
+        #if DEBUG
+        throughDebugProxy(config)
+        #endif
         return URLSession(configuration: config)
     }
+
+    #if DEBUG
+    /// UI tests (OPENREEL_DEBUG_PROXY=127.0.0.1:8859): the throttling proxy
+    /// (scripts/throttle_proxy.py) every request to a server goes through,
+    /// a slow network on purpose. HTTPS goes through it as a tunnel.
+    static func debugProxy(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> (host: String, port: Int)? {
+        guard let address = environment["OPENREEL_DEBUG_PROXY"], let colon = address.lastIndex(of: ":"),
+              let port = Int(address[address.index(after: colon)...]) else { return nil }
+        return (String(address[..<colon]), port)
+    }
+
+    static func throughDebugProxy(_ config: URLSessionConfiguration,
+                                  environment: [String: String] = ProcessInfo.processInfo.environment) {
+        guard let (host, port) = debugProxy(environment) else { return }
+        config.connectionProxyDictionary = ["HTTPEnable": 1, "HTTPProxy": host, "HTTPPort": port,
+                                            "HTTPSEnable": 1, "HTTPSProxy": host, "HTTPSPort": port]
+    }
+    #endif
 
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
@@ -275,3 +296,4 @@ final class Locked<Value>: @unchecked Sendable {
     var value: Value { lock.lock(); defer { lock.unlock() }; return stored }
     func mutate(_ change: (inout Value) -> Void) { lock.lock(); change(&stored); lock.unlock() }
 }
+

@@ -351,6 +351,12 @@ final class MPVPlayer: @unchecked Sendable {
             let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
             if parts.count == 2 { set(parts[0], parts[1]) }
         }
+        // The player's own requests (a converted version's) through the
+        // throttling proxy too, all but those to the relay on this device.
+        if let (host, port) = HTTP.debugProxy() {
+            setenv("no_proxy", "127.0.0.1", 1)
+            set("http-proxy", "http://\(host):\(port)")
+        }
         #endif
         mpv_initialize(mpv)
         mpv_request_log_messages(mpv, "warn")

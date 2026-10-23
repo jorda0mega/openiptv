@@ -29,12 +29,16 @@ actor ImagePipeline {
         config.requestCachePolicy = .returnCacheDataElseLoad
         config.timeoutIntervalForRequest = 20
         config.httpMaximumConnectionsPerHost = 8
-        session = URLSession(configuration: config)
         let ahead = URLSessionConfiguration.default
         ahead.urlCache = config.urlCache
         ahead.requestCachePolicy = .returnCacheDataElseLoad
         ahead.timeoutIntervalForRequest = 20
         ahead.httpMaximumConnectionsPerHost = 2
+        #if DEBUG
+        HTTP.throughDebugProxy(config)
+        HTTP.throughDebugProxy(ahead)
+        #endif
+        session = URLSession(configuration: config)
         storeSession = URLSession(configuration: ahead)
         // By decoded size (a 4K backdrop is 30 MB, a poster under 1 MB), so
         // a page of backdrops can't push out every poster, or the memory.
