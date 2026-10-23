@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
+from slow_link import PROFILES, Link, ShapedWriter, opens_file
 
 PANEL_TZ = timezone(timedelta(hours=1))
 EASTERN = ZoneInfo("America/New_York")
@@ -71,8 +72,28 @@ CONNECTIONS = set()
 # request for the film's file, or for a converted version's segment, is
 # redirected to its own address, on this server or at localhost, which the
 # app takes for another server).
+#
+# A slow network and server, apart from CONTROL (a reset keeps it):
+# OPENIPTV_MOCK_PROFILE ("busy", "far" or "worst", as slow_link.PROFILES
+# sets them; GET /mock/profile?name= switches, "none" for none, and closes
+# every other connection so the next ones take it). OPENIPTV_MOCK_SEED (1
+# unless set; ?seed= too) fixes every random draw, so a run repeats.
+# Per connection: "connect" s before its first answer (the TCP and TLS
+# handshakes); "connection_rate" bytes a second (one TCP window a round
+# trip, a long link's limit: two to four connections in parallel get past
+# it, up to the link's rate). Per request: "request" (low, high s) before
+# every answer, drawn per request (the round trip); "first_byte" (low, high
+# s): the server's own wait before it sends a file (the film's or its
+# sound's stream, under /Videos/ or /Audio/; a converted version keeps its
+# own pace, see converted_segment), drawn per request. Per link:
+# "link_rate" bytes a second, for every connection together; "link_stall"
+# (about every s, shortest, longest s): every connection stops at once (a
+# radio fading). /mock/ requests go at full speed, and the film's own pace
+# in send_file is off.
 CONTROL = {}
 CONTROL.update({k: v[0] for k, v in parse_qs(os.environ.get("OPENIPTV_MOCK_SET", "")).items()})
+SEED = int(os.environ.get("OPENIPTV_MOCK_SEED", "1"))
+LINK = [Link(os.environ["OPENIPTV_MOCK_PROFILE"], SEED) if os.environ.get("OPENIPTV_MOCK_PROFILE") else None]
 TOKEN = os.environ.get("OPENIPTV_MOCK_TOKEN", "tok")
 # Until then, every connection is dropped at once: a server gone down.
 DOWN_UNTIL = [0.0]
@@ -490,6 +511,32 @@ def note_video_sent(path, start, end):
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def setup(self):
+        super().setup()
+        self.link = LINK[0] and LINK[0].connection()
+        if self.link:
+            self.wfile = ShapedWriter(self.wfile, self.link)
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        if self.link:
+            path = urlparse(self.path).path
+            self.wfile.on = not path.startswith("/mock/")
+            if self.wfile.on:
+                time.sleep(self.link.wait_before_answer(opens_file(path)))
+        return True
+
+    def close_others(self, abrupt):
+        for connection in list(CONNECTIONS - {self.connection}):
+            try:
+                if abrupt:
+                    connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                connection.shutdown(socket.SHUT_RDWR)
+                connection.close()
+            except OSError:
+                pass
+
     def handle(self):
         if time.time() < DOWN_UNTIL[0]:
             try:
@@ -633,15 +680,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/mock/close_connections":
             # The server closes every other connection ("abrupt": dropped,
             # as a server going down does).
-            for connection in list(CONNECTIONS - {self.connection}):
-                try:
-                    if q.get("abrupt") == "1":
-                        connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
-                    connection.shutdown(socket.SHUT_RDWR)
-                    connection.close()
-                except OSError:
-                    pass
+            self.close_others(q.get("abrupt") == "1")
             return self.send({"closed": True})
+        if path == "/mock/profile":
+            name = q.get("name", "none")
+            if name != "none" and name not in PROFILES:
+                return self.send({"error": "no such profile"}, status=400)
+            LINK[0] = Link(name, int(q.get("seed", SEED))) if name in PROFILES else None
+            self.close_others(False)
+            return self.send({"profile": name})
         if path == "/mock/down":
             # Gone down for "seconds": every connection dropped at once.
             DOWN_UNTIL[0] = time.time() + float(q.get("seconds", "10"))
@@ -1076,7 +1123,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_file(self, file_path, ctype="video/x-matroska", kind=None):
         """A real video with Range support, like Emby's static stream, slowed
-        to roughly a home connection (~200 ms per request, ~10 MB/s)."""
+        to roughly a home connection (~200 ms per request, ~10 MB/s) unless
+        a profile slows the connection."""
         size = os.path.getsize(file_path)
         start, end = 0, size - 1
         rng = self.headers.get("Range", "")
@@ -1084,7 +1132,8 @@ class Handler(BaseHTTPRequestHandler):
             first, _, last = rng[6:].partition("-")
             start = int(first or 0)
             end = min(int(last), size - 1) if last else size - 1
-        time.sleep(0.2)
+        paced = not self.link
+        time.sleep(0.2 if paced else 0)
         # A test can make the video slow to answer (a remote server's round
         # trip), e.g. while a subtitle track is switched.
         time.sleep(float(CONTROL.get("video_delay", 0)))
@@ -1113,7 +1162,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
                     note_video_sent(file_path, at, at + len(chunk))
                     left -= len(chunk)
-                    time.sleep(0.025)
+                    time.sleep(0.025 if paced else 0)
         except (BrokenPipeError, ConnectionResetError):
             if kind:
                 CANCELLED.append((time.time(), kind))
