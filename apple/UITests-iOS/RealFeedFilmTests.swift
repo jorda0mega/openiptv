@@ -92,7 +92,9 @@ final class RealFeedFilmTests: RealFeedCase {
         }
         // "rebuffers 2: 1234 567 ms": how many, and each one's length.
         let pauses = buffering().components(separatedBy: " | ").first { $0.hasPrefix("rebuffers") } ?? "rebuffers: no readout"
+        let read = serverMB()
         say("REAL link first \(Int(playing)) s: \(pauses.replacingOccurrences(of: "rebuffers", with: "pauses")) | "
+            + String(format: "film %.1f MB from the server, %.2f MB/s since the tap | ", read, read / Date().timeIntervalSince(tapped))
             + "\(readout("debug-quality") ?? "no readout") | \(server)")
         say("REAL link lower quality: " + (decided.map { String(format: "decided %.1f s after the tap, ", $0) } ?? "not decided, ")
             + (lowerFrame.map { String(format: "its first frame %.1f s after the tap", $0) } ?? "no frame of it") + " | \(server)")

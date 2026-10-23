@@ -2,10 +2,12 @@
 # A film test on the feeds the helper at FEED hands out (the real ones, or the test server's).
 # TEST=testFilmOnThisLink (the baseline: what a viewer sees today, the default) or
 # testFilmBufferingAsSeenNow (each moment the old way and now).
-# LINKS="none far worst" (scripts/slow_link.py): a run on each link, through the throttling proxy
-# on PROXY_PORT with that profile (none: no proxy), its lines marked with it. TLS goes through
-# the proxy untouched. MOCK (the test server's address) with PROFILE: the test server's own
-# profile for the whole run.
+# LINKS="none far worst" (scripts/net_profiles.json): a run on each link, through the throttling
+# proxy on PROXY_PORT with that profile's link half (none: no proxy), its lines marked with it. TLS
+# goes through the proxy untouched. MOCK (the test server's address): each run takes PROFILE's
+# server half (the link's own profile unless set), and its link half too on the none link, set
+# afresh as the run starts; after it, what the test server did, counts only. Each run says the
+# Mac's free disk: the app fetches no film ahead under 2 GB.
 set -u
 APPLE=$(cd "$(dirname "$0")/.." && pwd)
 DD=${DD:-/tmp/openiptv/dd-ios}
@@ -22,6 +24,20 @@ stop_proxy() { kill $(lsof -t -iTCP:$PROXY_PORT -sTCP:LISTEN) 2>/dev/null && sle
 
 curl -sf -o /dev/null $TEST_RUNNER_REAL_FEED/emby || { echo "the logins helper isn't running"; exit 1; }
 [ -n "${MOCK:-}" ] && { curl -sf -o /dev/null "$MOCK/mock/profile?name=${PROFILE:-none}" || { echo "the test server took no profile"; exit 1; }; }
+far_end() {
+  local server=${PROFILE:-$1}
+  curl -sf -o /dev/null "$MOCK/mock/profile?name=$server&link=$([ $1 = none ] && echo $server || echo none)"
+}
+far_end_done() {
+  curl -sf "$MOCK/mock/net" | python3 -c '
+import json, sys
+n = json.load(sys.stdin)
+if n["profile"] != "none" or n.get("link", "none") != "none":
+    s, l = n["server"], n["net"]
+    print("test server %s over %s: %d reads, %d hung, %d reset, %d conversions, %d refused, %d subtitle extractions | "
+          "link %s MB/s while sending, %.1f MB, %d stalls, %d network changes" % (n["profile"], n["link"], s["reads"], s["hangs"],
+          s["resets"], s["conversions"], s["refused"], s["extractions"], l["mb_s"] or "-", l["mb"], l["stalls"], l["changes"]))'
+}
 [ $(free_mb) -ge 3500 ] || { echo "$(free_mb) MB free, a build needs 3500: not run"; exit 1; }
 cd $APPLE
 echo "$(git rev-parse --short HEAD) $(date '+%H:%M') $TEST"
@@ -39,7 +55,7 @@ echo $OWNER > $LOCK/owner
 trap 'stop_proxy; xcrun simctl shutdown $PHONE 2>/dev/null; xcrun simctl erase $PHONE 2>/dev/null; rm -rf $LOCK' EXIT INT TERM HUP
 for link in ${=LINKS:-none far worst}; do
   [ $(free_mb) -ge 1500 ] || { echo "$(free_mb) MB free: stopped before the $link run"; exit 1; }
-  echo "== link $link $(date '+%H:%M')"
+  echo "== link $link $(date '+%H:%M'), $(free_mb) MB free"
   unset TEST_RUNNER_PROXY TEST_RUNNER_PROXY_PLAIN
   if [ $link != none ]; then
     python3 -u $APPLE/../scripts/throttle_proxy.py $PROXY_PORT $link > /tmp/openiptv/proxy-$PROXY_PORT.log 2>&1 &
@@ -52,6 +68,7 @@ for link in ${=LINKS:-none far worst}; do
     xcrun simctl shutdown $PHONE 2>/dev/null
     [ $attempt = 1 ] && xcrun simctl erase $PHONE 2>/dev/null
     xcrun simctl boot $PHONE 2>/dev/null; xcrun simctl bootstatus $PHONE -b >/dev/null 2>&1; sleep 5
+    [ -n "${MOCK:-}" ] && far_end $link
     out=$(xcodebuild test-without-building -scheme OpenIPTV -destination "platform=iOS Simulator,id=$PHONE" -derivedDataPath $DD \
       "-only-testing:OpenIPTV UITests/RealFeedFilmTests/$TEST" 2>&1)
     if print -r -- "$out" | grep -q "Failed to get list of active applications"; then echo "(start-up error, attempt $attempt)"; continue; fi
@@ -60,5 +77,6 @@ for link in ${=LINKS:-none far worst}; do
   print -r -- "$out" | grep -E "REAL |error: -|Test Case .*(passed|failed|skipped)|Executed .* tests?," \
     | sed -E "s/^.*Test Case //; s/^.*(REAL )/\1/; s/^.*error: -/error: -/; s/ \([0-9.]+\) seconds$/ seconds/; s/^/[$link] /" | uniq | head -80
   [ $link != none ] && { stop_proxy; sed "s/^/[$link] /" /tmp/openiptv/proxy-$PROXY_PORT.log | tail -1; }
+  [ -n "${MOCK:-}" ] && far_end_done | sed "s/^/[$link] /"
 done
 echo "== done $(date '+%H:%M')"
