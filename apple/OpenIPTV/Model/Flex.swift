@@ -297,3 +297,42 @@ final class Locked<Value>: @unchecked Sendable {
     func mutate(_ change: (inout Value) -> Void) { lock.lock(); change(&stored); lock.unlock() }
 }
 
+#if DEBUG
+/// UI tests (-debugServerProbe YES): the server's own state beside each
+/// start, read just before the tap on a session of its own (not the app's
+/// warm connection, not the throttling proxy). Two tiny reads, the first on
+/// a new connection and the second on the same one. Times only.
+enum ServerProbe {
+    struct Reading: Equatable {
+        /// What a new connection adds before its first answer: DNS, TCP and
+        /// TLS, and any wait the server puts on a new one.
+        let connect: Double
+        /// A tiny read's answer on a connection already open.
+        let firstByte: Double
+
+        var readout: String { String(format: "server: connect %.2f s, first byte %.2f s", connect, firstByte) }
+    }
+
+    /// The key goes in a header, and only to `account`'s server: a redirect isn't followed.
+    static func measure(_ account: EmbyAccount) async -> Reading? {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.finishTasksAndInvalidate() }
+        var request = URLRequest(url: EmbyClient.api(account.serverURL, "Users/\(account.userId)"))
+        request.setValue(account.accessToken, forHTTPHeaderField: "X-Emby-Token")
+        request.timeoutInterval = 30
+        guard let fresh = await answered(request, on: session), let again = await answered(request, on: session) else { return nil }
+        return Reading(connect: max(0, fresh - again), firstByte: again)
+    }
+
+    private static func answered(_ request: URLRequest, on session: URLSession) async -> Double? {
+        let asked = Date()
+        guard (try? await session.data(for: request, delegate: Unredirected())) != nil else { return nil }
+        return Date().timeIntervalSince(asked)
+    }
+
+    private final class Unredirected: NSObject, URLSessionTaskDelegate, Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? { nil }
+    }
+}
+#endif

@@ -1236,6 +1236,14 @@ final class AppModel {
     /// UI tests: the search for a film heard in English or Spanish only in
     /// another copy, counts only.
     var debugCopyFilm = ""
+    /// UI tests (-debugServerProbe YES): the server's own state at launch.
+    var debugServer = ""
+
+    func debugProbeServer() async {
+        for _ in 0..<300 where sources.emby == nil { try? await Task.sleep(for: .milliseconds(200)) }
+        guard let account = sources.emby else { return }
+        debugServer = await ServerProbe.measure(account)?.readout ?? "server: no answer"
+    }
 
     func debugFilmHeardOnlyInAnotherCopy(limit: Int = 12) async -> EmbyPlayback? {
         for _ in 0..<90 where library.versions.isEmpty { try? await Task.sleep(for: .seconds(1)) }
