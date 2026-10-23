@@ -40,11 +40,13 @@ trap 'stop_proxy; xcrun simctl shutdown $PHONE 2>/dev/null; xcrun simctl erase $
 for link in ${=LINKS:-none far worst}; do
   [ $(free_mb) -ge 1500 ] || { echo "$(free_mb) MB free: stopped before the $link run"; exit 1; }
   echo "== link $link $(date '+%H:%M')"
-  unset TEST_RUNNER_PROXY
+  unset TEST_RUNNER_PROXY TEST_RUNNER_PROXY_PLAIN
   if [ $link != none ]; then
     python3 -u $APPLE/../scripts/throttle_proxy.py $PROXY_PORT $link > /tmp/openiptv/proxy-$PROXY_PORT.log 2>&1 &
     for _ in {1..20}; do lsof -t -iTCP:$PROXY_PORT -sTCP:LISTEN >/dev/null && break; sleep 0.5; done
     export TEST_RUNNER_PROXY=127.0.0.1:$PROXY_PORT
+    # Plain HTTP carries the key in clear: through the proxy only for the test server.
+    [ -n "${MOCK:-}" ] && export TEST_RUNNER_PROXY_PLAIN=1
   fi
   for attempt in 1 2 3; do
     xcrun simctl shutdown $PHONE 2>/dev/null

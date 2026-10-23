@@ -77,6 +77,8 @@ def serve(client, link):
         else:
             origin = urlsplit(target.decode())
             server = (origin.hostname, origin.port or 80)
+            if origin.hostname not in ("127.0.0.1", "localhost", "::1"):
+                raise PermissionError("plain HTTP to a real server would carry the key in clear")
         upstream = socket.create_connection(server, timeout=30)
         upstream.settimeout(None)
     except Exception as error:

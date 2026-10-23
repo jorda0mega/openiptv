@@ -351,12 +351,7 @@ final class MPVPlayer: @unchecked Sendable {
             let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
             if parts.count == 2 { set(parts[0], parts[1]) }
         }
-        // The player's own requests (a converted version's) through the
-        // throttling proxy too, all but those to the relay on this device.
-        if let (host, port) = HTTP.debugProxy() {
-            setenv("no_proxy", "127.0.0.1", 1)
-            set("http-proxy", "http://\(host):\(port)")
-        }
+        if HTTP.debugProxy() != nil { setenv("no_proxy", "127.0.0.1", 1) }
         #endif
         mpv_initialize(mpv)
         mpv_request_log_messages(mpv, "warn")
@@ -398,6 +393,12 @@ final class MPVPlayer: @unchecked Sendable {
         // Files go through the in-app relay, which keeps one warm HTTP/2
         // connection to the server instead of a new one per seek.
         var url = url, headers = headers
+        #if DEBUG
+        // The player's own requests (a converted version's) through the
+        // throttling proxy too: https as a tunnel, plain http only to the
+        // test server, never to the relay on this device.
+        let proxy = HTTP.debugProxy().map { url.scheme?.lowercased() == "https" || HTTP.plainThroughDebugProxy() ? "http://\($0.host):\($0.port)" : "" }
+        #endif
         if file, url.scheme?.hasPrefix("http") == true, let local = StreamRelay.shared.localURL(for: url, headers: headers) {
             url = local
             headers = []
@@ -414,6 +415,9 @@ final class MPVPlayer: @unchecked Sendable {
         #endif
         queue.async { [self] in
             guard let mpv, !stateLock.withLock({ closed }) else { return }
+            #if DEBUG
+            if let proxy { mpv_set_property_string(mpv, "http-proxy", proxy) }
+            #endif
             #if DEBUG
             let asked = CFAbsoluteTimeGetCurrent()
             #endif

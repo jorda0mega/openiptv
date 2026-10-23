@@ -19,6 +19,7 @@ class RealFeedCase: XCTestCase {
         app.launchEnvironment["OPENREEL_DEBUG_IPTV_URL"] = feed!.appending(path: "iptv").absoluteString
         // A slow network on purpose (PROXY, the throttling proxy's address).
         app.launchEnvironment["OPENREEL_DEBUG_PROXY"] = ProcessInfo.processInfo.environment["PROXY"]
+        app.launchEnvironment["OPENREEL_DEBUG_PROXY_PLAIN"] = ProcessInfo.processInfo.environment["PROXY_PLAIN"]
         // The viewer's own account: playing reports nothing to the server,
         // so where they are in a title stays as it was.
         app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", ProcessInfo.processInfo.environment["REAL_FEED_CACHE"] ?? "real"]

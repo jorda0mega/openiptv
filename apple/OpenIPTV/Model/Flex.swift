@@ -145,8 +145,17 @@ enum HTTP {
     static func throughDebugProxy(_ config: URLSessionConfiguration,
                                   environment: [String: String] = ProcessInfo.processInfo.environment) {
         guard let (host, port) = debugProxy(environment) else { return }
-        config.connectionProxyDictionary = ["HTTPEnable": 1, "HTTPProxy": host, "HTTPPort": port,
-                                            "HTTPSEnable": 1, "HTTPSProxy": host, "HTTPSPort": port]
+        config.connectionProxyDictionary = ["HTTPSEnable": 1, "HTTPSProxy": host, "HTTPSPort": port]
+        if plainThroughDebugProxy(environment) {
+            config.connectionProxyDictionary?.merge(["HTTPEnable": 1, "HTTPProxy": host, "HTTPPort": port]) { $1 }
+        }
+    }
+
+    /// Plain HTTP carries the key in clear: through the proxy only for the
+    /// test server (OPENREEL_DEBUG_PROXY_PLAIN=1), a real server's only as a
+    /// TLS tunnel.
+    static func plainThroughDebugProxy(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        environment["OPENREEL_DEBUG_PROXY_PLAIN"] == "1"
     }
     #endif
 
