@@ -7,26 +7,33 @@ final class PlanCopiesTests: XCTestCase {
     private static let ids = ["copy-hd-0001", "copy-4k-0002"]
 
     /// `info`: each copy's PlaybackInfo wait, by its place in `ids`;
-    /// `width`: the picture's width in each.
-    private func server(info: [Double], width: [Int] = [1280, 1920]) throws -> (LocalServer, EmbyClient) {
+    /// `width`: the picture's width in each; `itemSource`: the protocol of
+    /// the source in each copy's item, as Emby lists it in an item's full
+    /// record (nil: the item lists none).
+    private func server(info: [Double], width: [Int] = [1280, 1920], itemSource: String? = nil) throws -> (LocalServer, EmbyClient) {
         let ids = Self.ids
         func copy(_ target: String) -> Int? { ids.firstIndex { target.contains("/\($0)") } }
+        func source(_ n: Int, _ protocolName: String) -> String {
+            """
+            {"Id": "ms\(n)", "Protocol": "\(protocolName)", "Container": "mkv", "Path": "http://elsewhere.invalid/film.mkv",
+             "SupportsDirectPlay": true, "SupportsDirectStream": true,
+             "MediaStreams": [{"Type": "Video", "Width": \(width[n])}, {"Type": "Audio", "Index": 1, "Language": "eng"}]}
+            """
+        }
         let server = try LocalServer(pause: { target in
             guard target.contains("/PlaybackInfo"), let n = copy(target) else { return 0 }
             return info[n]
         }, answer: { target in
             guard let n = copy(target) else { return (404, [:], "{}") }
             if target.contains("/PlaybackInfo") {
-                return (200, ["Content-Type": "application/json"], """
-                    {"PlaySessionId": "ps\(n)", "MediaSources": [{"Id": "ms\(n)", "Protocol": "File", "Container": "mkv",
-                     "SupportsDirectPlay": true, "SupportsDirectStream": true,
-                     "MediaStreams": [{"Type": "Video", "Width": \(width[n])}, {"Type": "Audio", "Index": 1, "Language": "eng"}]}]}
-                    """)
+                return (200, ["Content-Type": "application/json"],
+                        "{\"PlaySessionId\": \"ps\(n)\", \"MediaSources\": [\(source(n, itemSource ?? "File"))]}")
             }
             return (200, ["Content-Type": "application/json"], """
                 {"Id": "\(ids[n])", "Name": "Film", "Type": "Movie", "RunTimeTicks": 72000000000,
                  "ProductionLocations": ["United States of America"],
-                 "UserData": {"PlaybackPositionTicks": \((n + 1) * 300_000_000), "LastPlayedDate": "2026-10-0\(n + 1)T00:00:00Z"}}
+                 "UserData": {"PlaybackPositionTicks": \((n + 1) * 300_000_000), "LastPlayedDate": "2026-10-0\(n + 1)T00:00:00Z"}
+                 \(itemSource.map { ", \"MediaSources\": [\(source(n, $0))]" } ?? "")}
                 """)
         })
         let account = EmbyAccount(serverURL: URL(string: "http://127.0.0.1:\(server.port)")!, serverName: "test", userId: "U1",
@@ -75,5 +82,38 @@ final class PlanCopiesTests: XCTestCase {
         defer { server.stop() }
         let playback = try await client.playback(versions: Self.ids, kind: "Movie", maxWidth: 1920)
         XCTAssertEqual(playback.startSeconds, 60, "the second copy, watched last, was left at 60 s")
+    }
+
+    func testAFilmStartsFromItsItemsSourceAndReportsWithItsLatePlaySession() async throws {
+        let (server, client) = try server(info: [3, 3], itemSource: "File")
+        defer { server.stop() }
+        let began = ContinuousClock.now
+        let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
+        let took = ContinuousClock.now - began
+        XCTAssertLessThan(took, .seconds(1), "the start waited \(took) for PlaybackInfo")
+        XCTAssertEqual(playback.mediaSourceId, "ms0")
+        let query = URLComponents(url: playback.url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        XCTAssertEqual(query.first { $0.name == "MediaSourceId" }?.value, "ms0")
+        XCTAssertTrue(playback.listed, "its tracks came from the item's list")
+        let session = await playback.session()
+        XCTAssertEqual(session, "ps0", "the reports' play session, once PlaybackInfo answered")
+    }
+
+    func testCopiesWhoseItemsTellTheirSourcesPlayWithoutWaitingForPlaybackInfo() async throws {
+        let (server, client) = try server(info: [3, 3], width: [1280, 1920], itemSource: "File")
+        defer { server.stop() }
+        let began = ContinuousClock.now
+        let playback = try await client.playback(versions: Self.ids, kind: "Movie", maxWidth: 1920)
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1))
+        XCTAssertEqual(playback.itemId, Self.ids[1], "the sharper copy")
+    }
+
+    func testARemoteFileStillWaitsForPlaybackInfo() async throws {
+        let (server, client) = try server(info: [1.5, 1.5], itemSource: "Http")
+        defer { server.stop() }
+        let began = ContinuousClock.now
+        let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
+        XCTAssertGreaterThan(ContinuousClock.now - began, .seconds(1.4))
+        XCTAssertEqual(playback.playSessionId, "ps0")
     }
 }

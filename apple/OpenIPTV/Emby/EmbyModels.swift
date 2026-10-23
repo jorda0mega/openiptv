@@ -262,6 +262,9 @@ struct EmbyPlayback: Hashable, Identifiable {
     var intro: ClosedRange<Double>?
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
+
+    /// The play session its reports carry.
+    func session() async -> String? { playSessionId }
     /// The server said how to play it (its tracks and subtitle files);
     /// false when it didn't answer in time and a guess stands in.
     var listed = true
