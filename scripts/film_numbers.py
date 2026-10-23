@@ -8,7 +8,9 @@ test server's under the profile meant to copy it.
     python3 scripts/film_numbers.py compare real.json mock.json
 
 extract keeps counts and times only, never a word of a line but the names
-below. --as probe files each line under real-quiet or real-busy by the
+below. A two-platform run's lines go under the label with " tvos" added
+for the Apple TV, and the network and phone network setting added past
+unmetered (" metered daily"). --as probe files each line under real-quiet or real-busy by the
 server's own state on it (-debugServerProbe: a first byte under 0.3 s is
 quiet, between the 0.17-0.23 s measured quiet and the 0.4 s that starts
 busy); a line without it goes under --unprobed. Lines of the old way are
@@ -36,6 +38,10 @@ START_PARTS = [
     ("first frame after the open", "s", r"first frame ([\d.]+) s after"),
     ("slowest first byte", "s", r"first byte up to (\d+) ms", 1e-3),
     ("MB from the server", "MB", r"from the server \d+ reads ([\d.]+) MB"),
+    ("MB ahead, the open's own reads", "MB", r"took ahead: open ([\d.]+) MB"),
+    ("reads ahead, the open's own", "count", r"took ahead: open [\d.]+ MB in (\d+) read"),
+    ("MB ahead, the rest", "MB", r"took ahead: .*?rest ([\d.]+) MB"),
+    ("reads ahead, the rest", "count", r"took ahead: .*?rest [\d.]+ MB in (\d+) read"),
 ]
 KEPT = [("used", r"kept start: used(?! in part)"), ("used in part", r"kept start: used in part"),
         ("not done at the tap", r"kept start: not done at the tap"), ("unused", r"kept start: unused")]
@@ -55,12 +61,13 @@ LINES = [
     (r"REAL (?:link )?subtitles[^:]*: switch .*?after=(\d+)", [("subtitle switch: first line", "s", "1ms")]),
     (r"REAL (?:link )?subtitles[^:]*: switch .*?(no line in \d+ s)", [("subtitle switch: no line", "count", "one")]),
     (r"REAL (?:link )?subtitles[^:]*: switch .*?(rebuffer)", [("subtitle switch: stalls", "count", "one")]),
-    (r"== link \S+ .*?(\d+) MB free", [("Mac free disk", "MB", 1)]),
+    (r"== (?:link|ios|tvos) \S+ .*?(\d+) MB free", [("Mac free disk", "MB", 1)]),
     (r"test server .*?link ([\d.]+) MB/s while carrying data", [("link: MB/s while carrying data", "MB/s", 1)]),
     (r"test server .*?(\d+) network changes", [("link: network changes", "count", 1)]),
     (r"server: connect ([\d.]+) s, first byte ([\d.]+) s$", [("server probe: connect", "s", 1), ("server probe: first byte", "s", 2)]),
 ]
 PROBE = re.compile(r"server: connect [\d.]+ s, first byte ([\d.]+) s$")
+RUN = re.compile(r"^(?:\[([^\]]+)\] |== ((?:ios|tvos) [^,]+?) \d\d:\d\d)")
 
 
 def value(match, how):
@@ -80,7 +87,7 @@ def value(match, how):
 
 def line_numbers(line):
     """[(name, unit, number)] for one printed line."""
-    line = re.sub(r"^\[[\w-]+\] ", "", line.rstrip("\n"))
+    line = re.sub(r"^\[[^\]]+\] ", "", line.rstrip("\n"))
     if "(old way)" in line:
         return []
     found = []
@@ -105,6 +112,17 @@ def line_numbers(line):
     return found
 
 
+def run_of(line):
+    """What a two-platform run's line adds to its label: the Apple TV, and a
+    network other than unmetered with its phone network setting."""
+    run = RUN.match(line)
+    words = (run.group(1) or run.group(2)).split() if run else []
+    if len(words) < 3:
+        return ""
+    platform, _, *network = words
+    return "".join(" " + word for word in ([platform] if platform != "ios" else []) + (network if network != ["unmetered"] else []))
+
+
 def extract(lines, label, unprobed):
     numbers = {}
     for line in lines:
@@ -113,6 +131,7 @@ def extract(lines, label, unprobed):
             ("real-quiet" if float(probe.group(1)) < QUIET_PROBE_S else "real-busy") if probe else unprobed)
         if where is None:
             continue
+        where += run_of(line)
         for name, unit, number in line_numbers(line):
             numbers.setdefault(where, {}).setdefault(name, {"unit": unit, "values": []})["values"].append(number)
     return numbers
