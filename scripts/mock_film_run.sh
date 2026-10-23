@@ -3,8 +3,10 @@
 # test server (port PORT, 8858 unless set, its own account at /mock/feed) under that profile of
 # net_profiles.json, the server carrying its link too (LINKS=none), with m7 in Continue Watching 3:36 in.
 # FILM: net (make_net_film.sh, the default) or open (make_open_film.sh: its header runs past the first
-# read, three audio tracks, a sparse Spanish track inside). TEST, SEED and LOW_DISK as the runner and the
-# test server take them. Prints and saves the runner's lines.
+# read, three audio tracks, a sparse Spanish track inside). PLATFORMS ("ios tvos"), NETWORK, METERED_LINKS,
+# PHONE_FILMS, TEST, SEED and LOW_DISK as the runner and the test server take them: by default the iPhone
+# runs unmetered and then metered over the phone link once per setting, and the Apple TV unmetered.
+# Prints and saves the runner's lines.
 set -u
 profile=$1 out=$2
 here=$(cd "$(dirname "$0")" && pwd)
