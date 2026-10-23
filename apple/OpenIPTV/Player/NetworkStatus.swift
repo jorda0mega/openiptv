@@ -165,8 +165,22 @@ final class PhoneNetworkUse: @unchecked Sendable {
         lock.withLock {
             kept = (today, (kept.day == today ? kept.bytes : 0) + Int64(bytes))
             defaults.set(["day": kept.day, "bytes": kept.bytes], forKey: Self.key)
+            #if DEBUG
+            sinceLaunch += Int64(bytes)
+            #endif
         }
     }
+
+    #if DEBUG
+    private var sinceLaunch: Int64 = 0
+
+    /// A start's line on a phone network: what came ahead over it.
+    func debugReadout(over network: Conditions.Network) -> String {
+        guard network == .expensive else { return "" }
+        return String(format: " | phone network: %.1f MB ahead since launch, %.1f MB today",
+                      Double(lock.withLock { sinceLaunch }) / 1e6, Double(usedToday()) / 1e6)
+    }
+    #endif
 
     private func day(of date: Date) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)

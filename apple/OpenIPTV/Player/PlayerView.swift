@@ -1372,6 +1372,7 @@ struct MoviePlayerView: View {
                 let loading = player.startLoadedAt - playback.requestedAt.timeIntervalSinceReferenceDate - playback.resolvedIn
                 startParts = String(format: "plan %.2f s (%@), start ahead %@, then %.2f s to the open, ", playback.resolvedIn,
                                     model.lastPlanKept ? "kept" : "asked", model.lastStartAhead, loading) + player.startNote
+                    + PhoneNetworkUse.shared.debugReadout(over: NetworkStatus.shared.network)
             }
             #endif
             Task { await loadTrackInfo() }
