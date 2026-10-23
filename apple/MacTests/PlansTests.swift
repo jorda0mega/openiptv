@@ -10,15 +10,29 @@ final class PlansTests: XCTestCase {
 
     private final class Server: @unchecked Sendable {
         private let lock = NSLock()
-        private var count = 0
+        private var count = 0, underWay = 0
+        private(set) var order: [String] = []
+        private(set) var mostAtOnce = 0
         private let failing: Set<Int>
+        private let wait: Double
 
-        init(failing: Set<Int> = []) { self.failing = failing }
+        init(failing: Set<Int> = [], wait: Double = 0) {
+            self.failing = failing
+            self.wait = wait
+        }
 
         var asked: Int { lock.withLock { count } }
 
-        func playback(_ key: PlanKey) throws -> EmbyPlayback {
-            let number = lock.withLock { count += 1; return count }
+        func playback(_ key: PlanKey) async throws -> EmbyPlayback {
+            let number = lock.withLock {
+                count += 1
+                underWay += 1
+                mostAtOnce = max(mostAtOnce, underWay)
+                order.append(key.itemId)
+                return count
+            }
+            try? await Task.sleep(for: .seconds(wait))
+            lock.withLock { underWay -= 1 }
             if failing.contains(number) { throw SourceError.http(503) }
             var playback = EmbyPlayback(itemId: key.itemId, title: key.itemId, subtitle: nil, url: URL(string: "http://server/\(key.itemId)")!,
                                         durationSeconds: 7200)
@@ -29,7 +43,7 @@ final class PlansTests: XCTestCase {
 
     private func plans(_ server: Server, now: @escaping @Sendable () -> Date = { Date() }) -> Shelf<PlanKey, EmbyPlayback> {
         let open = open
-        return Plans.shelf(lane: Lane(.light, atOnce: 4) { open }, now: now) { try server.playback($0) }
+        return Plans.shelf(lane: Lane(.light, atOnce: 4) { open }, now: now) { try await server.playback($0) }
     }
 
     func testAPlanGotReadyAheadIsPlayedWithoutAskingAgain() async throws {
@@ -85,6 +99,17 @@ final class PlansTests: XCTestCase {
         _ = await plans.warm(film, for: Interest(at: .continueWatching, .likely))
         _ = try await plans.take(PlanKey(itemId: "m5", kind: nil, versions: ["m5"]))
         XCTAssertEqual(server.asked, 1)
+    }
+
+    func testHomeAsksEveryCardsPlanFirstCardFirstOneAtATime() async throws {
+        let server = Server(wait: 0.05)
+        let plans = plans(server)
+        let cards = ["m1", "e2", "m3"].map { PlanKey(itemId: $0, kind: "Movie", versions: [$0]) }
+        await Plans.forecast(cards, on: plans)
+        XCTAssertEqual(server.order, ["m1", "e2", "m3"])
+        XCTAssertEqual(server.mostAtOnce, 1, "Home's plans went out together")
+        _ = try await plans.take(cards[2])
+        XCTAssertEqual(server.asked, 3, "the third card's tap asked again")
     }
 
     func testAStopForgetsThatTitlesPlanOnly() async throws {

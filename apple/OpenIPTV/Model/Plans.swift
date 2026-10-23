@@ -23,6 +23,8 @@ enum Plans {
                       fetch: @escaping @Sendable (PlanKey) async throws -> EmbyPlayback) -> Shelf<PlanKey, EmbyPlayback> {
         Shelf(.init(lane: lane ?? .emby, lifetime: .seconds(180), failureKept: .zero), now: now, fetch: fetch)
     }
+
+    static func forecast(_ keys: [PlanKey], on shelf: Shelf<PlanKey, EmbyPlayback>) async {}
 }
 
 #if DEBUG
