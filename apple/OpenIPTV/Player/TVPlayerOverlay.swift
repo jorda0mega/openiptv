@@ -61,6 +61,7 @@ struct TVTrackMenu: Equatable {
     struct Row: Equatable {
         let label: String
         let checked: Bool
+        var identifier = ""
     }
 
     let heading: String
@@ -479,6 +480,7 @@ struct TVTrackMenuView: View {
                 .background { if on { Capsule().fill(.white) } }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(row.checked ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier(row.identifier)
             }
         }
         .padding(12)

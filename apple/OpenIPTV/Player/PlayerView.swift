@@ -483,12 +483,12 @@ struct MoviePlayerView: View {
                         debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
                         debugReadout(player?.hlsKeys ?? "", "debug-hls-keys")
                         debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
-                        #if os(iOS)
-                        debugReadout(player?.subtitleShift ?? "", "debug-subshift")
-                        debugReadout(player?.subtitleLine ?? "", "debug-subtext")
                         debugReadout(player?.stopwatch.readout ?? "", "debug-subs-timing")
                         debugReadout(player?.bufferingReadout ?? "", "debug-buffering")
                         debugReadout(StreamRelay.shared.startReadsReadout, "debug-relay")
+                        #if os(iOS)
+                        debugReadout(player?.subtitleShift ?? "", "debug-subshift")
+                        debugReadout(player?.subtitleLine ?? "", "debug-subtext")
                         debugReadout(redirectsReadout, "debug-redirects")
                         debugReadout(model.debugCopySwitch, "debug-copy-switch")
                         #endif
@@ -1017,11 +1017,12 @@ struct MoviePlayerView: View {
     private var menu: TVTrackMenu? {
         switch panel {
         case .audio:
-            TVTrackMenu(heading: "Audio Track", rows: audioTracks.map { .init(label: label($0), checked: $0.selected) }
-                + otherLanguages.map { .init(label: Self.languageName($0), checked: false) })
+            TVTrackMenu(heading: "Audio Track", rows: audioTracks.map {
+                .init(label: label($0), checked: $0.selected, identifier: $0.selected ? "audio-playing" : "audio-track")
+            } + otherLanguages.map { .init(label: Self.languageName($0), checked: false, identifier: "audio-other-copy") })
         case .subtitles:
-            TVTrackMenu(heading: "Subtitles", rows: [.init(label: "Off", checked: !subtitleTracks.contains(where: \.selected))]
-                + subtitleTracks.map { .init(label: label($0), checked: $0.selected) })
+            TVTrackMenu(heading: "Subtitles", rows: [.init(label: "Off", checked: !subtitleTracks.contains(where: \.selected), identifier: "subtitle-row")]
+                + subtitleTracks.map { .init(label: label($0), checked: $0.selected, identifier: "subtitle-row") })
         case .speed:
             TVTrackMenu(heading: "Playback Speed", rows: PlaybackSpeed.all.map { .init(label: PlaybackSpeed.name($0), checked: $0 == speed) })
         default:
