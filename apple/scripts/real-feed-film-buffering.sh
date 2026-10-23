@@ -60,6 +60,11 @@ if n["profile"] != "none" or n.get("link", "none") != "none":
           "link %s MB/s while carrying data, %.1f MB, %d stalls (%.1f s waited), %d network changes" % (n["profile"], n["link"],
           s["reads"], s["hangs"], s["resets"], s["conversions"], s["refused"], s["extractions"], l["mb_s"] or "-", l["mb"],
           l["stalls"], l["stalled_s"], l["changes"]))'
+  curl -sf "$MOCK/mock/reports" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+print("test server reports: " + ("; ".join("%s %s" % (event, ", ".join("%d %s" % (n, kind) for kind, n in sorted(kinds.items())))
+                                           for event, kinds in sorted(r.items())) or "none"))'
 }
 # The runs of one platform, a line each: link, network, the phone network setting (- for none).
 runs() {

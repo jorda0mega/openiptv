@@ -112,6 +112,11 @@ PREFERENCES = {}
 VIDEO_REQUESTS = []
 SUBTITLE_REQUESTS = []
 PLAYBACKINFO_REQUESTS = []
+# Each PlaybackInfo's play session, by the item it was for; and each
+# playback report: (event, its PlaySessionId, its item). GET /mock/reports
+# counts the reports by whether they carry a session given for their item.
+PLAY_SESSIONS = {}
+REPORTS = []
 KEY_CHECKS = []
 CANCELLED = []
 SUBTITLES_CUT = []
@@ -193,6 +198,27 @@ CAST = {"z0": [("Antonio Banderas", "Actor"), ("Anthony Hopkins", "Actor"), ("Ca
 
 # Subtitles downloaded through the providers (RemoteSearch), by language.
 DOWNLOADED = []
+
+
+def media_source(item):
+    """How `item` plays, as Emby lists it in PlaybackInfo and in the item's full record."""
+    width = 3840 if item.startswith("k") else 1920
+    streams = file_streams()
+    # "copy_audio": "a8:fre": that copy's sound in that language only;
+    # "a8:spa+spa+jpn": those tracks in that order (another copy of the
+    # same film keeps the file's).
+    for spec in filter(None, CONTROL.get("copy_audio", "").split(",")):
+        copy, languages = spec.split(":")
+        if copy == item:
+            streams = [s for s in streams if s["Type"] != "Audio"] + \
+                      [{"Type": "Audio", "Index": 1 + n, "Language": language, "Codec": "aac"}
+                       # "+" arrives as a space (a query's way).
+                       for n, language in enumerate(languages.replace("+", " ").split())]
+    # The app picks a quality from the file's bitrate.
+    bitrate = int(os.environ.get("OPENIPTV_MOCK_BITRATE", "8000000"))
+    return {"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": bitrate,
+            "SupportsDirectPlay": True, "SupportsDirectStream": True,
+            "MediaStreams": [{"Type": "Video", "Width": width}] + streams}
 
 
 def file_streams():
@@ -697,6 +723,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.endswith("/Sessions/Logout") and self.headers.get("X-Emby-Token") == TOKEN:
             return self.send(b"", status=204)
         if "/Sessions/Playing" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
+            REPORTS.append((self.path.split("?")[0].rsplit("/", 1)[1], body.get("PlaySessionId") or "", body.get("ItemId")))
             # "ignore_reports": a server that hasn't heard (or kept) them.
             if self.path.split("?")[0].endswith(("/Progress", "/Stopped")) and body.get("ItemId") \
                     and CONTROL.get("ignore_reports") != "1":
@@ -734,24 +761,9 @@ class Handler(BaseHTTPRequestHandler):
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
             PLAYBACKINFO_REQUESTS.append((time.time(), item))
             time.sleep(float(CONTROL.get("plan_delay", 0)))
-            width = 3840 if item.startswith("k") else 1920
-            streams = file_streams()
-            # "copy_audio": "a8:fre": that copy's sound in that language only;
-            # "a8:spa+spa+jpn": those tracks in that order (another copy of the
-            # same film keeps the file's).
-            for spec in filter(None, CONTROL.get("copy_audio", "").split(",")):
-                copy, languages = spec.split(":")
-                if copy == item:
-                    streams = [s for s in streams if s["Type"] != "Audio"] + \
-                              [{"Type": "Audio", "Index": 1 + n, "Language": language, "Codec": "aac"}
-                               # "+" arrives as a space (a query's way).
-                               for n, language in enumerate(languages.replace("+", " ").split())]
-            # The app picks a quality from the file's bitrate.
-            bitrate = int(os.environ.get("OPENIPTV_MOCK_BITRATE", "8000000"))
-            return self.send({"MediaSources": [{"Id": f"ms-{item}", "Protocol": "File", "Container": "mkv", "Bitrate": bitrate,
-                                                "SupportsDirectPlay": True, "SupportsDirectStream": True,
-                                                "MediaStreams": [{"Type": "Video", "Width": width}] + streams}],
-                              "PlaySessionId": "ps1"})
+            session = f"ps{len(PLAY_SESSIONS) + 1}"
+            PLAY_SESSIONS[session] = item
+            return self.send({"MediaSources": [media_source(item)], "PlaySessionId": session})
         if self.path.endswith("/Users/AuthenticateByName") and body.get("Pw") == "p":
             return self.send({"AccessToken": TOKEN, "User": {"Id": "U1", "Name": body["Username"]}})
         self.send({"error": "unauthorized"}, status=401)
@@ -841,6 +853,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"items": [r[1] for r in asked], "keyed": [r[1] for r in asked if r[2]],
                               "headerless": [r[1] for r in asked if not r[3]],
                               "cut": [track for t, track in SUBTITLES_CUT if t >= since]})
+        if path == "/mock/reports":
+            counts = {}
+            for event, session, item in REPORTS:
+                kind = "with no session" if not session else "with its session" if PLAY_SESSIONS.get(session) == item \
+                    else "with another's session"
+                counts.setdefault(event, {}).setdefault(kind, 0)
+                counts[event][kind] += 1
+            return self.send(counts)
         if path == "/mock/playbackinfo_requests":
             since = float(q.get("since", "0"))
             return self.send({"items": [item for t, item in PLAYBACKINFO_REQUESTS if t >= since]})
@@ -862,6 +882,7 @@ class Handler(BaseHTTPRequestHandler):
                 SUBTITLE_REQUESTS.clear()
                 SUBTITLES_CUT.clear()
                 PLAYBACKINFO_REQUESTS.clear()
+                REPORTS.clear()
                 KEY_CHECKS.clear()
                 CANCELLED.clear()
                 XTREAM_REQUESTS.clear()
@@ -1335,7 +1356,8 @@ class Handler(BaseHTTPRequestHandler):
                                         {"StartPositionTicks": int(start * 1e7), "Name": "Intro", "MarkerType": "IntroStart"},
                                         {"StartPositionTicks": int(end * 1e7), "Name": "Intro End", "MarkerType": "IntroEnd"}]
                 return self.send(item)
-            return self.send(copied(movie(int(item_id[1:]))) | {"Id": item_id, "RunTimeTicks": MOVIE_TICKS})
+            return self.send(copied(movie(int(item_id[1:]))) | {"Id": item_id, "RunTimeTicks": MOVIE_TICKS,
+                                                                 "MediaSources": [media_source(item_id)]})
         if path.startswith("/Shows/") and path.endswith("/Seasons"):
             return self.send({"Items": [{"Id": f"season{n}", "Name": f"Season {n}", "Type": "Season", "IndexNumber": n,
                                          "UserData": {"Played": n == 1}} for n in (1, 2)]})

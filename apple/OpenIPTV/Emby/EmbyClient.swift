@@ -758,7 +758,7 @@ struct EmbyClient {
     func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
         let (item, info) = try await resolve(itemId, kind: kind)
         let resume: Double? = if let point = Self.resumePoint(item) { point } else { await recordedStart(item) }
-        return await assemble(item, info: info, resume: resume)
+        return await assemble(Copy(item: item, info: info), resume: resume)
     }
 
     /// One title with copies in several libraries (HD and 4K, a dubbed
@@ -772,11 +772,14 @@ struct EmbyClient {
     func playback(versions ids: [String], kind: String?, maxWidth: Int?,
                   showCopies: @escaping @Sendable (String) -> [String] = { _ in [] }) async throws -> EmbyPlayback {
         var copies: [Copy]
-        if ids.count == 1 || kind == "Series" {
+        if ["Movie", "Episode", "Video"].contains(kind) {
+            copies = await inTime(ids, maxWidth: maxWidth)
+            guard !copies.isEmpty else { return try await playback(itemId: ids[0], kind: kind) }
+        } else if ids.count == 1 || kind == "Series" {
             let (item, info) = try await resolve(ids[0], kind: kind)
-            copies = [(item, info)]
+            copies = [Copy(item: item, info: info)]
         } else {
-            copies = ["Movie", "Episode", "Video"].contains(kind) ? await inTime(ids, maxWidth: maxWidth) : await resolved(ids, kind: kind)
+            copies = await resolved(ids, kind: kind)
             guard !copies.isEmpty else { return try await playback(itemId: ids[0], kind: kind) }
         }
         if copies.count == 1, copies[0].item.kind == "Episode", let show = copies[0].item.seriesId {
@@ -786,7 +789,39 @@ struct EmbyClient {
         return await choose(copies, kind: copies[0].item.kind == "Episode" ? "Episode" : kind, maxWidth: maxWidth)
     }
 
-    typealias Copy = (item: EmbyItem, info: PlaybackInfo?)
+    /// One copy of a title: its item, its PlaybackInfo once that answered,
+    /// and how it plays: PlaybackInfo's source, or meanwhile the item's own
+    /// when its full record lists a file on the server (`late`: the
+    /// PlaybackInfo still out).
+    struct Copy {
+        let item: EmbyItem
+        var info: PlaybackInfo?
+        var itemSource: PlaybackInfo.Source?
+        var late: Task<PlaybackInfo?, Never>?
+
+        var source: PlaybackInfo.Source? { info?.MediaSources?.first ?? itemSource }
+    }
+
+    /// An item's full record with the sources it lists.
+    private struct Listed: Decodable {
+        let item: EmbyItem
+        let sources: [PlaybackInfo.Source]?
+
+        enum Key: String, CodingKey { case sources = "MediaSources" }
+
+        init(from decoder: Decoder) throws {
+            item = try EmbyItem(from: decoder)
+            sources = try? decoder.container(keyedBy: Key.self).decodeIfPresent([PlaybackInfo.Source].self, forKey: .sources)
+        }
+
+        /// A file on the server, with its picture: playable as it is before
+        /// PlaybackInfo answers. A remote file waits for it (its headers).
+        var playable: PlaybackInfo.Source? {
+            guard !EmbyClient.waitsForPlaybackInfo, let source = sources?.first, source.Protocol != "Http",
+                  source.MediaStreams?.contains(where: { $0.Type == "Video" }) == true else { return nil }
+            return source
+        }
+    }
 
     private func resolved(_ ids: [String], kind: String?) async -> [Copy] {
         await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
@@ -795,46 +830,59 @@ struct EmbyClient {
             }
             var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
             for await copy in group { if let copy { out.append(copy) } }
-            return out.sorted { $0.order < $1.order }.map { ($0.item, $0.info) }
+            return out.sorted { $0.order < $1.order }.map { Copy(item: $0.item, info: $0.info) }
         }
     }
 
-    /// Every copy's item (each holds where it was left off), and their
-    /// PlaybackInfo until a copy meets the rule choose() applies; the others
-    /// then get `grace` more, and one still out is played without (the
-    /// slowest copy no longer sets the start).
+    /// Every copy's item (each holds where it was left off) and its
+    /// PlaybackInfo, asked at once. When every item lists a file on the
+    /// server, the copies are chosen from those, PlaybackInfo still out.
+    /// Otherwise, once a copy meets the rule choose() applies, the others
+    /// get `grace` more: the slowest copy no longer sets the start.
     private func inTime(_ ids: [String], maxWidth: Int?) async -> [Copy] {
-        enum Arrival { case item(Int, EmbyItem?), info(Int, PlaybackInfo?), timeUp }
-        return await withTaskGroup(of: Arrival.self) { group in
-            for (order, id) in ids.enumerated() {
-                group.addTask { .item(order, try? await get("Users/\(account.userId)/Items/\(id)", [])) }
-                group.addTask { .info(order, try? await playbackInfo(id, startSeconds: nil)) }
+        enum Arrival { case item(Int, Listed?), info(Int, PlaybackInfo?), timeUp }
+        let (arrivals, arrive) = AsyncStream<Arrival>.makeStream()
+        let infos = ids.map { id in Task { try? await playbackInfo(id, startSeconds: nil) } }
+        let relays = ids.enumerated().map { order, id in
+            Task { arrive.yield(.item(order, try? await get("Users/\(account.userId)/Items/\(id)", []))) }
+        } + infos.enumerated().map { order, info in Task { arrive.yield(.info(order, await info.value)) } }
+        var items: [Int: Listed?] = [:], answered: [Int: PlaybackInfo?] = [:]
+        func copies() -> [Copy] {
+            items.sorted { $0.key < $1.key }.compactMap { order, listed in
+                listed.map { Copy(item: $0.item, info: answered[order] ?? nil, itemSource: $0.playable,
+                                  late: answered[order] == nil ? infos[order] : nil) }
             }
-            var items: [Int: EmbyItem?] = [:], infos: [Int: PlaybackInfo?] = [:]
-            var graceBegun = Self.waitsForEveryCopy
-            func copies() -> [Copy] {
-                items.sorted { $0.key < $1.key }.compactMap { order, item in item.map { ($0, infos[order] ?? nil) } }
-            }
-            arrivals: while let arrival = await group.next() {
+        }
+        var graceBegun = Self.waitsForEveryCopy
+        var timer: Task<Void, Never>?
+        await withTaskCancellationHandler {
+            arrivals: for await arrival in arrivals {
                 switch arrival {
-                case let .item(order, item): items[order] = item
-                case let .info(order, info): infos[order] = info
+                case let .item(order, listed): items[order] = listed
+                case let .info(order, info): answered[order] = info
                 case .timeUp: break arrivals
                 }
-                if items.count == ids.count, infos.count == ids.count { break }
-                guard !graceBegun, items.count == ids.count, !copies().isEmpty else { continue }
-                let (copy, fits) = Self.chosen(copies(), maxWidth: maxWidth)
-                if fits, copy.info != nil {
+                guard items.count == ids.count else { continue }
+                let all = copies()
+                if answered.count == ids.count || all.isEmpty || all.allSatisfy({ $0.source != nil }) { break }
+                guard !graceBegun else { continue }
+                let (copy, fits) = Self.chosen(all, maxWidth: maxWidth)
+                if fits, copy.source != nil {
                     graceBegun = true
-                    group.addTask {
+                    timer = Task {
                         try? await Task.sleep(for: Self.grace)
-                        return .timeUp
+                        arrive.yield(.timeUp)
                     }
                 }
             }
-            group.cancelAll()
-            return copies()
+        } onCancel: {
+            infos.forEach { $0.cancel() }
+            arrive.finish()
         }
+        timer?.cancel()
+        relays.forEach { $0.cancel() }
+        arrive.finish()
+        return copies()
     }
 
     private static let grace = Duration.seconds(1)
@@ -843,14 +891,18 @@ struct EmbyClient {
     /// -oldPlanWait YES: a title with several copies waits for every copy's
     /// PlaybackInfo (the start before).
     private static var waitsForEveryCopy: Bool { UserDefaults.standard.bool(forKey: "oldPlanWait") }
+    /// -waitForPlaybackInfo YES: a film starts once PlaybackInfo answers,
+    /// whatever its item lists (the start before).
+    fileprivate static var waitsForPlaybackInfo: Bool { UserDefaults.standard.bool(forKey: "waitForPlaybackInfo") }
     #else
     private static let waitsForEveryCopy = false
+    fileprivate static let waitsForPlaybackInfo = false
     #endif
 
-    private static func width(_ info: PlaybackInfo?) -> Int { info?.MediaSources?.first?.videoWidth ?? 0 }
+    private static func width(_ copy: Copy) -> Int { copy.source?.videoWidth ?? 0 }
 
-    private static func sound(_ info: PlaybackInfo?) -> [String] {
-        (info?.MediaSources?.first?.MediaStreams ?? []).filter { $0.Type == "Audio" }
+    private static func sound(_ copy: Copy) -> [String] {
+        (copy.source?.MediaStreams ?? []).filter { $0.Type == "Audio" }
             .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }.compactMap { $0.Language.flatMap(TrackChoice.normalized) }
     }
 
@@ -867,23 +919,24 @@ struct EmbyClient {
     /// says): all of them. Of those, the sharpest up to `maxWidth` (`fits`),
     /// else the least sharp.
     private static func chosen(_ copies: [Copy], maxWidth: Int?) -> (copy: Copy, fits: Bool) {
-        guard copies.count > 1 else { return (copies[0], maxWidth.map { width(copies[0].info) <= $0 } ?? true) }
+        guard copies.count > 1 else { return (copies[0], maxWidth.map { width(copies[0]) <= $0 } ?? true) }
         let first = copies[0]
-        let wanted = TrackChoice.wantedAudio(countries: first.item.productionLocations ?? [], original: sound(first.info).first,
-                                             heard: Set(copies.flatMap { sound($0.info) }), keys: keys(copies))
-        let speaking = copies.filter { sound($0.info).contains(wanted) }
+        let wanted = TrackChoice.wantedAudio(countries: first.item.productionLocations ?? [], original: sound(first).first,
+                                             heard: Set(copies.flatMap(sound)), keys: keys(copies))
+        let speaking = copies.filter { sound($0).contains(wanted) }
         let pool = speaking.isEmpty ? copies : speaking
-        if let sharpest = pool.filter({ maxWidth == nil || width($0.info) <= maxWidth! }).max(by: { width($0.info) < width($1.info) }) {
+        if let sharpest = pool.filter({ maxWidth == nil || width($0) <= maxWidth! }).max(by: { width($0) < width($1) }) {
             return (sharpest, true)
         }
-        return (pool.min { width($0.info) < width($1.info) }!, false)
+        return (pool.min { width($0) < width($1) }!, false)
     }
 
-    /// The copy to play, ready (see playback(versions:)).
+    /// The copy to play, ready (see playback(versions:)); the others'
+    /// PlaybackInfo still out is stopped.
     private func choose(_ copies: [Copy], kind: String?, maxWidth: Int?) async -> EmbyPlayback {
-        let sound = Self.sound
         let keys = Self.keys(copies)
         let chosen = Self.chosen(copies, maxWidth: maxWidth).copy
+        for copy in copies where copy.item.id != chosen.item.id { copy.late?.cancel() }
         // Resume where any copy was left off most recently.
         var resume = copies
             .filter { Self.resumePoint($0.item) != nil }
@@ -895,8 +948,8 @@ struct EmbyClient {
                 if let start = await recordedStart(copy.item) { resume = start; break }
             }
         }
-        var playback = await assemble(chosen.item, info: chosen.info, resume: resume, keys: keys)
-        playback.otherCopies = copies.filter { $0.item.id != chosen.item.id }.map { .init(itemId: $0.item.id, languages: sound($0.info)) }
+        var playback = await assemble(chosen, resume: resume, keys: keys)
+        playback.otherCopies = copies.filter { $0.item.id != chosen.item.id }.map { .init(itemId: $0.item.id, languages: Self.sound($0)) }
         playback.copyIds = copies.map(\.item.id)
         playback.copyKind = kind
         playback.trackKeys = keys
@@ -905,7 +958,7 @@ struct EmbyClient {
 
     /// The same episode (its season and number) in other copies of its
     /// show, with how to play each.
-    private func sameEpisode(_ episode: EmbyItem, inShows shows: [String]) async -> [(item: EmbyItem, info: PlaybackInfo?)] {
+    private func sameEpisode(_ episode: EmbyItem, inShows shows: [String]) async -> [Copy] {
         guard let season = episode.parentIndexNumber, let number = episode.indexNumber else { return [] }
         return await withTaskGroup(of: (Int, EmbyItem, PlaybackInfo?)?.self) { group in
             for (order, show) in shows.enumerated() {
@@ -919,7 +972,7 @@ struct EmbyClient {
             }
             var out: [(order: Int, item: EmbyItem, info: PlaybackInfo?)] = []
             for await copy in group { if let copy { out.append(copy) } }
-            return out.sorted { $0.order < $1.order }.map { ($0.item, $0.info) }
+            return out.sorted { $0.order < $1.order }.map { Copy(item: $0.item, info: $0.info) }
         }
     }
 
@@ -961,7 +1014,8 @@ struct EmbyClient {
         return (item, prefetchedInfo)
     }
 
-    private func assemble(_ item: EmbyItem, info prefetchedInfo: PlaybackInfo?, resume: Double?, keys: [String] = []) async -> EmbyPlayback {
+    private func assemble(_ copy: Copy, resume: Double?, keys: [String] = []) async -> EmbyPlayback {
+        let item = copy.item
         #if DEBUG
         let resume = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_START_AT"].flatMap(Double.init) ?? resume
         #endif
@@ -973,26 +1027,30 @@ struct EmbyClient {
         // Ask the server how to play it, like Emby's own apps do: the media
         // source id can differ from the item id, and some sources are remote
         // files to open directly. Fall back to direct stream if this fails.
-        let info: PlaybackInfo?
-        if let prefetchedInfo { info = prefetchedInfo } else {
-            do { info = try await playbackInfo(item.id, startSeconds: resume) } catch {
-                #if DEBUG
-                NSLog("%@", "PERF playback info failed for \(item.id)")
-                #endif
-                info = nil
+        // A file the item lists plays meanwhile, its play session to come.
+        var info = copy.info
+        if info == nil, copy.itemSource == nil {
+            if let late = copy.late { info = await late.value } else {
+                do { info = try await playbackInfo(item.id, startSeconds: resume) } catch {
+                    #if DEBUG
+                    NSLog("%@", "PERF playback info failed for \(item.id)")
+                    #endif
+                }
             }
         }
-        if let info, let source = info.MediaSources?.first {
+        let late = info == nil ? copy.late.map(LateSession.init) : nil
+        if let source = info?.MediaSources?.first ?? copy.itemSource {
+            let session = info?.PlaySessionId
             playback.mediaSourceId = source.Id
-            playback.playSessionId = info.PlaySessionId
+            playback.playSessionId = session
             if source.Protocol == "Http", let path = source.Path, let remote = URL(string: path),
                remote.scheme?.hasPrefix("http") == true {
                 playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle, url: remote,
                                         headers: (source.RequiredHttpHeaders ?? [:]).map { "\($0.key): \($0.value)" },
                                         startSeconds: resume, durationSeconds: playback.durationSeconds,
-                                        mediaSourceId: source.Id, playSessionId: info.PlaySessionId, method: "remote file",
-                                        fallbacks: [directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId),
-                                                    hlsURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId, start: resume)])
+                                        mediaSourceId: source.Id, playSessionId: session, method: "remote file",
+                                        fallbacks: [directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: session),
+                                                    hlsURL(item.id, mediaSourceId: source.Id, playSessionId: session, start: resume)])
             } else {
                 // The original file, even when the server would rather
                 // convert it (a remote bitrate limit, say): libmpv plays
@@ -1000,15 +1058,17 @@ struct EmbyClient {
                 // in it freely, where a conversion takes 5-15 s to begin and
                 // restarts on every seek. Converting stays the fallback.
                 playback = EmbyPlayback(itemId: item.id, title: title, subtitle: subtitle,
-                                        url: directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId,
+                                        url: directStreamURL(item.id, mediaSourceId: source.Id, playSessionId: session,
                                                              container: source.Container),
                                         startSeconds: resume, durationSeconds: playback.durationSeconds,
-                                        mediaSourceId: source.Id, playSessionId: info.PlaySessionId,
-                                        fallbacks: [hlsURL(item.id, mediaSourceId: source.Id, playSessionId: info.PlaySessionId, start: resume)])
+                                        mediaSourceId: source.Id, playSessionId: session,
+                                        fallbacks: [hlsURL(item.id, mediaSourceId: source.Id, playSessionId: session, start: resume)])
             }
         }
-        playback.bitrate = info?.MediaSources?.first?.Bitrate
-        playback.listed = info?.MediaSources?.first != nil
+        let source = info?.MediaSources?.first ?? copy.itemSource
+        playback.lateSession = late
+        playback.bitrate = source?.Bitrate
+        playback.listed = source != nil
         playback.seriesId = item.seriesId
         playback.overview = item.overview
         playback.intro = item.intro
@@ -1020,13 +1080,13 @@ struct EmbyClient {
         // Always a plan: without the server's track list (it didn't answer
         // in time) it still asks for the language the title calls for, and
         // the player keeps the file's own only when that one isn't there.
-        let audio = (info?.MediaSources?.first?.MediaStreams ?? [])
+        let audio = (source?.MediaStreams ?? [])
             .filter { $0.Type == "Audio" }
             .sorted { ($0.Index ?? 0) < ($1.Index ?? 0) }
             .map(\.Language)
         playback.tracks = TrackChoice.plan(audio: audio, countries: item.productionLocations ?? [],
                                            key: item.seriesId ?? item.id, keys: keys)
-        if let source = info?.MediaSources?.first {
+        if let source {
             playback.subtitleLanguages = Set((source.MediaStreams ?? []).filter { $0.Type == "Subtitle" }
                 .compactMap { $0.Language.flatMap(TrackChoice.normalized) })
             playback.subtitleFiles = subtitleFiles(item.id, source)

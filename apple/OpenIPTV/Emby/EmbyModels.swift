@@ -216,6 +216,32 @@ struct Card: Codable, Hashable, Identifiable {
     var pageTarget: Target { .title(id: id, kind: kind) }
 }
 
+/// PlaybackInfo still on its way when a film started from its item's own
+/// source: the play session its reports and conversions carry, once it
+/// answers.
+final class LateSession: Hashable, @unchecked Sendable {
+    private let answer: Task<String?, Never>
+    private let arrived: Locked<String?>
+
+    init(_ info: Task<EmbyClient.PlaybackInfo?, Never>) {
+        let arrived = Locked<String?>(nil)
+        self.arrived = arrived
+        answer = Task {
+            let session = await info.value?.PlaySessionId
+            arrived.mutate { $0 = session }
+            return session
+        }
+    }
+
+    var now: String? { arrived.value }
+
+    func value() async -> String? { await answer.value }
+
+    static func == (a: LateSession, b: LateSession) -> Bool { a === b }
+
+    func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+}
+
 struct HomeRow: Codable, Hashable, Identifiable {
     var id: String { title }
     let title: String
@@ -263,8 +289,17 @@ struct EmbyPlayback: Hashable, Identifiable {
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
 
-    /// The play session its reports carry.
-    func session() async -> String? { playSessionId }
+    /// PlaybackInfo still out when it started from its item's own source.
+    var lateSession: LateSession?
+
+    /// The play session its reports carry: PlaybackInfo's, once it answered.
+    func session() async -> String? {
+        if let playSessionId { return playSessionId }
+        return await lateSession?.value()
+    }
+
+    /// The play session known now (a conversion asked meanwhile carries none).
+    var sessionNow: String? { playSessionId ?? lateSession?.now }
     /// The server said how to play it (its tracks and subtitle files);
     /// false when it didn't answer in time and a guess stands in.
     var listed = true

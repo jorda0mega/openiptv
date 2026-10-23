@@ -507,8 +507,9 @@ final class AppModel {
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         lastPlan = debugPlanClocks[key].map { clock in
             let copy = key.versions.firstIndex(of: playback.itemId).map { "copy \($0 + 1)" } ?? "another item"
+            let from = playback.lateSession == nil ? "" : " from its item's source"
             return "\(planAtTheTap) at the tap, " + String(format: "asked %+.2f s, ", clock.asked.timeIntervalSince(started))
-                + "played \(copy) of " + clock.readout(tap: started)
+                + "played \(copy)\(from) of " + clock.readout(tap: started)
         } ?? "no plan clock"
         #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
@@ -1446,7 +1447,7 @@ final class AppModel {
     /// with the audio track at `audio` (its place in the file).
     func convertedURL(for playback: EmbyPlayback, bitrate: Int, start: Double, copy: Bool = false, audio: Int? = nil) -> URL? {
         emby?.hlsURL(playback.itemId, mediaSourceId: playback.mediaSourceId ?? playback.itemId,
-                     playSessionId: playback.playSessionId, start: start, bitrate: bitrate, copy: copy, audioStreamIndex: audio)
+                     playSessionId: playback.sessionNow, start: start, bitrate: bitrate, copy: copy, audioStreamIndex: audio)
     }
 
     /// Download speed (bits/s) last measured from this Emby server, to pick
@@ -1577,13 +1578,13 @@ final class AppModel {
             await enqueueReport { [weak self] in
                 guard let (playback, seconds) = await self?.takeQueuedProgress() else { return }
                 await client?.report(.progress, itemId: playback.itemId, seconds: seconds,
-                                     mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
+                                     mediaSourceId: playback.mediaSourceId, playSessionId: await playback.session())
             }.value
             return
         }
         await enqueueReport {
             await client?.report(event, itemId: playback.itemId, seconds: seconds,
-                                 mediaSourceId: playback.mediaSourceId, playSessionId: playback.playSessionId)
+                                 mediaSourceId: playback.mediaSourceId, playSessionId: await playback.session())
         }.value
         guard event == .stopped else { return }
         plans.forget { $0.itemId == playback.itemId || $0.itemId == playback.seriesId }
