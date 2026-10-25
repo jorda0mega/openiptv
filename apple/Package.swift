@@ -43,6 +43,7 @@ let package = Package(
                 "Player/LoadEvents.swift",
                 "Player/Matroska.swift",
                 "Player/NetworkStatus.swift",
+                "Player/PlayerFacing.swift",
                 "Player/PlaylistKeys.swift",
                 "Player/QualityGovernor.swift",
                 "Player/RelayRoutes.swift",
