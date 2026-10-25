@@ -1,13 +1,13 @@
 #if os(iOS)
+import CoreMotion
 import UIKit
 
 /// Which ways the app may face, and turning it from the player.
 ///
 /// iOS decides as usual: with Rotation Lock off the video turns with the
-/// phone; with it on, nothing turns by itself. The rotate button turns it
-/// at will (sideways when upright, upright when sideways) and holds it
-/// there. If the phone then reports being turned (it only does with
-/// Rotation Lock off), iOS takes over again.
+/// phone; with it on, nothing turns by itself. The player turns it at will
+/// and holds it there (see PlayerFacing). If the phone then reports being
+/// turned (it only does with Rotation Lock off), iOS takes over again.
 @MainActor
 final class PlayerOrientation {
     static let shared = PlayerOrientation()
@@ -20,9 +20,8 @@ final class PlayerOrientation {
     private static var browsing: UIInterfaceOrientationMask {
         UIDevice.current.userInterfaceIdiom == .phone ? .portrait : .allButUpsideDown
     }
-    /// Set by the rotate button until the phone itself is turned.
-    private var held: UIInterfaceOrientation?
-    private var observer: NSObjectProtocol?
+    private lazy var facing = PlayerFacing(gravity: MotionGravity()) { [unowned self] in apply($0) }
+    private var observers: [NSObjectProtocol] = []
 
     private var scene: UIWindowScene? {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
@@ -30,64 +29,85 @@ final class PlayerOrientation {
 
     var isLandscape: Bool { scene?.effectiveGeometry.interfaceOrientation.isLandscape ?? false }
 
-    func playerAppeared() {
-        held = nil
-        allowed = .allButUpsideDown
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-        observer = NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification, object: nil,
-                                                          queue: .main) { _ in
-            MainActor.assumeIsolated { PlayerOrientation.shared.phoneTurned() }
+    private var current: PlayerFacing.Orientation {
+        switch scene?.effectiveGeometry.interfaceOrientation {
+        case .landscapeLeft: .landscapeLeft
+        case .landscapeRight: .landscapeRight
+        default: .portrait
         }
+    }
+
+    /// `film`: the film and show player, which follows the phone over on
+    /// iPhone (Live TV's vertical swipe changes the channel instead).
+    func playerAppeared(film: Bool) {
+        allowed = .allButUpsideDown
+        facing.playerAppeared(sensing: film && UIDevice.current.userInterfaceIdiom == .phone)
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { PlayerOrientation.shared.phoneTurned() }
+            },
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { PlayerOrientation.shared.facing.app(inForeground: false) }
+            },
+            center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { PlayerOrientation.shared.facing.app(inForeground: true) }
+            },
+        ]
     }
 
     /// The player closed: upright again for the rest of the app, then free
     /// to turn as iOS decides.
     func playerDisappeared() {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = nil
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
-        held = nil
-        if isLandscape { turn(to: .portrait) }
+        facing.playerDisappeared()
+        if isLandscape { apply(.hold(.portrait)) }
         allowed = Self.browsing
         refresh()
     }
 
     /// The rotate button: sideways when upright, upright when sideways.
     func toggle() {
-        let target: UIInterfaceOrientation = isLandscape ? .portrait : .landscapeRight
-        held = target
-        turn(to: target)
+        facing.rotate(from: current)
     }
 
-    /// The phone reported turning, so Rotation Lock is off: stop holding
-    /// the button's way and let iOS follow the phone.
+    func swiped(_ swipe: PlayerFacing.Swipe) {
+        facing.swiped(swipe, from: current)
+    }
+
     private func phoneTurned() {
-        guard let held else { return }
-        let facing: UIInterfaceOrientation? = switch UIDevice.current.orientation {
+        let facingNow: PlayerFacing.Orientation? = switch UIDevice.current.orientation {
         case .portrait: .portrait
         // The device turned left means the interface is landscape right.
         case .landscapeLeft: .landscapeRight
         case .landscapeRight: .landscapeLeft
         default: nil
         }
-        guard let facing, facing != held else { return }
-        self.held = nil
-        allowed = .allButUpsideDown
-        refresh()
-        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: Self.mask(facing))) { _ in }
+        if let facingNow { facing.phoneTurned(to: facingNow) }
     }
 
-    private func turn(to orientation: UIInterfaceOrientation) {
-        allowed = Self.mask(orientation)
+    private func apply(_ turn: PlayerFacing.Turn) {
+        let target: PlayerFacing.Orientation
+        switch turn {
+        case let .hold(orientation):
+            target = orientation
+            allowed = Self.mask(orientation)
+        case let .follow(orientation):
+            target = orientation
+            allowed = .allButUpsideDown
+        }
         refresh()
-        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: allowed)) { _ in }
+        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: Self.mask(target))) { _ in }
     }
 
-    private static func mask(_ orientation: UIInterfaceOrientation) -> UIInterfaceOrientationMask {
+    private static func mask(_ orientation: PlayerFacing.Orientation) -> UIInterfaceOrientationMask {
         switch orientation {
+        case .portrait: .portrait
         case .landscapeLeft: .landscapeLeft
         case .landscapeRight: .landscapeRight
-        default: .portrait
         }
     }
 
@@ -99,6 +119,26 @@ final class PlayerOrientation {
                 controller = current.presentedViewController
             }
         }
+    }
+}
+
+/// The phone's gravity from CoreMotion, ten times a second (no permission
+/// needed). The simulator has none.
+private final class MotionGravity: GravitySource {
+    private let manager = CMMotionManager()
+
+    func start(_ felt: @escaping @MainActor (PlayerFacing.Gravity, TimeInterval) -> Void) {
+        guard manager.isDeviceMotionAvailable else { return }
+        manager.deviceMotionUpdateInterval = 0.1
+        manager.startDeviceMotionUpdates(to: .main) { motion, _ in
+            guard let motion else { return }
+            let gravity = PlayerFacing.Gravity(x: motion.gravity.x, y: motion.gravity.y, z: motion.gravity.z)
+            MainActor.assumeIsolated { felt(gravity, motion.timestamp) }
+        }
+    }
+
+    func stop() {
+        manager.stopDeviceMotionUpdates()
     }
 }
 

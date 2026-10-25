@@ -14,6 +14,11 @@ enum PlayerItem: Identifiable {
         case let .vod(playback): "vod-\(playback.itemId)"
         }
     }
+
+    var isFilm: Bool {
+        if case .vod = self { return true }
+        return false
+    }
 }
 
 struct PlayerScreen: View {
@@ -43,7 +48,7 @@ struct PlayerScreen: View {
         })
         .presentationBackground(.clear)
         #if os(iOS)
-        .onAppear { PlayerOrientation.shared.playerAppeared() }
+        .onAppear { PlayerOrientation.shared.playerAppeared(film: item.isFilm) }
         .onDisappear { PlayerOrientation.shared.playerDisappeared() }
         #endif
     }
@@ -406,6 +411,12 @@ struct MoviePlayerView: View {
                 .onTapGesture {
                     if showInfo { toggleInfo() } else if showContinue { toggleContinue() } else if showEpisodes { toggleEpisodes() } else { toggleControls() }
                 }
+                // iPhone: up turns it sideways, down upright (see PlayerFacing).
+                .gesture(DragGesture(minimumDistance: 30).onEnded { drag in
+                    guard !showInfo, !showContinue, !showEpisodes, scrubbing == nil,
+                          let swipe = PlayerFacing.swipe(dx: drag.translation.width, dy: drag.translation.height) else { return }
+                    PlayerOrientation.shared.swiped(swipe)
+                }, isEnabled: UIDevice.current.userInterfaceIdiom == .phone)
                 .accessibilityHidden(true)
             #endif
             // With the controls up, their play button turns into the spinner.

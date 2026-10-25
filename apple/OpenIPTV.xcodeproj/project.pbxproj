@@ -279,6 +279,7 @@
 		E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C786F389C51A2833D4205BE /* TitleHero.swift */; };
 		E46D2D4F358B026B53225FC1 /* LiveFailures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBBDDA77B65B86BB26D8D65 /* LiveFailures.swift */; };
 		E5362F0D86095D2F863749C7 /* Shelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03687A5122C40ADC0462D4BE /* Shelf.swift */; };
+		E670273A189FED60AC57B1CD /* PlayerFacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C24FE14EDDFC06A76BFE381 /* PlayerFacing.swift */; };
 		E79797576A5367AA203CF4BE /* BufferingLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 054309E9F5F6C53E9B0548BC /* BufferingLog.swift */; };
 		E837BD64EFB5556EF182B830 /* TVWatchOnRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8109F8BC5559C9CA077C2CBE /* TVWatchOnRow.swift */; };
 		EA8F7A63FFC991764504B776 /* Libdovi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA19E9D3F75925C5283CD299 /* Libdovi.xcframework */; };
@@ -290,6 +291,7 @@
 		EF729A91220E6C66170831E6 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5EDE0462D2DCE22124164E8 /* Metal.framework */; };
 		F19040B9E5205FE5168B1CF4 /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9236570FD5D04A7FE5B59AB8 /* Artwork.swift */; };
 		F21DC92D8A7B935E03245135 /* RelayRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D98E8646EA291A2E9297C377 /* RelayRoutes.swift */; };
+		F3812054FAD86B3BA5FD70F3 /* PlayerFacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C24FE14EDDFC06A76BFE381 /* PlayerFacing.swift */; };
 		F53713E92CA858B3297424D8 /* LivePerfProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4CB49D07772393CE3267AC2 /* LivePerfProbeTests.swift */; };
 		F72204C9018C0C581257040E /* TitleHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C786F389C51A2833D4205BE /* TitleHero.swift */; };
 		F7D4B4BAB7ABD5CC5632552E /* TVTitlePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21CB2421CE9A188C91DE446 /* TVTitlePages.swift */; };
@@ -405,6 +407,7 @@
 		72303AAC600EF3DE6075EF7A /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		766249862D814DF2C6786AF4 /* LiveShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveShelfViews.swift; sourceTree = "<group>"; };
 		7A1F2D0451F66503C9B600AF /* libbz2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libbz2.tbd; path = usr/lib/libbz2.tbd; sourceTree = SDKROOT; };
+		7C24FE14EDDFC06A76BFE381 /* PlayerFacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerFacing.swift; sourceTree = "<group>"; };
 		8109F8BC5559C9CA077C2CBE /* TVWatchOnRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVWatchOnRow.swift; sourceTree = "<group>"; };
 		857825645808317F48AB50AA /* StreamRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamRelay.swift; sourceTree = "<group>"; };
 		8781972F0C4836EB0FCF2A63 /* Onboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Onboarding.swift; sourceTree = "<group>"; };
@@ -624,6 +627,7 @@
 				404C86B1D60778438688EBC2 /* PictureInPicture.swift */,
 				25632E2613497E37F388902A /* PlayerChrome.swift */,
 				7155AE8826997263B83512B3 /* PlayerClock.swift */,
+				7C24FE14EDDFC06A76BFE381 /* PlayerFacing.swift */,
 				098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */,
 				00376995EF16ADF89BDF9B03 /* PlayerView.swift */,
 				BEC4A175B06BF50066727F04 /* PlaylistKeys.swift */,
@@ -1173,6 +1177,7 @@
 				EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */,
 				D57BDC4BD51A60B08A48786B /* PlayerChrome.swift in Sources */,
 				FB882C1CB57D66CB302F2E0C /* PlayerClock.swift in Sources */,
+				F3812054FAD86B3BA5FD70F3 /* PlayerFacing.swift in Sources */,
 				77EDE39EF1FBF524AD0B54A7 /* PlayerOrientation.swift in Sources */,
 				09D42133B87A08F33EEB1C07 /* PlayerView.swift in Sources */,
 				D3B1612E9F3D51A62240956C /* PlaylistKeys.swift in Sources */,
@@ -1287,6 +1292,7 @@
 				461BF742965E3E5A547A1485 /* Platform.swift in Sources */,
 				6EA1240A0D81185D2CF7CAAF /* PlayerChrome.swift in Sources */,
 				F935A8F8B86BC5A71F17DE5B /* PlayerClock.swift in Sources */,
+				E670273A189FED60AC57B1CD /* PlayerFacing.swift in Sources */,
 				BD094BC015A36CC339757823 /* PlayerOrientation.swift in Sources */,
 				05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */,
 				3024B58A298A3D8AB378ADFE /* PlaylistKeys.swift in Sources */,

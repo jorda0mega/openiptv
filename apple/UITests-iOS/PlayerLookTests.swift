@@ -505,6 +505,28 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(app.buttons["Unmute"].waitForExistence(timeout: 2), "Mute didn't turn into Unmute")
     }
 
+    /// iPhone: a swipe up on the picture turns the player sideways and a
+    /// swipe down turns it upright. The simulator has no gravity, so
+    /// sideways is landscape right; turning the phone over is a Mac test.
+    func testSwipesTurnThePlayer() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .phone, "the swipes are iPhone only")
+        openFilm()
+        swipePicture(from: 0.35, to: 0.1)
+        controlsUp()
+        XCTAssertTrue(app.buttons["Rotate to portrait"].waitForExistence(timeout: 4), "a swipe up didn't turn it sideways")
+        shot("swiped up")
+        swipePicture(from: 0.2, to: 0.6)
+        controlsUp()
+        XCTAssertTrue(app.buttons["Rotate to landscape"].waitForExistence(timeout: 4), "a swipe down didn't turn it upright")
+        shot("swiped down")
+    }
+
+    private func swipePicture(from start: CGFloat, to end: CGFloat) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: start))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: end)))
+        sleep(2)
+    }
+
     /// A film made in a Spanish-speaking country starts in Spanish, with no
     /// subtitles. Needs the test server with the multi-track file and
     /// OPENIPTV_MOCK_COUNTRIES=Mexico (run with TEST_RUNNER_SPANISH_FILM=1).
