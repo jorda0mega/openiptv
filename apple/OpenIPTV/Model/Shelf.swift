@@ -129,7 +129,7 @@ struct Bucket: Sendable {
 @MainActor
 final class Lane {
     final class Ticket {
-        let interest: Interest?
+        fileprivate(set) var interest: Interest?
         fileprivate(set) var plays: Bool
         fileprivate var turn: CheckedContinuation<Void, Error>?
         fileprivate var running = false
@@ -192,6 +192,12 @@ final class Lane {
         ticket.running = false
         running -= 1
         admit()
+    }
+
+    /// A ticket waiting goes by the likeliest interest holding it.
+    func raise(_ ticket: Ticket, to interest: Interest) {
+        guard let held = ticket.interest, interest.likelihood > held.likelihood else { return }
+        ticket.interest = interest
     }
 
     func playNow(_ ticket: Ticket) {
@@ -385,6 +391,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             return nil
         case let .waiting(running)?, let .fetching(running)?:
             job = running
+            policy.lane.raise(job.ticket, to: interest)
         case nil:
             job = start(key, Lane.Ticket(interest))
         }
