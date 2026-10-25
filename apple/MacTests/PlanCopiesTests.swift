@@ -124,6 +124,20 @@ final class PlanCopiesTests: XCTestCase {
         }
     }
 
+    func testAPlaySessionIsAskedAgainWhenTheLatePlaybackInfoFails() async throws {
+        let asked = Locked(0)
+        let (server, client) = try server(info: [0.3, 0.3], itemSource: "File", failing: { target in
+            guard target.contains("/PlaybackInfo") else { return false }
+            var first = false
+            asked.mutate { $0 += 1; first = $0 == 1 }
+            return first
+        })
+        defer { server.stop() }
+        let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
+        let session = await playback.session()
+        XCTAssertEqual(session, "ps0", "the reports carried no play session")
+    }
+
     func testARemoteFileStillWaitsForPlaybackInfo() async throws {
         let (server, client) = try server(info: [1.5, 1.5], itemSource: "Http")
         defer { server.stop() }
