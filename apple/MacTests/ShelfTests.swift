@@ -524,7 +524,8 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(refusal { $0.memoryWarned = true }, "memory warning")
     }
 
-    private func onPhoneNetwork(_ choice: PhoneNetworkFilms, used: Int64 = 0, _ change: (inout Conditions) -> Void = { _ in }) -> Conditions {
+    private func onPhoneNetwork(_ choice: PhoneNetworkFilms, used: Int64 = 0,
+                                _ change: (inout Conditions) -> Void = { _ in }) -> Conditions {
         var conditions = open
         conditions.network = .expensive
         conditions.phoneNetwork = choice

@@ -162,7 +162,9 @@ final class Lane {
         if ticket.running { return }
         try Task.checkCancellation()
         if ticket.plays { return start(ticket) }
-        guard let interest = ticket.interest, conditions().allows(weight, at: interest.place, interest.likelihood) else { throw CancellationError() }
+        guard let interest = ticket.interest, conditions().allows(weight, at: interest.place, interest.likelihood) else {
+            throw CancellationError()
+        }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { turn in
                 ticket.turn = turn
@@ -206,7 +208,9 @@ final class Lane {
     #if DEBUG
     var debugCounts: String { "\(running) under way, \(waiting.count) waiting" }
 
-    func debugRefusal(at place: Place, _ likelihood: Likelihood) -> Conditions.Refusal? { conditions().refusal(weight, at: place, likelihood) }
+    func debugRefusal(at place: Place, _ likelihood: Likelihood) -> Conditions.Refusal? {
+        conditions().refusal(weight, at: place, likelihood)
+    }
     #endif
 
     func withdraw(_ ticket: Ticket) {
@@ -231,7 +235,9 @@ final class Lane {
 
     private func admit() {
         let now = conditions()
-        for ticket in waiting where !now.allows(weight, at: ticket.interest?.place ?? .page, ticket.interest?.likelihood ?? .next) { withdraw(ticket) }
+        for ticket in waiting where !now.allows(weight, at: ticket.interest?.place ?? .page, ticket.interest?.likelihood ?? .next) {
+            withdraw(ticket)
+        }
         refillTokens()
         while running < atOnce, hasToken, let next = waiting.min(by: goesBefore) {
             waiting.removeAll { $0 === next }
