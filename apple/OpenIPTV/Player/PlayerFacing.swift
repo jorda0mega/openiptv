@@ -77,7 +77,11 @@ final class PlayerFacing {
     }
 
     func swiped(_ swipe: Swipe, from current: Orientation) {
-        guard (swipe == .up) != current.isLandscape else { return }
+        let turns: Bool = switch swipe {
+        case .up: !current.isLandscape
+        case .down: current.isLandscape
+        }
+        guard turns else { return }
         rotate(from: current)
     }
 
@@ -111,7 +115,7 @@ final class PlayerFacing {
         leaning = nil
         otherSideSince = nil
         if wanted {
-            gravity.start { [weak self] in self?.felt($0, at: $1) }
+            gravity.start { [weak self] sample, time in self?.felt(sample, at: time) }
         } else {
             gravity.stop()
         }
@@ -129,11 +133,12 @@ final class PlayerFacing {
     }
 
     private static func side(of sample: Gravity) -> Orientation? {
-        let standing = (sample.x * sample.x + sample.y * sample.y).squareRoot()
-        guard standing >= Self.standing else { return nil }
+        let rise = (sample.x * sample.x + sample.y * sample.y).squareRoot()
+        guard rise >= standing else { return nil }
+        let across = sample.x / rise
         // Falling toward the phone's right edge is the interface's landscape left.
-        if sample.x / standing >= lean { return .landscapeLeft }
-        if sample.x / standing <= -lean { return .landscapeRight }
+        if across >= lean { return .landscapeLeft }
+        if across <= -lean { return .landscapeRight }
         return nil
     }
 }
