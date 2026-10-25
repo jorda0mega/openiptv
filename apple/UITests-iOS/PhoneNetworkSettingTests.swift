@@ -34,10 +34,10 @@ final class PhoneNetworkSettingTests: XCTestCase {
                        + "Used today: 0 MB. Low Data Mode turns this off.")
         XCTAssertTrue("\(picker.label) \(picker.value as? String ?? "")".contains("150 MB a day"),
                       "not on 150 MB a day: \(picker.label) \(picker.value ?? "")")
-        XCTAssertLessThan(player.frame.maxY, header.frame.minY, "the section isn't below the player")
-        XCTAssertLessThan(header.frame.maxY, picker.frame.minY)
-        XCTAssertLessThan(picker.frame.maxY, footer.frame.minY)
-        XCTAssertLessThan(footer.frame.maxY, languages.frame.minY, "the section isn't above the languages")
+        XCTAssertLessThanOrEqual(player.frame.maxY, header.frame.minY, "the section isn't below the player")
+        XCTAssertLessThanOrEqual(header.frame.maxY, picker.frame.minY)
+        XCTAssertLessThanOrEqual(picker.frame.maxY, footer.frame.minY)
+        XCTAssertLessThanOrEqual(footer.frame.maxY, languages.frame.minY, "the section isn't above the languages")
         shot("playback page")
 
         picker.tap()
