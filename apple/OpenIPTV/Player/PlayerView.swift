@@ -413,7 +413,6 @@ struct MoviePlayerView: View {
                 .onTapGesture {
                     if showInfo { toggleInfo() } else if showContinue { toggleContinue() } else if showEpisodes { toggleEpisodes() } else { toggleControls() }
                 }
-                // iPhone: up turns it sideways, down upright (see PlayerFacing).
                 .gesture(DragGesture(minimumDistance: 30).onEnded { drag in
                     guard !showInfo, !showContinue, !showEpisodes, scrubbing == nil,
                           let swipe = PlayerFacing.swipe(dx: drag.translation.width, dy: drag.translation.height) else { return }

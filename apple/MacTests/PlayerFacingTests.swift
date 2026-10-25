@@ -1,9 +1,6 @@
 import XCTest
 @testable import OpenIPTV
 
-/// iPhone film player: a swipe up on the picture turns it sideways and a
-/// swipe down turns it upright, even with Rotation Lock on; sideways, turning
-/// the phone over turns the picture over, so it is never upside down.
 @MainActor
 final class PlayerFacingTests: XCTestCase {
     private let gravity = FakeGravity()

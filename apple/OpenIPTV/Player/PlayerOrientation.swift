@@ -2,12 +2,6 @@
 import CoreMotion
 import UIKit
 
-/// Which ways the app may face, and turning it from the player.
-///
-/// iOS decides as usual: with Rotation Lock off the video turns with the
-/// phone; with it on, nothing turns by itself. The player turns it at will
-/// and holds it there (see PlayerFacing). If the phone then reports being
-/// turned (it only does with Rotation Lock off), iOS takes over again.
 @MainActor
 final class PlayerOrientation {
     static let shared = PlayerOrientation()
@@ -37,8 +31,6 @@ final class PlayerOrientation {
         }
     }
 
-    /// `film`: the film and show player, which follows the phone over on
-    /// iPhone (Live TV's vertical swipe changes the channel instead).
     func playerAppeared(film: Bool) {
         allowed = .allButUpsideDown
         facing.playerAppeared(sensing: film && UIDevice.current.userInterfaceIdiom == .phone)
@@ -78,6 +70,7 @@ final class PlayerOrientation {
         facing.swiped(swipe, from: current)
     }
 
+    // UIDevice orientation notifications stop under Rotation Lock.
     private func phoneTurned() {
         guard let orientation = Self.orientation(of: UIDevice.current.orientation) else { return }
         facing.phoneTurned(to: orientation)
@@ -86,7 +79,7 @@ final class PlayerOrientation {
     private static func orientation(of device: UIDeviceOrientation) -> PlayerFacing.Orientation? {
         switch device {
         case .portrait: .portrait
-        // The device turned left means the interface is landscape right.
+        // Device landscapeLeft is interface landscapeRight.
         case .landscapeLeft: .landscapeRight
         case .landscapeRight: .landscapeLeft
         default: nil
@@ -128,8 +121,6 @@ final class PlayerOrientation {
     }
 }
 
-/// The phone's gravity from CoreMotion, ten times a second (no permission
-/// needed). The simulator has none.
 private final class MotionGravity: GravitySource {
     private let manager = CMMotionManager()
 
