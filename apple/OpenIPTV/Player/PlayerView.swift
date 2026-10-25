@@ -16,8 +16,10 @@ enum PlayerItem: Identifiable {
     }
 
     var isFilm: Bool {
-        if case .vod = self { return true }
-        return false
+        switch self {
+        case .vod: true
+        case .live: false
+        }
     }
 }
 

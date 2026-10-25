@@ -79,28 +79,34 @@ final class PlayerOrientation {
     }
 
     private func phoneTurned() {
-        let facingNow: PlayerFacing.Orientation? = switch UIDevice.current.orientation {
+        guard let orientation = Self.orientation(of: UIDevice.current.orientation) else { return }
+        facing.phoneTurned(to: orientation)
+    }
+
+    private static func orientation(of device: UIDeviceOrientation) -> PlayerFacing.Orientation? {
+        switch device {
         case .portrait: .portrait
         // The device turned left means the interface is landscape right.
         case .landscapeLeft: .landscapeRight
         case .landscapeRight: .landscapeLeft
         default: nil
         }
-        if let facingNow { facing.phoneTurned(to: facingNow) }
     }
 
-    private func apply(_ turn: PlayerFacing.Turn) {
-        let target: PlayerFacing.Orientation
-        switch turn {
+    private func apply(_ change: PlayerFacing.Turn) {
+        switch change {
         case let .hold(orientation):
-            target = orientation
             allowed = Self.mask(orientation)
+            turn(to: orientation)
         case let .follow(orientation):
-            target = orientation
             allowed = .allButUpsideDown
+            turn(to: orientation)
         }
+    }
+
+    private func turn(to orientation: PlayerFacing.Orientation) {
         refresh()
-        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: Self.mask(target))) { _ in }
+        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: Self.mask(orientation))) { _ in }
     }
 
     private static func mask(_ orientation: PlayerFacing.Orientation) -> UIInterfaceOrientationMask {
