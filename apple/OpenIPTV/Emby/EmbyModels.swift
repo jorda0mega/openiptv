@@ -263,6 +263,8 @@ struct EmbyPlayback: Hashable, Identifiable {
     let durationSeconds: Double?
     var mediaSourceId: String?
     var playSessionId: String?
+    /// PlaybackInfo still out when it started from its item's own source.
+    var lateSession: LateSession?
     /// How it plays, for diagnostics: "direct stream", "remote file" or "transcode".
     var method = "direct stream"
     /// Tried in order if `url` fails to open (Emby's direct stream, then HLS).
@@ -288,18 +290,6 @@ struct EmbyPlayback: Hashable, Identifiable {
     var intro: ClosedRange<Double>?
     /// The audio and subtitles it starts with (see TrackChoice).
     var tracks: TrackPlan?
-
-    /// PlaybackInfo still out when it started from its item's own source.
-    var lateSession: LateSession?
-
-    /// The play session its reports carry: PlaybackInfo's, once it answered.
-    func session() async -> String? {
-        if let playSessionId { return playSessionId }
-        return await lateSession?.value()
-    }
-
-    /// The play session known now (a conversion asked meanwhile carries none).
-    var sessionNow: String? { playSessionId ?? lateSession?.now }
     /// The server said how to play it (its tracks and subtitle files);
     /// false when it didn't answer in time and a guess stands in.
     var listed = true
@@ -442,6 +432,15 @@ struct EmbyPlayback: Hashable, Identifiable {
         copy.requestedAt = Date()
         return copy
     }
+
+    /// The play session its reports carry: PlaybackInfo's, once it answered.
+    func session() async -> String? {
+        if let playSessionId { return playSessionId }
+        return await lateSession?.value()
+    }
+
+    /// The play session known now (a conversion asked meanwhile carries none).
+    var sessionNow: String? { playSessionId ?? lateSession?.now }
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {

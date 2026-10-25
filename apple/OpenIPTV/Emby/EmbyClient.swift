@@ -1038,7 +1038,13 @@ struct EmbyClient {
                 }
             }
         }
-        let late = info == nil ? copy.late.map(LateSession.init) : nil
+        // A late PlaybackInfo that fails is asked again, as one asked before the start is.
+        let late = info == nil ? copy.late.map { late in
+            LateSession(Task {
+                if let info = await late.value { return info }
+                return try? await playbackInfo(item.id, startSeconds: resume)
+            })
+        } : nil
         if let source = info?.MediaSources?.first ?? copy.itemSource {
             let session = info?.PlaySessionId
             playback.mediaSourceId = source.Id
