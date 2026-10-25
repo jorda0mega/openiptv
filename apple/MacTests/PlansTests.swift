@@ -112,6 +112,20 @@ final class PlansTests: XCTestCase {
         XCTAssertEqual(server.asked, 3, "the third card's tap asked again")
     }
 
+    func testAPlanAskedByHomeGoesFirstOnceItsCardIsHeldOnScreen() async throws {
+        let server = Server(wait: 0.3)
+        let open = open
+        let plans = Plans.shelf(lane: Lane(.light, atOnce: 1) { open }) { try await server.playback($0) }
+        let keys = ["m0", "m1", "m2"].map { PlanKey(itemId: $0, kind: "Movie", versions: [$0]) }
+        var asks: [Task<EmbyPlayback?, Never>] = []
+        for (key, likelihood) in [(keys[0], Likelihood.likely), (keys[1], .glance), (keys[2], .glance), (keys[1], .likely)] {
+            asks.append(Task { await plans.warm(key, for: Interest(at: .continueWatching, likelihood)) })
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        for ask in asks { _ = await ask.value }
+        XCTAssertEqual(server.order, ["m0", "m1", "m2"], "the card held on screen waited behind one only Home asked for")
+    }
+
     func testAStopForgetsThatTitlesPlanOnly() async throws {
         let server = Server()
         let plans = plans(server)
