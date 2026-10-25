@@ -1,23 +1,13 @@
 import Foundation
 
-/// The phone's gravity, as CoreMotion reports it (iPhone; the Mac tests feed
-/// their own).
 @MainActor
 protocol GravitySource: AnyObject {
     func start(_ felt: @escaping @MainActor (PlayerFacing.Gravity, TimeInterval) -> Void)
     func stop()
 }
 
-/// Which way the player faces on iPhone. A swipe up on the picture, or the
-/// rotate button, turns it sideways and holds it there, even with Rotation
-/// Lock on: to the side the phone leans toward, landscape right when it
-/// leans to neither. A swipe down, or the button again, turns it upright.
-/// Held sideways in the film player, turning the phone over turns the
-/// picture over, so it is never upside down. With Rotation Lock off, a phone
-/// turned the other way lets iOS follow the phone again, as before.
 @MainActor
 final class PlayerFacing {
-    /// As UIInterfaceOrientation names them.
     enum Orientation: Equatable {
         case portrait, landscapeLeft, landscapeRight
 
@@ -27,21 +17,15 @@ final class PlayerFacing {
     enum Swipe: Equatable { case up, down }
 
     enum Turn: Equatable {
-        /// Turn there and stay, however the phone is held.
         case hold(Orientation)
-        /// Turn there and let iOS follow the phone again.
         case follow(Orientation)
     }
 
     struct Gravity: Equatable { var x, y, z: Double }
 
-    /// The least travel up or down the picture that's a swipe (points).
     static let swipeTravel = 60.0
-    /// How far up from flat the screen must stand to lean either way, and
-    /// how far it must lean (the share of its fall across the screen).
-    static let standing = 0.4
-    static let lean = 0.7
-    /// How long the phone must stay over on the other side to turn there.
+    static let minimumRise = 0.4
+    static let minimumSideShare = 0.7
     static let settle: TimeInterval = 0.3
 
     private let gravity: GravitySource
@@ -58,7 +42,6 @@ final class PlayerFacing {
         self.turn = turn
     }
 
-    /// `sensing`: the iPhone film player, which follows the phone over.
     func playerAppeared(sensing: Bool) {
         held = nil
         self.sensing = sensing
@@ -85,12 +68,10 @@ final class PlayerFacing {
         rotate(from: current)
     }
 
-    /// The rotate button: sideways when upright, upright when sideways.
     func rotate(from current: Orientation) {
         hold(current.isLandscape ? .portrait : leaning ?? .landscapeRight)
     }
 
-    /// The phone reported turning, which it only does with Rotation Lock off.
     func phoneTurned(to orientation: Orientation) {
         guard let held, orientation != held else { return }
         self.held = nil
@@ -134,11 +115,11 @@ final class PlayerFacing {
 
     private static func side(of sample: Gravity) -> Orientation? {
         let rise = (sample.x * sample.x + sample.y * sample.y).squareRoot()
-        guard rise >= standing else { return nil }
+        guard rise >= minimumRise else { return nil }
         let across = sample.x / rise
-        // Falling toward the phone's right edge is the interface's landscape left.
-        if across >= lean { return .landscapeLeft }
-        if across <= -lean { return .landscapeRight }
+        // Gravity toward the phone's right edge is interface landscape left.
+        if across >= minimumSideShare { return .landscapeLeft }
+        if across <= -minimumSideShare { return .landscapeRight }
         return nil
     }
 }

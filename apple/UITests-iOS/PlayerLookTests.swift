@@ -505,9 +505,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(app.buttons["Unmute"].waitForExistence(timeout: 2), "Mute didn't turn into Unmute")
     }
 
-    /// iPhone: a swipe up on the picture turns the player sideways and a
-    /// swipe down turns it upright. The simulator has no gravity, so
-    /// sideways is landscape right; turning the phone over is a Mac test.
     func testSwipesTurnThePlayer() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .phone, "the swipes are iPhone only")
         openFilm()
