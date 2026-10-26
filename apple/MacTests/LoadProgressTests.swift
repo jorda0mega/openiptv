@@ -15,54 +15,26 @@ final class LoadProgressTests: XCTestCase {
         LoadProgress(subject: .channel("PPV 1"), wait: wait, stage: stage, received: received, cause: cause, began: tap)
     }
 
-    func testTheFirstSecondIsTheRingAlone() {
-        let shown = film(.asking).shown(at: at(0.6))
-        XCTAssertNotNil(shown?.ring, "no ring in the first second")
-        XCTAssertNil(shown?.line, "words in the first second: a quick start flashes them")
-        XCTAssertNil(shown?.dashes)
-        XCTAssertEqual(shown?.details, [])
-    }
-
-    func testFromOneSecondTheLineNamesTheStepAndTheDashesCountIt() {
-        let lines: [(LoadProgress, String, Int)] = [
-            (film(.asking), "Asking your server", 1),
-            (film(.fetching), "Opening the film", 2),
-            (film(.starting), "Starting", 3),
-            (channel(.asking), "Connecting to PPV 1", 1),
-            (channel(.fetching, received: 0.6), "Getting the picture · 60%", 2),
-            (channel(.starting), "Starting", 3),
-        ]
-        for (load, line, dashes) in lines {
-            let shown = load.shown(at: at(2))
-            XCTAssertEqual(shown?.line, line)
-            XCTAssertEqual(shown?.dashes, dashes, line)
-            XCTAssertEqual(shown?.details, [], "\(line): a second line before 8 s")
-            XCTAssertEqual(shown?.tryAgain, false, "\(line): Try again before 8 s")
+    func testTheFirstSecondDrawsNothing() {
+        for load in [film(.asking), film(.fetching), channel(.asking)] {
+            XCTAssertEqual(load.shown(at: at(0.6)), LoadProgress.Shown(), "a quick start flashed something")
         }
     }
 
-    func testThePercentageNeverRoundsUpToDone() {
-        XCTAssertEqual(channel(.fetching, received: 0.996).shown(at: at(2))?.line, "Getting the picture · 99%")
-        XCTAssertEqual(channel(.fetching, received: 1.7).shown(at: at(2))?.line, "Getting the picture · 100%")
-        XCTAssertEqual(channel(.fetching, received: -0.2).shown(at: at(2))?.line, "Getting the picture · 0%")
-        XCTAssertEqual(channel(.fetching).shown(at: at(2))?.line, "Getting the picture", "a percentage with nothing measured")
+    func testFromOneSecondANormalStartIsTheRingAlone() {
+        let starts = [film(.asking), film(.fetching), film(.starting), channel(.asking), channel(.fetching, received: 0.6), channel(.starting)]
+        let shown = starts.map { $0.shown(at: at(2)) }
+        for one in shown {
+            XCTAssertNotNil(one?.ring, "no ring at 2 s")
+            XCTAssertNil(one?.line, "a step named: \(one?.line ?? "")")
+            XCTAssertEqual(one?.details, [])
+            XCTAssertEqual(one?.buttons, [])
+        }
+        XCTAssertEqual(Set(shown.map { $0?.ring }).count, 1, "the ring changed as the start went on")
+        XCTAssertEqual(film(.asking).shown(at: at(2)), film(.asking).shown(at: at(7.9)), "the view changed before 8 s")
     }
 
-    func testTheRingFillsByStepAndByTheDataReceived() {
-        let fills = [film(.asking), film(.fetching), film(.starting)].compactMap { $0.shown(at: at(2))?.ring }
-        XCTAssertEqual(fills, fills.sorted(), "the ring went back as the start went on")
-        XCTAssertEqual(Set(fills).count, 3, "a step that doesn't move the ring")
-        let receiving = [0, 0.3, 0.6, 1].compactMap { channel(.fetching, received: $0).shown(at: at(2))?.ring }
-        XCTAssertEqual(receiving, receiving.sorted())
-        XCTAssertLessThan(receiving[0], receiving[3], "data arriving doesn't move the ring")
-        let asked = channel(.asking).shown(at: at(2))?.ring ?? 1, starting = channel(.starting).shown(at: at(2))?.ring ?? 0
-        XCTAssertLessThan(asked, receiving[0])
-        XCTAssertLessThan(receiving[3], starting)
-        XCTAssertGreaterThan(asked, 0, "an empty ring while asking")
-        XCTAssertLessThan(starting, 1, "a full ring before the picture")
-    }
-
-    func testFromEightSecondsASecondLineNamesWhatIsSlowAndCountsTheSeconds() {
+    func testFromEightSecondsOneLineNamesWhatIsSlow() {
         let slow: [(LoadProgress, String)] = [
             (film(.asking), "Your server is slow to answer · 12 s"),
             (film(.fetching), "Your server is slow to answer · 12 s"),
@@ -74,13 +46,28 @@ final class LoadProgressTests: XCTestCase {
         ]
         for (load, line) in slow {
             let shown = load.shown(at: at(12.4))
+            XCTAssertNil(shown?.line, "\(line): a step line above it")
             XCTAssertEqual(shown?.details, [line])
             XCTAssertEqual(shown?.tryAgain, true, "\(line): no Try again")
-            XCTAssertNotNil(shown?.line, "\(line): the step went")
             XCTAssertNotNil(shown?.ring, "\(line): the ring went")
         }
         XCTAssertEqual(film(.asking).shown(at: at(7.9))?.details, [], "slow before 8 s")
         XCTAssertEqual(film(.asking).shown(at: at(8))?.details, ["Your server is slow to answer · 8 s"])
+    }
+
+    func testAQuickStartHoldsTheRingHalfASecondOrNeverShowsIt() {
+        var quick = film(.fetching)
+        quick.endedAt = at(1.2)
+        XCTAssertNotNil(quick.shown(at: at(1.3))?.ring, "the ring flashed off 0.2 s after it came")
+        XCTAssertNil(quick.shown(at: at(1.5)))
+        XCTAssertNil(quick.deadline, "a finished start still has a deadline")
+        var quicker = film(.fetching)
+        quicker.endedAt = at(0.8)
+        XCTAssertNil(quicker.shown(at: at(0.9)), "a start done before 1 s showed something")
+        XCTAssertNil(quicker.shown(at: at(1.2)), "the ring came after the picture")
+        var slow = film(.fetching)
+        slow.endedAt = at(4)
+        XCTAssertNil(slow.shown(at: at(4.1)), "the ring stayed over the picture")
     }
 
     func testAFailureNamesTheChannelAndTheTries() {
@@ -93,7 +80,6 @@ final class LoadProgressTests: XCTestCase {
         XCTAssertEqual(shown?.tryAgain, true)
         XCTAssertEqual(shown?.otherChannels, true)
         XCTAssertEqual(shown?.buttons, [.tryAgain, .otherChannels], "the remote's first stop isn't Try again")
-        XCTAssertNil(shown?.dashes)
     }
 
     func testOtherChannelsOnlyWhenAnotherChannelHasTheEvent() {
@@ -135,7 +121,6 @@ final class LoadProgressTests: XCTestCase {
         let shown = drop.shown(at: at(3))
         XCTAssertEqual(shown?.line, "Reconnecting to PPV 1…")
         XCTAssertNotNil(shown?.ring)
-        XCTAssertNil(shown?.dashes)
         XCTAssertEqual(shown?.tryAgain, false)
         XCTAssertEqual(channel(.fetching, received: 0.5, wait: .reconnect).shown(at: at(4))?.line, "Reconnecting to PPV 1…")
         let slow = drop.shown(at: at(9))
@@ -223,7 +208,7 @@ final class LoadTrackTests: XCTestCase {
     func testAStreamAskedForAfterThePictureIsADrop() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
-        track.pictured()
+        track.pictured(at: tap)
         XCTAssertFalse(track.dropped)
         track.asked(at: at(60))
         XCTAssertTrue(track.dropped)
@@ -232,7 +217,7 @@ final class LoadTrackTests: XCTestCase {
         track.asked(at: at(62))
         XCTAssertEqual(track.began, at(60))
         XCTAssertEqual(track.tries, 2)
-        track.pictured()
+        track.pictured(at: tap)
         XCTAssertFalse(track.dropped, "back with a picture and still called a drop")
     }
 
@@ -242,7 +227,7 @@ final class LoadTrackTests: XCTestCase {
         track.lost(at: at(5))
         XCTAssertFalse(track.dropped, "a start that never had a picture called a drop")
         XCTAssertEqual(track.began, tap)
-        track.pictured()
+        track.pictured(at: tap)
         track.lost(at: at(60))
         XCTAssertTrue(track.dropped)
         XCTAssertEqual(track.began, at(60), "offline during play counted from the tap")
@@ -326,7 +311,7 @@ final class LoadTrackTests: XCTestCase {
     func testAQualitySwitchDuringPlayIsANewAttemptButNotATry() {
         var track = LoadTrack(began: tap, stage: .fetching)
         let first = track.asked(.fetching, at: at(0))
-        track.pictured()
+        track.pictured(at: tap)
         let switched = track.nextAttempt()
         XCTAssertFalse(track.isCurrent(first))
         XCTAssertTrue(track.isCurrent(switched))
@@ -349,7 +334,7 @@ final class LoadTrackTests: XCTestCase {
     func testAStallThatBecomesAReopenCountsFromTheStall() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
-        track.pictured()
+        track.pictured(at: tap)
         track.stalled(at: at(50))
         track.asked(at: at(58))
         XCTAssertEqual(track.pictureLost, at(50), "the reconnect counted from the reopen, not from when the picture went")
@@ -359,7 +344,7 @@ final class LoadTrackTests: XCTestCase {
     func testALiveFreezeSaysReconnectingFromWhenThePictureWent() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
-        track.pictured()
+        track.pictured(at: tap)
         track.stalled(at: at(50))
         let frozen = LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: true, cause: .channel)
         XCTAssertEqual(frozen?.wait, .reconnect, "a frozen live picture shows a ring with no words")
@@ -378,17 +363,33 @@ final class LoadTrackTests: XCTestCase {
         track.asked(at: at(0))
         XCTAssertEqual(LoadProgress.channel("PPV 1", track: track, loading: true, hasPicture: false, cause: .server)?.wait, .start)
         XCTAssertNil(LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: false, cause: .channel))
-        track.pictured()
-        XCTAssertNil(LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: true, cause: .channel), "a progress over a moving picture")
+        track.pictured(at: at(4))
+        XCTAssertNil(LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: true, cause: .channel)?.shown(at: at(4.1)),
+                     "a progress over a moving picture")
         let failed = LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: false, cause: .channel,
                                           failure: .init(kind: .noPicture, tries: 2, seconds: 30))
         XCTAssertEqual(failed?.shown(at: at(31))?.line, "PPV 1 isn’t sending a picture")
     }
 
+    func testThePictureEndsAStartButNotADrop() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.pictured(at: at(1.2))
+        XCTAssertEqual(track.startEndedAt, at(1.2))
+        let held = LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: true, cause: .channel)
+        XCTAssertNotNil(held?.shown(at: at(1.3))?.ring, "a quick live start flashed the ring off")
+        XCTAssertNil(held?.shown(at: at(1.6)))
+        track.lost(at: at(60))
+        XCTAssertNil(track.startEndedAt)
+        track.asked(at: at(61))
+        track.pictured(at: at(62))
+        XCTAssertNil(track.startEndedAt, "a reconnect's end held the ring")
+    }
+
     func testAStallCountsFromItsStart() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
-        track.pictured()
+        track.pictured(at: tap)
         track.stalled(at: at(50))
         track.stalled(at: at(51))
         XCTAssertEqual(track.stalledSince, at(50))
