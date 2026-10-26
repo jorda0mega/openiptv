@@ -617,6 +617,8 @@ final class StreamRelay: @unchecked Sendable {
             return then(kept, cache.total)
         }
         if let key, lock.withLock({ stoppedAhead.contains(key) }) { return then(nil, nil) }
+        let use = phoneNetworkUse
+        guard let reserved = key == nil ? 0 : use.reserve(count) else { return then(nil, nil) }
         var request = URLRequest(url: route.url)
         request.timeoutInterval = 30
         for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
@@ -625,7 +627,7 @@ final class StreamRelay: @unchecked Sendable {
         let asked = from..<from + count
         let task = HTTP.session.dataTask(with: request) { [weak self] data, response, _ in
             if let key, let made { self?.lock.withLock { self?.ahead[key]?.removeAll { $0 === made } } }
-            if key != nil, let data, let self { self.phoneNetworkUse.noteArrived(data.count, reserved: 0) }
+            if key != nil { use.noteArrived(data?.count ?? 0, reserved: reserved) }
             let http = response as? HTTPURLResponse
             let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
             #if DEBUG

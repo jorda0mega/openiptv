@@ -192,8 +192,8 @@ enum ServerSubtitles {
     private nonisolated static func download(_ subtitle: ServerSubtitle, on session: URLSession) async throws -> URL {
         let generation = await store.generation
         do {
-            let (data, response) = try await session.data(for: request(for: subtitle), delegate: HTTP.keyOutOfRedirects)
-            if FetchAhead.isUnderWay { PhoneNetworkUse.shared.noteArrived(data.count, over: NetworkStatus.shared.network) }
+            let (data, response) = try await FetchAhead.isUnderWay
+                ? ahead(request(for: subtitle), on: session) : session.data(for: request(for: subtitle), delegate: HTTP.keyOutOfRedirects)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw SourceError.http(code) }
             guard !data.isEmpty else { throw SourceError.unexpected("The server's answer was empty.") }
@@ -207,5 +207,30 @@ enum ServerSubtitles {
             if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
             throw SourceError.wrap(error)
         }
+    }
+
+    /// A subtitle file is a few hundred kB: one fetched ahead under 150 MB a
+    /// day takes at most this from what is left, or isn't fetched.
+    nonisolated static let largestAhead: Int64 = 2 << 20
+
+    nonisolated static func ahead(_ request: URLRequest, on session: URLSession,
+                                  use: PhoneNetworkUse = .shared) async throws -> (Data, URLResponse) {
+        guard let room = use.reserve(largestAhead) else { throw CancellationError() }
+        var data = Data()
+        defer { use.noteArrived(data.count, reserved: room) }
+        guard room > 0 else {
+            let whole = try await session.data(for: request, delegate: HTTP.keyOutOfRedirects)
+            data = whole.0
+            return whole
+        }
+        let (bytes, response) = try await session.bytes(for: request, delegate: HTTP.keyOutOfRedirects)
+        for try await byte in bytes {
+            guard data.count < room else {
+                bytes.task.cancel()
+                throw CancellationError()
+            }
+            data.append(byte)
+        }
+        return (data, response)
     }
 }

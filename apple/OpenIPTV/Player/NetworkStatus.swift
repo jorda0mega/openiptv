@@ -203,6 +203,7 @@ final class PhoneNetworkUse: @unchecked Sendable {
     private let network: @Sendable () -> Conditions.Network
     private let lock = NSLock()
     private var kept: (day: String, bytes: Int64)
+    private var underWay: Int64 = 0
 
     init(defaults: UserDefaults, calendar: Calendar = .autoupdatingCurrent,
          network: @escaping @Sendable () -> Conditions.Network = { NetworkStatus.shared.network }) {
@@ -218,18 +219,38 @@ final class PhoneNetworkUse: @unchecked Sendable {
         return lock.withLock { kept.day == today ? kept.bytes : 0 }
     }
 
+    /// Asked before a read ahead goes, as the choice says: nil refuses it,
+    /// else it takes what it returns until noteArrived gives it back. Under
+    /// 150 MB a day it goes only if it fits beside the reads under way.
     func reserve(_ bytes: Int64, at now: Date = Date()) -> Int64? {
-        0
+        switch (network(), PhoneNetworkFilms.chosen(in: defaults)) {
+        case (.constrained, _), (.expensive, .none):
+            return nil
+        case (.expensive, .daily):
+            let today = day(of: now)
+            return lock.withLock {
+                guard (kept.day == today ? kept.bytes : 0) + underWay + bytes <= PhoneNetworkFilms.dailyBytes else { return nil }
+                underWay += bytes
+                return bytes
+            }
+        default:
+            return 0
+        }
     }
 
     func noteArrived(_ bytes: Int, reserved: Int64, at now: Date = Date()) {
-        noteArrived(bytes, over: network(), at: now)
+        noteArrived(bytes, reserved: reserved, over: network(), at: now)
     }
 
     func noteArrived(_ bytes: Int, over network: Conditions.Network, at now: Date = Date()) {
-        guard network == .expensive, bytes > 0 else { return }
+        noteArrived(bytes, reserved: 0, over: network, at: now)
+    }
+
+    private func noteArrived(_ bytes: Int, reserved: Int64, over network: Conditions.Network, at now: Date) {
         let today = day(of: now)
         lock.withLock {
+            underWay -= reserved
+            guard network == .expensive, bytes > 0 else { return }
             kept = (today, (kept.day == today ? kept.bytes : 0) + Int64(bytes))
             defaults.set(["day": kept.day, "bytes": kept.bytes], forKey: Self.key)
             #if DEBUG

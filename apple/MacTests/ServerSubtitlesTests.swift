@@ -69,6 +69,27 @@ final class ServerSubtitlesTests: XCTestCase {
         XCTAssertEqual(followed?.url?.absoluteString, "https://elsewhere.example/Stream.srt?a=1")
     }
 
+    func testUnder150MBADayASubtitleFileAheadTakesNoMoreThanItsRoom() async throws {
+        let suite = "phone-network-\(UUID())"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let use = PhoneNetworkUse(defaults: try XCTUnwrap(UserDefaults(suiteName: suite))) { .expensive }
+        let server = try LocalServer { target in (200, [:], String(repeating: "1", count: target == "/large.srt" ? 3 << 20 : 1000)) }
+        let session = URLSession(configuration: .ephemeral)
+        func ahead(_ name: String) async -> Int? {
+            try? await ServerSubtitles.ahead(URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/\(name)")!), on: session, use: use).0.count
+        }
+        let small = await ahead("small.srt")
+        let large = await ahead("large.srt")
+        XCTAssertEqual(small, 1000)
+        XCTAssertNil(large, "a subtitle file past its room was kept")
+        XCTAssertLessThanOrEqual(use.usedToday(), 1000 + ServerSubtitles.largestAhead)
+        use.noteArrived(Int(PhoneNetworkFilms.dailyBytes - use.usedToday() - ServerSubtitles.largestAhead + 1), over: .expensive)
+        let asked = server.asked.value.count
+        let late = await ahead("small.srt")
+        XCTAssertNil(late)
+        XCTAssertEqual(server.asked.value.count, asked, "asked with less left than its room")
+    }
+
     func testATrackIsNeverPrintedWithItsKey() {
         var dumped = ""
         dump(track(), to: &dumped)
