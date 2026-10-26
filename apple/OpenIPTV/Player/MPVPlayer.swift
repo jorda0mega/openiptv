@@ -37,6 +37,8 @@ final class MPVPlayer: @unchecked Sendable {
         case network(buffer: Double, bytesPerSecond: Double)
         /// A jump landed and playback carried on; seconds since it was asked.
         case seeked(Double)
+        /// The player is on its way to a jump (true), or has landed (false).
+        case seeking(Bool)
         /// A preview while choosing where to jump is on screen (its target,
         /// in the player's seconds).
         case previewShown(Double)
@@ -412,6 +414,7 @@ final class MPVPlayer: @unchecked Sendable {
         FFmpegLog.listen()
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
+        mpv_observe_property(mpv, 0, "seeking", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "duration", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "demuxer-cache-duration", MPV_FORMAT_DOUBLE)
@@ -1654,6 +1657,8 @@ final class MPVPlayer: @unchecked Sendable {
                 frames?.syncClock(timePos + clock, playing: !paused)
                 #endif
                 emit(.paused(paused))
+            case "seeking" where property.format == MPV_FORMAT_FLAG:
+                emit(.seeking(value.assumingMemoryBound(to: Int32.self).pointee != 0))
             case "duration" where property.format == MPV_FORMAT_DOUBLE:
                 duration = value.assumingMemoryBound(to: Double.self).pointee
             case "time-pos" where property.format == MPV_FORMAT_DOUBLE:
