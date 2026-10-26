@@ -339,7 +339,15 @@ enum ServerProbe {
         /// connection: a server's disk woken by the first.
         var file: Double?, fileAgain: Double?
 
-        var readout: String { String(format: "server: connect %.2f s, first byte %.2f s", connect, firstByte) }
+        var readout: String {
+            let file = film.map { String(format: "server file: first byte %.2f s, again %.2f s | ", $0.first, $0.again) } ?? ""
+            return file + String(format: "server: connect %.2f s, first byte %.2f s", connect, firstByte)
+        }
+
+        private var film: (first: Double, again: Double)? {
+            guard let file, let fileAgain else { return nil }
+            return (file, fileAgain)
+        }
     }
 
     /// The key goes in a header, and only to `account`'s server: a redirect isn't followed.
@@ -350,7 +358,17 @@ enum ServerProbe {
         request.setValue(account.accessToken, forHTTPHeaderField: "X-Emby-Token")
         request.timeoutInterval = 30
         guard let fresh = await answered(request, on: session), let again = await answered(request, on: session) else { return nil }
-        return Reading(connect: max(0, fresh - again), firstByte: again)
+        var reading = Reading(connect: max(0, fresh - again), firstByte: again)
+        if let film {
+            var read = URLRequest(url: EmbyClient.api(account.serverURL, "Videos/\(film)/stream")
+                .appending(queryItems: [.init(name: "Static", value: "true"), .init(name: "MediaSourceId", value: film)]))
+            read.setValue(account.accessToken, forHTTPHeaderField: "X-Emby-Token")
+            read.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+            read.timeoutInterval = 30
+            reading.file = await answered(read, on: session)
+            reading.fileAgain = await answered(read, on: session)
+        }
+        return reading
     }
 
     private static func answered(_ request: URLRequest, on session: URLSession) async -> Double? {

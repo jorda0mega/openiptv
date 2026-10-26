@@ -77,6 +77,8 @@ LINES = [
     (r"test server .*?link ([\d.]+) MB/s while carrying data", [("link: MB/s while carrying data", "MB/s", 1)]),
     (r"test server .*?(\d+) network changes", [("link: network changes", "count", 1)]),
     (r"server: connect ([\d.]+) s, first byte ([\d.]+) s$", [("server probe: connect", "s", 1), ("server probe: first byte", "s", 2)]),
+    (r"server file: first byte ([\d.]+) s, again ([\d.]+) s", [("server probe: film file first byte", "s", 1),
+                                                                  ("server probe: film file again", "s", 2)]),
 ]
 PROBE = re.compile(r"server: connect [\d.]+ s, first byte ([\d.]+) s$")
 RUN = re.compile(r"^(?:\[([^\]]+)\] |== ((?:ios|tvos) [^,]+?) \d\d:\d\d)")

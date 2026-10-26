@@ -58,6 +58,15 @@ class Extract(unittest.TestCase):
         self.assertEqual(metered["start ready: MB ahead, the open's own reads"]["values"], [0.0])
         self.assertEqual(metered["start ready: reads ahead, the rest"]["values"], [2.0])
         self.assertEqual(numbers["real-quiet tvos"]["start ready: reads ahead, the rest"]["values"], [1.0])
+
+    def test_the_film_files_first_byte_before_the_start(self):
+        line = "[none] REAL link start cold: tap to first frame 16.7 s at 148 s (a new player) | plan 13.63 s (asked) | " \
+               "server file: first byte 8.91 s, again 0.16 s | server: connect 0.32 s, first byte 0.15 s"
+        quiet = film_numbers.extract([line], "probe", None)["real-quiet"]
+        self.assertEqual(quiet["server probe: film file first byte"]["values"], [8.91])
+        self.assertEqual(quiet["server probe: film file again"]["values"], [0.16])
+        self.assertEqual(quiet["server probe: first byte"]["values"], [0.15])
+
     def test_the_plan_request_by_request(self):
         quiet = film_numbers.extract(PLANNED.splitlines(), "probe", None)["real-quiet"]
         self.assertEqual(quiet["start ready: plan"]["values"], [25.6])

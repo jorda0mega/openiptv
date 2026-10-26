@@ -1284,11 +1284,18 @@ final class AppModel {
     /// UI tests (-debugServerProbe YES): the server's own state at launch.
     var debugServer = ""
 
+    /// The film read is Continue Watching's first card's.
     func debugProbeServer() async {
-        for _ in 0..<300 where sources.emby == nil { try? await Task.sleep(for: .milliseconds(200)) }
+        for _ in 0..<300 where sources.emby == nil || continueCard == nil { try? await Task.sleep(for: .milliseconds(200)) }
         guard let account = sources.emby else { return }
-        debugServer = await ServerProbe.measure(account)?.readout ?? "server: no answer"
+        let film: String? = switch continueCard?.playTarget {
+        case let .playable(id, _)?, let .title(id, _)?: id
+        case nil: nil
+        }
+        debugServer = await ServerProbe.measure(account, film: film)?.readout ?? "server: no answer"
     }
+
+    private var continueCard: Card? { rows.first { $0.title == Self.continueTitle }?.cards.first }
 
     func debugFilmHeardOnlyInAnotherCopy(limit: Int = 12) async -> EmbyPlayback? {
         for _ in 0..<90 where library.versions.isEmpty { try? await Task.sleep(for: .seconds(1)) }
