@@ -471,6 +471,23 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(tapped, 3, "the tap after the stop didn't fetch it anew")
     }
 
+    func testOnWiFiAFetchAheadUnderWayGoesOnWhenTheLinkDropsAMoment() async throws {
+        let conditions = Locked(open)
+        let fetches = Fetches(held: true)
+        let lane = Lane(.bytes, atOnce: 2) { conditions.value }
+        let shelf = shelf(fetches, lane: lane)
+        let ahead = Task { await shelf.warm("ahead", for: Interest(at: .continueWatching, .likely)) }
+        var started = fetches.started.makeAsyncIterator()
+        _ = await started.next()
+        conditions.mutate { $0.network = .unknown }
+        lane.conditionsChanged()
+        conditions.mutate { $0.network = .unmetered }
+        lane.conditionsChanged()
+        fetches.letThrough()
+        let fetched = await ahead.value
+        XCTAssertEqual(fetched, 1, "a card's fetch on Wi-Fi stopped when the link dropped a moment")
+    }
+
     func testCancelledWaiterTakesNoTurn() async throws {
         let lane = lane(atOnce: 1)
         let busy = Lane.Ticket(Interest(at: .posterRow, .glance))
