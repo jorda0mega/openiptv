@@ -53,11 +53,26 @@ struct LoadProgress: Equatable {
 
     var deadline: Date? {
         guard failure == nil, !StartPatience.off else { return nil }
-        return began.addingTimeInterval(StartPatience.failAfter / .seconds(1))
+        return (pictureLost ?? began).addingTimeInterval(StartPatience.failAfter / .seconds(1))
     }
 
     func overdue(at now: Date) -> Bool {
         deadline.map { now >= $0 } ?? false
+    }
+
+    /// A channel's wait: its start, or a drop (a reopen, offline, a frozen
+    /// picture), each saying Reconnecting from when the picture went.
+    static func channel(_ name: String, track: LoadTrack, loading: Bool, hasPicture: Bool, cause: Cause,
+                        failure: Failure? = nil) -> LoadProgress? {
+        let subject = Subject.channel(name)
+        if let failure { return LoadProgress(subject: subject, cause: .channel, began: track.began, failure: failure) }
+        if loading {
+            return LoadProgress(subject: subject, wait: hasPicture ? .reconnect : .start, stage: track.stage,
+                                received: track.received, cause: cause, began: track.began,
+                                pictureLost: hasPicture ? track.pictureLost : nil)
+        }
+        guard hasPicture, let since = track.stalledSince else { return nil }
+        return LoadProgress(subject: subject, wait: .reconnect, stage: track.stage, cause: cause, began: since, pictureLost: since)
     }
 
     enum Button: Equatable {
