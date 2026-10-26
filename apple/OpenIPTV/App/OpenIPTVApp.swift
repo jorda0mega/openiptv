@@ -36,7 +36,7 @@ private struct FilmStartCover: View {
     var body: some View {
         if let start = model.startProgress, start.stage == .askingServer, let title = start.title {
             TimelineView(.periodic(from: start.began, by: 0.25)) { context in
-                if start.failure != nil || context.date.timeIntervalSince(start.began) >= LoadProgress.wordsAfter {
+                if start.failure != nil || context.date.timeIntervalSince(start.began) >= LoadProgress.ringAfter {
                     cover(start, title)
                 }
             }
@@ -51,7 +51,7 @@ private struct FilmStartCover: View {
                                 began: start.began, failure: failure)
         let actions = LoadActions(tryAgain: { model.retryStart() })
         return ZStack(alignment: .topLeading) {
-            Color.black.ignoresSafeArea()
+            StartBackdrop(images: start.backdrop, title: title)
             #if os(tvOS)
             Button { model.retryStart() } label: {
                 LoadProgressView(load: load, actions: actions, focused: failure == nil ? nil : .tryAgain)
@@ -62,6 +62,7 @@ private struct FilmStartCover: View {
             #else
             LoadProgressView(load: load, actions: actions)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
             Button { model.closeStart() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 17, weight: .semibold))

@@ -39,20 +39,23 @@ struct LoadProgress: Equatable {
     var subject: Subject
     var wait = Wait.start
     var stage = Stage.asking
-    var received: Double?
     var cause: Cause
     var began: Date
     /// When the picture went (a freeze, or the loss itself): the notice
     /// counts its 3 s from there, the request's own wait from `began`.
     var pictureLost: Date?
     var failure: Failure?
+    /// A start's first picture: the ring, once shown, stays a moment.
+    var endedAt: Date?
 
-    static let wordsAfter = 1.0
+    static let ringAfter = 1.0
+    static let ringHeld = 0.5
     static let dropShownAfter = 3.0
     static let slowAfter = 8.0
+    static let ring = 0.25
 
     var deadline: Date? {
-        guard failure == nil, !StartPatience.off else { return nil }
+        guard failure == nil, endedAt == nil, !StartPatience.off else { return nil }
         return (pictureLost ?? began).addingTimeInterval(StartPatience.failAfter / .seconds(1))
     }
 
@@ -67,12 +70,14 @@ struct LoadProgress: Equatable {
         let subject = Subject.channel(name)
         if let failure { return LoadProgress(subject: subject, cause: .channel, began: track.began, failure: failure) }
         if loading {
-            return LoadProgress(subject: subject, wait: hasPicture ? .reconnect : .start, stage: track.stage,
-                                received: track.received, cause: cause, began: track.began,
-                                pictureLost: hasPicture ? track.pictureLost : nil)
+            return LoadProgress(subject: subject, wait: hasPicture ? .reconnect : .start, stage: track.stage, cause: cause,
+                                began: track.began, pictureLost: hasPicture ? track.pictureLost : nil)
         }
-        guard hasPicture, let since = track.stalledSince else { return nil }
-        return LoadProgress(subject: subject, wait: .reconnect, stage: track.stage, cause: cause, began: since, pictureLost: since)
+        if hasPicture, let since = track.stalledSince {
+            return LoadProgress(subject: subject, wait: .reconnect, stage: track.stage, cause: cause, began: since, pictureLost: since)
+        }
+        guard hasPicture, let ended = track.startEndedAt else { return nil }
+        return LoadProgress(subject: subject, cause: cause, began: track.began, endedAt: ended)
     }
 
     enum Button: Equatable {
@@ -83,7 +88,6 @@ struct LoadProgress: Equatable {
         var ring: Double?
         var line: String?
         var details: [String] = []
-        var dashes: Int?
         var tryAgain = false
         var otherChannels = false
 
@@ -92,14 +96,19 @@ struct LoadProgress: Equatable {
         }
     }
 
+    /// Nil: nothing of the wait's (a drop's first seconds, a start done).
     func shown(at now: Date) -> Shown? {
         if let failure { return failed(failure) }
         let elapsed = now.timeIntervalSince(began)
+        if let endedAt {
+            let ringShown = endedAt.timeIntervalSince(began) >= Self.ringAfter
+            return ringShown && elapsed < Self.ringAfter + Self.ringHeld ? Shown(ring: Self.ring) : nil
+        }
         let line: String?
         switch wait {
         case .start:
-            guard elapsed >= Self.wordsAfter else { return Shown(ring: fill) }
-            line = stageLine
+            guard elapsed >= Self.ringAfter else { return Shown() }
+            line = nil
         case .reconnect:
             guard now.timeIntervalSince(pictureLost ?? began) >= Self.dropShownAfter else { return nil }
             line = reconnectLine
@@ -107,37 +116,13 @@ struct LoadProgress: Equatable {
             guard elapsed >= Self.dropShownAfter else { return nil }
             line = nil
         }
-        guard elapsed >= Self.slowAfter else {
-            return Shown(ring: fill, line: line, dashes: wait == .start ? stage.rawValue + 1 : nil)
-        }
-        return Shown(ring: fill, line: line, details: ["\(slowLine) · \(Int(elapsed)) s"], tryAgain: true)
+        guard elapsed >= Self.slowAfter else { return Shown(ring: Self.ring, line: line) }
+        return Shown(ring: Self.ring, line: line, details: ["\(slowLine) · \(Int(elapsed)) s"], tryAgain: true)
     }
 
-    private var fill: Double {
-        switch (wait, stage) {
-        case (.stall, _): 0.25
-        case (_, .asking): 0.15
-        case (_, .fetching): (1 + min(max(received ?? 0, 0), 1)) / 3
-        case (_, .starting): 0.85
-        }
-    }
-
-    private var stageLine: String {
-        switch (subject, stage) {
-        case (.film, .asking): "Asking your server"
-        case (.film, .fetching): "Opening the film"
-        case let (.channel(name), .asking): "Connecting to \(name)"
-        case (.channel, .fetching):
-            received.map { "Getting the picture · \(Self.percent($0))%" } ?? "Getting the picture"
-        case (_, .starting): "Starting"
-        }
-    }
-
-    private var reconnectLine: String {
-        switch subject {
-        case let .channel(name): "Reconnecting to \(name)…"
-        case .film: stageLine
-        }
+    private var reconnectLine: String? {
+        guard case let .channel(name) = subject else { return nil }
+        return "Reconnecting to \(name)…"
     }
 
     private var slowLine: String {
@@ -169,21 +154,18 @@ struct LoadProgress: Equatable {
         let others = if case .channel = subject { failure.otherChannels } else { false }
         return Shown(line: headline, details: details, tryAgain: true, otherChannels: others)
     }
-
-    private static func percent(_ received: Double) -> Int {
-        Int((min(max(received, 0), 1) * 100).rounded(.down))
-    }
 }
 
 struct LoadTrack: Equatable {
     private(set) var began: Date
     private(set) var tries = 0
     private(set) var stage: LoadProgress.Stage
-    private(set) var received: Double?
     private(set) var addressed = false
     private(set) var dropped = false
     private(set) var stalledSince: Date?
     private(set) var pictureLost: Date?
+    /// The first picture of a start (not of a drop).
+    private(set) var startEndedAt: Date?
     private(set) var attempt: Int
     private var failedAt: Date?
     private var pictureOn = false
@@ -201,7 +183,6 @@ struct LoadTrack: Equatable {
         lost(at: now)
         tries += 1
         self.stage = stage
-        received = nil
         addressed = false
         failedAt = nil
         return nextAttempt()
@@ -231,21 +212,11 @@ struct LoadTrack: Equatable {
     }
 
     mutating func opened() {
-        if stage == .asking {
-            stage = .fetching
-            received = 0
-        } else {
-            stage = .starting
-        }
+        stage = stage == .asking ? .fetching : .starting
     }
 
-    mutating func received(_ have: Double, of need: Double) {
-        guard stage == .fetching else { return }
-        received = have / need
-        if have >= need { stage = .starting }
-    }
-
-    mutating func pictured() {
+    mutating func pictured(at now: Date) {
+        startEndedAt = dropped ? nil : now
         pictureOn = true
         dropped = false
         stalledSince = nil
@@ -255,6 +226,7 @@ struct LoadTrack: Equatable {
     mutating func lost(at now: Date) {
         guard pictureOn else { return }
         pictureOn = false
+        startEndedAt = nil
         dropped = true
         began = now
         pictureLost = stalledSince ?? now

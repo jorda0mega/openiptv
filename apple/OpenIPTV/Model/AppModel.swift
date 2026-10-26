@@ -483,6 +483,10 @@ final class AppModel {
 
     /// `title`: a tap outside the player, whose wait and failure show over
     /// the page (RootView); a failure there waits for Try again or Close.
+    func startBackdrop(_ itemId: String, episode: Bool) -> [CardImage] {
+        emby?.startBackdrop(itemId: itemId, episode: episode) ?? []
+    }
+
     func playback(itemId: String, kind: String? = nil, title: String? = nil) async throws -> EmbyPlayback {
         var started = Date()
         // Just closed here, and kept: no need to ask the server anything.
@@ -500,7 +504,8 @@ final class AppModel {
         var playback: EmbyPlayback
         while true {
             startClosed = false
-            startProgress = StartProgress(stage: .askingServer, tapped: .now, title: title)
+            startProgress = StartProgress(stage: .askingServer, tapped: .now, title: title,
+                                          backdrop: startBackdrop(itemId, episode: kind == "Episode"))
             do {
                 playback = withLocalResume(try await Plans.forStart(key, on: plans) { [weak self] in self?.noteStartAskedAgain() })
             } catch {

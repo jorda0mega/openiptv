@@ -788,7 +788,7 @@ struct LivePlayerView: View {
 
     private func pictureShown() {
         buffering = false
-        startTrack.pictured()
+        startTrack.pictured(at: Date())
         ScreenAwake.set(awakeID, playing: !paused)
         #if DEBUG
         perf.started(frame: frameSeconds)
@@ -842,14 +842,11 @@ struct LivePlayerView: View {
             perf.ended()
             #endif
             send(.ended(attempt, reading(logged ?? .eof_before_frame)))
+        #if DEBUG
         case let .network(buffer, bytesPerSecond):
             guard current else { return }
-            startTrack.received(buffer, of: Self.startNeeds)
-            #if DEBUG
             perf.network(buffer: buffer, bytesPerSecond: bytesPerSecond, gap: liveGap)
-            #else
-            _ = bytesPerSecond
-            #endif
+        #endif
         default:
             break
         }
@@ -925,11 +922,6 @@ struct LivePlayerView: View {
         #endif
         return model.event(of: channel) == nil ? 15 : 25
     }
-
-    /// Seconds of stream a channel's first picture is measured against:
-    /// about one keyframe interval of a broadcast stream, what a start can
-    /// have to read before it has a picture to draw.
-    private static let startNeeds = 2.0
 
     private static var cueSeconds: Double {
         #if DEBUG

@@ -10,9 +10,9 @@ final class LoadProgressTests: XCTestCase {
         LoadProgress(subject: .film("Heat"), stage: stage, cause: cause, began: tap)
     }
 
-    private func channel(_ stage: LoadProgress.Stage, received: Double? = nil, cause: LoadProgress.Cause = .channel,
+    private func channel(_ stage: LoadProgress.Stage, cause: LoadProgress.Cause = .channel,
                          wait: LoadProgress.Wait = .start) -> LoadProgress {
-        LoadProgress(subject: .channel("PPV 1"), wait: wait, stage: stage, received: received, cause: cause, began: tap)
+        LoadProgress(subject: .channel("PPV 1"), wait: wait, stage: stage, cause: cause, began: tap)
     }
 
     func testTheFirstSecondDrawsNothing() {
@@ -22,7 +22,7 @@ final class LoadProgressTests: XCTestCase {
     }
 
     func testFromOneSecondANormalStartIsTheRingAlone() {
-        let starts = [film(.asking), film(.fetching), film(.starting), channel(.asking), channel(.fetching, received: 0.6), channel(.starting)]
+        let starts = [film(.asking), film(.fetching), film(.starting), channel(.asking), channel(.fetching), channel(.starting)]
         let shown = starts.map { $0.shown(at: at(2)) }
         for one in shown {
             XCTAssertNotNil(one?.ring, "no ring at 2 s")
@@ -40,7 +40,7 @@ final class LoadProgressTests: XCTestCase {
             (film(.fetching), "Your server is slow to answer · 12 s"),
             (film(.starting), "Your server is slow to send the film · 12 s"),
             (channel(.asking, cause: .server), "Your TV provider is slow to answer · 12 s"),
-            (channel(.fetching, received: 0.2), "The channel is slow to send · 12 s"),
+            (channel(.fetching), "The channel is slow to send · 12 s"),
             (film(.fetching, cause: .connection), "Your connection is slow · 12 s"),
             (channel(.asking, cause: .offline), "No internet connection · 12 s"),
         ]
@@ -122,7 +122,7 @@ final class LoadProgressTests: XCTestCase {
         XCTAssertEqual(shown?.line, "Reconnecting to PPV 1…")
         XCTAssertNotNil(shown?.ring)
         XCTAssertEqual(shown?.tryAgain, false)
-        XCTAssertEqual(channel(.fetching, received: 0.5, wait: .reconnect).shown(at: at(4))?.line, "Reconnecting to PPV 1…")
+        XCTAssertEqual(channel(.fetching, wait: .reconnect).shown(at: at(4))?.line, "Reconnecting to PPV 1…")
         let slow = drop.shown(at: at(9))
         XCTAssertEqual(slow?.details, ["The channel is slow to send · 9 s"])
         XCTAssertEqual(slow?.tryAgain, true)
@@ -164,7 +164,7 @@ final class LoadTrackTests: XCTestCase {
 
     private func at(_ seconds: Double) -> Date { tap.addingTimeInterval(seconds) }
 
-    func testAChannelConnectsThenGetsThePictureThenStarts() {
+    func testAChannelConnectsThenGetsThePicture() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
         XCTAssertEqual(track.stage, .asking)
@@ -173,12 +173,6 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertTrue(track.addressed)
         track.opened()
         XCTAssertEqual(track.stage, .fetching)
-        XCTAssertEqual(track.received, 0)
-        track.received(1, of: 2)
-        XCTAssertEqual(track.received, 0.5)
-        XCTAssertEqual(track.stage, .fetching)
-        track.received(2.4, of: 2)
-        XCTAssertEqual(track.stage, .starting, "all the start needs is in, and it still says it's getting the picture")
     }
 
     func testAFilmOpensItsFileThenStarts() {
@@ -187,8 +181,6 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertEqual(track.began, tap, "the clock restarted at the file instead of the tap")
         track.opened()
         XCTAssertEqual(track.stage, .starting)
-        track.received(5, of: 2)
-        XCTAssertEqual(track.stage, .starting, "data counted past the picture's step")
     }
 
     func testEveryStreamAskedForIsATryAndStartsItsStepsAgain() {
@@ -196,11 +188,9 @@ final class LoadTrackTests: XCTestCase {
         track.asked(at: at(0))
         track.gotAddress()
         track.opened()
-        track.received(1, of: 2)
         track.asked(at: at(15))
         XCTAssertEqual(track.tries, 2)
         XCTAssertEqual(track.stage, .asking)
-        XCTAssertNil(track.received)
         XCTAssertFalse(track.addressed, "the next copy's address was taken as known")
         XCTAssertEqual(track.began, tap, "a retry restarted the clock")
     }

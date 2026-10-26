@@ -552,6 +552,16 @@ struct EmbyClient {
         return card(item, context: context, shape: landscape ? .landscape : .portrait, width: width)
     }
 
+    /// Behind a film's start, by its id alone: the start shows before the
+    /// server's plan names its art. A film's backdrop, an episode's still.
+    func startBackdrop(itemId: String, episode: Bool) -> [CardImage] {
+        (episode ? ["Primary"] : ["Backdrop/0", "Thumb"]).map { type in
+            var parts = URLComponents(url: Self.api(account.serverURL, "Items/\(itemId)/Images/\(type)"), resolvingAgainstBaseURL: false)!
+            parts.queryItems = [.init(name: "maxWidth", value: String(Artwork.bucket(1280))), .init(name: "quality", value: "70")]
+            return CardImage(url: parts.url!.absoluteString, contain: false)
+        }
+    }
+
     func backdropURL(for item: EmbyItem, width: Int) -> URL? {
         Artwork.candidates(item, context: .backdrop).first.map { imageURL($0, width: width, shape: .landscape) }
     }
