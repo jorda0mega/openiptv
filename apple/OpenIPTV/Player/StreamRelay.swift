@@ -1015,7 +1015,7 @@ enum FileStarts {
 }
 
 extension Lane {
-    static let connections = Lane(.light, atOnce: 1, bucket: Bucket(size: 3, refillEvery: .seconds(5), reserve: 0),
+    static let connections = Lane(.connection, atOnce: 1, bucket: Bucket(size: 3, refillEvery: .seconds(5), reserve: 0),
                                   conditions: Conditions.current)
 }
 

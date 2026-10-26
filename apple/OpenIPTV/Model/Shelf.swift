@@ -2,6 +2,8 @@ import Foundation
 
 enum Weight: Sendable {
     case light
+    /// A byte now and then, keeping open the connection playback will use.
+    case connection
     case files
     /// Emby reads the whole film for it.
     case heavy
@@ -102,8 +104,9 @@ struct Conditions: Equatable, Sendable {
         if memoryWarned { return .memoryWarned }
         if playing { return weight == .light && place == .upNext ? nil : .playing }
         if [.light, .iptv].contains(weight) { return nil }
-        if network == .unknown { return .network(network) }
         if network == .expensive, let refusal = phoneNetworkRefusal(weight, at: place, likelihood) { return refusal }
+        if weight == .connection { return nil }
+        if network == .unknown { return .network(network) }
         if weight == .bytes, freeDisk.bytes < freeDisk.neededAhead { return .disk(free: freeDisk.bytes, needs: freeDisk.neededAhead) }
         if [.heavy, .player].contains(weight), lowPower { return .lowPower }
         return nil
@@ -112,7 +115,7 @@ struct Conditions: Equatable, Sendable {
     private func phoneNetworkRefusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Refusal? {
         switch phoneNetwork {
         case .none: .phoneNetworkNone
-        case .daily where ![.bytes, .files].contains(weight) || !place.isRestedOn(at: likelihood): .notTheRestedStart
+        case .daily where ![.bytes, .files, .connection].contains(weight) || !place.isRestedOn(at: likelihood): .notTheRestedStart
         case .daily where usedToday >= PhoneNetworkFilms.dailyBytes: .usedToday
         case .daily, .wifi: nil
         }
