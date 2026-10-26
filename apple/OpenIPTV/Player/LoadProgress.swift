@@ -51,6 +51,15 @@ struct LoadProgress: Equatable {
     static let dropShownAfter = 3.0
     static let slowAfter = 8.0
 
+    var deadline: Date? {
+        guard failure == nil, !StartPatience.off else { return nil }
+        return began.addingTimeInterval(StartPatience.failAfter / .seconds(1))
+    }
+
+    func overdue(at now: Date) -> Bool {
+        deadline.map { now >= $0 } ?? false
+    }
+
     enum Button: Equatable {
         case tryAgain, otherChannels
     }

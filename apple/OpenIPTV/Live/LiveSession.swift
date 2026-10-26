@@ -20,6 +20,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     enum Failure: Equatable {
         case notPlaying
         case ended
+        case offline
         case message(String)
     }
 
@@ -37,13 +38,15 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         case paused(Bool)
         case away(keepsStream: Bool)
         case back
+        /// The wait for a picture reached its deadline.
+        case gaveUp
         case closed
 
         private var attempt: Attempt? {
             switch self {
             case let .opening(at), let .started(at), let .failed(at, _, _), let .timedOut(at, _), let .ended(at, _),
                  let .picture(at, _): at
-            case .play, .recording, .online, .paused, .away, .back, .closed: nil
+            case .play, .recording, .online, .paused, .away, .back, .gaveUp, .closed: nil
             }
         }
 
@@ -237,6 +240,12 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
                 return [.unpause, .loadRecording(attempt, resume: true)]
             default:
                 return []
+            }
+        case .gaveUp:
+            switch phase {
+            case .offline: return stop(.offline, now)
+            case .opening, .reopening, .playing, .recording: return stop(.notPlaying, now)
+            case .idle, .stoppedWhilePaused, .away, .awayFromRecording, .failed, .closed: return []
             }
         case .closed:
             attempt += 1
