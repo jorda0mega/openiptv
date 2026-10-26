@@ -556,7 +556,7 @@ struct LivePlayerView: View {
         // what was fetched ahead for Continue Watching.
         model.coolDown()
         StreamRelay.shared.stopAhead(keeping: nil)
-        let player = makePlayer(prefs: prefs)
+        let player = makePlayer(prefs: prefs, picture: .gpu)
         player.onEvent = { event, attempt in handle(event, attempt) }
         self.player = player
         #if DEBUG

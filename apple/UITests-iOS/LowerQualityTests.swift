@@ -86,7 +86,6 @@ extension PlayerLookTests {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
         defer { configure(server, ["reset": "1"]) }
-        app.launchEnvironment["OPENREEL_DEBUG_PIP_HOLD"] = "3.5"
         openLowered(server, ["hls_delay": "2"])
         let quality = app.staticTexts["debug-quality"].firstMatch
         for _ in 0..<120 where !(quality.exists && quality.label.hasPrefix("converted")) { usleep(250_000) }
