@@ -138,6 +138,18 @@ final class PlanCopiesTests: XCTestCase {
         XCTAssertEqual(session, "ps0", "the reports carried no play session")
     }
 
+    /// Reports go one after another: one waiting for a PlaybackInfo the
+    /// server held (about 40 s) held Stopped back too.
+    func testAReportWaitsForALatePlaySessionAtMostTwoSeconds() async throws {
+        let (server, client) = try server(info: [6, 6], itemSource: "File")
+        defer { server.stop() }
+        let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
+        let began = ContinuousClock.now
+        let session = await playback.session()
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(3), "a report waited for the play session the server held")
+        XCTAssertNil(session)
+    }
+
     func testARemoteFileStillWaitsForPlaybackInfo() async throws {
         let (server, client) = try server(info: [1.5, 1.5], itemSource: "Http")
         defer { server.stop() }
