@@ -335,12 +335,15 @@ enum ServerProbe {
         let connect: Double
         /// A tiny read's answer on a connection already open.
         let firstByte: Double
+        /// The film's own file read for its first byte, then again, on that
+        /// connection: a server's disk woken by the first.
+        var file: Double?, fileAgain: Double?
 
         var readout: String { String(format: "server: connect %.2f s, first byte %.2f s", connect, firstByte) }
     }
 
     /// The key goes in a header, and only to `account`'s server: a redirect isn't followed.
-    static func measure(_ account: EmbyAccount) async -> Reading? {
+    static func measure(_ account: EmbyAccount, film: String? = nil) async -> Reading? {
         let session = URLSession(configuration: .ephemeral)
         defer { session.finishTasksAndInvalidate() }
         var request = URLRequest(url: EmbyClient.api(account.serverURL, "Users/\(account.userId)"))
