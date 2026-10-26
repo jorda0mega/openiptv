@@ -229,7 +229,7 @@ final class LoadTrackTests: XCTestCase {
     func testAReconnectAfterAFrozenPictureSaysSoAtOnceAndCountsItsOwnWait() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
-        track.pictured()
+        track.pictured(at: at(1))
         track.stalled(at: at(50))
         track.asked(at: at(63))
         XCTAssertTrue(track.dropped)
@@ -246,7 +246,7 @@ final class LoadTrackTests: XCTestCase {
     func testALossWithNoFreezeCountsTheNoticeFromTheRequest() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
-        track.pictured()
+        track.pictured(at: at(1))
         track.asked(at: at(60))
         XCTAssertEqual(track.pictureLost, at(60))
         let reconnecting = LoadProgress(subject: .channel("PPV 1"), wait: .reconnect, stage: track.stage, cause: .channel,
