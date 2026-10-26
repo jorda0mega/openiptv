@@ -17,6 +17,8 @@
       "base": "real-quiet",
       "first_byte_s": {"median": 0.9, "spread": 1.0, "low": 0.4, "high": 9},
       "plan_s": [0.2, 1.8],
+      "launch": {"by_launch": [[40, 44], [40, 44], [27, 31], [9, 11]]},
+      "file_wake": {"idle_s": 120, "s": [8, 9]},
       "convert_first_s": [1.1, 5.9]
     }
   },

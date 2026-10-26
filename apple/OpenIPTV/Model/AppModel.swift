@@ -1284,13 +1284,15 @@ final class AppModel {
     /// UI tests (-debugServerProbe YES): the server's own state at launch.
     var debugServer = ""
 
-    /// The film read is Continue Watching's first card's.
+    /// The film read is Continue Watching's first card's; none with
+    /// -noFileProbe YES (a start that finds the file not yet read).
     func debugProbeServer() async {
-        for _ in 0..<300 where sources.emby == nil || continueCard == nil { try? await Task.sleep(for: .milliseconds(200)) }
+        let fileProbe = !UserDefaults.standard.bool(forKey: "noFileProbe")
+        for _ in 0..<300 where sources.emby == nil || (fileProbe && continueCard == nil) { try? await Task.sleep(for: .milliseconds(200)) }
         guard let account = sources.emby else { return }
         let film: String? = switch continueCard?.playTarget {
-        case let .playable(id, _)?, let .title(id, _)?: id
-        case nil: nil
+        case let .playable(id, _)? where fileProbe, let .title(id, _)? where fileProbe: id
+        default: nil
         }
         debugServer = await ServerProbe.measure(account, film: film)?.readout ?? "server: no answer"
     }

@@ -10,9 +10,11 @@ before a file read's, "read_mb_s" each read's pace, "convert_first_s" to a
 converted version's first segment, "convert_segment_s" to make each next one,
 "subtitle_extract_s" to take one of the film's own subtitle tracks out,
 "launch" ({launches, s}: for `s` after each of a fresh install's first
-`launches` launches, a PlaybackInfo answers only once that time is up; a
-launch is a new X-Openreel-Launch, which debug builds send), and its
-faults: "hang" ({one_in, s}: a read stops that long, part way), "reset"
+`launches` launches, a PlaybackInfo answers only once that time is up, or
+{by_launch: [s, ...]}: each launch's own; a launch is a new
+X-Openreel-Launch, which debug builds send), "file_wake" ({idle_s, s}: a
+film read when none came for `idle_s` waits `s` more for its first byte,
+a disk woken), and its faults: "hang" ({one_in, s}: a read stops that long, part way), "reset"
 ({one_in}: a read's connection reset part way), "convert_refused" (503s each
 time a conversion starts). Its link half is a network in between:
 "connect_s" more for each new connection, "round_trip_s" for each request,
@@ -127,6 +129,7 @@ class Server:
         self.lock = threading.Lock()
         self.counts = dict(reads=0, hangs=0, resets=0, conversions=0, refused=0, extractions=0, launches=0)
         self.launches, self.launch_until = set(), -math.inf
+        self.last_read = -math.inf
 
     def count(self, key):
         with self.lock:
@@ -146,8 +149,9 @@ class Server:
             self.launches.add(launch)
             self.counts["launches"] += 1
             number = self.counts["launches"]
-            if window and number <= (launches or window["launches"]):
-                self.launch_until = now + draw(window["s"], random.Random(f"{self.seed}:launch:{number}"))
+            spells = window and (window.get("by_launch") or [window["s"]] * (launches or window["launches"]))
+            if spells and number <= len(spells):
+                self.launch_until = now + draw(spells[number - 1], random.Random(f"{self.seed}:launch:{number}"))
 
     def answer(self, plan, rng, now=None):
         """The server's wait before an answer that isn't a file read's: PlaybackInfo's if `plan`."""
@@ -155,11 +159,17 @@ class Server:
         held = max(0.0, self.launch_until - now) if plan else 0.0
         return held + draw(self.p.get("plan_s" if plan else "answer_s"), rng)
 
-    def read(self):
+    def read(self, now=None):
         number = self.count("reads")
         rng = random.Random(f"{self.seed}:read:{number}")
+        now = time.monotonic() if now is None else now
+        wake = self.p.get("file_wake")
+        with self.lock:
+            woken = wake and now - self.last_read >= wake["idle_s"]
+            self.last_read = now
         hang, reset = self.p.get("hang"), self.p.get("reset")
         first_byte, rate = draw(self.p.get("first_byte_s"), rng), draw(self.p.get("read_mb_s"), rng) * 1e6
+        first_byte += draw(wake["s"], rng) if woken else 0
         hangs, hang_at, hang_s = rng.random(), rng.random(), draw(hang and hang["s"], rng)
         resets, reset_at = rng.random(), rng.random()
         return Read(number, first_byte, rate or math.inf,
