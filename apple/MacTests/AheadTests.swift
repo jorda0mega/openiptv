@@ -327,6 +327,40 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(pings.count, 0)
     }
 
+    private func pings(over device: Conditions, at place: Place = .continueWatching) async -> Int {
+        let pings = Pings()
+        let warm = Task {
+            await Connections.keepWarm(FileStart(film()), for: Interest(at: place, .likely), lane: Lane(Lane.connections.weight, atOnce: 1) { device },
+                                       every: .seconds(10), sleep: Screen(stays: .seconds(25)).sleep, ping: pings.ping)
+        }
+        await settle()
+        warm.cancel()
+        await warm.value
+        return pings.count
+    }
+
+    func testOnAPhoneNetworkTheConnectionIsKeptOpenOnlyAsTheChoiceSays() async {
+        func phone(_ choice: PhoneNetworkFilms, used: Int64 = 0, _ network: Conditions.Network = .expensive) -> Conditions {
+            var device = conditions(playing: false)
+            (device.network, device.phoneNetwork, device.usedToday) = (network, choice, used)
+            return device
+        }
+        let none = await pings(over: phone(.none))
+        let usedUp = await pings(over: phone(.daily, used: PhoneNetworkFilms.dailyBytes))
+        let lowData = await pings(over: phone(.wifi, .constrained))
+        let forecast = await pings(over: phone(.daily), at: .homeForecast)
+        let daily = await pings(over: phone(.daily))
+        let asOnWiFi = await pings(over: phone(.wifi))
+        let onWiFi = await pings(over: phone(.none, .unmetered))
+        XCTAssertEqual(none, 0, "None")
+        XCTAssertEqual(usedUp, 0, "today's 150 MB used")
+        XCTAssertEqual(lowData, 0, "Low Data Mode")
+        XCTAssertEqual(forecast, 0, "150 MB a day, a row's forecast")
+        XCTAssertEqual(daily, 3, "150 MB a day, the card rested on")
+        XCTAssertEqual(asOnWiFi, 3, "As on Wi-Fi")
+        XCTAssertEqual(onWiFi, 3, "Wi-Fi, whatever the choice")
+    }
+
     func testEachLikelihoodOnlyAdds() {
         for target in [card, .title(id: "m5", kind: "Movie")] {
             let ladder = [Likelihood.glance, .likely, .next].map { Set(Ahead.needs(target, $0)) }
