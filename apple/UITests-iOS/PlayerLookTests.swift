@@ -215,6 +215,7 @@ final class PlayerLookTests: XCTestCase {
             XCTAssertEqual(fields["seeks"], 0, "\(kind): libmpv jumped back to decode again: \(part)", file: file, line: line)
             XCTAssertEqual(fields["restarts"], 0, "\(kind): libmpv restarted playback: \(part)", file: file, line: line)
             XCTAssertEqual(fields["paused"], 0, "\(kind): the film paused: \(part)", file: file, line: line)
+            XCTAssertEqual(fields["drops"], 0, "\(kind): frames were dropped: \(part)", file: file, line: line)
             for (field, what) in [("time", "the film"), ("audio", "the sound"), ("frames", "the picture")] {
                 XCTAssertLessThan(fields[field] ?? .max, 150, "\(kind): \(what) stopped for \(fields[field] ?? -1) ms: \(part)", file: file, line: line)
             }

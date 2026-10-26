@@ -16,6 +16,7 @@ struct FramePlan: Equatable, Sendable {
     var fills: Bool
 
     static func make(video: PixelSize, screen: PixelSize?, window: PixelSize?, fill: Bool) -> FramePlan {
+        let screen = screen.flatMap(nonEmpty), window = window.flatMap(nonEmpty)
         let fills = fill && window == nil && screen != nil
         let box = window ?? screen ?? video
         let shape = fills ? box.aspect : video.aspect
@@ -29,6 +30,7 @@ struct FramePlan: Equatable, Sendable {
     }
 
     private static func even(_ value: Double) -> Int { max(2, Int(value.rounded()) & ~1) }
+    private static func nonEmpty(_ size: PixelSize) -> PixelSize? { size.width > 0 && size.height > 0 ? size : nil }
 }
 
 /// libmpv's software renderer converts the matrix only, so an HDR film's RGB stays coded for its own transfer and primaries.

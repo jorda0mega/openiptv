@@ -104,8 +104,35 @@ final class WindowFlowTests: XCTestCase {
     }
 
     func testStrayAndRepeatedEventsDoNothing() {
-        let (flow, effects) = flow([.didStart, .restoreAsked, .offered, .offered, .didStop, .screenHosts, .willStart, .willStart])
-        XCTAssertEqual(effects, [[], [], [], [], [], [], [.measureStart, .framesToWindow], []])
-        XCTAssertEqual(flow.phase, .starting(byButton: false))
+        let (flow, effects) = flow([.didStart, .offered, .offered, .didStop, .screenHosts, .willStart, .willStart])
+        XCTAssertEqual(effects, [[], [], [], [], [], [.measureStart, .framesToWindow], []])
+        XCTAssertEqual(flow.phase, .starting(byButton: false, appBack: false))
+    }
+
+    func testARestoreNothingWaitsForIsAnswered() {
+        XCTAssertEqual(flow([.restoreAsked]).1[0], [.finishRestore(false)])
+        XCTAssertEqual(flow([.offered, .restoreAsked]).1[1], [.finishRestore(false)])
+    }
+
+    func testComingBackWhileTheWindowOpensPutsTheFilmBack() {
+        let (flow, effects) = flow([.offered, .willStart, .appOpened, .didStart, .didStop])
+        XCTAssertEqual(effects[2], [])
+        XCTAssertEqual(effects[3], [.measureReturn, .framesToScreen, .stopWindow])
+        XCTAssertEqual(flow.phase, .inline)
+    }
+
+    func testARestoreTimingOutAfterTheScreenTookThePlayerLeavesItPlaying() {
+        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .restoreAsked, .reclaimed, .restoreTimedOut, .screenHosts])
+        XCTAssertEqual(effects[4], [])
+        XCTAssertEqual(effects[5], [.finishRestore(false)])
+        XCTAssertEqual(effects[6], [.framesToScreen])
+        XCTAssertEqual(flow.phase, .closingWindow)
+        XCTAssertFalse(flow.keepsFilm)
+    }
+
+    func testTheScreenThatTookThePlayerOwnsIt() {
+        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .chosenAgain, .reclaimed, .otherTitle])
+        XCTAssertFalse(flow.keepsFilm)
+        XCTAssertEqual(effects[5], [], "another title doesn't stop a film the screen has")
     }
 }

@@ -37,6 +37,12 @@ final class FramePlanTests: XCTestCase {
         XCTAssertEqual(FramePlan.make(video: wide, screen: nil, window: nil, fill: true), FramePlan(size: wide, fills: false))
     }
 
+    func testAnEmptyBoxCountsAsNone() {
+        let flat = PixelSize(width: 0, height: 1206)
+        XCTAssertEqual(FramePlan.make(video: film, screen: flat, window: PixelSize(width: 640, height: 0), fill: true),
+                       FramePlan(size: film, fills: false))
+    }
+
     func testSizesAreEven() {
         let odd = PixelSize(width: 853, height: 481)
         let plan = FramePlan.make(video: odd, screen: phone, window: nil, fill: false)

@@ -256,7 +256,6 @@ final class MPVPlayer: @unchecked Sendable {
     #if os(iOS)
     private var timePos: Double = 0
     private var isPaused = false
-    private var goingAway: DispatchWorkItem?
     #if DEBUG
     private var gap: SwitchGap?
     private var gapTimer: DispatchSourceTimer?
@@ -316,18 +315,9 @@ final class MPVPlayer: @unchecked Sendable {
         ]
     }
 
-    /// iOS may open the floating window a moment after the app has gone.
     private func leftApp() {
         #if os(iOS)
-        if let frames {
-            queue.async { [self] in
-                goingAway?.cancel()
-                let away = DispatchWorkItem { if !frames.isInWindow { frames.setUndrawn(true) } }
-                goingAway = away
-                queue.asyncAfter(deadline: .now() + 1, execute: away)
-            }
-            return
-        }
+        if let frames { return frames.setInBackground(true) }
         #endif
         queue.async { [self] in
             guard let mpv, awayTrack == nil,
@@ -346,13 +336,8 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in
             #if os(iOS)
             if let frames {
-                goingAway?.cancel()
-                goingAway = nil
-                if frames.isUndrawn {
-                    frames.setUndrawn(false)
-                    stateLock.withLock { awayReturns += 1 }
-                }
-                return
+                if frames.isUndrawn { stateLock.withLock { awayReturns += 1 } }
+                return frames.setInBackground(false)
             }
             #endif
             guard let mpv, let track = awayTrack else { return }
@@ -1477,7 +1462,6 @@ final class MPVPlayer: @unchecked Sendable {
             gapTimer?.cancel()
             gapTimer = nil
             #endif
-            goingAway?.cancel()
             // libmpv's renderer goes before libmpv does.
             if let frames {
                 mpv_set_property_string(mpv, "vo", "null")
@@ -1902,7 +1886,10 @@ extension MPVPlayer {
                 let now = CFAbsoluteTimeGetCurrent()
                 var paused: Int32 = 0
                 mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &paused)
-                gap?.sample(at: now, time: read("time-pos"), audio: read("audio-pts"), paused: paused != 0)
+                var drops: Int64 = 0
+                let dropsRead = mpv_get_property(mpv, "frame-drop-count", MPV_FORMAT_INT64, &drops) >= 0
+                gap?.sample(at: now, time: read("time-pos"), audio: read("audio-pts"), paused: paused != 0,
+                            drops: dropsRead ? Int(drops) : nil)
                 guard now - began >= 4, let text = gap?.readout(until: now) else { return }
                 gapTimer?.cancel()
                 gapTimer = nil
@@ -1925,12 +1912,15 @@ extension MPVPlayer {
 final class MPVHostView: UIView {
     private let picture: CALayer
     private weak var player: MPVPlayer?
+    private let hosted: () -> Void
     private var lastSize: CGSize = .zero
     private var settle: DispatchWorkItem?
 
-    init(player: MPVPlayer) {
+    /// `hosted`: the picture is on a screen in this view.
+    init(player: MPVPlayer, hosted: @escaping () -> Void = {}) {
         picture = player.pictureLayer
         self.player = player
+        self.hosted = hosted
         super.init(frame: .zero)
         backgroundColor = .black
         layer.addSublayer(picture)
@@ -1948,7 +1938,7 @@ final class MPVHostView: UIView {
             player.showFrames(onScreen: nil)
             lastSize = .zero
         } else {
-            PictureInPicture.shared.hosted(player)
+            hosted()
         }
         #endif
     }

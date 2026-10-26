@@ -204,7 +204,8 @@ extension EnvironmentValues {
 
 struct VideoSurface: UIViewRepresentable {
     let player: MPVPlayer
-    func makeUIView(context: Context) -> MPVHostView { MPVHostView(player: player) }
+    var hosted: () -> Void = {}
+    func makeUIView(context: Context) -> MPVHostView { MPVHostView(player: player, hosted: hosted) }
     func updateUIView(_ view: MPVHostView, context: Context) {}
 }
 
@@ -385,7 +386,7 @@ struct MoviePlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let player {
-                VideoSurface(player: player)
+                VideoSurface(player: player) { pictureOnScreen(player) }
                     .ignoresSafeArea()
                     #if os(iOS)
                     .gesture(MagnifyGesture().onEnded { pinch in
@@ -1218,6 +1219,12 @@ struct MoviePlayerView: View {
         showControls(autoHide: false)
     }
 
+    private func pictureOnScreen(_ player: MPVPlayer) {
+        #if os(iOS)
+        PictureInPicture.shared.hosted(player)
+        #endif
+    }
+
     #if os(iOS)
     private func offerPictureInPicture() {
         guard let player else { return }
@@ -1517,7 +1524,12 @@ struct MoviePlayerView: View {
                 error = why
             }
         case let .time(rawPosition, newDuration):
-            if let newDuration, offset == 0, duration != newDuration { duration = newDuration }
+            if let newDuration, offset == 0, duration != newDuration {
+                duration = newDuration
+                #if os(iOS)
+                offerPictureInPicture()
+                #endif
+            }
             if let until = jumpUntil {
                 guard Date() >= until else { return }
                 jumpUntil = nil
