@@ -15,12 +15,13 @@ struct LoadProgressView<Otherwise: View>: View {
     var body: some View {
         TimelineView(.periodic(from: load.began, by: 1)) { context in
             if let shown = load.shown(at: context.date) {
+                let content = LoadProgressShown(shown: shown, actions: actions, focused: focused)
                 if overPicture {
-                    LoadProgressShown(shown: shown, actions: actions, focused: focused)
+                    content
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background { Color.black.opacity(0.5).ignoresSafeArea().allowsHitTesting(false) }
                 } else {
-                    LoadProgressShown(shown: shown, actions: actions, focused: focused)
+                    content
                 }
             } else {
                 otherwise
