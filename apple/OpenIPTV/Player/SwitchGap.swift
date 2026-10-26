@@ -9,11 +9,18 @@ import Foundation
 struct SwitchGap {
     enum Kind: String { case start, `return` }
 
+    private struct Sample {
+        var wall: Double
+        var time: Double?
+        var audio: Double?
+        var paused: Bool
+    }
+
     let kind: Kind
     let began: Double
     private(set) var seeks = 0
     private(set) var restarts = 0
-    private var samples: [(wall: Double, time: Double?, audio: Double?, paused: Bool)] = []
+    private var samples: [Sample] = []
     private var frames: [Double] = []
 
     init(_ kind: Kind, at began: Double) {
@@ -25,7 +32,7 @@ struct SwitchGap {
     mutating func restarted() { restarts += 1 }
 
     mutating func sample(at wall: Double, time: Double?, audio: Double?, paused: Bool = false) {
-        samples.append((wall, time, audio, paused))
+        samples.append(Sample(wall: wall, time: time, audio: audio, paused: paused))
     }
 
     mutating func frame(at wall: Double) { frames.append(wall) }
@@ -33,14 +40,18 @@ struct SwitchGap {
     /// Milliseconds: "start seeks=0 restarts=0 paused=0 time=12 audio=8 frames=45".
     func readout(until end: Double) -> String {
         let playing = stretchesPlaying
-        let time = playing.map { Self.longestStall($0.compactMap { sample in sample.time.map { (sample.wall, $0) } }) }.max() ?? 0
-        let audio = playing.map { Self.longestStall($0.compactMap { sample in sample.audio.map { (sample.wall, $0) } }) }.max() ?? 0
+        let time = playing.map { Self.longestStall(Self.clock($0, \.time)) }.max() ?? 0
+        let audio = playing.map { Self.longestStall(Self.clock($0, \.audio)) }.max() ?? 0
         return "\(kind.rawValue) seeks=\(seeks) restarts=\(restarts) paused=\(ms(pausedFor)) time=\(ms(time)) audio=\(ms(audio)) "
             + "frames=\(ms(longestWait(until: end)))"
     }
 
-    private var stretchesPlaying: [[(wall: Double, time: Double?, audio: Double?, paused: Bool)]] {
+    private var stretchesPlaying: [[Sample]] {
         samples.split(whereSeparator: \.paused).map(Array.init)
+    }
+
+    private static func clock(_ samples: [Sample], _ value: (Sample) -> Double?) -> [(wall: Double, position: Double)] {
+        samples.compactMap { sample in value(sample).map { (sample.wall, $0) } }
     }
 
     private var pausedFor: Double {

@@ -221,10 +221,7 @@ final class PlayerLookTests: XCTestCase {
                 XCTFail("no \(kind) in the gap readout: \(readout)", file: file, line: line)
                 continue
             }
-            let fields = Dictionary(uniqueKeysWithValues: part.split(separator: " ").compactMap { word -> (String, Int)? in
-                let pair = word.split(separator: "=")
-                return pair.count == 2 ? Int(pair[1]).map { (String(pair[0]), $0) } : nil
-            })
+            let fields = gapNumbers(in: part)
             XCTAssertEqual(fields["seeks"], 0, "\(kind): libmpv jumped back to decode again: \(part)", file: file, line: line)
             XCTAssertEqual(fields["restarts"], 0, "\(kind): libmpv restarted playback: \(part)", file: file, line: line)
             XCTAssertEqual(fields["paused"], 0, "\(kind): the film paused: \(part)", file: file, line: line)
@@ -232,6 +229,14 @@ final class PlayerLookTests: XCTestCase {
                 XCTAssertLessThan(fields[field] ?? .max, 150, "\(kind): \(what) stopped for \(fields[field] ?? -1) ms: \(part)", file: file, line: line)
             }
         }
+    }
+
+    private func gapNumbers(in part: Substring) -> [String: Int] {
+        Dictionary(uniqueKeysWithValues: part.split(separator: " ").compactMap { word -> (String, Int)? in
+            let pair = word.split(separator: "=", maxSplits: 1)
+            guard pair.count == 2, let value = Int(pair[1]) else { return nil }
+            return (String(pair[0]), value)
+        })
     }
 
     /// Closed and chosen again, a film carries on at once where it stopped,

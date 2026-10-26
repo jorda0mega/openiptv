@@ -103,16 +103,11 @@ struct WindowFlow: Equatable, Sendable {
         case let (.returning(docked, waiting, windowUp), .didStop) where windowUp:
             phase = docked ? .returning(docked: true, waiting: waiting, windowUp: false) : .inline
             return []
-        case let (.returning(docked, waiting, windowUp), .restoreTimedOut) where docked:
-            phase = .none
-            return (waiting ? [.finishRestore(false)] : []) + (windowUp ? [.stopWindow] : []) + [.stopFilm, .releaseController]
-
-        case let (.returning(docked, waiting, windowUp), .otherTitle) where docked:
-            phase = .none
-            return (waiting ? [.finishRestore(false)] : []) + (windowUp ? [.stopWindow] : []) + [.stopFilm, .releaseController]
+        case let (.returning(docked, waiting, windowUp), .restoreTimedOut) where docked,
+             let (.returning(docked, waiting, windowUp), .otherTitle) where docked:
+            return releaseDockedFilm(waiting: waiting, windowUp: windowUp)
         case (.windowed(docked: true), .otherTitle):
-            phase = .none
-            return [.stopWindow, .stopFilm, .releaseController]
+            return releaseDockedFilm(waiting: false, windowUp: true)
 
         case (.inline, .screenLetGo):
             phase = .none
@@ -127,5 +122,10 @@ struct WindowFlow: Equatable, Sendable {
         default:
             return []
         }
+    }
+
+    private mutating func releaseDockedFilm(waiting: Bool, windowUp: Bool) -> [Effect] {
+        phase = .none
+        return (waiting ? [.finishRestore(false)] : []) + (windowUp ? [.stopWindow] : []) + [.stopFilm, .releaseController]
     }
 }
