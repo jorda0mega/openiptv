@@ -237,6 +237,9 @@ final class MPVPlayer: @unchecked Sendable {
     #if DEBUG
     /// Until when libmpv's events go to the log (a Picture in Picture switch).
     private var logEventsUntil: CFAbsoluteTime = 0
+    private var gap: SwitchGap?
+    private var gapTimer: DispatchSourceTimer?
+    private var pictureHidden = false
     #endif
     #endif
     /// Away from the app (another app, the Home Screen, an Apple TV asleep)
@@ -1371,6 +1374,10 @@ final class MPVPlayer: @unchecked Sendable {
             defer { if live { Self.closing.leave() } }
             guard let mpv else { return }
             #if os(iOS)
+            #if DEBUG
+            gapTimer?.cancel()
+            gapTimer = nil
+            #endif
             // libmpv's renderer goes before libmpv does.
             if let tap = frameTap {
                 frameTap = nil
@@ -1428,14 +1435,15 @@ final class MPVPlayer: @unchecked Sendable {
         if logEventsUntil > CFAbsoluteTimeGetCurrent(), event.event_id != MPV_EVENT_PROPERTY_CHANGE {
             NSLog("%@", "PERF pip event \(String(cString: mpv_event_name(event.event_id)))")
         }
+        if event.event_id == MPV_EVENT_SEEK { gap?.seeked() }
+        if event.event_id == MPV_EVENT_PLAYBACK_RESTART { gap?.restarted() }
         #endif
         #if os(iOS)
         // Back on screen after Picture in Picture: shown once libmpv has
         // drawn the picture where it is now.
         if revealPending, event.event_id == MPV_EVENT_VIDEO_RECONFIG || event.event_id == MPV_EVENT_PLAYBACK_RESTART {
             revealPending = false
-            let layer = layer
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { layer.isHidden = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [self] in reveal() }
         }
         #endif
         switch event.event_id {
@@ -1797,6 +1805,9 @@ extension MPVPlayer {
             let h = max(2, Int((Double(w) * Double(height) / Double(width)).rounded()) & ~1)
             guard let tap = FrameTap(mpv: mpv, layer: layer, width: w, height: h, drawn: drawn) else { return }
             frameTap = tap
+            #if DEBUG
+            tap.onFrame = { [weak self] at in self?.queue.async { self?.gap?.frame(at: at) } }
+            #endif
             // A still of the picture in the window's layer at once: iOS
             // grows the window out of it while libmpv switches to drawing
             // for the window (decoding again from the last keyframe, a few
@@ -1838,6 +1849,9 @@ extension MPVPlayer {
         CATransaction.setDisableActions(true)
         layer.isHidden = true
         CATransaction.commit()
+        #if DEBUG
+        stateLock.withLock { pictureHidden = true }
+        #endif
         queue.async { [self] in
             guard let mpv, let tap = frameTap else { return }
             frameTap = nil
@@ -1846,10 +1860,54 @@ extension MPVPlayer {
             tap.close()
             // Shown in any case after a moment (a paused picture may not
             // say it's drawn).
-            let layer = layer
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { layer.isHidden = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [self] in reveal() }
         }
     }
+
+    private func reveal() {
+        layer.isHidden = false
+        #if DEBUG
+        stateLock.withLock { pictureHidden = false }
+        #endif
+    }
+
+    #if DEBUG
+    /// Measures the next four seconds (see SwitchGap), into "debug-pip-gap".
+    /// Frames on the screen's own surface count when the film's clock moves
+    /// on with the picture showing.
+    func measureGap(_ kind: SwitchGap.Kind) {
+        queue.async { [self] in
+            gapTimer?.cancel()
+            let began = CFAbsoluteTimeGetCurrent()
+            gap = SwitchGap(kind, at: began)
+            var lastTime: Double?
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now(), repeating: .milliseconds(10))
+            timer.setEventHandler { [self] in
+                guard let mpv else { return }
+                func read(_ name: String) -> Double? {
+                    var value = 0.0
+                    return mpv_get_property(mpv, name, MPV_FORMAT_DOUBLE, &value) >= 0 ? value : nil
+                }
+                let now = CFAbsoluteTimeGetCurrent()
+                let time = read("time-pos")
+                var paused: Int32 = 0
+                mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &paused)
+                gap?.sample(at: now, time: time, audio: read("audio-pts"), paused: paused != 0)
+                if frameTap == nil, !stateLock.withLock({ pictureHidden }), let time, time != lastTime { gap?.frame(at: now) }
+                lastTime = time
+                guard now - began >= 4, let text = gap?.readout(until: now) else { return }
+                gapTimer?.cancel()
+                gapTimer = nil
+                gap = nil
+                NSLog("%@", "PERF pip gap \(text)")
+                Task { @MainActor in PictureInPictureProbe.shared.gaps[kind] = text }
+            }
+            gapTimer = timer
+            timer.resume()
+        }
+    }
+    #endif
 }
 
 #if os(iOS)
@@ -1891,6 +1949,7 @@ private final class FrameTap: @unchecked Sendable {
     private var count = 0
     #if DEBUG
     private var updates = 0
+    var onFrame: (@Sendable (Double) -> Void)?
     #endif
     /// libmpv's RGB picture, before it's converted.
     private let rgb: UnsafeMutableRawPointer
@@ -1969,7 +2028,11 @@ private final class FrameTap: @unchecked Sendable {
             }
         }
         free(pixels)
+        let before = count
         deliver(rendered: rendered)
+        #if DEBUG
+        if count > before { onFrame?(CFAbsoluteTimeGetCurrent()) }
+        #endif
     }
 
     /// A still of the picture (the player's view, from the screen): its
