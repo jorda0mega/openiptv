@@ -15,9 +15,6 @@ final class PlayerLookTests: XCTestCase {
         if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
             app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
         }
-        if let hold = ProcessInfo.processInfo.environment["PIP_HOLD"] {
-            app.launchEnvironment["OPENREEL_DEBUG_PIP_HOLD"] = hold
-        }
         if let options = ProcessInfo.processInfo.environment["MPV_EXTRA"] {
             app.launchEnvironment["OPENREEL_DEBUG_MPV"] = options
         }
@@ -115,15 +112,7 @@ final class PlayerLookTests: XCTestCase {
         let later = pipState()
         let raw = app.staticTexts["debug-pip"].firstMatch.label
         print("PIP state \(String(describing: first)) then \(String(describing: later)) raw \(raw)")
-        // The window grew out of a still of the picture, put in its layer at
-        // once. Regression: it waited for libmpv to switch to drawing for
-        // the window (decoding again from the last keyframe), a delay after
-        // the tap on a device.
-        XCTAssertTrue(raw.contains("first=still"), "the window waited for libmpv's own first frame: \(raw)")
         guard let first, let later, let before, let up else { return XCTFail("no Picture in Picture state") }
-        // Regression: the window grew out of a picture hidden behind the
-        // app, and started late; it stuttered on the way.
-        XCTAssertEqual(first.from, "screen", "Picture in Picture didn't grow out of the picture on screen")
         // Regression: the film paused while the window's stream got ready;
         // it plays on, and the window takes over where it has got to.
         XCTAssertGreaterThan(first.seconds, before + sinceTap - 2.5,
@@ -195,6 +184,27 @@ final class PlayerLookTests: XCTestCase {
         restore.tap()
         sleep(6)
         shot("brought back")
+        assertNothingStopped()
+        XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
+        controlsUp()
+        XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
+    }
+
+    /// As in YouTube: opening the app again while the film plays in the
+    /// floating window puts it back in the player, still playing.
+    func testOpeningTheAppBringsTheFilmBackInline() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
+        openFilm()
+        sleep(4)
+        XCUIDevice.shared.press(.home)
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let window = board.otherElements["Video"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "swiping home didn't start Picture in Picture")
+        sleep(6)
+        app.activate()
+        sleep(6)
+        shot("opened again")
+        XCTAssertFalse(window.exists, "the floating window stayed up over the app")
         assertNothingStopped()
         XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
         controlsUp()
@@ -286,7 +296,9 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertEqual(awake.label, "awake", "the screen may sleep after playing again")
     }
 
-    func testPictureMovesAfterLeavingApp() {
+    func testPictureMovesAfterLeavingApp() throws {
+        // iPads open Picture in Picture as the app goes (see testSwipingHomeCarriesOnInPictureInPicture).
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "the film goes on in Picture in Picture")
         openFilm()
         sleep(5)
         XCTAssertTrue(pictureMoves(), "the picture doesn't move before leaving")
@@ -386,10 +398,9 @@ final class PlayerLookTests: XCTestCase {
     }
 
     /// The app's debug readout: "pip active=true playing=true seconds=72
-    /// clock=72 start=640 from=screen" (seconds: the film's second it
-    /// reports; clock: the window's stream; start: milliseconds to come up;
-    /// from: whether it grew out of the picture on screen).
-    func pipState() -> (playing: Bool, seconds: Double, clock: Double, startMs: Int, from: String)? {
+    /// clock=72 start=640" (seconds: the film's second it reports; clock:
+    /// the window's; start: milliseconds to come up).
+    func pipState() -> (playing: Bool, seconds: Double, clock: Double, startMs: Int)? {
         let text = app.staticTexts["debug-pip"].firstMatch.label
         guard text.hasPrefix("pip") else { return nil }
         let fields = Dictionary(uniqueKeysWithValues: text.split(separator: " ").dropFirst().compactMap { part -> (String, String)? in
@@ -398,7 +409,7 @@ final class PlayerLookTests: XCTestCase {
         })
         guard let seconds = fields["seconds"].flatMap(Double.init),
               let clock = fields["clock"].flatMap(Double.init) else { return nil }
-        return (fields["playing"] == "true", seconds, clock, fields["start"].flatMap(Int.init) ?? .max, fields["from"] ?? "")
+        return (fields["playing"] == "true", seconds, clock, fields["start"].flatMap(Int.init) ?? .max)
     }
 
     /// Subtitles picked in the player stay for that film, even in the

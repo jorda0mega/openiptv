@@ -209,9 +209,9 @@ struct VideoSurface: UIViewRepresentable {
 }
 
 @MainActor
-func makePlayer(prefs: Preferences) -> MPVPlayer {
+func makePlayer(prefs: Preferences, picture: MPVPlayer.Picture) -> MPVPlayer {
     PlaybackAudio.activate()
-    return MPVPlayer(options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding)
+    return MPVPlayer(options: prefs.playerProfile.mpvOptions, hardwareDecoding: prefs.hardwareDecoding, picture: picture)
 }
 
 /// The audio session set up for films, off the main thread: activating it
@@ -302,8 +302,6 @@ struct MoviePlayerView: View {
     #endif
     @State private var filled = false
     @State private var muted = false
-    /// The film went on in Picture in Picture: closing here isn't stopping.
-    @State private var handedOff = false
     #endif
     #if os(tvOS)
     /// Where the current swipe started from.
@@ -769,14 +767,8 @@ struct MoviePlayerView: View {
     /// plays on there, the same playback (see PictureInPicture); this
     /// screen closes once the window is up, leaving the player running.
     private func startPictureInPicture() {
-        guard let player else { return }
-        // The picture's way out changes (a moment's refresh): not a stall
-        // to lower the quality for.
-        trackSwitched()
         convertedOpen?.cancel()
-        PictureInPicture.shared.start(player, playback: playback, stream: stream, position: position, total: total, paused: paused,
-                                      started: {
-            handedOff = true
+        PictureInPicture.shared.startFromButton(stream: stream, position: position, paused: paused, started: {
             if let closePlayer { closePlayer() } else { dismiss() }
         }, failed: {
             note("Picture in Picture isn't available for this video")
@@ -1136,12 +1128,10 @@ struct MoviePlayerView: View {
         #if os(iOS)
         // Back from Picture in Picture (or chosen again while it's there):
         // the same player, where it has got to.
-        if let back = PictureInPicture.shared.takeBack(playback.itemId) {
+        if let back = PictureInPicture.shared.reclaim(playback.itemId) {
             adopt(back)
             return
         }
-        // A film in Picture in Picture stops (where it got to) for this one.
-        PictureInPicture.shared.close()
         #endif
         position = playback.startSeconds ?? 0
         #if DEBUG
@@ -1182,7 +1172,7 @@ struct MoviePlayerView: View {
             // A player warmed up for something else would only compete for
             // the connection.
             model.coolDown()
-            let player = makePlayer(prefs: prefs)
+            let player = makePlayer(prefs: prefs, picture: .film)
             player.onEvent = { event, attempt in handle(event, attempt) }
             self.player = player
             track = LoadTrack(began: playback.requestedAt, stage: .fetching)
@@ -1229,7 +1219,13 @@ struct MoviePlayerView: View {
     }
 
     #if os(iOS)
-    /// The player from Picture in Picture, drawing on this screen again.
+    /// The window may open from this film's picture (by itself as the app goes, or from the button).
+    private func offerPictureInPicture() {
+        guard let player else { return }
+        PictureInPicture.shared.offer(player, playback: playback, total: total) { skip($0) }
+    }
+
+    /// The player from Picture in Picture, on this screen again.
     private func adopt(_ back: (player: MPVPlayer, stream: FilmStream, position: Double, paused: Bool)) {
         PlaybackAudio.activate()
         stream = back.stream
@@ -1241,8 +1237,7 @@ struct MoviePlayerView: View {
         track = LoadTrack(began: Date(), stage: .fetching, attempt: back.player.currentAttempt)
         back.player.onEvent = { event, attempt in handle(event, attempt) }
         player = back.player
-        trackSwitched()
-        back.player.drawOnScreen()
+        offerPictureInPicture()
         if governor == nil, prefs.adaptiveQuality, back.stream.isOriginal { governor = QualityGovernor(original: playback.bitrate) }
         Task { await loadTrackInfo() }
         thumbnailTask = Task { await loadThumbnails() }
@@ -1404,6 +1399,9 @@ struct MoviePlayerView: View {
             buffering = false
             track.pictured(at: Date())
             governor?.notePlaying()
+            #if os(iOS)
+            offerPictureInPicture()
+            #endif
             guard !startedOnce else { return }
             startedOnce = true
             // Whole start from the tap: server, then screen/player setup,
@@ -1613,8 +1611,8 @@ struct MoviePlayerView: View {
         #if os(iOS)
         // Playing on in Picture in Picture: the window has the player now,
         // and reports when it stops.
-        if handedOff {
-            player = nil
+        if let player, PictureInPicture.shared.letGo(player) {
+            self.player = nil
             return
         }
         #endif

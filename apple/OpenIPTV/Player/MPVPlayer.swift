@@ -2,7 +2,6 @@ import Libmpv
 import QuartzCore
 import UIKit
 #if os(iOS)
-import Accelerate
 import AVFoundation
 import CoreText
 import Metal
@@ -50,7 +49,37 @@ final class MPVPlayer: @unchecked Sendable {
         case tracksChanged
     }
 
+    /// How the player draws, chosen when it's made and never changed while it lives (in libmpv a change of
+    /// output is a seek back to the last keyframe and a restart).
+    enum Picture {
+        /// gpu-next on a Metal layer: Apple TV and live TV.
+        case gpu
+        #if os(iOS)
+        /// FilmFrames: films and episodes on iPhone and iPad, the one layer Picture in Picture also shows.
+        case frames
+        #endif
+
+        static var film: Picture {
+            #if os(iOS)
+            .frames
+            #else
+            .gpu
+            #endif
+        }
+    }
+
     let layer = MPVMetalLayer()
+    #if os(iOS)
+    let frames: FilmFrames?
+    #endif
+    /// What the player's view hosts.
+    var pictureLayer: CALayer {
+        #if os(iOS)
+        frames?.layer ?? layer
+        #else
+        layer
+        #endif
+    }
     var onEvent: (@MainActor (Event, Int) -> Void)? {
         didSet {
             // Tracks added, or a failure, while nobody listened (a player
@@ -229,21 +258,17 @@ final class MPVPlayer: @unchecked Sendable {
     private var lastNetworkReport: CFAbsoluteTime = 0
     private var reportsWindow = false
     #if os(iOS)
-    /// Picture in Picture: the picture drawn into the window's layer.
-    private var frameTap: FrameTap?
-    /// The picture drawn on screen again: shown once it is (the screen's
-    /// surface still holds a frame from before the window).
-    private var revealPending = false
+    /// Seconds since the film's clock starts in this stream, and whether it's paused (the window's clock).
+    private var rawTime: Double = 0
+    private var isPaused = false
+    private var goingAway: DispatchWorkItem?
     #if DEBUG
-    /// Until when libmpv's events go to the log (a Picture in Picture switch).
-    private var logEventsUntil: CFAbsoluteTime = 0
     private var gap: SwitchGap?
     private var gapTimer: DispatchSourceTimer?
-    private var pictureHidden = false
     #endif
     #endif
     /// Away from the app (another app, the Home Screen, an Apple TV asleep)
-    /// with the picture on screen: its track, off meanwhile. iOS and tvOS
+    /// with the picture on the GPU: its track, off meanwhile. iOS and tvOS
     /// stop an app's GPU work in the background; the picture kept being
     /// drawn there, failed, and stayed frozen after coming back. The sound
     /// plays on.
@@ -274,9 +299,15 @@ final class MPVPlayer: @unchecked Sendable {
     /// Returns at once: libmpv starts up on the player's own queue (its
     /// initialisation takes a while, and used to hold up the screen that
     /// opened the player); everything asked of the player queues behind it.
-    init(options: [(String, String)], hardwareDecoding: Bool) {
+    init(options: [(String, String)], hardwareDecoding: Bool, picture: Picture) {
         layer.framebufferOnly = true
         layer.backgroundColor = UIColor.black.cgColor
+        #if os(iOS)
+        frames = picture == .frames ? FilmFrames() : nil
+        #if DEBUG
+        frames?.onFrame = { [weak self] time in self?.noteFrame(at: time) }
+        #endif
+        #endif
         let wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         queue.async { [self] in setUp(wid: wid, options: options, hardwareDecoding: hardwareDecoding) }
         let center = NotificationCenter.default
@@ -290,13 +321,21 @@ final class MPVPlayer: @unchecked Sendable {
         ]
     }
 
-    /// Away from the app (or an Apple TV asleep): the picture off (unless
-    /// Picture in Picture draws it, on the CPU), the sound on.
+    /// Away from the app (or an Apple TV asleep): the picture off, the sound on. A film's frames go on into the
+    /// floating window, or go by undrawn: iOS may open the window a moment after the app has gone.
     private func leftApp() {
+        #if os(iOS)
+        if let frames {
+            let away = DispatchWorkItem { if !frames.isInWindow { frames.setAway(true) } }
+            queue.async { [self] in
+                goingAway?.cancel()
+                goingAway = away
+                queue.asyncAfter(deadline: .now() + 1, execute: away)
+            }
+            return
+        }
+        #endif
         queue.async { [self] in
-            #if os(iOS)
-            guard frameTap == nil else { return }
-            #endif
             guard let mpv, awayTrack == nil,
                   let track = mpv_get_property_string(mpv, "vid") else { return }
             let current = String(cString: track)
@@ -311,6 +350,17 @@ final class MPVPlayer: @unchecked Sendable {
     /// (even one that failed while away is replaced).
     private func cameBack() {
         queue.async { [self] in
+            #if os(iOS)
+            if let frames {
+                goingAway?.cancel()
+                goingAway = nil
+                if frames.isAway {
+                    frames.setAway(false)
+                    stateLock.withLock { awayReturns += 1 }
+                }
+                return
+            }
+            #endif
             guard let mpv, let track = awayTrack else { return }
             awayTrack = nil
             mpv_set_property_string(mpv, "vid", track)
@@ -325,12 +375,25 @@ final class MPVPlayer: @unchecked Sendable {
         #endif
         guard let mpv = mpv_create() else { return }
         self.mpv = mpv
-        var wid = wid
-        mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &wid)
-        set("vo", "gpu-next")
-        set("gpu-api", "vulkan")
-        set("gpu-context", "moltenvk")
-        set("hwdec", hardwareDecoding ? "videotoolbox" : "no")
+        #if os(iOS)
+        let drawsFrames = frames != nil
+        #else
+        let drawsFrames = false
+        #endif
+        if drawsFrames {
+            // No GPU output to hand VideoToolbox's frames to: decoded there and copied back (else libmpv
+            // decodes on the CPU).
+            set("vo", "libmpv")
+            set("hwdec", hardwareDecoding ? "videotoolbox-copy" : "no")
+            set("sw-fast", "yes")
+        } else {
+            var wid = wid
+            mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &wid)
+            set("vo", "gpu-next")
+            set("gpu-api", "vulkan")
+            set("gpu-context", "moltenvk")
+            set("hwdec", hardwareDecoding ? "videotoolbox" : "no")
+        }
         set("video-rotate", "no")
         set("idle", "yes")
         set("terminal", "no")
@@ -360,6 +423,9 @@ final class MPVPlayer: @unchecked Sendable {
         if HTTP.debugProxy() != nil { setenv("no_proxy", "127.0.0.1", 1) }
         #endif
         mpv_initialize(mpv)
+        #if os(iOS)
+        frames?.attach(to: mpv)
+        #endif
         mpv_request_log_messages(mpv, "warn")
         FFmpegLog.listen()
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
@@ -546,6 +612,9 @@ final class MPVPlayer: @unchecked Sendable {
     /// so nudge the aspect ratio by a hundredth of a percent (invisible) and
     /// put it back: each change makes it lay the picture out for the new size.
     func surfaceChanged() {
+        #if os(iOS)
+        guard frames == nil else { return }
+        #endif
         queue.async { [self] in
             guard let mpv else { return }
             var aspect: Double = 0
@@ -584,6 +653,9 @@ final class MPVPlayer: @unchecked Sendable {
     /// Gives the video layer a full-screen drawable before it's on screen,
     /// so a player warmed up in the background can render its first frame.
     @MainActor func prepareOffscreen() {
+        #if os(iOS)
+        guard frames == nil else { return }
+        #endif
         guard let screen = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.screen }).first else { return }
         layer.frame = screen.bounds
         layer.contentsScale = screen.scale
@@ -1147,11 +1219,33 @@ final class MPVPlayer: @unchecked Sendable {
 
     /// Fills the screen with the picture (cropping its edges) or fits it.
     func setFill(_ fill: Bool) {
+        #if os(iOS)
+        if let frames { return apply(frames.fill(fill)) }
+        #endif
         queue.async { [self] in
             guard let mpv else { return }
             mpv_set_property_string(mpv, "panscan", fill ? "1.0" : "0.0")
         }
     }
+
+    #if os(iOS)
+    /// The film's picture on the player screen (its size in pixels; nil: off it).
+    func showFrames(onScreen pixels: PixelSize?) {
+        if let frames { apply(frames.show(onScreen: pixels)) }
+    }
+
+    /// The film's picture in the floating window (its size in pixels; nil: not there).
+    func showFrames(inWindow pixels: PixelSize?) {
+        if let frames { apply(frames.show(inWindow: pixels)) }
+    }
+
+    private func apply(_ plan: FramePlan) {
+        queue.async { [self] in
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "panscan", plan.fills ? "1.0" : "0.0")
+        }
+    }
+    #endif
 
     /// Plays this audio track.
     func selectAudio(_ id: Int) {
@@ -1378,11 +1472,11 @@ final class MPVPlayer: @unchecked Sendable {
             gapTimer?.cancel()
             gapTimer = nil
             #endif
+            goingAway?.cancel()
             // libmpv's renderer goes before libmpv does.
-            if let tap = frameTap {
-                frameTap = nil
+            if let frames {
                 mpv_set_property_string(mpv, "vo", "null")
-                tap.close()
+                frames.close()
             }
             #endif
             mpv_set_wakeup_callback(mpv, nil, nil)
@@ -1432,18 +1526,21 @@ final class MPVPlayer: @unchecked Sendable {
 
     private func handle(_ event: mpv_event) {
         #if DEBUG && os(iOS)
-        if logEventsUntil > CFAbsoluteTimeGetCurrent(), event.event_id != MPV_EVENT_PROPERTY_CHANGE {
-            NSLog("%@", "PERF pip event \(String(cString: mpv_event_name(event.event_id)))")
-        }
         if event.event_id == MPV_EVENT_SEEK { gap?.seeked() }
         if event.event_id == MPV_EVENT_PLAYBACK_RESTART { gap?.restarted() }
         #endif
         #if os(iOS)
-        // Back on screen after Picture in Picture: shown once libmpv has
-        // drawn the picture where it is now.
-        if revealPending, event.event_id == MPV_EVENT_VIDEO_RECONFIG || event.event_id == MPV_EVENT_PLAYBACK_RESTART {
-            revealPending = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [self] in reveal() }
+        if event.event_id == MPV_EVENT_VIDEO_RECONFIG, let frames, let mpv {
+            var width: Int64 = 0, height: Int64 = 0
+            mpv_get_property(mpv, "video-params/dw", MPV_FORMAT_INT64, &width)
+            mpv_get_property(mpv, "video-params/dh", MPV_FORMAT_INT64, &height)
+            let gamma = mpv_get_property_string(mpv, "video-params/gamma").map { raw in
+                defer { mpv_free(raw) }
+                return String(cString: raw)
+            }
+            if width > 0, height > 0 {
+                apply(frames.video(PixelSize(width: Int(width), height: Int(height)), color: FrameColor(gamma: gamma)))
+            }
         }
         #endif
         switch event.event_id {
@@ -1570,12 +1667,21 @@ final class MPVPlayer: @unchecked Sendable {
                 stateLock.withLock { bufferingLog.stalled(stalled, at: CFAbsoluteTimeGetCurrent()) }
                 #endif
             case "pause" where property.format == MPV_FORMAT_FLAG:
-                emit(.paused(value.assumingMemoryBound(to: Int32.self).pointee != 0))
+                let paused = value.assumingMemoryBound(to: Int32.self).pointee != 0
+                #if os(iOS)
+                isPaused = paused
+                frames?.follow(rawTime + clock, playing: !paused)
+                #endif
+                emit(.paused(paused))
             case "duration" where property.format == MPV_FORMAT_DOUBLE:
                 duration = value.assumingMemoryBound(to: Double.self).pointee
             case "time-pos" where property.format == MPV_FORMAT_DOUBLE:
                 // Four times a second, and at once after a jump.
                 let position = value.assumingMemoryBound(to: Double.self).pointee
+                #if os(iOS)
+                rawTime = position
+                frames?.follow(position + clock, playing: !isPaused)
+                #endif
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - lastTimeEmit >= 0.25 || abs(position - lastTimePosition) > 1.5 else { break }
                 lastTimeEmit = now
@@ -1784,103 +1890,14 @@ final class MPVPlayer: @unchecked Sendable {
     }
 }
 
-#if os(iOS)
+#if os(iOS) && DEBUG
 extension MPVPlayer {
-    /// Picture in Picture: the same playback (nothing reopens, pauses or
-    /// jumps), its picture drawn into `layer` by the CPU instead of onto
-    /// the screen by the GPU. iOS's floating window shows only its own
-    /// kinds of layer, and an app in the background can't use the GPU.
-    /// `drawn`: the first frame is in the layer.
-    func drawFrames(into layer: AVSampleBufferDisplayLayer, drawn: @escaping @Sendable () -> Void) {
-        let snapshot = Self.snapshot(self.layer)
-        queue.async { [self] in
-            guard let mpv, frameTap == nil else { return }
-            // The picture's shape, at most 1280 wide: plenty for the
-            // window, and quick to draw.
-            var width: Int64 = 0, height: Int64 = 0
-            mpv_get_property(mpv, "video-params/dw", MPV_FORMAT_INT64, &width)
-            mpv_get_property(mpv, "video-params/dh", MPV_FORMAT_INT64, &height)
-            if width <= 0 || height <= 0 { (width, height) = (1280, 720) }
-            let w = Int(min(width, 1280)) & ~1
-            let h = max(2, Int((Double(w) * Double(height) / Double(width)).rounded()) & ~1)
-            guard let tap = FrameTap(mpv: mpv, layer: layer, width: w, height: h, drawn: drawn) else { return }
-            frameTap = tap
-            #if DEBUG
-            tap.onFrame = { [weak self] at in self?.queue.async { self?.gap?.frame(at: at) } }
-            #endif
-            // A still of the picture in the window's layer at once: iOS
-            // grows the window out of it while libmpv switches to drawing
-            // for the window (decoding again from the last keyframe, a few
-            // hundred ms for a 4K film, which the window waited for).
-            if let snapshot { tap.showStill(snapshot, videoWidth: Int(width), videoHeight: Int(height)) }
-            #if DEBUG
-            // What libmpv does while it switches (Picture in Picture froze
-            // sound and picture for a moment on the user's iPhone).
-            logEventsUntil = CFAbsoluteTimeGetCurrent() + 5
-            var at = CFAbsoluteTimeGetCurrent()
-            func took(_ what: String) {
-                let now = CFAbsoluteTimeGetCurrent()
-                NSLog("%@", String(format: "PERF pip switch %@ %.0f ms", what, (now - at) * 1000))
-                at = now
-            }
-            #endif
-            mpv_set_property_string(mpv, "sw-fast", "yes")
-            // The decoder stays as it is (libmpv copies the frames it needs
-            // for the window): switching it to copy-back restarted the
-            // decoder, a seek that froze sound and picture for a moment.
-            let switched = mpv_set_property_string(mpv, "vo", "libmpv")
-            #if DEBUG
-            took("vo")
-            NSLog("%@", "PERF pip frames \(w)x\(h) vo=\(switched)")
-            #endif
-        }
-    }
-
-    #if DEBUG
-    /// Whether the window's first frame was a still (UI tests).
-    var windowStartedFromStill: Bool { queue.sync { frameTap?.stillShown ?? false } }
-    #endif
-
-    /// Back on screen from Picture in Picture (the screen's layer is in a
-    /// window again): the GPU draws it, as before.
-    func drawOnScreen() {
-        guard stateLock.withLock({ !closed }) else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layer.isHidden = true
-        CATransaction.commit()
-        #if DEBUG
-        stateLock.withLock { pictureHidden = true }
-        #endif
-        queue.async { [self] in
-            guard let mpv, let tap = frameTap else { return }
-            frameTap = nil
-            revealPending = true
-            mpv_set_property_string(mpv, "vo", "gpu-next")
-            tap.close()
-            // Shown in any case after a moment (a paused picture may not
-            // say it's drawn).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [self] in reveal() }
-        }
-    }
-
-    private func reveal() {
-        layer.isHidden = false
-        #if DEBUG
-        stateLock.withLock { pictureHidden = false }
-        #endif
-    }
-
-    #if DEBUG
     /// Measures the next four seconds (see SwitchGap), into "debug-pip-gap".
-    /// Frames on the screen's own surface count when the film's clock moves
-    /// on with the picture showing.
     func measureGap(_ kind: SwitchGap.Kind) {
         queue.async { [self] in
             gapTimer?.cancel()
             let began = CFAbsoluteTimeGetCurrent()
             gap = SwitchGap(kind, at: began)
-            var lastTime: Double?
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now(), repeating: .milliseconds(10))
             timer.setEventHandler { [self] in
@@ -1890,12 +1907,9 @@ extension MPVPlayer {
                     return mpv_get_property(mpv, name, MPV_FORMAT_DOUBLE, &value) >= 0 ? value : nil
                 }
                 let now = CFAbsoluteTimeGetCurrent()
-                let time = read("time-pos")
                 var paused: Int32 = 0
                 mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &paused)
-                gap?.sample(at: now, time: time, audio: read("audio-pts"), paused: paused != 0)
-                if frameTap == nil, !stateLock.withLock({ pictureHidden }), let time, time != lastTime { gap?.frame(at: now) }
-                lastTime = time
+                gap?.sample(at: now, time: read("time-pos"), audio: read("audio-pts"), paused: paused != 0)
                 guard now - began >= 4, let text = gap?.readout(until: now) else { return }
                 gapTimer?.cancel()
                 gapTimer = nil
@@ -1907,243 +1921,28 @@ extension MPVPlayer {
             timer.resume()
         }
     }
-    #endif
-}
 
-#if os(iOS)
-extension MPVPlayer {
-    /// What the player's view shows now, from the screen (libmpv's own
-    /// screenshot goes through its GPU output, which crashed simulators).
-    fileprivate static func snapshot(_ layer: CALayer) -> CGImage? {
-        guard let view = layer.superlayer?.delegate as? UIView, view.window != nil,
-              view.bounds.width > 0, view.bounds.height > 0 else { return nil }
-        #if DEBUG
-        let started = CFAbsoluteTimeGetCurrent()
-        defer { NSLog("%@", String(format: "PERF pip still %.0f ms", (CFAbsoluteTimeGetCurrent() - started) * 1000)) }
-        #endif
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 2
-        format.opaque = true
-        return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
-            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
-        }.cgImage
+    fileprivate func noteFrame(at time: Double) {
+        queue.async { [self] in gap?.frame(at: time) }
     }
 }
 #endif
 
-/// Draws libmpv's picture into frames for an AVSampleBufferDisplayLayer, on
-/// its own thread, each when libmpv says it's due. libmpv draws RGB; the
-/// frames go out as video's own 4:2:0 YUV.
-private final class FrameTap: @unchecked Sendable {
-    private let context: OpaquePointer
-    private let layer: AVSampleBufferDisplayLayer
-    private let width: Int
-    private let height: Int
-    private let drawn: @Sendable () -> Void
-    private let queue = DispatchQueue(label: "openiptv.pip-frames", qos: .userInteractive)
-    private let lock = NSLock()
-    private var closed = false
-    private var waiting = false
-    private var pool: CVPixelBufferPool?
-    private var format: CMVideoFormatDescription?
-    private var count = 0
-    #if DEBUG
-    private var updates = 0
-    var onFrame: (@Sendable (Double) -> Void)?
-    #endif
-    /// libmpv's RGB picture, before it's converted.
-    private let rgb: UnsafeMutableRawPointer
-    private let rgbStride: Int
-    private var conversion = vImage_ARGBToYpCbCr()
-
-    init?(mpv: OpaquePointer, layer: AVSampleBufferDisplayLayer, width: Int, height: Int, drawn: @escaping @Sendable () -> Void) {
-        self.layer = layer
-        self.width = width
-        self.height = height
-        self.drawn = drawn
-        rgbStride = (width * 4 + 63) & ~63
-        var memory: UnsafeMutableRawPointer?
-        guard posix_memalign(&memory, 64, rgbStride * height) == 0, let memory else { return nil }
-        rgb = memory
-        var made: OpaquePointer?
-        let api = strdup("sw")
-        defer { free(api) }
-        var params = [mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(api)),
-                      mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)]
-        guard mpv_render_context_create(&made, mpv, &params) >= 0, let made else {
-            free(memory)
-            return nil
-        }
-        context = made
-        let attributes: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-            kCVPixelBufferWidthKey as String: width,
-            kCVPixelBufferHeightKey as String: height,
-            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
-            // The floating window draws them with the GPU, in another process.
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-        ]
-        CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pool)
-        // Video range, HD colours.
-        var range = vImage_YpCbCrPixelRange(Yp_bias: 16, CbCr_bias: 128, YpRangeMax: 235, CbCrRangeMax: 240,
-                                            YpMax: 235, YpMin: 16, CbCrMax: 240, CbCrMin: 16)
-        vImageConvert_ARGBToYpCbCr_GenerateConversion(kvImage_ARGBToYpCbCrMatrix_ITU_R_709_2, &range, &conversion,
-                                                      kvImageARGB8888, kvImage420Yp8_CbCr8, vImage_Flags(kvImageNoFlags))
-        mpv_render_context_set_update_callback(context, { raw in
-            guard let raw else { return }
-            Unmanaged<FrameTap>.fromOpaque(raw).takeUnretainedValue().due()
-        }, Unmanaged.passUnretained(self).toOpaque())
-    }
-
-    /// Called by libmpv (any thread; nothing of libmpv's may be called here).
-    private func due() {
-        let skip = lock.withLock { () -> Bool in
-            if closed || waiting { return true }
-            waiting = true
-            return false
-        }
-        if !skip { queue.async { [self] in draw() } }
-    }
-
-    private func draw() {
-        guard lock.withLock({ waiting = false; return !closed }) else { return }
-        let flags = mpv_render_context_update(context)
-        #if DEBUG
-        updates += 1
-        if updates % 60 == 1 { NSLog("%@", "PERF pip update \(updates) flags=\(flags) drawn=\(count)") }
-        #endif
-        guard flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0, let pool else { return }
-        var size: [Int32] = [Int32(width), Int32(height)]
-        var stride = rgbStride
-        var rendered: Int32 = 0
-        let pixels = strdup("bgr0")
-        size.withUnsafeMutableBufferPointer { size in
-            withUnsafeMutablePointer(to: &stride) { stride in
-                var params = [mpv_render_param(type: MPV_RENDER_PARAM_SW_SIZE, data: UnsafeMutableRawPointer(size.baseAddress)),
-                              mpv_render_param(type: MPV_RENDER_PARAM_SW_FORMAT, data: UnsafeMutableRawPointer(pixels)),
-                              mpv_render_param(type: MPV_RENDER_PARAM_SW_STRIDE, data: UnsafeMutableRawPointer(stride)),
-                              mpv_render_param(type: MPV_RENDER_PARAM_SW_POINTER, data: rgb),
-                              mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)]
-                rendered = mpv_render_context_render(context, &params)
-            }
-        }
-        free(pixels)
-        let before = count
-        deliver(rendered: rendered)
-        #if DEBUG
-        if count > before { onFrame?(CFAbsoluteTimeGetCurrent()) }
-        #endif
-    }
-
-    /// A still of the picture (the player's view, from the screen): its
-    /// picture, between any black bars, at the window's size, shown at
-    /// once until libmpv's own frames come.
-    func showStill(_ image: CGImage, videoWidth: Int, videoHeight: Int) {
-        queue.sync {
-            guard lock.withLock({ !closed }), count == 0, videoWidth > 0, videoHeight > 0 else { return }
-            let screen = CGRect(x: 0, y: 0, width: image.width, height: image.height)
-            let picture = AVMakeRect(aspectRatio: CGSize(width: videoWidth, height: videoHeight), insideRect: screen).integral
-            guard let cropped = image.cropping(to: picture), let space = CGColorSpace(name: CGColorSpace.sRGB),
-                  let context = CGContext(data: rgb, width: width, height: height, bitsPerComponent: 8, bytesPerRow: rgbStride, space: space,
-                                          bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)
-            else { return }
-            // Memory order B, G, R, (unused), as libmpv draws.
-            context.interpolationQuality = .medium
-            context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
-            stillShown = true
-            deliver(rendered: 0)
-        }
-    }
-
-    /// Whether the first frame in the window was a still (UI tests).
-    private(set) var stillShown = false
-
-    /// The picture in `rgb`, converted and put in the window's layer.
-    private func deliver(rendered: Int32) {
-        guard let pool else { return }
-        var made: CVPixelBuffer?
-        let pooled = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made)
-        #if DEBUG
-        if rendered < 0 || pooled != kCVReturnSuccess { NSLog("%@", "PERF pip frame lost render=\(rendered) pool=\(pooled)") }
-        #endif
-        guard rendered >= 0, pooled == kCVReturnSuccess, let buffer = made else { return }
-        CVPixelBufferLockBaseAddress(buffer, [])
-        var source = vImage_Buffer(data: rgb, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rgbStride)
-        var luma = vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 0), height: vImagePixelCount(height),
-                                 width: vImagePixelCount(width), rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0))
-        var chroma = vImage_Buffer(data: CVPixelBufferGetBaseAddressOfPlane(buffer, 1), height: vImagePixelCount(height / 2),
-                                   width: vImagePixelCount(width / 2), rowBytes: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1))
-        // Memory order B, G, R, (unused): read as A, R, G, B.
-        let order: [UInt8] = [3, 2, 1, 0]
-        vImageConvert_ARGB8888To420Yp8_CbCr8(&source, &luma, &chroma, &conversion, order, vImage_Flags(kvImageNoFlags))
-        CVPixelBufferUnlockBaseAddress(buffer, [])
-        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
-        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
-        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
-        if format == nil {
-            CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer, formatDescriptionOut: &format)
-        }
-        guard let format else { return }
-        let now = layer.controlTimebase.map { CMTimebaseGetTime($0) } ?? CMClockGetTime(CMClockGetHostTimeClock())
-        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: now, decodeTimeStamp: .invalid)
-        var sample: CMSampleBuffer?
-        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: format,
-                                                 sampleTiming: &timing, sampleBufferOut: &sample)
-        guard let sample else { return }
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true), CFArrayGetCount(attachments) > 0 {
-            let first = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
-            CFDictionarySetValue(first, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
-                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
-        }
-        let renderer = layer.sampleBufferRenderer
-        // Interrupted (the app was away, or the phone locked): start over.
-        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding { renderer.flush() }
-        renderer.enqueue(sample)
-        count += 1
-        if count == 1 { drawn() }
-        #if DEBUG
-        if count % 60 == 1 {
-            // The brightest of a grid of the picture's pixels: the window
-            // gets a picture, not black (simulators can't show the window).
-            var brightest: UInt8 = 0
-            let bytes = rgb.assumingMemoryBound(to: UInt8.self)
-            for y in Swift.stride(from: 0, to: height, by: 16) {
-                for x in Swift.stride(from: 0, to: width, by: 16) {
-                    let pixel = y * rgbStride + x * 4
-                    brightest = max(brightest, bytes[pixel], bytes[pixel + 1], bytes[pixel + 2])
-                }
-            }
-            NSLog("%@", "PERF pip frame \(count) render=\(rendered) status=\(renderer.status.rawValue) brightest=\(brightest) error=\((renderer.error as NSError?)?.code ?? 0)")
-        }
-        #endif
-    }
-
-    /// Stops drawing and lets go of libmpv's renderer (after the player
-    /// has gone back to drawing on screen).
-    func close() {
-        lock.withLock { closed = true }
-        queue.sync {}
-        mpv_render_context_set_update_callback(context, nil, nil)
-        mpv_render_context_free(context)
-        free(rgb)
-    }
-}
-#endif
-
-/// Hosts the player's Metal layer and keeps it sized to the view, including
-/// its drawable size so rotation re-creates mpv's swapchain at full size.
+/// Hosts the player's picture and keeps it sized to the view: a film's frames (iPhone, iPad), drawn at the
+/// view's size; or the Metal layer, with its drawable size so rotation re-creates mpv's swapchain at full size.
+/// The newest host takes the picture's layer.
 final class MPVHostView: UIView {
-    private let metalLayer: CAMetalLayer
+    private let picture: CALayer
     private weak var player: MPVPlayer?
     private var lastSize: CGSize = .zero
     private var settle: DispatchWorkItem?
 
     init(player: MPVPlayer) {
-        metalLayer = player.layer
+        picture = player.pictureLayer
         self.player = player
         super.init(frame: .zero)
         backgroundColor = .black
-        layer.addSublayer(metalLayer)
+        layer.addSublayer(picture)
     }
 
     @available(*, unavailable)
@@ -2152,6 +1951,15 @@ final class MPVHostView: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         setNeedsLayout()
+        #if os(iOS)
+        guard let player, player.frames != nil, picture.superlayer === layer else { return }
+        if window == nil {
+            player.showFrames(onScreen: nil)
+            lastSize = .zero
+        } else {
+            PictureInPicture.shared.hosted(player)
+        }
+        #endif
     }
 
     /// The picture always covers the whole window, whatever SwiftUI makes
@@ -2160,17 +1968,25 @@ final class MPVHostView: UIView {
     /// zoomed and lost its top and bottom.
     override func layoutSubviews() {
         super.layoutSubviews()
+        guard picture.superlayer === layer else { return }
         let area = window.map { convert($0.bounds, from: $0) } ?? bounds
+        let scale = traitCollection.displayScale
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        metalLayer.frame = area
-        let scale = traitCollection.displayScale
-        metalLayer.contentsScale = scale
-        if area.size != lastSize {
-            metalLayer.drawableSize = CGSize(width: area.width * scale, height: area.height * scale)
+        picture.frame = area
+        picture.contentsScale = scale
+        if area.size != lastSize, let metal = picture as? CAMetalLayer {
+            metal.drawableSize = CGSize(width: area.width * scale, height: area.height * scale)
         }
         CATransaction.commit()
         guard area.size != lastSize else { return }
+        #if os(iOS)
+        if let player, player.frames != nil {
+            lastSize = area.size
+            if window != nil { player.showFrames(onScreen: PixelSize(width: Int(area.width * scale), height: Int(area.height * scale))) }
+            return
+        }
+        #endif
         #if DEBUG
         NSLog("%@", "PERF surface \(Int(area.width))x\(Int(area.height))")
         #endif

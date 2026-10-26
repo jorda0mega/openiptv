@@ -1194,7 +1194,7 @@ final class AppModel {
     /// plays and on any connection: it was asked for.
     func warmSwitch(_ playback: EmbyPlayback, options: [(String, String)], hardwareDecoding: Bool) -> MPVPlayer {
         coolDown()
-        let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding)
+        let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding, picture: .film)
         player.prepareOffscreen()
         player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
                     tracks: playback.tracks)
