@@ -107,6 +107,13 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("debug-stop")
         }
+        .overlay(alignment: .topLeading) {
+            Text(Bundle.main.object(forInfoDictionaryKey: "OpenreelBuild") as? String ?? "no stamp")
+                .font(.caption2)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("debug-build")
+        }
         .overlay(alignment: .bottomTrailing) {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Text(model.aheadCounts)

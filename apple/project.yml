@@ -26,6 +26,16 @@ targetTemplates:
       - name: Fetch MPVKit
         script: '[ -d "$SRCROOT/Vendor/Libmpv.xcframework" ] || "$SRCROOT/scripts/fetch-mpvkit.sh"'
         basedOnDependencyAnalysis: false
+    # Debug builds: the commit the app was built from (OpenreelBuild), so a
+    # test run shows at once when the app under it isn't its tree's.
+    postBuildScripts:
+      - name: Build Stamp
+        script: |
+          [ "$CONFIGURATION" = Debug ] || exit 0
+          stamp=$("$SRCROOT/scripts/build-stamp.sh")
+          /usr/libexec/PlistBuddy -c "Delete :OpenreelBuild" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null
+          /usr/libexec/PlistBuddy -c "Add :OpenreelBuild string $stamp" "$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+        basedOnDependencyAnalysis: false
     dependencies:
       - framework: Vendor/Libmpv.xcframework
         embed: false

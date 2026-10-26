@@ -969,6 +969,7 @@
 				5A7365C903E355342716359D /* Sources */,
 				AF4DCEB858D1B95F3F47584F /* Resources */,
 				257855631318C846041EC32C /* Frameworks */,
+				30844A4E9F3DCBD7F8699FEB /* Build Stamp */,
 			);
 			buildRules = (
 			);
@@ -989,6 +990,7 @@
 				B4BD648488A21FD9D068E39B /* Sources */,
 				85C91BC4DCBA7FFF4EF7747C /* Resources */,
 				3B566CDEBAAB1438A4C58E84 /* Frameworks */,
+				306D81776945AC348DFD1EC1 /* Build Stamp */,
 			);
 			buildRules = (
 			);
@@ -1090,6 +1092,44 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		306D81776945AC348DFD1EC1 /* Build Stamp */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Stamp";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "[ \"$CONFIGURATION\" = Debug ] || exit 0\nstamp=$(\"$SRCROOT/scripts/build-stamp.sh\")\n/usr/libexec/PlistBuddy -c \"Delete :OpenreelBuild\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\" 2>/dev/null\n/usr/libexec/PlistBuddy -c \"Add :OpenreelBuild string $stamp\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n";
+		};
+		30844A4E9F3DCBD7F8699FEB /* Build Stamp */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Stamp";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "[ \"$CONFIGURATION\" = Debug ] || exit 0\nstamp=$(\"$SRCROOT/scripts/build-stamp.sh\")\n/usr/libexec/PlistBuddy -c \"Delete :OpenreelBuild\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\" 2>/dev/null\n/usr/libexec/PlistBuddy -c \"Add :OpenreelBuild string $stamp\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n";
+		};
 		854024C601CE88F55EBD7FE6 /* Fetch MPVKit */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
