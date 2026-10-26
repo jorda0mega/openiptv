@@ -36,10 +36,8 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     var note: (text: String, color: Color)?
     let paused: Bool
     var canGoForward = true
-    /// Opening, or the picture gone: its progress where play/pause is.
     var load: LoadProgress?
     var loadActions = LoadActions(tryAgain: {})
-    /// Apple TV: the progress's button the remote is on.
     var loadFocus: LoadProgress.Button?
     /// Playing has started (the skip buttons need something to skip in).
     var ready = true
