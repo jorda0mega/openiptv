@@ -237,16 +237,32 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertEqual(track.tries, 1)
     }
 
-    func testAStreamAskedForAfterAFrozenPictureCountsFromTheFreeze() {
+    func testAReconnectAfterAFrozenPictureSaysSoAtOnceAndCountsItsOwnWait() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
         track.pictured()
         track.stalled(at: at(50))
         track.asked(at: at(63))
         XCTAssertTrue(track.dropped)
-        XCTAssertEqual(track.began, at(50), "the reconnect after a frozen picture counted from the reopen")
-        let reconnecting = LoadProgress(subject: .channel("PPV 1"), wait: .reconnect, stage: track.stage, cause: .channel, began: track.began)
-        XCTAssertEqual(reconnecting.shown(at: at(63))?.line, "Reconnecting to PPV 1…", "the notice went away for 3 s at the reopen")
+        XCTAssertEqual(track.began, at(63), "slow and Try again count from the request")
+        XCTAssertEqual(track.pictureLost, at(50))
+        let reconnecting = LoadProgress(subject: .channel("PPV 1"), wait: .reconnect, stage: track.stage, cause: .channel,
+                                        began: track.began, pictureLost: track.pictureLost)
+        let shown = reconnecting.shown(at: at(63))
+        XCTAssertEqual(shown?.line, "Reconnecting to PPV 1…", "3 s without a picture and the notice not shown")
+        XCTAssertEqual(shown?.tryAgain, false, "Try again offered before the reopen had a chance")
+        XCTAssertEqual(reconnecting.shown(at: at(71))?.tryAgain, true)
+    }
+
+    func testALossWithNoFreezeCountsTheNoticeFromTheRequest() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.pictured()
+        track.asked(at: at(60))
+        XCTAssertEqual(track.pictureLost, at(60))
+        let reconnecting = LoadProgress(subject: .channel("PPV 1"), wait: .reconnect, stage: track.stage, cause: .channel,
+                                        began: track.began, pictureLost: track.pictureLost)
+        XCTAssertNil(reconnecting.shown(at: at(61)))
     }
 
     func testAFailureCountsItsTriesAndSeconds() {

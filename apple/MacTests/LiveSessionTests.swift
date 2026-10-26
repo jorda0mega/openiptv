@@ -164,17 +164,29 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(recording.handle(.timedOut(recording.attempt, .timeout), now: at(30)), [])
     }
 
-    func testTheReopenedCopyIsWatchedFromItsOwnPicture() {
+    func testAFreezeBeforeTheReopenedPictureLeavesTheStartLimitInCharge() {
         var session = playing()
         let load = session.attempt
         _ = session.handle(.picture(load, frozen: true), now: at(20))
         _ = session.handle(.timedOut(load, .timeout), now: at(30))
         let reopened = session.attempt
         XCTAssertEqual(session.handle(.opening(reopened), now: at(30.5)), [.deadline(reopened, after: 15)])
-        XCTAssertEqual(session.handle(.picture(reopened, frozen: true), now: at(31)), [], "the start limit still decides")
-        let started = session.handle(.started(reopened), now: at(32))
-        XCTAssertEqual(started.first, .cancelDeadline)
-        XCTAssertFalse(started.contains(where: isDeadline), "a picture just shown was taken for a frozen one: \(started)")
+        XCTAssertEqual(session.handle(.picture(reopened, frozen: true), now: at(31)), [])
+    }
+
+    func testTheLastCopyStalledOutStopsOnce() {
+        var session = playing([[a]])
+        var last: [Session.Action] = []
+        for i in 0..<4 {
+            let load = session.attempt
+            _ = session.handle(.picture(load, frozen: true), now: at(Double(20 + 30 * i)))
+            last = session.handle(.timedOut(load, .timeout), now: at(Double(30 + 30 * i)))
+            guard i < 3 else { break }
+            _ = session.handle(.opening(session.attempt), now: at(Double(31 + 30 * i)))
+            _ = session.handle(.started(session.attempt), now: at(Double(32 + 30 * i)))
+        }
+        XCTAssertEqual(last.filter { $0 == .stop }.count, 1, "the stream stopped twice: \(last)")
+        XCTAssertEqual(session.failure, .notPlaying)
     }
 
     func testLeavingPlayWhileFrozenCancelsTheStallDeadline() {
@@ -200,7 +212,9 @@ final class LiveSessionTests: XCTestCase {
             _ = session.handle(.started(session.attempt), now: at(Double(32 + 30 * i)))
         }
         XCTAssertEqual(waits.prefix(3), [3, 3, 3])
-        XCTAssertTrue(last.contains(.stop) && last.contains(.load(b, session.attempt, after: 0)), "four stalls in 3 min stayed on the copy: \(last)")
+        XCTAssertTrue(last.contains(.load(b, session.attempt, after: Session.refusalWindow)),
+                      "the next copy must wait out the account's refusal as the same copy does: \(last)")
+        XCTAssertEqual(last.filter { $0 == .stop }.count, 1, "the stream stopped twice: \(last)")
     }
 
     func testACutWhilePausedWaitsForPlay() {
