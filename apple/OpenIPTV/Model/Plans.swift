@@ -26,10 +26,11 @@ enum Plans {
 
     /// A start's plan, asked once more if it fails, and again for the
     /// server's track list if it came without, while time is left; none by
-    /// `limit`: the server took too long.
-    static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>,
-                         within limit: Duration = StartPatience.plan) async throws -> EmbyPlayback {
-        let deadline = ContinuousClock.now + limit
+    /// `failAfter`: the server took too long.
+    static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, retryAfter: Duration = StartPatience.retryAfter,
+                         failAfter: Duration = StartPatience.failAfter,
+                         retried: @escaping @MainActor () -> Void = {}) async throws -> EmbyPlayback {
+        let deadline = ContinuousClock.now + failAfter
         var playback = try await StartPatience.by(deadline) {
             do {
                 return try await shelf.take(key)
@@ -52,14 +53,44 @@ enum Plans {
     }
 }
 
-/// How long each part of a start may take before the viewer is told.
+/// A start, for the loading progress: where it is, since the tap, whether
+/// it asked again, and why it failed. What is slow, from `causeAfter`, and
+/// whether it has failed, by `failAfter`, follow.
+struct StartProgress: Equatable, Sendable {
+    enum Stage: Equatable, Sendable {
+        /// The plan: the server says how to play it.
+        case askingServer
+        /// The player asks for the film's first bytes.
+        case openingFilm
+        /// The film has opened; its first frame is on its way.
+        case starting
+    }
+
+    enum Cause: Equatable, Sendable {
+        case serverSlowToAnswer, filmSlowToArrive, slowToStart
+    }
+
+    var stage: Stage
+    let tapped: ContinuousClock.Instant
+    var retried = false
+    var failure: String?
+
+    func waited(at now: ContinuousClock.Instant = .now) -> Duration { now - tapped }
+
+    func cause(at now: ContinuousClock.Instant = .now) -> Cause? { nil }
+
+    func failed(at now: ContinuousClock.Instant = .now) -> Bool { false }
+}
+
+/// How long each part of a start may take before the viewer is told: a
+/// cause shows from 8 s, a step with no answer is asked once more at 15 s,
+/// and the start fails at 30 s.
 enum StartPatience {
-    /// Plans took up to about 40 s on a busy server.
-    static let plan = Duration.seconds(45)
+    static let causeAfter = Duration.seconds(8)
+    static let retryAfter = Duration.seconds(15)
     /// A read's first byte took up to 9 s on a busy server.
     static let firstByte = Duration.seconds(15)
-    /// From the player's open to its first frame.
-    static let open = Duration.seconds(60)
+    static let failAfter = Duration.seconds(30)
     static let tooLong = SourceError.network("The server took too long to answer.", .timedOut)
 
     #if DEBUG

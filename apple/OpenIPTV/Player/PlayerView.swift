@@ -1198,7 +1198,7 @@ struct MoviePlayerView: View {
     /// No first frame a while after the open, each way of opening it tried
     /// meanwhile: the viewer is told, rather than left with the spinner.
     private func watchTheOpen() async {
-        guard !StartPatience.off, (try? await Task.sleep(for: StartPatience.open)) != nil, !started, error == nil else { return }
+        guard !StartPatience.off, (try? await Task.sleep(for: StartPatience.failAfter)) != nil, !started, error == nil else { return }
         player?.shutdown()
         player = nil
         error = "Couldn't play: \(StartPatience.tooLong.localizedDescription)"
