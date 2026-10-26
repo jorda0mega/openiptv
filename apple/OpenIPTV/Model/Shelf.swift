@@ -140,6 +140,8 @@ final class Lane {
         fileprivate(set) var plays: Bool
         fileprivate var turn: CheckedContinuation<Void, Error>?
         fileprivate var running = false
+        /// Its owner stops it under way when conditions refuse it (Shelf).
+        fileprivate var stop: (@MainActor () -> Void)?
 
         init(_ interest: Interest?) {
             self.interest = interest
@@ -154,8 +156,9 @@ final class Lane {
     private var tokens: Int
     private var refilledAt = ContinuousClock.now
     private var refill: Task<Void, Never>?
-    private var running = 0
+    private var underWay: [Ticket] = []
     private var waiting: [Ticket] = []
+    private static let every = NSHashTable<Lane>.weakObjects()
 
     init(_ weight: Weight, atOnce: Int, bucket: Bucket? = nil, conditions: @escaping @MainActor () -> Conditions) {
         self.weight = weight
@@ -163,6 +166,11 @@ final class Lane {
         self.bucket = bucket
         self.conditions = conditions
         tokens = bucket?.size ?? 0
+        Self.every.add(self)
+    }
+
+    static func conditionsChangedEverywhere() {
+        for lane in every.allObjects { lane.conditionsChanged() }
     }
 
     func enter(_ ticket: Ticket) async throws {
@@ -197,7 +205,7 @@ final class Lane {
     func leave(_ ticket: Ticket) {
         guard ticket.running else { return }
         ticket.running = false
-        running -= 1
+        underWay.removeAll { $0 === ticket }
         admit()
     }
 
@@ -214,12 +222,15 @@ final class Lane {
         start(ticket)
     }
 
+    /// What the conditions refuse now stops, under way or waiting; a play goes on.
     func conditionsChanged() {
+        let now = conditions()
+        for ticket in underWay where !ticket.plays && !allows(ticket, now) { ticket.stop?() }
         admit()
     }
 
     #if DEBUG
-    var debugCounts: String { "\(running) under way, \(waiting.count) waiting" }
+    var debugCounts: String { "\(underWay.count) under way, \(waiting.count) waiting" }
 
     func debugRefusal(at place: Place, _ likelihood: Likelihood) -> Conditions.Refusal? {
         conditions().refusal(weight, at: place, likelihood)
@@ -237,7 +248,7 @@ final class Lane {
         refillTokens()
         if tokens > 0 { tokens -= 1 }
         ticket.running = true
-        running += 1
+        underWay.append(ticket)
         ticket.turn?.resume()
         ticket.turn = nil
     }
@@ -248,15 +259,19 @@ final class Lane {
 
     private func admit() {
         let now = conditions()
-        for ticket in waiting where !now.allows(weight, at: ticket.interest?.place ?? .page, ticket.interest?.likelihood ?? .next) {
+        for ticket in waiting where !allows(ticket, now) {
             withdraw(ticket)
         }
         refillTokens()
-        while running < atOnce, hasToken, let next = waiting.min(by: goesBefore) {
+        while underWay.count < atOnce, hasToken, let next = waiting.min(by: goesBefore) {
             waiting.removeAll { $0 === next }
             start(next)
         }
         awaitRefill()
+    }
+
+    private func allows(_ ticket: Ticket, _ now: Conditions) -> Bool {
+        now.allows(weight, at: ticket.interest?.place ?? .page, ticket.interest?.likelihood ?? .next)
     }
 
     private func goesBefore(_ a: Ticket, _ b: Ticket) -> Bool {
@@ -274,7 +289,7 @@ final class Lane {
     }
 
     private func awaitRefill() {
-        guard let bucket, refill == nil, !waiting.isEmpty, running < atOnce, !hasToken else { return }
+        guard let bucket, refill == nil, !waiting.isEmpty, underWay.count < atOnce, !hasToken else { return }
         let next = refilledAt + bucket.refillEvery
         refill = Task { [weak self] in
             try? await Task.sleep(until: next, clock: .continuous)
@@ -441,6 +456,11 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     private func start(_ key: Key, _ ticket: Lane.Ticket) -> Job {
         let job = Job(ticket)
+        ticket.stop = { [weak self, weak job] in
+            guard let self, let job, entries[key]?.job === job else { return }
+            stop(job)
+            entries[key] = nil
+        }
         job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in await run(job, key) }
         entries[key] = .waiting(job)
         return job

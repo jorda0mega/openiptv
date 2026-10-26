@@ -87,12 +87,15 @@ final class NetworkStatus: @unchecked Sendable {
         case nil: break
         }
         #endif
-        lock.withLock {
+        let changed = lock.withLock {
             satisfied = link.satisfied
             unmeteredValue = satisfied && !expensive && !constrained
             known = true
+            let was = networkValue
             networkValue = !satisfied ? .unknown : constrained ? .constrained : expensive ? .expensive : .unmetered
+            return networkValue != was
         }
+        if changed { Task { @MainActor in Lane.conditionsChangedEverywhere() } }
     }
 
     #if DEBUG

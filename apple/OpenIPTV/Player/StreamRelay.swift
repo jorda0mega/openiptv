@@ -558,9 +558,17 @@ final class StreamRelay: @unchecked Sendable {
     func fetchStart(_ file: FileStart) async -> Bool {
         start()
         let key = cacheKey(file.url)
-        // Asked a moment after something started playing: not now.
+        return await withTaskCancellationHandler {
+            await fetchStart(file, key: key)
+        } onCancel: {
+            stopAhead(of: key)
+        }
+    }
+
+    private func fetchStart(_ file: FileStart, key: String) async -> Bool {
+        // Asked a moment after something started playing, or stopped: not now.
         let allowed = lock.withLock { () -> Bool in
-            guard !PlaybackActivity.isPlaying || key == playingFile else { return false }
+            guard !Task.isCancelled, !PlaybackActivity.isPlaying || key == playingFile else { return false }
             stoppedAhead.remove(key)
             aheadFiles.insert(key)
             return true
@@ -715,6 +723,18 @@ final class StreamRelay: @unchecked Sendable {
         #if DEBUG
         if !stopping.isEmpty { NSLog("%@", "PERF relay stopped \(stopping.count) fetches ahead") }
         #endif
+    }
+
+    /// A start ahead stopped: its reads stop, under way and still to come,
+    /// unless its file plays (then they are playback's).
+    private func stopAhead(of key: String) {
+        let stopping = lock.withLock { () -> [URLSessionDataTask] in
+            guard key != playingFile else { return [] }
+            stoppedAhead.insert(key)
+            aheadFiles.remove(key)
+            return ahead.removeValue(forKey: key) ?? []
+        }
+        stopping.forEach { $0.cancel() }
     }
 
     // MARK: The file's index
