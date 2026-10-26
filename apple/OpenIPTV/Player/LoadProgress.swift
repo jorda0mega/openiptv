@@ -162,7 +162,11 @@ struct LoadTrack: Equatable {
     private(set) var stage: LoadProgress.Stage
     private(set) var addressed = false
     private(set) var dropped = false
-    private(set) var stalledSince: Date?
+    /// The picture waiting: for data that stopped, or for a jump to land;
+    /// from the earlier of the two.
+    var stalledSince: Date? { [dataStoppedAt, jumpAskedAt].compactMap { $0 }.min() }
+    private var dataStoppedAt: Date?
+    private var jumpAskedAt: Date?
     private(set) var pictureLost: Date?
     /// The first picture of a start (not of a drop).
     private(set) var startEndedAt: Date?
@@ -219,7 +223,8 @@ struct LoadTrack: Equatable {
         startEndedAt = dropped ? nil : now
         pictureOn = true
         dropped = false
-        stalledSince = nil
+        dataStoppedAt = nil
+        jumpAskedAt = nil
         pictureLost = nil
     }
 
@@ -234,11 +239,19 @@ struct LoadTrack: Equatable {
     }
 
     mutating func stalled(at now: Date) {
-        if stalledSince == nil { stalledSince = now }
+        if dataStoppedAt == nil { dataStoppedAt = now }
     }
 
     mutating func flowing() {
-        stalledSince = nil
+        dataStoppedAt = nil
+    }
+
+    mutating func jumping(at now: Date) {
+        if jumpAskedAt == nil { jumpAskedAt = now }
+    }
+
+    mutating func landed() {
+        jumpAskedAt = nil
     }
 
     mutating func failed(at now: Date) {

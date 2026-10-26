@@ -987,7 +987,7 @@ struct MoviePlayerView: View {
             return LoadProgress(subject: subject, cause: cause, began: track.began, failure: track.failure(.refused(error)))
         }
         if !started { return LoadProgress(subject: subject, stage: track.stage, cause: cause, began: track.began) }
-        if buffering, let since = track.stalledSince {
+        if let since = track.stalledSince {
             return LoadProgress(subject: subject, wait: .stall, stage: track.stage, cause: cause, began: since)
         }
         return track.startEndedAt.map { LoadProgress(subject: subject, cause: cause, began: track.began, endedAt: $0) }
@@ -1394,7 +1394,7 @@ struct MoviePlayerView: View {
     /// and tracks aren't any one load's.
     private func handle(_ event: MPVPlayer.Event, _ loadAttempt: Int) {
         switch event {
-        case .paused, .seeked, .previewShown, .tracksChanged: break
+        case .paused, .seeked, .seeking, .previewShown, .tracksChanged: break
         default: guard track.isCurrent(loadAttempt) else { return }
         }
         switch event {
@@ -1452,6 +1452,10 @@ struct MoviePlayerView: View {
             if prefs.performanceStats { showTiming(timing ?? "", for: 5) } else { timing = nil }
             if controlsVisible { showControls() }
             Task { await model.report(playback, seconds: position, event: .started) }
+        case let .seeking(on):
+            // A jump that doesn't land (the server stopped answering) waits
+            // like a stall; choosing where to jump doesn't.
+            if on, started, scrubbing == nil { track.jumping(at: Date()) } else if !on { track.landed() }
         case let .seeked(seconds):
             jumpUntil = nil
             if prefs.performanceStats { showTiming(String(format: "Jumped in %.1f s", seconds), for: 3) }
