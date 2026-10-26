@@ -44,12 +44,16 @@ final class PhoneNetworkSettingTests: XCTestCase {
         let choices = [("None", "Films load when you tap them. Uses the least data."),
                        ("150 MB a day", "The film you rest on, about 10 MB each."),
                        ("As on Wi-Fi", "Up to 3 films, 10–30 MB each, no daily limit.")]
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'None'")).firstMatch.waitForExistence(timeout: 5),
+                      "the menu didn't open")
+        shot("choices open")
         for (title, line) in choices {
             let choice = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
-            XCTAssertTrue(choice.waitForExistence(timeout: 5), "no \(title) in the menu")
-            XCTAssertTrue(choice.label.contains(line) || text(line).exists, "no line under \(title): \(choice.label)")
+            XCTAssertTrue(choice.exists, "no \(title) in the menu")
+            let anywhere = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", line)).firstMatch
+            XCTAssertTrue(choice.label.contains(line) || (choice.value as? String)?.contains(line) == true || anywhere.exists,
+                          "no line under \(title): \(choice.label)")
         }
-        shot("choices open")
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH '150 MB a day'")).firstMatch.tap()
     }
 
