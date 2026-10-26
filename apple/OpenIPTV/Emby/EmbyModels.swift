@@ -220,6 +220,11 @@ struct Card: Codable, Hashable, Identifiable {
 /// source: the play session its reports and conversions carry, once it
 /// answers.
 final class LateSession: Hashable, @unchecked Sendable {
+    /// Reports go one after another: one waiting for a PlaybackInfo the
+    /// server held (about 40 s) held Stopped back, and a viewer leaving the
+    /// app meanwhile lost it.
+    static let patience = Duration.seconds(2)
+
     private let answer: Task<String?, Never>
     private let arrived: Locked<String?>
 
@@ -235,7 +240,24 @@ final class LateSession: Hashable, @unchecked Sendable {
 
     var now: String? { arrived.value }
 
-    func value() async -> String? { await answer.value }
+    /// Once it answers, or after `limit` the one known then.
+    func value(within limit: Duration) async -> String? {
+        let answer = answer
+        let waiting = Locked<CheckedContinuation<String?, Never>?>(nil)
+        func finish(_ session: String?) {
+            var done: CheckedContinuation<String?, Never>?
+            waiting.mutate { done = $0; $0 = nil }
+            done?.resume(returning: session)
+        }
+        return await withCheckedContinuation { done in
+            waiting.mutate { $0 = done }
+            Task { finish(await answer.value) }
+            Task {
+                try? await Task.sleep(for: limit)
+                finish(now)
+            }
+        }
+    }
 
     static func == (a: LateSession, b: LateSession) -> Bool { a === b }
 
@@ -434,9 +456,9 @@ struct EmbyPlayback: Hashable, Identifiable {
     }
 
     /// The play session its reports carry: PlaybackInfo's, once it answered.
-    func session() async -> String? {
+    func session(within limit: Duration = LateSession.patience) async -> String? {
         if let playSessionId { return playSessionId }
-        return await lateSession?.value()
+        return await lateSession?.value(within: limit)
     }
 
     /// The play session known now (a conversion asked meanwhile carries none).

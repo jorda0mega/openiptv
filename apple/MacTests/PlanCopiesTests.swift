@@ -96,7 +96,7 @@ final class PlanCopiesTests: XCTestCase {
         let query = URLComponents(url: playback.url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         XCTAssertEqual(query.first { $0.name == "MediaSourceId" }?.value, "ms0")
         XCTAssertTrue(playback.listed, "its tracks came from the item's list")
-        let session = await playback.session()
+        let session = await playback.session(within: .seconds(10))
         XCTAssertEqual(session, "ps0", "the reports' play session, once PlaybackInfo answered")
     }
 
