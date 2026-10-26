@@ -142,6 +142,25 @@ final class KeptStartUseTests: XCTestCase {
         XCTAssertEqual(server.ranges.filter { $0 == "bytes=0-524287" }.count, 2, "the player waited for a read asked after the tap")
         _ = await ahead.value
     }
+
+    /// The fetch ahead has no wait for a first byte of its own: the
+    /// player's read waits for it 3 s, then asks the server itself.
+    func testAReadWaitsForTheBytesOnTheirWayOnlyOnce() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0, silent: 1)
+        let relay = StreamRelay()
+        let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
+        let ahead = Task { await relay.fetchStart(FileStart(film)) }
+        for _ in 0..<100 where server.ranges.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+        read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
+        read.timeoutInterval = 6
+        let began = ContinuousClock.now
+        let answer = try? await URLSession(configuration: .ephemeral).data(for: read)
+        XCTAssertEqual(answer?.0.count, 524_288, "the player's read waited past 3 s for bytes on their way")
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(5))
+        relay.stopAhead(keeping: nil)
+        _ = await ahead.value
+    }
 }
 
 #if DEBUG
