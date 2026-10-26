@@ -189,12 +189,7 @@ struct LoadTrack: Equatable {
     }
 
     mutating func asked(_ stage: LoadProgress.Stage = .asking, at now: Date) {
-        if pictureOn {
-            pictureOn = false
-            dropped = true
-            began = now
-            tries = 0
-        }
+        lost(at: now)
         tries += 1
         self.stage = stage
         received = nil
@@ -222,6 +217,15 @@ struct LoadTrack: Equatable {
         pictureOn = true
         dropped = false
         stalledSince = nil
+    }
+
+    /// The picture went (the connection did): the wait counts from here.
+    mutating func lost(at now: Date) {
+        guard pictureOn else { return }
+        pictureOn = false
+        dropped = true
+        began = now
+        tries = 0
     }
 
     mutating func stalled(at now: Date) {
