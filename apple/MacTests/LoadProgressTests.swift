@@ -346,6 +346,44 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertFalse(track.stillFailed(again), "an explanation for a load that hasn't failed")
     }
 
+    func testAStallThatBecomesAReopenCountsFromTheStall() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.pictured()
+        track.stalled(at: at(50))
+        track.asked(at: at(58))
+        XCTAssertEqual(track.began, at(50), "the reconnect counted from the reopen, not from when the picture went")
+        XCTAssertTrue(track.dropped)
+    }
+
+    func testALiveFreezeSaysReconnectingFromWhenThePictureWent() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.pictured()
+        track.stalled(at: at(50))
+        let frozen = LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: true, cause: .channel)
+        XCTAssertEqual(frozen?.wait, .reconnect, "a frozen live picture shows a ring with no words")
+        XCTAssertEqual(frozen?.began, at(50))
+        XCTAssertNil(frozen?.shown(at: at(52.9)))
+        XCTAssertEqual(frozen?.shown(at: at(53))?.line, "Reconnecting to PPV 1…")
+        track.asked(at: at(58))
+        let reopening = LoadProgress.channel("PPV 1", track: track, loading: true, hasPicture: true, cause: .channel)
+        XCTAssertEqual(reopening?.wait, .reconnect)
+        XCTAssertEqual(reopening?.began, at(50), "the reopen restarted the drop's clock")
+    }
+
+    func testALiveStartAndAFailureAreWhatTheyWere() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        XCTAssertEqual(LoadProgress.channel("PPV 1", track: track, loading: true, hasPicture: false, cause: .server)?.wait, .start)
+        XCTAssertNil(LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: false, cause: .channel))
+        track.pictured()
+        XCTAssertNil(LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: true, cause: .channel), "a progress over a moving picture")
+        let failed = LoadProgress.channel("PPV 1", track: track, loading: false, hasPicture: false, cause: .channel,
+                                          failure: .init(kind: .noPicture, tries: 2, seconds: 30))
+        XCTAssertEqual(failed?.shown(at: at(31))?.line, "PPV 1 isn’t sending a picture")
+    }
+
     func testAStallCountsFromItsStart() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
