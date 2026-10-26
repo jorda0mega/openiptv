@@ -273,6 +273,8 @@ struct MoviePlayerView: View {
     @State private var timing: String?
     @State private var warmStart = false
     @State private var track = LoadTrack(began: Date(), stage: .fetching)
+    /// How the server answered each way of opening a film that failed.
+    @State private var diagnosis: Task<Void, Never>?
     /// The file's audio and subtitle tracks, and the picture's badges ("4K",
     /// "HDR") for the Info panel.
     @State private var tracks: [Track] = []
@@ -996,6 +998,7 @@ struct MoviePlayerView: View {
     private var loadActions: LoadActions { LoadActions(tryAgain: { retry() }) }
 
     private func retry() {
+        diagnosis?.cancel()
         error = nil
         attempt = 0
         started = false
@@ -1502,10 +1505,12 @@ struct MoviePlayerView: View {
             error = message.prefix(1).uppercased() + message.dropFirst()
             track.failed(at: Date())
             showControls(autoHide: false)
-            // Say why: how the server answered each way of opening it.
-            Task {
+            let failed = track.attempt
+            diagnosis?.cancel()
+            diagnosis = Task {
                 let why = await model.diagnose(playback)
-                if !why.isEmpty, error != nil { error = why }
+                guard !Task.isCancelled, !why.isEmpty, track.stillFailed(failed) else { return }
+                error = why
             }
         case let .time(rawPosition, newDuration):
             if let newDuration, offset == 0, duration != newDuration { duration = newDuration }
@@ -1587,6 +1592,7 @@ struct MoviePlayerView: View {
 
     private func finish() {
         hideTask?.cancel()
+        diagnosis?.cancel()
         probeTask?.cancel()
         convertedOpen?.cancel()
         thumbnailTask?.cancel()
