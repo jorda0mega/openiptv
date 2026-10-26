@@ -203,6 +203,26 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
     }
 
+    /// A film closed and chosen again carries on from the player kept for
+    /// it, paused meanwhile: swiping home still puts it in the window.
+    func testAReopenedFilmGoesIntoTheWindowAsTheAppGoes() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
+        openFilm()
+        sleep(3)
+        controlsUp()
+        app.buttons["Close player"].firstMatch.tap()
+        sleep(2)
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "no play button")
+        play.tap()
+        sleep(5)
+        XCTAssertTrue(app.staticTexts["debug-start"].firstMatch.label.hasPrefix("warm"), "the film opened afresh")
+        XCUIDevice.shared.press(.home)
+        let window = XCUIApplication(bundleIdentifier: "com.apple.springboard").otherElements["Video"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "swiping home didn't put the reopened film in the window")
+        app.activate()
+    }
+
     private func assertNothingStopped(file: StaticString = #filePath, line: UInt = #line) {
         let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
         print("PIP gap \(readout)")
