@@ -225,38 +225,52 @@ final class LateSession: Hashable, @unchecked Sendable {
     /// app meanwhile lost it.
     static let patience = Duration.seconds(2)
 
-    private let answer: Task<String?, Never>
-    private let arrived: Locked<String?>
+    private let answer: Task<Void, Never>
+    /// Nil while PlaybackInfo is out; then its session, or none for good
+    /// once a conversion opened without it.
+    private let known: Locked<String??>
 
     init(_ info: Task<EmbyClient.PlaybackInfo?, Never>) {
-        let arrived = Locked<String?>(nil)
-        self.arrived = arrived
+        let known = Locked<String??>(nil)
+        self.known = known
         answer = Task {
             let session = await info.value?.PlaySessionId
-            arrived.mutate { $0 = session }
-            return session
+            known.mutate { if case .none = $0 { $0 = .some(session) } }
         }
     }
 
-    var now: String? { arrived.value }
+    var now: String? { known.value ?? nil }
 
     /// Once it answers, or after `limit` the one known then.
     func value(within limit: Duration) async -> String? {
+        if known.value != nil { return now }
         let answer = answer
         let waiting = Locked<CheckedContinuation<String?, Never>?>(nil)
-        func finish(_ session: String?) {
+        func finish() {
             var done: CheckedContinuation<String?, Never>?
             waiting.mutate { done = $0; $0 = nil }
-            done?.resume(returning: session)
+            done?.resume(returning: now)
         }
         return await withCheckedContinuation { done in
             waiting.mutate { $0 = done }
-            Task { finish(await answer.value) }
+            Task {
+                await answer.value
+                finish()
+            }
             Task {
                 try? await Task.sleep(for: limit)
-                finish(now)
+                finish()
             }
         }
+    }
+
+    /// What a conversion opening now carries, waited for as a report waits:
+    /// every report carries the same from then on (the server stops the
+    /// conversion its Stopped names).
+    func settled(within limit: Duration) async -> String? {
+        _ = await value(within: limit)
+        known.mutate { if case .none = $0 { $0 = .some(nil) } }
+        return now
     }
 
     static func == (a: LateSession, b: LateSession) -> Bool { a === b }
@@ -461,8 +475,16 @@ struct EmbyPlayback: Hashable, Identifiable {
         return await lateSession?.value(within: limit)
     }
 
-    /// The play session known now (a conversion asked meanwhile carries none).
-    var sessionNow: String? { playSessionId ?? lateSession?.now }
+    /// A converted version's address as it opens, with the play session
+    /// known then.
+    func opening(_ converted: URL) async -> URL {
+        var session = playSessionId
+        if session == nil { session = await lateSession?.settled(within: LateSession.patience) }
+        guard var parts = URLComponents(url: converted, resolvingAgainstBaseURL: false) else { return converted }
+        parts.queryItems = (parts.queryItems ?? []).filter { $0.name != "PlaySessionId" }
+            + (session.map { [URLQueryItem(name: "PlaySessionId", value: $0)] } ?? [])
+        return parts.url ?? converted
+    }
 }
 
 struct EmbyConnectServer: Decodable, Hashable, Identifiable {

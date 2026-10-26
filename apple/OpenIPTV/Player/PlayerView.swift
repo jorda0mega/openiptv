@@ -1301,12 +1301,13 @@ struct MoviePlayerView: View {
         let headers = playback.fallbackHeaders
         convertedOpen?.cancel()
         convertedOpen = Task {
-            let opening = await ConvertedPlaylist.load(url, headers: headers)
+            let address = await playback.opening(url)
+            let opening = await ConvertedPlaylist.load(address, headers: headers)
             guard !Task.isCancelled, self.player === player else { return }
             switch opening {
             case let .refused(why): refuseConverted(why, player)
             case let .listed(list):
-                guard let opened = player.openConverted(url, list, at: position, for: playback) else {
+                guard let opened = player.openConverted(address, list, at: position, for: playback) else {
                     return refuseConverted("relay not running", player)
                 }
                 // The stream playing reports where it was for a moment after
