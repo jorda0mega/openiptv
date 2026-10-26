@@ -25,18 +25,30 @@ final class NetworkStatus: @unchecked Sendable {
     private var path: NWPath?
     #endif
 
+    private let queue = DispatchQueue(label: "openiptv.network-status")
     #if DEBUG
-    private let debugNetwork: String?
+    private let debugNetwork: DebugNetwork?
+    /// On `queue`: whether -debugNetwork's time has come, and the link last seen.
+    private var debugSwitched = false
+    private var seen: Seen?
 
     private convenience init() {
         self.init(debugNetwork: UserDefaults.standard.string(forKey: "debugNetwork"))
     }
 
-    /// UI tests: -debugNetwork metered or lowData. The simulator's link is
-    /// the Mac's, never a phone network.
+    /// UI tests: -debugNetwork metered or lowData, or metered@120 from 120 s
+    /// after launch. The simulator's link is the Mac's, never a phone network.
     init(debugNetwork: String?) {
-        self.debugNetwork = debugNetwork
+        self.debugNetwork = DebugNetwork(debugNetwork)
+        debugSwitched = self.debugNetwork?.after == .zero
         start()
+        if let after = self.debugNetwork?.after, after > .zero {
+            queue.asyncAfter(deadline: .now() + after / .seconds(1)) { [weak self] in
+                guard let self else { return }
+                debugSwitched = true
+                if let seen { take(seen) }
+            }
+        }
     }
     #else
     private init() {
@@ -44,34 +56,43 @@ final class NetworkStatus: @unchecked Sendable {
     }
     #endif
 
+    private struct Seen {
+        let satisfied: Bool, expensive: Bool, constrained: Bool
+    }
+
     private func start() {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
-            var (expensive, constrained) = (path.isExpensive, path.isConstrained)
-            #if DEBUG
-            switch debugNetwork {
-            case "metered": expensive = true
-            case "lowData": constrained = true
-            default: break
-            }
-            #endif
-            lock.lock()
-            satisfied = path.status == .satisfied
-            unmeteredValue = satisfied && !expensive && !constrained
-            known = true
-            networkValue = path.status != .satisfied ? .unknown : constrained ? .constrained : expensive ? .expensive : .unmetered
             #if DEBUG && canImport(Libmpv)
-            self.path = path
+            lock.withLock { self.path = path }
             #endif
-            lock.unlock()
+            take(Seen(satisfied: path.status == .satisfied, expensive: path.isExpensive, constrained: path.isConstrained))
             #if DEBUG && canImport(Libmpv)
             LivePerf.sayPath(path)
             #endif
         }
-        monitor.start(queue: DispatchQueue(label: "openiptv.network-status"))
+        monitor.start(queue: queue)
         #if DEBUG
         if let url = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_ONLINE_URL"].flatMap(URL.init(string:)) { followDebugOnline(url) }
         #endif
+    }
+
+    private func take(_ link: Seen) {
+        var (expensive, constrained) = (link.expensive, link.constrained)
+        #if DEBUG
+        seen = link
+        switch debugSwitched ? debugNetwork?.reading : nil {
+        case .metered: expensive = true
+        case .lowData: constrained = true
+        case nil: break
+        }
+        #endif
+        lock.withLock {
+            satisfied = link.satisfied
+            unmeteredValue = satisfied && !expensive && !constrained
+            known = true
+            networkValue = !satisfied ? .unknown : constrained ? .constrained : expensive ? .expensive : .unmetered
+        }
     }
 
     #if DEBUG
@@ -143,6 +164,24 @@ final class NetworkStatus: @unchecked Sendable {
         return free
     }
 }
+
+#if DEBUG
+/// -debugNetwork's value: a phone network (metered) or Low Data Mode
+/// (lowData), from launch or from that many seconds after it (metered@120).
+struct DebugNetwork {
+    enum Reading: String { case metered, lowData }
+
+    let reading: Reading
+    let after: Duration
+
+    init?(_ value: String?) {
+        let parts = (value ?? "").split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard let reading = Reading(rawValue: parts[0]), let seconds = parts.count == 1 ? 0 : Double(parts[1]), seconds >= 0
+        else { return nil }
+        (self.reading, after) = (reading, .seconds(seconds))
+    }
+}
+#endif
 
 extension Conditions {
     @MainActor static func current() -> Conditions {
