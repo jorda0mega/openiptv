@@ -40,10 +40,10 @@ enum FilmStream: Sendable {
 #if canImport(UIKit)
 extension MPVPlayer {
     func openConverted(_ url: URL, _ list: ConvertedPlaylist, at second: Double, for playback: EmbyPlayback,
-                       attempt: Int? = nil) -> FilmStream? {
+                       attempt: @autoclosure () -> Int? = nil) -> FilmStream? {
         guard let opening = FilmStream.converted(url, list, at: second, headers: playback.fallbackHeaders) else { return nil }
         load(opening.address, headers: opening.headers, start: opening.start, file: false, converting: !FilmStream.oldConvertedStart,
-             tracks: playback.tracks, sameFilm: opening.stream.clockStart, attempt: attempt)
+             tracks: playback.tracks, sameFilm: opening.stream.clockStart, attempt: attempt())
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "debugRedirectCounts") {
             let (headers, from) = (playback.fallbackHeaders, opening.stream.clockStart)

@@ -1286,7 +1286,7 @@ struct MoviePlayerView: View {
             revertTo = nil
             lastConverted = bitrate
             guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at, audio: player.audioStreamIndex) else { return }
-            playConverted(url, attempt: track.nextAttempt())
+            playConverted(url)
         case .original:
             revertTo = lastConverted
             jumpUntil = Date().addingTimeInterval(1.5)
@@ -1303,7 +1303,9 @@ struct MoviePlayerView: View {
     }
 
     /// Opens from where the film is once the playlists arrive, so a jump during the wait holds.
-    private func playConverted(_ url: URL, attempt: Int) {
+    /// `asked`: the attempt of a start's next way to open it; another
+    /// quality's starts when its load does, the playing one counting till then.
+    private func playConverted(_ url: URL, asked: Int? = nil) {
         guard let player else { return }
         #if DEBUG
         player.askedForConverted()
@@ -1317,7 +1319,8 @@ struct MoviePlayerView: View {
             switch opening {
             case let .refused(why): refuseConverted(why, player)
             case let .listed(list):
-                guard let opened = player.openConverted(address, list, at: position, for: playback, attempt: attempt) else {
+                guard let opened = player.openConverted(address, list, at: position, for: playback,
+                                                        attempt: asked ?? track.nextAttempt()) else {
                     return refuseConverted("relay not running", player)
                 }
                 // The stream playing reports where it was for a moment after
@@ -1483,7 +1486,7 @@ struct MoviePlayerView: View {
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
                 revertTo = nil
                 governor?.revert(to: bitrate)
-                playConverted(url, attempt: track.nextAttempt())
+                playConverted(url)
                 return
             }
             // A converted version the server won't make: go back to the
@@ -1498,7 +1501,7 @@ struct MoviePlayerView: View {
                 let next = playback.fallbacks[attempt]
                 attempt += 1
                 let asked = track.asked(.fetching, at: Date())
-                if next.path().hasSuffix(".m3u8") { playConverted(next, attempt: asked); return }
+                if next.path().hasSuffix(".m3u8") { playConverted(next, asked: asked); return }
                 playFile(next, headers: playback.fallbackHeaders, at: playback.startSeconds, attempt: asked)
                 return
             }
