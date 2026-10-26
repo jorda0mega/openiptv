@@ -82,8 +82,10 @@ CONNECTIONS = set()
 # real-busy, worst, far; busy is real-busy) takes the profile's server half,
 # and its link half unless OPENIPTV_MOCK_LINK names another profile's ("none"
 # when the throttling proxy carries the link). GET /mock/profile?name=&link=
-# switches ("none" for none) and closes every other connection so the next
-# ones take it; GET /mock/net says what each half has done, counts only.
+# switches ("none" for none; &ago=N begins the run N s in) and closes every
+# other connection so the next ones take it; GET /mock/net says what each
+# half has done, counts only, and the link's schedule (its network change
+# and offline windows, times only).
 # OPENIPTV_MOCK_SEED (1 unless set; ?seed= too) fixes every random draw, so a
 # run repeats. slow_link.py defines each part. Under a profile, /mock/
 # requests go at full speed, the film's own pace in send_file is off, a
@@ -549,12 +551,13 @@ def network_change():
         CONVERSIONS.clear()
 
 
-def take_profile(name, link=None, seed=SEED):
+def take_profile(name, link=None, seed=SEED, ago=0.0):
     """Profile `name`'s server half, over `link`'s link half (name's own unless given)."""
     if FAR[0]:
         FAR[0][1].stop()
     link = link or name
-    FAR[0] = (slow_link.Server(name, seed), Link(link, seed, on_change=network_change)) if "none" != name or "none" != link else None
+    FAR[0] = (slow_link.Server(name, seed), Link(link, seed, on_change=network_change, on_offline=network_change, ago=ago)) \
+        if "none" != name or "none" != link else None
     EXTRACTIONS.clear()
 
 
@@ -593,6 +596,12 @@ class Handler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             self.wfile.on = not path.startswith("/mock/")
             if self.wfile.on:
+                link = self.link.link
+                if link.offline(time.monotonic()) == "refused":
+                    self.close_connection = True
+                    close([self.connection], abrupt=True)
+                    return False
+                time.sleep(max(0.0, link.offline_until(time.monotonic()) - time.monotonic()))
                 first, server, rng = not self.link.answered, self.server_half, self.link.answers
                 wait = self.link.wait_before_answer() + (server.setup(rng) if first else 0)
                 if opens_file(path) and server.p:
@@ -761,7 +770,7 @@ class Handler(BaseHTTPRequestHandler):
             name, link = q.get("name", "none"), q.get("link")
             if {name, link or name} - set(slow_link.profiles()) - {"none"}:
                 return self.send({"error": "no such profile"}, status=400)
-            take_profile(name, link, int(q.get("seed", SEED)))
+            take_profile(name, link, int(q.get("seed", SEED)), float(q.get("ago", 0)))
             self.close_others(False)
             return self.send({"profile": name, "link": link or name})
         if path == "/mock/net":
@@ -769,7 +778,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({"profile": "none"})
             server, link = FAR[0]
             return self.send({"profile": server.name, "link": link.name, "seed": server.seed,
-                              "server": dict(server.counts), "net": link.readout()})
+                              "server": dict(server.counts), "net": link.readout(), "schedule": link.schedule()})
         if path == "/mock/down":
             # Gone down for "seconds": every connection dropped at once.
             DOWN_UNTIL[0] = time.time() + float(q.get("seconds", "10"))

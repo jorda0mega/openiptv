@@ -14,9 +14,13 @@ its faults: "hang" ({one_in, s}: a read stops that long, part way), "reset"
 time a conversion starts). Its link half is a network in between:
 "connect_s" more for each new connection, "round_trip_s" for each request,
 "mbit_s" for every connection together ({low, high, every_s}: it swings),
-"stall" ({every_s, s}: every connection stops at once, about that often) and
-"network_change_s" (once a run, that long in: every open connection dropped
-at once). The test server takes the server half, and the link half unless
+"stall" ({every_s, s}: every connection stops at once, about that often),
+"offline" ({per_hour, s}: fully offline that long, once in each share of the
+hour at a drawn second; the first window of each pair hangs every connection
+as a dead link does, the second refuses every new one and drops the open
+ones as it begins), "network_change_s" (once a run, that long in: every open
+connection dropped at once) and "metered_after_change" (1: the change is from
+Wi-Fi to a phone network, which the app is told with -debugNetwork). The test server takes the server half, and the link half unless
 the proxy carries it; the proxy takes only the link half.
 
 A spec is a number; [low, high], drawn evenly; or {median, spread, low,
@@ -26,6 +30,7 @@ profile's. Every draw comes from the seed: a connection's from its number, a
 read's from its number, a conversion's from its start's number, the link's
 from its own, so a run repeats."""
 
+import bisect
 import json
 import math
 import os
@@ -36,6 +41,7 @@ from typing import NamedTuple, Optional
 
 PIECE = 16 << 10
 FAULT_SPAN = 512 << 10
+OFFLINE_HOURS = 2
 PROFILES_FILE = os.environ.get("OPENIPTV_NET_PROFILES") or os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                         "net_profiles.json")
 
@@ -153,35 +159,91 @@ class Server:
 class Link:
     """A profile's link half for every connection over it, and what it has
     done (`counts`). `on_change` drops every open connection at the network
-    change."""
+    change, `on_offline` as a refusing offline window begins. `ago` begins
+    the run that many seconds in, so a check reaches the change or a window
+    at once."""
 
-    def __init__(self, name, seed=1, on_change=None):
+    def __init__(self, name, seed=1, on_change=None, on_offline=None, ago=0.0):
         self.name, self.seed, self.p = name, seed, half(name, "link")
         self.lock = threading.Lock()
         self.due = 0.0
-        self.began = time.monotonic()
+        self.began = time.monotonic() - ago
+        self.wall_began = time.time() - ago
+        self.windows = self.offline_windows()
+        self.starts = [start for start, _, _ in self.windows]
         self.fades = random.Random(f"{seed}:link")
         self.fade = (math.inf, math.inf)
         if self.p.get("stall"):
             self.fade = self.next_fade(self.began)
         self.swings = random.Random(f"{seed}:rate")
         self.rate, self.rate_until = math.inf, self.began
-        self.counts = dict(connections=0, stalls=0, changes=0, sent=0, carrying_s=0.0, stalled_s=0.0)
-        self.timer = None
-        if self.p.get("network_change_s") and on_change:
-            self.timer = threading.Timer(draw(self.p["network_change_s"], random.Random(f"{seed}:change")),
-                                         self.change, [on_change])
-            self.timer.daemon = True
-            self.timer.start()
+        self.counts = dict(connections=0, stalls=0, changes=0, sent=0, carrying_s=0.0, stalled_s=0.0, offline_s=0.0)
+        self.change_s = draw(self.p["network_change_s"], random.Random(f"{seed}:change")) if self.p.get("network_change_s") else None
+        self.timers = []
+        if self.change_s is not None and on_change and self.change_s > ago:
+            self.after(self.change_s - ago, self.change, on_change)
+        if on_offline:
+            self.next_drop(on_offline)
+
+    def after(self, seconds, action, *args):
+        timer = threading.Timer(seconds, action, args)
+        timer.daemon = True
+        with self.lock:
+            self.timers.append(timer)
+        timer.start()
 
     def change(self, on_change):
         with self.lock:
             self.counts["changes"] += 1
         on_change()
 
+    def offline_windows(self):
+        """(start, end, "hang" or "refused"), seconds from the run's start, for its first OFFLINE_HOURS."""
+        spec = self.p.get("offline")
+        if not spec:
+            return []
+        rng, share, windows = random.Random(f"{self.seed}:offline"), 3600 / spec["per_hour"], []
+        for n in range(int(spec["per_hour"] * OFFLINE_HOURS)):
+            length = draw(spec["s"], rng)
+            start = n * share + rng.uniform(0, share - length)
+            windows.append((start, start + length, ("hang", "refused")[n % 2]))
+        return windows
+
+    def window(self, at):
+        """The offline window at monotonic `at`, or None."""
+        n = bisect.bisect_right(self.starts, at - self.began) - 1
+        return self.windows[n] if n >= 0 and at - self.began < self.windows[n][1] else None
+
+    def offline(self, at):
+        window = self.window(at)
+        return window and window[2]
+
+    def offline_until(self, at):
+        window = self.window(at)
+        return self.began + window[1] if window else at
+
+    def next_drop(self, on_offline, after=None):
+        elapsed = time.monotonic() - self.began
+        upcoming = [start for start, _, kind in self.windows if kind == "refused" and start > (after if after is not None else elapsed - 0.001)]
+        if upcoming:
+            self.after(max(0.0, upcoming[0] - elapsed), self.drop, on_offline, upcoming[0])
+
+    def drop(self, on_offline, start):
+        on_offline()
+        self.next_drop(on_offline, after=start)
+
     def stop(self):
-        if self.timer:
-            self.timer.cancel()
+        with self.lock:
+            timers, self.timers = self.timers, []
+        for timer in timers:
+            timer.cancel()
+
+    def schedule(self):
+        """When the network change and the first hour's offline windows come, in seconds from the run's
+        start, and the change as a time of day (change_at) for the app's -debugNetwork: times only."""
+        return {"change_s": self.change_s, "change_at": None if self.change_s is None else self.wall_began + self.change_s,
+                "metered_after_change": bool(self.p.get("metered_after_change")),
+                "offline": [list(window) for window in self.windows if window[0] < 3600]}
 
     def next_fade(self, after):
         stall = self.p["stall"]
@@ -208,6 +270,10 @@ class Link:
         with self.lock:
             now = time.monotonic()
             at = max(now, connection.due, self.due)
+            if self.window(at):
+                until = self.offline_until(at)
+                self.counts["offline_s"] += until - at
+                at = until
             while self.fade[1] <= at:
                 self.counts["stalls"] += 1
                 self.fade = self.next_fade(self.fade[1])
@@ -226,7 +292,9 @@ class Link:
         with self.lock:
             counts = dict(self.counts)
         sent, carrying = counts.pop("sent") / 1e6, counts.pop("carrying_s")
-        return counts | {"mb": round(sent, 1), "stalled_s": round(counts["stalled_s"], 1),
+        elapsed = time.monotonic() - self.began
+        return counts | {"mb": round(sent, 1), "stalled_s": round(counts["stalled_s"], 1), "offline_s": round(counts["offline_s"], 1),
+                         "offline": sum(1 for start, _, _ in self.windows if start <= elapsed),
                          "mb_s": round(sent / carrying, 2) if "mbit_s" in self.p and carrying > 0 else None}
 
 

@@ -35,6 +35,22 @@
       "network_change_s": [120, 300]
     }
   },
+  "extreme": {
+    "server": {
+      "base": "worst",
+      "connect_s": 0,
+      "plan_s": [30, 40]
+    },
+    "link": {
+      "connect_s": [2, 5],
+      "round_trip_s": [0.6, 0.8],
+      "mbit_s": 1,
+      "stall": {"every_s": 5, "s": [0.5, 3]},
+      "offline": {"per_hour": 2, "s": [10, 30]},
+      "network_change_s": [120, 300],
+      "metered_after_change": 1
+    }
+  },
   "far": {
     "link": {
       "round_trip_s": [0.08, 0.15],

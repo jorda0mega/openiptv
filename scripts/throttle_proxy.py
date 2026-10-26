@@ -11,7 +11,8 @@ before it opens, everything the app sends arrives a round trip late, and
 what comes back goes at the link's pace, with its stalls; at the network
 change every tunnel is dropped at once. The server half is the server's
 own: the real one's, or the test server's profile (with link=none, so the
-link is carried once). Plain HTTP (the test server) comes as requests, each
+link is carried once). In an offline window a new connection waits it out,
+or is refused in a refusing one, which drops every tunnel as it begins. Plain HTTP (the test server) comes as requests, each
 a round trip late and its connection's first the handshakes too.
 
 Prints counts only, at the end: never a host, an address or a request.
@@ -29,7 +30,7 @@ from urllib.parse import urlsplit
 
 from slow_link import Link
 
-TOTALS = {"tunnels": 0, "requests": 0, "playlists": 0, "segments": 0, "failed": 0, "down": 0, "up": 0}
+TOTALS = {"tunnels": 0, "requests": 0, "playlists": 0, "segments": 0, "failed": 0, "refused": 0, "down": 0, "up": 0}
 FAILURES = set()
 LOCK = threading.Lock()
 OPEN = set()
@@ -69,6 +70,12 @@ class Reader:
 
 def serve(client, link):
     connection = link.connection()
+    if link.offline(time.monotonic()) == "refused":
+        count("refused")
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        client.close()
+        return
+    time.sleep(max(0.0, link.offline_until(time.monotonic()) - time.monotonic()))
     try:
         reader = Reader(client)
         head = reader.head()
@@ -202,7 +209,7 @@ def delay_up(reader, upstream, delay):
 def main():
     port, name = int(sys.argv[1]), sys.argv[2]
     seed = int(sys.argv[3]) if len(sys.argv) > 3 else 1
-    link = Link(name, seed, on_change=drop_all)
+    link = Link(name, seed, on_change=drop_all, on_offline=drop_all)
 
     def stop(*_):
         done = link.readout()
@@ -210,7 +217,8 @@ def main():
               f"({TOTALS['playlists']} playlists, {TOTALS['segments']} segments), "
               f"{TOTALS['down'] / 1e6:.1f} MB down, {TOTALS['up'] / 1e6:.1f} MB up, {TOTALS['failed']} failed "
               f"({', '.join(sorted(FAILURES)) or 'none'}) | link {done['mb_s'] or '-'} MB/s while carrying data, "
-              f"{done['stalls']} stalls ({done['stalled_s']} s waited), {done['changes']} network changes", flush=True)
+              f"{done['stalls']} stalls ({done['stalled_s']} s waited), {done['offline']} offline ({done['offline_s']} s waited, "
+              f"{TOTALS['refused']} refused), {done['changes']} network changes", flush=True)
         os._exit(0)
 
     signal.signal(signal.SIGTERM, stop)

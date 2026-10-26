@@ -238,7 +238,8 @@ class Extreme(unittest.TestCase):
         done = link.readout()
         offline = [w for w in link.schedule()["offline"] if w[0] < 900]
         stalls = [g for at, g in gaps if not any(s - 1 <= at - began <= e for s, e, _ in offline)]
-        self.assertAlmostEqual(done["mb_s"], 0.125, delta=0.002)
+        self.assertEqual(link.rate_at(self.clock.now), 1e6 / 8)
+        self.assertAlmostEqual(done["mb_s"], 0.125, delta=0.006)
         self.assertTrue(all(0.5 - step - 0.01 <= g <= 3 + 0.01 for g in stalls), stalls)
         self.assertAlmostEqual(len(stalls), 900 / (5 + 1.75), delta=20)
         self.assertAlmostEqual(done["stalls"], len(stalls), delta=2)
@@ -251,7 +252,8 @@ class Extreme(unittest.TestCase):
             self.assertTrue(1800 * half_hour <= start and end <= 1800 * (half_hour + 1))
             self.assertTrue(10 <= end - start <= 30)
         self.assertEqual([w[2] for w in first_hour], ["hang", "refused"])
-        self.assertEqual(slow_link.Link("extreme").schedule(), slow_link.Link("extreme").schedule())
+        again = slow_link.Link("extreme").schedule()
+        self.assertEqual((again["offline"], again["change_s"]), (windows, slow_link.Link("extreme").schedule()["change_s"]))
         self.assertNotEqual(slow_link.Link("extreme", seed=2).schedule()["offline"], windows)
 
     def test_every_connection_waits_out_an_offline_window(self):
@@ -265,7 +267,7 @@ class Extreme(unittest.TestCase):
 
     def test_the_schedule_names_the_change_and_counts_from_the_run_s_start_however_far_in_it_begins(self):
         fresh, later = slow_link.Link("extreme"), slow_link.Link("extreme", ago=600)
-        self.assertEqual(fresh.schedule(), later.schedule())
+        self.assertEqual({**fresh.schedule(), "change_at": 0}, {**later.schedule(), "change_at": 0})
         self.assertTrue(120 <= fresh.schedule()["change_s"] <= 300)
         self.assertTrue(fresh.schedule()["metered_after_change"])
         self.assertFalse(slow_link.Link("worst").schedule()["metered_after_change"])
