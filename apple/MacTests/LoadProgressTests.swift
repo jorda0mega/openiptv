@@ -334,6 +334,18 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertFalse(track.dropped)
     }
 
+    func testAFailuresExplanationOnlyCountsForThatFailure() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        let failed = track.asked(.fetching, at: at(0))
+        XCTAssertFalse(track.stillFailed(failed), "an explanation for a load still opening")
+        track.failed(at: at(3))
+        XCTAssertTrue(track.stillFailed(failed))
+        track.restart(at: at(5))
+        let again = track.asked(.fetching, at: at(5))
+        XCTAssertFalse(track.stillFailed(failed), "the first failure's explanation landed on Try again")
+        XCTAssertFalse(track.stillFailed(again), "an explanation for a load that hasn't failed")
+    }
+
     func testAStallCountsFromItsStart() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
