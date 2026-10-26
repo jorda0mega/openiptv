@@ -21,6 +21,8 @@ final class RealFeedFilmTests: XCTestCase, FilmLink {
         app.launchEnvironment["OPENREEL_DEBUG_PROXY_PLAIN"] = environment["PROXY_PLAIN"]
         app.launchArguments = ["-readOnlyServer", "YES", "-cacheFolder", environment["REAL_FEED_CACHE"] ?? "real", "-tvTab", "home"]
         if environment["LOW_DISK"] == "1" { app.launchArguments += ["-lowDisk", "YES"] }
+        // Launch arguments for every launch ("-oldPlanWait YES"): one run the way before.
+        app.launchArguments += (environment["APP_ARGUMENTS"] ?? "").split(separator: " ").map(String.init)
     }
 
     func testFilmOnThisLink() throws {

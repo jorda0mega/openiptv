@@ -35,7 +35,9 @@ extension FilmLink {
         app.launch()
         let id = try firstCard()
         let build = readout("debug-build") ?? "no readout", tree = ProcessInfo.processInfo.environment["TREE"]
-        say("REAL app build \(build)" + (tree.map { $0 == build ? ", this tree" : ", not this tree (\($0))" } ?? ""))
+        let arguments = ProcessInfo.processInfo.environment["APP_ARGUMENTS"] ?? ""
+        say("REAL app build \(build)" + (tree.map { $0 == build ? ", this tree" : ", not this tree (\($0))" } ?? "")
+            + (arguments.isEmpty ? "" : ", launched with \(arguments)"))
         app.terminate()
 
         for (kind, arguments) in [("ready", [String]()), ("cold", ["-noPrepareAhead", "YES"])] {
