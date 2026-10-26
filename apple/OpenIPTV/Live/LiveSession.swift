@@ -200,7 +200,8 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             return failed(failure, shown, now)
         case let .timedOut(_, failure):
             guard deadline != nil else { return [] }
-            return failed(failure, .notPlaying, now)
+            guard case let .playing(copy) = phase else { return failed(failure, .notPlaying, now) }
+            return stalled(copy, failure, now)
         case let .ended(_, failure):
             if case .recording(started: true) = phase { return [.goLive] }
             return failed(failure, .ended, now)
@@ -335,6 +336,18 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         let cue: [Action] = cueing ? [] : [.switching(from: picked)]
         cueing = true
         return marks + cue + open(next, after: 0)
+    }
+
+    /// The connection that stopped sending still counts as the account's
+    /// one stream until it closes, and a moment after.
+    private mutating func stalled(_ copy: Copy, _ failure: StreamFailure, _ now: Date) -> [Action] {
+        guard failure.kind != .offline else { return waitForNetwork(copy, hadPicture: true, now) }
+        switch cuts.cut(copy.id, at: now) {
+        case let .reopen(after: wait):
+            return [.stop] + reopen(copy, after: max(wait, Self.refusalWindow))
+        case .giveUp:
+            return [.stop] + nextCopy(after: copy, marking: false, .unknown, .notPlaying, now)
+        }
     }
 
     private mutating func cut(_ copy: Copy, _ now: Date) -> [Action] {
