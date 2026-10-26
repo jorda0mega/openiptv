@@ -55,7 +55,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
 
     override private init() {
         super.init()
-        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { PictureInPicture.shared.happen(.appOpened) }
         }
     }
@@ -69,7 +69,8 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             return
         }
         if film != nil { happen(.screenLetGo) }
-        // iOS asks for the length as the controller is made, and skips the automatic window when the film is paused or has no length.
+        // iOS asks whether the film plays as soon as the controller is made; answered "paused" then, it never
+        // opened the window by itself as the app went.
         facts.set(total: total, frames: frames)
         let controller = AVPictureInPictureController(contentSource: .init(sampleBufferDisplayLayer: frames.layer, playbackDelegate: self))
         controller.delegate = self
