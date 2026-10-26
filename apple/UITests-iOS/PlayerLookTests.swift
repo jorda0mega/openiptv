@@ -159,15 +159,9 @@ final class PlayerLookTests: XCTestCase {
         let expected = leaving.seconds + backAt.timeIntervalSince(leftAt)
         XCTAssertLessThan(abs(back - expected), 3, "came back at \(back) s, not \(expected) s (left the window at \(leaving.seconds) s)")
         XCTAssertGreaterThanOrEqual(after - back, 3, "the app's player came back paused")
-        // Regression: the picture and the sound stopped for a moment each
-        // way, while libmpv switched where it drew (a seek from the last
-        // keyframe and a restart).
         assertNothingStopped()
     }
 
-    /// As in YouTube: swiping home from a playing film puts it in the
-    /// floating window, and bringing it back puts it back in the player,
-    /// with the picture and the sound going on all the while.
     func testSwipingHomeCarriesOnInPictureInPicture() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         openFilm()
@@ -190,8 +184,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
     }
 
-    /// As in YouTube: opening the app again while the film plays in the
-    /// floating window puts it back in the player, still playing.
     func testOpeningTheAppBringsTheFilmBackInline() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         openFilm()
@@ -211,8 +203,6 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
     }
 
-    /// The app's readout of the last switch each way (see SwitchGap):
-    /// "start seeks=0 restarts=0 paused=0 time=21 audio=9 frames=42 | return ...".
     private func assertNothingStopped(file: StaticString = #filePath, line: UInt = #line) {
         let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
         print("PIP gap \(readout)")
@@ -302,7 +292,6 @@ final class PlayerLookTests: XCTestCase {
     }
 
     func testPictureMovesAfterLeavingApp() throws {
-        // iPads open Picture in Picture as the app goes (see testSwipingHomeCarriesOnInPictureInPicture).
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "the film goes on in Picture in Picture")
         openFilm()
         sleep(5)
@@ -402,9 +391,6 @@ final class PlayerLookTests: XCTestCase {
         return value.map { $0.split(separator: ":").compactMap { Double($0) }.reduce(0) { $0 * 60 + $1 } }
     }
 
-    /// The app's debug readout: "pip active=true playing=true seconds=72
-    /// clock=72 start=640" (seconds: the film's second it reports; clock:
-    /// the window's; start: milliseconds to come up).
     func pipState() -> (playing: Bool, seconds: Double, clock: Double, startMs: Int)? {
         let text = app.staticTexts["debug-pip"].firstMatch.label
         guard text.hasPrefix("pip") else { return nil }

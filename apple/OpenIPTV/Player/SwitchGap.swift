@@ -1,11 +1,6 @@
 #if DEBUG
 import Foundation
 
-/// What stopped while the picture moved into the Picture in Picture window
-/// or back: libmpv's seeks and restarts, how long it was paused, the
-/// longest stall of the film's clock and of the sound against the wall
-/// clock while it played, and the longest wait between frames reaching the
-/// picture.
 struct SwitchGap {
     enum Kind: String { case start, `return` }
 
@@ -37,7 +32,6 @@ struct SwitchGap {
 
     mutating func frame(at wall: Double) { frames.append(wall) }
 
-    /// Milliseconds: "start seeks=0 restarts=0 paused=0 time=12 audio=8 frames=45".
     func readout(until end: Double) -> String {
         let playing = stretchesPlaying
         let time = playing.map { Self.longestStall(Self.clock($0, \.time)) }.max() ?? 0
@@ -58,15 +52,13 @@ struct SwitchGap {
         zip(samples, samples.dropFirst()).filter { $0.0.paused }.reduce(0) { $0 + $1.1.wall - $1.0.wall }
     }
 
-    /// How far the clock fell behind the wall clock over any stretch: a
-    /// clock read late but moved on as far is not a stall.
     static func longestStall(_ readings: [(wall: Double, position: Double)]) -> Double {
         guard let first = readings.first else { return 0 }
-        var least = 0.0, longest = 0.0
+        var leastBehind = 0.0, longest = 0.0
         for reading in readings {
             let behind = (reading.wall - first.wall) - (reading.position - first.position)
-            least = min(least, behind)
-            longest = max(longest, behind - least)
+            leastBehind = min(leastBehind, behind)
+            longest = max(longest, behind - leastBehind)
         }
         return longest
     }

@@ -3,15 +3,9 @@ import AVFoundation
 import Libmpv
 import UIKit
 
-/// A film's one picture on iPhone and iPad: libmpv's software renderer draws every frame on the CPU into one
-/// AVSampleBufferDisplayLayer, on screen and in the floating window alike, in the app and behind it (iOS gives
-/// an app in the background no GPU). Made with its player and never switched: in libmpv a switch of output is
-/// a seek back to the last keyframe and a restart, which stopped picture and sound each way.
 final class FilmFrames: @unchecked Sendable {
     let layer = AVSampleBufferDisplayLayer()
-    /// The film's clock (the floating window's), from the player's events.
     private let clock: CMTimebase?
-    /// Called on the player's queue when the film starts or stops playing.
     var onPlayingChanged: (@Sendable (Bool) -> Void)? {
         get { lock.withLock { playingChanged } }
         set { lock.withLock { playingChanged = newValue } }
@@ -36,8 +30,7 @@ final class FilmFrames: @unchecked Sendable {
         var screen: PixelSize?
         var window: PixelSize?
         var fill = false
-        /// Behind the app with no window: frames go by undrawn, so the sound plays on and nothing restarts.
-        var away = false
+        var undrawn = false
         var redraw = false
 
         var plan: FramePlan { FramePlan.make(video: video, screen: screen, window: window, fill: fill) }
@@ -52,7 +45,6 @@ final class FilmFrames: @unchecked Sendable {
         layer.controlTimebase = clock
     }
 
-    /// The player's queue, after mpv_initialize and before anything loads.
     func attach(to mpv: OpaquePointer) {
         var made: OpaquePointer?
         let api = strdup("sw")
@@ -77,12 +69,11 @@ final class FilmFrames: @unchecked Sendable {
         }
     }
 
-    func setAway(_ away: Bool) { _ = change { $0.away = away } }
+    func setUndrawn(_ undrawn: Bool) { _ = change { $0.undrawn = undrawn } }
     var isInWindow: Bool { lock.withLock { inputs.window != nil } }
-    var isAway: Bool { lock.withLock { inputs.away } }
+    var isUndrawn: Bool { lock.withLock { inputs.undrawn } }
 
-    /// The film's second and whether it plays, for the window's clock.
-    func follow(_ seconds: Double, playing: Bool) {
+    func syncClock(_ seconds: Double, playing: Bool) {
         guard let clock else { return }
         let was = CMTimebaseGetRate(clock) != 0
         if abs(CMTimebaseGetTime(clock).seconds - seconds) > 0.5 || !was {
@@ -94,7 +85,6 @@ final class FilmFrames: @unchecked Sendable {
 
     var isPlaying: Bool { clock.map { CMTimebaseGetRate($0) != 0 } ?? false }
 
-    /// The player's queue, before mpv_terminate_destroy.
     func close() {
         lock.withLock { closed = true }
         queue.sync {}
@@ -104,7 +94,6 @@ final class FilmFrames: @unchecked Sendable {
         self.context = nil
     }
 
-    /// The next frame follows the change; a paused picture is drawn again for it.
     private func change(_ edit: (inout Inputs) -> Void) -> FramePlan {
         let plan = lock.withLock {
             edit(&inputs)
@@ -137,7 +126,7 @@ final class FilmFrames: @unchecked Sendable {
         let fresh = mpv_render_context_update(context) & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0
         guard fresh || state.redraw else { return }
         let plan = state.inputs.plan
-        guard !state.inputs.away, let buffer = buffer(plan.size) else { return skip(context) }
+        guard !state.inputs.undrawn, let buffer = buffer(plan.size) else { return skip(context) }
         CVPixelBufferLockBaseAddress(buffer, [])
         let drawn = render(context, into: buffer, size: plan.size)
         CVPixelBufferUnlockBaseAddress(buffer, [])
@@ -218,7 +207,6 @@ final class FilmFrames: @unchecked Sendable {
                                  Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
         }
         let renderer = layer.sampleBufferRenderer
-        // Interrupted (the phone locked, the app killed in the background): start over.
         if renderer.status == .failed || renderer.requiresFlushToResumeDecoding { renderer.flush() }
         renderer.enqueue(sample)
         #if DEBUG

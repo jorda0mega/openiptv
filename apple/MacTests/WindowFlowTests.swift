@@ -11,7 +11,7 @@ final class WindowFlowTests: XCTestCase {
     func testSwipingHomeStartsTheWindowWithTheScreenKept() {
         let (flow, effects) = flow([.offered, .willStart, .didStart])
         XCTAssertEqual(effects, [[], [.measureStart, .framesToWindow], []])
-        XCTAssertEqual(flow.phase, .windowed(docked: false))
+        XCTAssertEqual(flow.phase, .windowed(screenClosed: false))
         XCTAssertFalse(flow.keepsFilm)
     }
 

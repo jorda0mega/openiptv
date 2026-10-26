@@ -49,13 +49,10 @@ final class MPVPlayer: @unchecked Sendable {
         case tracksChanged
     }
 
-    /// How the player draws, chosen when it's made and never changed while it lives (in libmpv a change of
-    /// output is a seek back to the last keyframe and a restart).
+    /// libmpv seeks to the last keyframe and restarts if this changes while the player lives.
     enum Picture {
-        /// gpu-next on a Metal layer: Apple TV and live TV.
         case gpu
         #if os(iOS)
-        /// FilmFrames: films and episodes on iPhone and iPad, the one layer Picture in Picture also shows.
         case frames
         #endif
 
@@ -72,7 +69,6 @@ final class MPVPlayer: @unchecked Sendable {
     #if os(iOS)
     let frames: FilmFrames?
     #endif
-    /// What the player's view hosts.
     var pictureLayer: CALayer {
         #if os(iOS)
         frames?.layer ?? layer
@@ -258,8 +254,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var lastNetworkReport: CFAbsoluteTime = 0
     private var reportsWindow = false
     #if os(iOS)
-    /// Seconds since the film's clock starts in this stream, and whether it's paused (the window's clock).
-    private var rawTime: Double = 0
+    private var timePos: Double = 0
     private var isPaused = false
     private var goingAway: DispatchWorkItem?
     #if DEBUG
@@ -321,14 +316,13 @@ final class MPVPlayer: @unchecked Sendable {
         ]
     }
 
-    /// Away from the app (or an Apple TV asleep): the picture off, the sound on. A film's frames go on into the
-    /// floating window, or go by undrawn: iOS may open the window a moment after the app has gone.
+    /// iOS may open the floating window a moment after the app has gone.
     private func leftApp() {
         #if os(iOS)
         if let frames {
             queue.async { [self] in
                 goingAway?.cancel()
-                let away = DispatchWorkItem { if !frames.isInWindow { frames.setAway(true) } }
+                let away = DispatchWorkItem { if !frames.isInWindow { frames.setUndrawn(true) } }
                 goingAway = away
                 queue.asyncAfter(deadline: .now() + 1, execute: away)
             }
@@ -354,8 +348,8 @@ final class MPVPlayer: @unchecked Sendable {
             if let frames {
                 goingAway?.cancel()
                 goingAway = nil
-                if frames.isAway {
-                    frames.setAway(false)
+                if frames.isUndrawn {
+                    frames.setUndrawn(false)
                     stateLock.withLock { awayReturns += 1 }
                 }
                 return
@@ -1229,12 +1223,10 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     #if os(iOS)
-    /// The film's picture on the player screen (its size in pixels; nil: off it).
     func showFrames(onScreen pixels: PixelSize?) {
         if let frames { apply(frames.show(onScreen: pixels)) }
     }
 
-    /// The film's picture in the floating window (its size in pixels; nil: not there).
     func showFrames(inWindow pixels: PixelSize?) {
         if let frames { apply(frames.show(inWindow: pixels)) }
     }
@@ -1672,7 +1664,7 @@ final class MPVPlayer: @unchecked Sendable {
                 let paused = value.assumingMemoryBound(to: Int32.self).pointee != 0
                 #if os(iOS)
                 isPaused = paused
-                frames?.follow(rawTime + clock, playing: !paused)
+                frames?.syncClock(timePos + clock, playing: !paused)
                 #endif
                 emit(.paused(paused))
             case "duration" where property.format == MPV_FORMAT_DOUBLE:
@@ -1681,8 +1673,8 @@ final class MPVPlayer: @unchecked Sendable {
                 // Four times a second, and at once after a jump.
                 let position = value.assumingMemoryBound(to: Double.self).pointee
                 #if os(iOS)
-                rawTime = position
-                frames?.follow(position + clock, playing: !isPaused)
+                timePos = position
+                frames?.syncClock(position + clock, playing: !isPaused)
                 #endif
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - lastTimeEmit >= 0.25 || abs(position - lastTimePosition) > 1.5 else { break }
@@ -1894,7 +1886,6 @@ final class MPVPlayer: @unchecked Sendable {
 
 #if os(iOS) && DEBUG
 extension MPVPlayer {
-    /// Measures the next four seconds (see SwitchGap), into "debug-pip-gap".
     func measureGap(_ kind: SwitchGap.Kind) {
         queue.async { [self] in
             gapTimer?.cancel()
@@ -1930,9 +1921,7 @@ extension MPVPlayer {
 }
 #endif
 
-/// Hosts the player's picture and keeps it sized to the view: a film's frames (iPhone, iPad), drawn at the
-/// view's size; or the Metal layer, with its drawable size so rotation re-creates mpv's swapchain at full size.
-/// The newest host takes the picture's layer.
+/// Rotation sets the Metal layer's drawable size so libmpv re-creates its swapchain at full size.
 final class MPVHostView: UIView {
     private let picture: CALayer
     private weak var player: MPVPlayer?
