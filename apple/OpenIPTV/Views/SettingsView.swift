@@ -172,14 +172,24 @@ struct SettingsView: View {
         }
         #if os(iOS)
         Section {
-            Picker("Get films ready", selection: $phoneNetworkFilms) {
+            // A menu of toggles, not a picker: only a menu item's own label
+            // shows its second Text as the line under it.
+            Menu {
                 ForEach(PhoneNetworkFilms.allCases) { choice in
-                    VStack {
+                    Toggle(isOn: Binding(get: { phoneNetworkFilms == choice }, set: { if $0 { phoneNetworkFilms = choice } })) {
                         Text(choice.title)
                         Text(choice.detail)
                     }
-                    .tag(choice)
                 }
+            } label: {
+                LabeledContent("Get films ready") {
+                    HStack(spacing: 5) {
+                        Text(phoneNetworkFilms.title)
+                        Image(systemName: "chevron.up.chevron.down").imageScale(.small)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.primary)
             }
         } header: {
             Text("Phone network")
