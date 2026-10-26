@@ -296,6 +296,44 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertEqual(track.failure(.refused("No such channel.")).tries, 1)
     }
 
+    func testEachStreamAskedForHasItsOwnAttempt() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        let first = track.asked(.fetching, at: at(0))
+        let fallback = track.asked(.fetching, at: at(15))
+        XCTAssertNotEqual(first, fallback)
+        XCTAssertFalse(track.isCurrent(first), "the replaced load's events still count")
+        XCTAssertTrue(track.isCurrent(fallback))
+    }
+
+    func testTryAgainStartsTheWaitOverAndKeepsCountingAttempts() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        let failed = track.asked(.fetching, at: at(0))
+        track.failed(at: at(30))
+        track.restart(at: at(31))
+        XCTAssertEqual(track.began, at(31))
+        XCTAssertEqual(track.stage, .fetching)
+        let again = track.asked(.fetching, at: at(31))
+        XCTAssertNotEqual(again, failed, "Try again reused the failed load's attempt")
+        XCTAssertFalse(track.isCurrent(failed), "the failed load's late events count after Try again")
+        XCTAssertEqual(track.failure(.noPicture).tries, 1)
+        XCTAssertEqual(track.failure(.noPicture).seconds, 0, "the earlier failure's time carried over")
+    }
+
+    func testAPlayerTakenOverKeepsItsAttempt() {
+        XCTAssertTrue(LoadTrack(began: tap, stage: .fetching, attempt: 4).isCurrent(4), "a warm or Picture in Picture player's events were dropped")
+    }
+
+    func testAQualitySwitchDuringPlayIsANewAttemptButNotATry() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        let first = track.asked(.fetching, at: at(0))
+        track.pictured()
+        let switched = track.nextAttempt()
+        XCTAssertFalse(track.isCurrent(first))
+        XCTAssertTrue(track.isCurrent(switched))
+        XCTAssertEqual(track.tries, 1)
+        XCTAssertFalse(track.dropped)
+    }
+
     func testAStallCountsFromItsStart() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
