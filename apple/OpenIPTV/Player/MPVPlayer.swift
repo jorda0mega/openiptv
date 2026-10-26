@@ -69,6 +69,14 @@ final class MPVPlayer: @unchecked Sendable {
     #if os(iOS)
     let frames: FilmFrames?
     #endif
+    var drawsFrames: Bool {
+        #if os(iOS)
+        frames != nil
+        #else
+        false
+        #endif
+    }
+
     var pictureLayer: CALayer {
         #if os(iOS)
         frames?.layer ?? layer
@@ -354,11 +362,6 @@ final class MPVPlayer: @unchecked Sendable {
         #endif
         guard let mpv = mpv_create() else { return }
         self.mpv = mpv
-        #if os(iOS)
-        let drawsFrames = frames != nil
-        #else
-        let drawsFrames = false
-        #endif
         if drawsFrames {
             // No GPU output to hand VideoToolbox's frames to: decoded there and copied back (else libmpv
             // decodes on the CPU).
@@ -1923,7 +1926,7 @@ final class MPVHostView: UIView {
         self.hosted = hosted
         super.init(frame: .zero)
         backgroundColor = .black
-        layer.addSublayer(picture)
+        if !player.drawsFrames { layer.addSublayer(picture) }
     }
 
     @available(*, unavailable)
@@ -1933,12 +1936,20 @@ final class MPVHostView: UIView {
         super.didMoveToWindow()
         setNeedsLayout()
         #if os(iOS)
-        guard let player, player.frames != nil, picture.superlayer === layer else { return }
-        if window == nil {
+        guard let player, player.drawsFrames else { return }
+        if window != nil {
+            // iOS feeds the floating window only from a layer in a window: taken from the dock once this view is in one.
+            if picture.superlayer !== layer {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                layer.addSublayer(picture)
+                CATransaction.commit()
+                lastSize = .zero
+            }
+            hosted()
+        } else if picture.superlayer === layer {
             player.showFrames(onScreen: nil)
             lastSize = .zero
-        } else {
-            hosted()
         }
         #endif
     }
@@ -1962,7 +1973,7 @@ final class MPVHostView: UIView {
         CATransaction.commit()
         guard area.size != lastSize else { return }
         #if os(iOS)
-        if let player, player.frames != nil {
+        if let player, player.drawsFrames {
             lastSize = area.size
             if window != nil { player.showFrames(onScreen: PixelSize(width: Int(area.width * scale), height: Int(area.height * scale))) }
             return

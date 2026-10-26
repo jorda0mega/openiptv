@@ -122,10 +122,10 @@ final class FilmFrames: @unchecked Sendable {
     private func draw() {
         let state = lock.withLock { () -> (inputs: Inputs, redraw: Bool, context: OpaquePointer)? in
             waiting = false
-            guard !closed, let context else { return nil }
+            guard !closed, let current = self.context else { return nil }
             let redraw = inputs.redraw
             inputs.redraw = false
-            return (inputs, redraw, context)
+            return (inputs, redraw, current)
         }
         guard let state else { return }
         let context = state.context
