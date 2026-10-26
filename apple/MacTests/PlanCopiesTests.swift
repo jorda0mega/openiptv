@@ -166,6 +166,32 @@ final class PlanCopiesTests: XCTestCase {
         XCTAssertNil(session)
     }
 
+    private func playSession(_ address: URL) -> String? {
+        URLComponents(url: address, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "PlaySessionId" }?.value
+    }
+
+    func testAConversionOpenedOnceTheLatePlaySessionCameCarriesIt() async throws {
+        let (server, client) = try server(info: [0.5, 0.5], itemSource: "File")
+        defer { server.stop() }
+        let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
+        let converted = try XCTUnwrap(playback.fallbacks.last)
+        let opened = await playback.opening(converted)
+        XCTAssertEqual(playSession(opened), "ps0")
+    }
+
+    /// The server stops the conversion its Stopped names.
+    func testAConversionOpenedBeforeTheLatePlaySessionCameCarriesTheSameAsItsReports() async throws {
+        let (server, client) = try server(info: [4, 4], itemSource: "File")
+        defer { server.stop() }
+        let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
+        let converted = try XCTUnwrap(playback.fallbacks.last)
+        let began = ContinuousClock.now
+        let opened = await playback.opening(converted)
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(3), "the conversion waited for the play session the server held")
+        let stopped = await playback.session(within: .seconds(10))
+        XCTAssertEqual(playSession(opened), stopped, "Stopped named another play session than the conversion")
+    }
+
     func testARemoteFileStillWaitsForPlaybackInfo() async throws {
         let (server, client) = try server(info: [1.5, 1.5], itemSource: "Http")
         defer { server.stop() }
