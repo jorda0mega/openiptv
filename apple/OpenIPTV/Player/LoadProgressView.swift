@@ -69,11 +69,9 @@ private struct LoadProgressShown: View {
             }
             if let dashes = shown.dashes { LoadDashes(reached: dashes) }
             if !shown.buttons.isEmpty {
-                HStack(spacing: gap * 0.8) {
-                    ForEach(shown.buttons, id: \.self) { button in
-                        LoadButtonView(button: button, focused: focus == button,
-                                       action: button == .tryAgain ? actions.tryAgain : actions.otherChannels)
-                    }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: gap * 0.8) { buttons }
+                    VStack(spacing: gap * 0.8) { buttons }
                 }
                 .padding(.top, gap * 0.4)
             }
@@ -83,6 +81,13 @@ private struct LoadProgressShown: View {
         .fixedSize(horizontal: false, vertical: true)
         .shadow(color: .black.opacity(0.45), radius: 6)
         .accessibilityElement(children: .contain)
+    }
+
+    private var buttons: some View {
+        ForEach(shown.buttons, id: \.self) { button in
+            LoadButtonView(button: button, focused: focus == button,
+                           action: button == .tryAgain ? actions.tryAgain : actions.otherChannels)
+        }
     }
 
     private var focus: LoadProgress.Button? {
@@ -159,6 +164,7 @@ private struct LoadButtonView: View {
         #if os(tvOS)
         Text(title)
             .font(.system(size: 29, weight: .semibold))
+            .fixedSize()
             .foregroundStyle(focused ? .black : .white)
             .padding(.horizontal, 36)
             .frame(height: 66)
@@ -174,6 +180,7 @@ private struct LoadButtonView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 15, weight: .semibold))
+                .fixedSize()
                 .foregroundStyle(primary ? .black : .white)
                 .padding(.horizontal, 16)
                 .frame(height: 40)
