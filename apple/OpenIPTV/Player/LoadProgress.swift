@@ -67,6 +67,10 @@ struct LoadProgress: Equatable {
     static let dropShownAfter = 3.0
     static let slowAfter = 8.0
 
+    enum Button: Equatable {
+        case tryAgain, otherChannels
+    }
+
     struct Shown: Equatable {
         /// How full the ring is; none once it has given up.
         var ring: Double?
@@ -76,6 +80,10 @@ struct LoadProgress: Equatable {
         var dashes: Int?
         var tryAgain = false
         var otherChannels = false
+
+        var buttons: [Button] {
+            (tryAgain ? [.tryAgain] : []) + (otherChannels ? [.otherChannels] : [])
+        }
     }
 
     func shown(at now: Date) -> Shown? {
@@ -156,5 +164,79 @@ struct LoadProgress: Equatable {
     /// Rounded down: 100% is the picture.
     private static func percent(_ received: Double) -> Int {
         Int((min(max(received, 0), 1) * 100).rounded(.down))
+    }
+}
+
+/// A start as the player's events tell it, for LoadProgress: when it
+/// began, how many streams were asked for since, and how far the newest
+/// got. A stream asked for after the picture showed is a drop: its clock
+/// and tries start again.
+struct LoadTrack: Equatable {
+    private(set) var began: Date
+    private(set) var tries = 0
+    private(set) var stage: LoadProgress.Stage
+    private(set) var received: Double?
+    /// Channels: the stream's address came, and the wait is on the stream.
+    private(set) var addressed = false
+    private(set) var dropped = false
+    private(set) var stalledSince: Date?
+    private var failedAt: Date?
+    private var pictureOn = false
+
+    init(began: Date, stage: LoadProgress.Stage = .asking) {
+        self.began = began
+        self.stage = stage
+    }
+
+    mutating func asked(_ stage: LoadProgress.Stage = .asking, at now: Date) {
+        if pictureOn {
+            pictureOn = false
+            dropped = true
+            began = now
+            tries = 0
+        }
+        tries += 1
+        self.stage = stage
+        received = nil
+        addressed = false
+        failedAt = nil
+    }
+
+    mutating func gotAddress() {
+        addressed = true
+    }
+
+    /// Channels: the picture's data comes next. Films: the picture.
+    mutating func opened() {
+        stage = stage == .asking ? .fetching : .starting
+        if stage == .fetching { received = 0 }
+    }
+
+    mutating func received(_ have: Double, of need: Double) {
+        guard stage == .fetching else { return }
+        received = have / need
+        if have >= need { stage = .starting }
+    }
+
+    mutating func pictured() {
+        pictureOn = true
+        dropped = false
+        stalledSince = nil
+    }
+
+    mutating func stalled(at now: Date) {
+        if stalledSince == nil { stalledSince = now }
+    }
+
+    mutating func flowing() {
+        stalledSince = nil
+    }
+
+    mutating func failed(at now: Date) {
+        if failedAt == nil { failedAt = now }
+    }
+
+    func failure(_ kind: LoadProgress.Failure.Kind, otherChannels: Bool = false) -> LoadProgress.Failure {
+        .init(kind: kind, tries: max(tries, 1), seconds: (failedAt ?? began).timeIntervalSince(began), otherChannels: otherChannels)
     }
 }
