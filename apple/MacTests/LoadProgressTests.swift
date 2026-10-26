@@ -407,6 +407,24 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertNil(track.stalledSince, "the picture back still waits")
     }
 
+    func testAJumpBegunWhileChoosingAndNotLandedWhenChoosingEndsIsAWait() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0))
+        track.pictured(at: at(1))
+        track.seeking(true, choosing: true, at: at(50))
+        XCTAssertNil(track.stalledSince, "choosing where to jump showed a wait")
+        track.choosingEnded(at: at(53))
+        XCTAssertEqual(track.stalledSince, at(53), "a jump begun while choosing (Apple TV's held press, iPhone's drag) never waited once let go")
+        track.seeking(false, choosing: false, at: at(60))
+        XCTAssertNil(track.stalledSince)
+        track.seeking(true, choosing: true, at: at(70))
+        track.seeking(false, choosing: true, at: at(71))
+        track.choosingEnded(at: at(72))
+        XCTAssertNil(track.stalledSince, "a jump that landed while choosing waited after")
+        track.seeking(true, choosing: false, at: at(80))
+        XCTAssertEqual(track.stalledSince, at(80), "a jump outside choosing didn't wait")
+    }
+
     func testAStallCountsFromItsStart() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
