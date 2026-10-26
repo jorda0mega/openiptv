@@ -204,6 +204,13 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("debug-pip")
         }
+        .overlay(alignment: .topTrailing) {
+            Text(PictureInPictureProbe.shared.gapText)
+                .font(.caption2)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("debug-pip-gap")
+        }
         #endif
         #if os(iOS)
         // Picture in Picture: back in the app's player when brought back,

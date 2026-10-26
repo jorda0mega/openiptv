@@ -10,6 +10,9 @@ import UIKit
 final class PictureInPictureProbe {
     static let shared = PictureInPictureProbe()
     var text = ""
+    /// The last switch each way, "debug-pip-gap" (see SwitchGap).
+    var gaps: [SwitchGap.Kind: String] = [:]
+    var gapText: String { [SwitchGap.Kind.start, .return].compactMap { gaps[$0] }.joined(separator: " | ") }
 }
 
 /// Picture in Picture for films and episodes (iPhone and iPad), from the
@@ -118,6 +121,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         drawnMs = -1
         #endif
         let drawn = DrawnFlag()
+        #if DEBUG
+        player.measureGap(.start)
+        #endif
         player.drawFrames(into: host.frames) { drawn.set() }
         // Up as soon as the picture is in the layer and iOS says it's
         // possible; not up in 4 s: the player carries on on screen.
@@ -153,6 +159,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         let back = (player, stream, position, paused)
         self.player = nil
         player.onEvent = nil
+        #if DEBUG
+        player.measureGap(.return)
+        #endif
         if let restored {
             self.restored = nil
             restored(true)

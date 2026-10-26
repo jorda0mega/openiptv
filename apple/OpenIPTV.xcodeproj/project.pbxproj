@@ -213,6 +213,7 @@
 		9F06D59EE7F81D0590BE65AE /* LivePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */; };
 		A1804E83860F054CF4FDA4EC /* RemoteSwipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3861EB3474E6D114873728AE /* RemoteSwipe.swift */; };
 		A2006EE70586F43CED61C5E4 /* Libdav1d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */; };
+		A355AEF3CF1B5702166B2F79 /* SwitchGap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B65CF14B89DA6DC5461ADFD3 /* SwitchGap.swift */; };
 		A49929AB5718F330A7BBDB8C /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B28084FA0D3D9F051788F09 /* HomeView.swift */; };
 		A4C285B27BC4A5193F7D2399 /* SmartSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D955785FF1529F49B082EE5 /* SmartSearch.swift */; };
 		A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D066C9DD9FC2285C24EF35 /* LiveView.swift */; };
@@ -253,6 +254,7 @@
 		C4B8046237E84B860469F18F /* LocalArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E2C7BFE4B746450A95EAC7 /* LocalArea.swift */; };
 		C4E9E73C30E10837B94645CF /* StreamRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857825645808317F48AB50AA /* StreamRelay.swift */; };
 		C60E11EE235D997A17AB0EFD /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */; };
+		C62953873F582DA2045F0B50 /* SwitchGap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B65CF14B89DA6DC5461ADFD3 /* SwitchGap.swift */; };
 		C7655AEC73FDEB4B56A49695 /* Libdav1d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */; };
 		C81415BE14C59D9854D4DFEB /* PreparesAhead.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40F97880F2C4CB6F2C235BC /* PreparesAhead.swift */; };
 		C833AF2FFF051FF67BD0B769 /* NetworkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */; };
@@ -453,6 +455,7 @@
 		B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QualityGovernor.swift; sourceTree = "<group>"; };
 		B4020C8E18034E6A000541A9 /* Libdav1d.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libdav1d.xcframework; path = Vendor/Libdav1d.xcframework; sourceTree = "<group>"; };
 		B41963718B2429F644A73CAD /* Libcrypto.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libcrypto.xcframework; path = Vendor/Libcrypto.xcframework; sourceTree = "<group>"; };
+		B65CF14B89DA6DC5461ADFD3 /* SwitchGap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitchGap.swift; sourceTree = "<group>"; };
 		B695C9975B1FB89D1266C09E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B69AE410BD0503C59582F34F /* AheadTaken.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AheadTaken.swift; sourceTree = "<group>"; };
 		B7ED05298F5A207B9C71BE5A /* AreaPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaPicker.swift; sourceTree = "<group>"; };
@@ -663,6 +666,7 @@
 				F19E63A90D228DEEB8FCA703 /* SubtitleSync.swift */,
 				90346A56D5B1978C6A08AB74 /* SubtitleTiming.swift */,
 				6B64DA342DD63265ECD7969F /* SwitchCue.swift */,
+				B65CF14B89DA6DC5461ADFD3 /* SwitchGap.swift */,
 				FFD17B24F165233943D636F8 /* TrackChoice.swift */,
 				0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */,
 				3704F35E9F8381B01A16311E /* TVRemote.swift */,
@@ -1283,6 +1287,7 @@
 				C036D2EDCB7EF78F0B7CE4F6 /* SubtitleSync.swift in Sources */,
 				38D668967109851DE2371FC4 /* SubtitleTiming.swift in Sources */,
 				D0671E9DBF8597F479B8E4F9 /* SwitchCue.swift in Sources */,
+				A355AEF3CF1B5702166B2F79 /* SwitchGap.swift in Sources */,
 				0D646AB8C8A7382117611F70 /* TMDbPopularity.swift in Sources */,
 				DD7ABAA9E4BA1C5B1B8D7A7A /* TVHomeView.swift in Sources */,
 				EAC30F65A7C729D3E2CC42C0 /* TVLiveView.swift in Sources */,
@@ -1403,6 +1408,7 @@
 				2FBF68B8E252F5B346F377DA /* SubtitleSync.swift in Sources */,
 				5034C8DD2F8EA94153B0F96C /* SubtitleTiming.swift in Sources */,
 				892283DF3DAFDBE0F12CC133 /* SwitchCue.swift in Sources */,
+				C62953873F582DA2045F0B50 /* SwitchGap.swift in Sources */,
 				C8BF4CB60A50A5C122F775C9 /* TMDbPopularity.swift in Sources */,
 				C60E11EE235D997A17AB0EFD /* TVHomeView.swift in Sources */,
 				1D626F013984C6DFB17DDA92 /* TVLiveView.swift in Sources */,

@@ -170,6 +170,58 @@ final class PlayerLookTests: XCTestCase {
         let expected = leaving.seconds + backAt.timeIntervalSince(leftAt)
         XCTAssertLessThan(abs(back - expected), 3, "came back at \(back) s, not \(expected) s (left the window at \(leaving.seconds) s)")
         XCTAssertGreaterThanOrEqual(after - back, 3, "the app's player came back paused")
+        // Regression: the picture and the sound stopped for a moment each
+        // way, while libmpv switched where it drew (a seek from the last
+        // keyframe and a restart).
+        assertNothingStopped()
+    }
+
+    /// As in YouTube: swiping home from a playing film puts it in the
+    /// floating window, and bringing it back puts it back in the player,
+    /// with the picture and the sound going on all the while.
+    func testSwipingHomeCarriesOnInPictureInPicture() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
+        openFilm()
+        sleep(4)
+        XCUIDevice.shared.press(.home)
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let window = board.otherElements["Video"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "swiping home didn't start Picture in Picture")
+        shot("swiped home")
+        sleep(6)
+        window.tap()
+        let restore = board.buttons["Restore fullscreen"].firstMatch
+        XCTAssertTrue(restore.waitForExistence(timeout: 3), "no Restore fullscreen in the window")
+        restore.tap()
+        sleep(6)
+        shot("brought back")
+        assertNothingStopped()
+        XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
+        controlsUp()
+        XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
+    }
+
+    /// The app's readout of the last switch each way (see SwitchGap):
+    /// "start seeks=0 restarts=0 paused=0 time=21 audio=9 frames=42 | return ...".
+    private func assertNothingStopped(file: StaticString = #filePath, line: UInt = #line) {
+        let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
+        print("PIP gap \(readout)")
+        for kind in ["start", "return"] {
+            guard let part = readout.split(separator: "|").first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix(kind) }) else {
+                XCTFail("no \(kind) in the gap readout: \(readout)", file: file, line: line)
+                continue
+            }
+            let fields = Dictionary(uniqueKeysWithValues: part.split(separator: " ").compactMap { word -> (String, Int)? in
+                let pair = word.split(separator: "=")
+                return pair.count == 2 ? Int(pair[1]).map { (String(pair[0]), $0) } : nil
+            })
+            XCTAssertEqual(fields["seeks"], 0, "\(kind): libmpv jumped back to decode again: \(part)", file: file, line: line)
+            XCTAssertEqual(fields["restarts"], 0, "\(kind): libmpv restarted playback: \(part)", file: file, line: line)
+            XCTAssertEqual(fields["paused"], 0, "\(kind): the film paused: \(part)", file: file, line: line)
+            for (field, what) in [("time", "the film"), ("audio", "the sound"), ("frames", "the picture")] {
+                XCTAssertLessThan(fields[field] ?? .max, 150, "\(kind): \(what) stopped for \(fields[field] ?? -1) ms: \(part)", file: file, line: line)
+            }
+        }
     }
 
     /// Closed and chosen again, a film carries on at once where it stopped,

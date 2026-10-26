@@ -56,6 +56,7 @@ let package = Package(
                 "Player/SubtitleLanguage.swift",
                 "Player/SubtitleSync.swift",
                 "Player/SubtitleTiming.swift",
+                "Player/SwitchGap.swift",
                 "Player/TrackChoice.swift",
                 "Search/GenreShelves.swift",
                 "Search/Gzip.swift",
