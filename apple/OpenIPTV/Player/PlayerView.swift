@@ -272,6 +272,9 @@ struct MoviePlayerView: View {
     /// builds with the stats on).
     @State private var timing: String?
     @State private var warmStart = false
+    /// The start (from the tap: the server's plan is in by now) for its
+    /// progress, or a stall's.
+    @State private var track = LoadTrack(began: Date(), stage: .fetching)
     /// The file's audio and subtitle tracks, and the picture's badges ("4K",
     /// "HDR") for the Info panel.
     @State private var tracks: [Track] = []
@@ -420,9 +423,9 @@ struct MoviePlayerView: View {
                 }, isEnabled: UIDevice.current.userInterfaceIdiom == .phone)
                 .accessibilityHidden(true)
             #endif
-            // With the controls up, their play button turns into the spinner.
-            if (buffering || !started), error == nil, !controlsVisible {
-                ProgressView().controlSize(.large).tint(.white)
+            // With the controls up, their play button turns into it.
+            if let load, !controlsVisible {
+                LoadProgressView(load: load, actions: loadActions)
             }
             if controlsVisible { controls.transition(.opacity) }
             #if os(iOS)
@@ -544,7 +547,7 @@ struct MoviePlayerView: View {
         // an episode: "S1:E3 · Name" over the show, and as Info's heading.
         let film = playback.seriesId == nil
         return TVMovieOverlay(caption: film ? nil : playback.subtitle, title: playback.title, note: note,
-                       busy: (buffering || !started) && error == nil, bar: TVClockedBar(clock: playClock, total: total, holdDirection: holdDirection, paused: paused), compact: compact,
+                       load: load, loadActions: loadActions, bar: TVClockedBar(clock: playClock, total: total, holdDirection: holdDirection, paused: paused), compact: compact,
                        panel: panel, focus: focus, hasSubtitles: tracks.contains { $0.kind == .subtitle },
                        info: TVPlayerInfo(heading: film ? playback.title : playback.subtitle, overview: playback.overview,
                                           runtime: film ? [playback.subtitle, runtime].compactMap(\.self).joined(separator: " · ") : runtime,
@@ -558,7 +561,7 @@ struct MoviePlayerView: View {
         // A film shows its title alone, as in the Apple TV app; an episode
         // its "S1:E3 · Name" over the show.
         PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
-                     paused: paused, busy: (buffering || !started) && error == nil, ready: started,
+                     paused: paused, load: load, loadActions: loadActions, ready: started,
                      topActions: pictureActions, pills: pills,
                      selectedPill: showInfo ? "Info" : showEpisodes ? "Episodes" : showContinue ? "Continue Watching" : nil,
                      panel: showInfo ? infoPanel : showEpisodes ? episodesPanel : showContinue ? continuePanel : nil,
@@ -965,7 +968,7 @@ struct MoviePlayerView: View {
     }
 
     private var note: (text: String, color: Color)? {
-        if let error { return (error, .red) }
+        if error != nil { return nil }
         if let temporaryMessage { return (temporaryMessage, .yellow) }
         if let timing { return (timing, .white.opacity(0.6)) }
         #if DEBUG
@@ -975,6 +978,32 @@ struct MoviePlayerView: View {
     }
 
     private var total: Double { duration ?? playback.durationSeconds ?? 0 }
+
+    /// What the screen says while there's no picture (see LoadProgress).
+    private var load: LoadProgress? {
+        let subject = LoadProgress.Subject.film(playback.title)
+        let cause: LoadProgress.Cause = NetworkStatus.shared.online ? .server : .offline
+        if let error {
+            return LoadProgress(subject: subject, cause: cause, began: track.began, failure: track.failure(.refused(error)))
+        }
+        if !started { return LoadProgress(subject: subject, stage: track.stage, cause: cause, began: track.began) }
+        guard buffering, let since = track.stalledSince else { return nil }
+        return LoadProgress(subject: subject, wait: .stall, stage: track.stage, cause: cause, began: since)
+    }
+
+    private var loadActions: LoadActions { LoadActions(tryAgain: { retry() }) }
+
+    /// Opens the film again from where it is (Try again).
+    private func retry() {
+        error = nil
+        attempt = 0
+        started = false
+        track = LoadTrack(began: Date(), stage: .fetching)
+        track.asked(.fetching, at: Date())
+        playFile(playback.url, headers: playback.headers, at: startedOnce ? position : playback.startSeconds,
+                 readahead: NetworkStatus.shared.fileReadahead)
+        showControls()
+    }
 
     @ViewBuilder private var scrubber: some View {
         // While scrubbing the picture itself shows where it'll land (no
@@ -1125,6 +1154,8 @@ struct MoviePlayerView: View {
             }
         }
         #endif
+        track = LoadTrack(began: playback.requestedAt, stage: .fetching)
+        track.asked(.fetching, at: Date())
         if let warmPlayer = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
@@ -1322,6 +1353,7 @@ struct MoviePlayerView: View {
             ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false
+            track.pictured()
             governor?.notePlaying()
             guard !startedOnce else { return }
             startedOnce = true
@@ -1374,6 +1406,7 @@ struct MoviePlayerView: View {
             #endif
         case let .buffering(isBuffering):
             buffering = isBuffering
+            if isBuffering, started { track.stalled(at: Date()) } else { track.flowing() }
             #if DEBUG
             NSLog("%@", "PERF buffering \(isBuffering)")
             #endif
@@ -1421,16 +1454,18 @@ struct MoviePlayerView: View {
                 // The original didn't open; try the next way Emby offers.
                 let next = playback.fallbacks[attempt]
                 attempt += 1
+                track.asked(.fetching, at: Date())
                 if next.path().hasSuffix(".m3u8") { playConverted(next); return }
                 playFile(next, headers: playback.fallbackHeaders, at: playback.startSeconds)
                 return
             }
-            error = "Couldn't play: \(message)"
+            error = message.prefix(1).uppercased() + message.dropFirst()
+            track.failed(at: Date())
             showControls(autoHide: false)
             // Say why: how the server answered each way of opening it.
             Task {
                 let why = await model.diagnose(playback)
-                if !why.isEmpty, error != nil { error = "Couldn't play. \(why)" }
+                if !why.isEmpty, error != nil { error = why }
             }
         case let .time(rawPosition, newDuration):
             if let newDuration, offset == 0, duration != newDuration { duration = newDuration }
@@ -1503,7 +1538,9 @@ struct MoviePlayerView: View {
                 await readTracks()
                 #endif
             }
-        case .opening, .opened, .window:
+        case .opened:
+            if !started { track.opened() }
+        case .opening, .window:
             break
         }
     }
@@ -1678,6 +1715,7 @@ struct MoviePlayerView: View {
     /// - Menu: close a menu or the panel, stop choosing, hide the controls,
     ///   then leave.
     private func remote(_ input: TVRemoteSurface.Input) {
+        if inLoad(input) { return }
         if let panel { return inPanel(panel, input) }
         if focus == .audio || focus == .subtitles || focus == .speed { return onButtons(input) }
         switch input {
@@ -1756,6 +1794,20 @@ struct MoviePlayerView: View {
     /// On the round buttons: left and right between them (a click on the
     /// ring, or a swipe), a click opens its menu, down or Menu back to the
     /// bar.
+    /// A slow or failed start's button: Select presses it.
+    private func inLoad(_ input: TVRemoteSurface.Input) -> Bool {
+        guard load?.shown(at: Date())?.buttons.contains(.tryAgain) == true else { return false }
+        switch input {
+        case .select:
+            retry()
+            return true
+        case .click:
+            return true
+        default:
+            return false
+        }
+    }
+
     private func onButtons(_ input: TVRemoteSurface.Input) {
         func move(_ by: Int) {
             let buttons: [TVPlayerFocus] = (subtitleTracks.isEmpty ? [] : [.subtitles]) + [.audio, .speed]

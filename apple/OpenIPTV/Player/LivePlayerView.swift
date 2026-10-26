@@ -64,6 +64,11 @@ struct LivePlayerView: View {
     /// A channel picked in Watch On, kept for its league once it plays (a
     /// feed that never starts isn't tried first next time).
     @State private var pendingPick: (choice: AppModel.WatchChoice, league: String)?
+    /// The start (or a drop) for its progress.
+    @State private var startTrack = LoadTrack(began: Date())
+    #if os(tvOS)
+    @State private var loadFocus = LoadProgress.Button.tryAgain
+    #endif
     #if DEBUG
     @State private var perf = LivePerf.Watch()
     #endif
@@ -78,16 +83,37 @@ struct LivePlayerView: View {
     private var started: Bool { session.hasPicture }
     private var paused: Bool { session.paused }
     private var playingCopy: LiveChannel? { session.copy }
-    private var error: String? {
-        switch session.failure {
-        case .notPlaying: notPlaying
-        case .ended: "The channel stopped before it started."
-        case let .message(text): text
-        case nil: nil
+    private var failed: Bool { session.failure != nil }
+    private var loading: Bool { (buffering || session.isLoading) && !failed }
+    /// What the screen says while there's no picture (see LoadProgress).
+    private var load: LoadProgress? {
+        let subject = LoadProgress.Subject.channel(displayName)
+        if let failure = session.failure {
+            let kind: LoadProgress.Failure.Kind = switch failure {
+            case .notPlaying: .noPicture
+            case .ended: .ended
+            case let .message(text): .refused(text)
+            }
+            return LoadProgress(subject: subject, cause: .channel, began: startTrack.began,
+                                failure: startTrack.failure(kind, otherChannels: choices.count > 1))
         }
+        if session.isLoading {
+            return LoadProgress(subject: subject, wait: started ? .reconnect : .start, stage: startTrack.stage,
+                                received: startTrack.received, cause: loadCause, began: startTrack.began)
+        }
+        guard started, let since = startTrack.stalledSince else { return nil }
+        return LoadProgress(subject: subject, wait: .stall, stage: startTrack.stage, cause: loadCause, began: since)
     }
-    private var loading: Bool { (buffering || session.isLoading) && error == nil }
-    private var playingID: String? { error == nil ? playingCopy?.id : nil }
+    /// The provider until it gives the stream's address, the channel after.
+    private var loadCause: LoadProgress.Cause {
+        if case .offline = session.phase { return .offline }
+        if !NetworkStatus.shared.online { return .offline }
+        return startTrack.stage == .asking && !startTrack.addressed ? .server : .channel
+    }
+    private var loadActions: LoadActions {
+        LoadActions(tryAgain: { retry() }, otherChannels: { toggleWatchOn() })
+    }
+    private var playingID: String? { failed ? nil : playingCopy?.id }
     /// "TLC" rather than "US: TLC HD".
     private var displayName: String { model.title(of: channel) }
 
@@ -110,9 +136,9 @@ struct LivePlayerView: View {
                     .accessibilityAction(.escape) { close() }
             }
             if !controlsVisible { picture.ignoresSafeArea() }
-            // With the controls up, their play button turns into the spinner.
-            if loading, !controlsVisible {
-                ProgressView().controlSize(.large).tint(.white)
+            // With the controls up, their play button turns into it.
+            if let load, !controlsVisible {
+                LoadProgressView(load: load, actions: loadActions, focused: tvLoadFocus)
             }
             if controlsVisible { controls.transition(.opacity) }
             if let cue, let playingCopy { switchCue(cue, playingCopy) }
@@ -135,6 +161,7 @@ struct LivePlayerView: View {
         .onTapGesture { pictureTapped() }
         .onMoveCommand { direction in
             if showWatchOn { return moveInWatchOn(direction) }
+            if moveInLoad(direction) { return }
             switch direction {
             case .up: step(-1)
             case .down: step(1)
@@ -143,7 +170,7 @@ struct LivePlayerView: View {
             default: showControls()
             }
         }
-        .onPlayPauseCommand { error == nil ? togglePause() : play() }
+        .onPlayPauseCommand { failed ? play() : togglePause() }
         .onExitCommand { showWatchOn ? closeWatchOn() : close() }
         #endif
         .persistentSystemOverlays(.hidden)
@@ -200,16 +227,16 @@ struct LivePlayerView: View {
     private func chrome(info: NowNext?, event: LiveOrganizer.Event?) -> some View {
         PlayerChrome(caption: caption(info: info, event: event), title: heading(info: info, event: event),
                             note: note, paused: paused, canGoForward: !(recording == nil && atLive),
-                            busy: loading, ready: started,
+                            load: showWatchOn ? nil : load, loadActions: loadActions, loadFocus: tvLoadFocus, ready: started,
                             pills: livePills, selectedPill: showWatchOn ? "Watch On" : nil,
                             panel: watchOnPanel,
                             close: { close() }, back: { skip(-10) },
-                            playPause: { error == nil ? togglePause() : retry() }, forward: { skip(10) }) {
+                            playPause: { failed ? retry() : togglePause() }, forward: { skip(10) }) {
             #if os(iOS)
             more(info: info)
             #endif
         } accessory: {
-            if started, error == nil { liveButton }
+            if started, !failed { liveButton }
         } bar: {
             bar
         }
@@ -252,10 +279,10 @@ struct LivePlayerView: View {
         return info?.now?.title ?? displayName
     }
 
-    /// An error; how far behind; how fast it started, briefly. Paused shows
-    /// on the play button, not here too.
+    /// How far behind; how fast it started, briefly. Paused shows on the
+    /// play button, and a failure in the middle, not here too.
     private var note: (text: String, color: Color)? {
-        if let error { return (error, .red) }
+        if failed { return nil }
         if recording == nil, !atLive || (paused && behind >= 3) { return (status, .white.opacity(0.75)) }
         if started, Date() < timingUntil { return (timing, .white.opacity(0.6)) }
         return nil
@@ -297,7 +324,7 @@ struct LivePlayerView: View {
     /// with where it starts and how far behind live.
     @ViewBuilder private var bar: some View {
         #if os(iOS)
-        if started, error == nil, let span, let position {
+        if started, !failed, let span, let position {
             TimeBar(leading: leftLabel, trailing: scrubSpeed ?? rightLabel) {
                 Scrubber(position: position - span.lower, total: span.upper - span.lower,
                          scrubbing: $scrubbing, speedLabel: $scrubSpeed,
@@ -309,7 +336,7 @@ struct LivePlayerView: View {
             }
         }
         #else
-        if started, error == nil, let span, let position {
+        if started, !failed, let span, let position {
             TVTransportBar(fraction: (position - span.lower) / max(span.upper - span.lower, 1),
                            time: leftLabel, remaining: rightLabel, state: paused ? .paused : .playing)
         } else {
@@ -375,6 +402,32 @@ struct LivePlayerView: View {
     }
 
     #if os(tvOS)
+    private var tvLoadFocus: LoadProgress.Button? { loadFocus }
+
+    /// Apple TV: left and right between a slow or failed start's buttons.
+    private func moveInLoad(_ direction: MoveCommandDirection) -> Bool {
+        let buttons = load?.shown(at: Date())?.buttons ?? []
+        guard !buttons.isEmpty, direction == .left || direction == .right else { return false }
+        let at = buttons.firstIndex(of: loadFocus) ?? 0
+        loadFocus = buttons[min(max(at + (direction == .left ? -1 : 1), 0), buttons.count - 1)]
+        return true
+    }
+
+    /// Apple TV: Select on a slow or failed start's button.
+    private func pressInLoad() -> Bool {
+        let buttons = load?.shown(at: Date())?.buttons ?? []
+        guard let button = buttons.first(where: { $0 == loadFocus }) ?? buttons.first else { return false }
+        switch button {
+        case .tryAgain: retry()
+        case .otherChannels: toggleWatchOn()
+        }
+        return true
+    }
+    #else
+    private var tvLoadFocus: LoadProgress.Button? { nil }
+    #endif
+
+    #if os(tvOS)
     /// Apple TV: left and right along the row, up closes it.
     private func moveInWatchOn(_ direction: MoveCommandDirection) {
         switch direction {
@@ -411,6 +464,7 @@ struct LivePlayerView: View {
             if choices.indices.contains(watchOnIndex) { watch(on: choices[watchOnIndex]) }
             return
         }
+        if pressInLoad() { return }
         if controlsVisible {
             if livePills.contains(where: { $0.title == "Watch On" }) { toggleWatchOn() }
             return
@@ -543,12 +597,20 @@ struct LivePlayerView: View {
 
     private func run(_ action: LiveSession<LiveChannel>.Action) {
         switch action {
-        case let .load(copy, attempt, delay): load(copy, attempt, after: delay)
-        case let .loadRecording(attempt, resume): loadRecording(attempt, from: resume ? position : nil)
-        case .stop: stopStream()
+        case let .load(copy, attempt, delay):
+            startTrack.asked(at: Date())
+            load(copy, attempt, after: delay)
+        case let .loadRecording(attempt, resume):
+            startTrack.asked(at: Date())
+            loadRecording(attempt, from: resume ? position : nil)
+        case .stop:
+            if session.failure != nil { startTrack.failed(at: Date()) }
+            stopStream()
         case let .deadline(attempt, limit): giveUpWithoutPicture(attempt, after: limit)
         case .cancelDeadline: noPictureDeadline?.cancel()
-        case .waitForNetwork: waitForNetwork()
+        case .waitForNetwork:
+            startTrack.lost(at: Date())
+            waitForNetwork()
         case .clearTimeline:
             position = nil
             window = nil
@@ -596,6 +658,7 @@ struct LivePlayerView: View {
                 #endif
                 let stream = try await model.playable(copy)
                 guard !Task.isCancelled, session.attempt == attempt else { return }
+                startTrack.gotAddress()
                 #if DEBUG
                 perf.addressed(in: CFAbsoluteTimeGetCurrent() - asked)
                 #endif
@@ -617,6 +680,7 @@ struct LivePlayerView: View {
             do {
                 let stream = try await model.catchup(channel, programme: recording)
                 guard !Task.isCancelled, session.attempt == attempt else { return }
+                startTrack.gotAddress()
                 player?.load(stream.url, headers: stream.headers, start: start, sequential: true, attempt: attempt)
             } catch {
                 guard !Task.isCancelled, session.attempt == attempt else { return }
@@ -647,7 +711,7 @@ struct LivePlayerView: View {
         #endif
         let background = UIApplication.shared.beginBackgroundTask()
         player?.stop { UIApplication.shared.endBackgroundTask(background) }
-        guard error != nil else { return }
+        guard failed else { return }
         cue = nil
         showControls()
     }
@@ -711,10 +775,15 @@ struct LivePlayerView: View {
         cue = nil
         timing = "Starting…"
         buffering = false
+        startTrack = LoadTrack(began: Date())
+        #if os(tvOS)
+        loadFocus = .tryAgain
+        #endif
     }
 
     private func pictureShown() {
         buffering = false
+        startTrack.pictured()
         ScreenAwake.set(awakeID, playing: !paused)
         #if DEBUG
         perf.started(frame: frameSeconds)
@@ -731,6 +800,8 @@ struct LivePlayerView: View {
         switch event {
         case .opening:
             send(.opening(attempt))
+        case .opened:
+            if current { startTrack.opened() }
         case let .started(seconds):
             guard current else { return }
             frameSeconds = seconds
@@ -738,6 +809,7 @@ struct LivePlayerView: View {
         case let .buffering(isBuffering):
             guard current else { return }
             buffering = isBuffering
+            if isBuffering, started { startTrack.stalled(at: Date()) } else { startTrack.flowing() }
             #if DEBUG
             perf.buffering(isBuffering)
             #endif
@@ -757,18 +829,21 @@ struct LivePlayerView: View {
             #if DEBUG
             perf.failed()
             #endif
-            send(.failed(attempt, reading(logged ?? .unknown), shown: .message("Couldn't play: \(message)")))
+            send(.failed(attempt, reading(logged ?? .unknown), shown: .message(message.prefix(1).uppercased() + message.dropFirst())))
         case let .ended(logged):
             guard current else { return }
             #if DEBUG
             perf.ended()
             #endif
             send(.ended(attempt, reading(logged ?? .eof_before_frame)))
-        #if DEBUG
         case let .network(buffer, bytesPerSecond):
             guard current else { return }
+            startTrack.received(buffer, of: Self.startNeeds)
+            #if DEBUG
             perf.network(buffer: buffer, bytesPerSecond: bytesPerSecond, gap: liveGap)
-        #endif
+            #else
+            _ = bytesPerSecond
+            #endif
         default:
             break
         }
@@ -845,16 +920,16 @@ struct LivePlayerView: View {
         return model.event(of: channel) == nil ? 15 : 25
     }
 
+    /// Seconds of stream a channel's first picture is measured against:
+    /// about one keyframe interval of a broadcast stream, what a start can
+    /// have to read before it has a picture to draw.
+    private static let startNeeds = 2.0
+
     private static var cueSeconds: Double {
         #if DEBUG
         if let seconds = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_SWITCH_CUE_SECONDS"].flatMap(Double.init) { return seconds }
         #endif
         return 4
-    }
-
-    /// A game or channel that sent no picture on any of its channels.
-    private var notPlaying: String {
-        model.event(of: channel) != nil ? "This game isn’t playing right now." : "This channel isn’t playing right now."
     }
 
     private func step(_ delta: Int) {
@@ -879,10 +954,10 @@ struct LivePlayerView: View {
     private func showControls(autoHide: Bool = true) {
         hideTask?.cancel()
         withAnimation(.easeOut(duration: 0.12)) { controlsVisible = true }
-        guard autoHide, started, error == nil, !paused else { return }
+        guard autoHide, started, !failed, !paused else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))
-            guard !Task.isCancelled, started, error == nil, !paused, scrubbing == nil, !showGuide, !showMore, !showWatchOn else { return }
+            guard !Task.isCancelled, started, !failed, !paused, scrubbing == nil, !showGuide, !showMore, !showWatchOn else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
         }
     }
