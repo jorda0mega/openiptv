@@ -449,6 +449,28 @@ final class ShelfTests: XCTestCase {
         }
     }
 
+    func testAFetchAheadUnderWayStopsWhenConditionsNoLongerAllowItAndAPlayGoesOn() async throws {
+        let conditions = Locked(open)
+        let fetches = Fetches(held: true)
+        let lane = Lane(.bytes, atOnce: 2) { conditions.value }
+        let shelf = shelf(fetches, lane: lane)
+        let ahead = Task { await shelf.warm("ahead", for: Interest(at: .continueWatching, .likely)) }
+        let played = Task { try await shelf.value(for: "played") }
+        var started = fetches.started.makeAsyncIterator()
+        _ = await started.next()
+        _ = await started.next()
+        conditions.mutate { $0.network = .expensive }
+        lane.conditionsChanged()
+        await yieldToQueuedTasks()
+        fetches.letThrough()
+        let stopped = await ahead.value
+        XCTAssertNil(stopped, "a card's fetch went on over a phone network with None")
+        let playedValue = try await played.value
+        XCTAssertNotNil(playedValue)
+        let tapped = try await shelf.value(for: "ahead")
+        XCTAssertEqual(tapped, 3, "the tap after the stop didn't fetch it anew")
+    }
+
     func testCancelledWaiterTakesNoTurn() async throws {
         let lane = lane(atOnce: 1)
         let busy = Lane.Ticket(Interest(at: .posterRow, .glance))

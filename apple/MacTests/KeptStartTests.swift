@@ -190,6 +190,19 @@ final class PhoneNetworkDayTests: XCTestCase {
         XCTAssertLessThanOrEqual(use.usedToday(), PhoneNetworkFilms.dailyBytes, "a start ahead took the day past 150 MB")
         XCTAssertEqual(server.ranges, [], "a read that didn't fit in what was left was asked")
     }
+
+    func testAStartAheadStoppedStopsItsReadUnderWay() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 2)
+        let relay = StreamRelay()
+        let ahead = Task { await relay.fetchStart(FileStart(EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film,
+                                                                        durationSeconds: 7200))) }
+        for _ in 0..<100 where server.ranges.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        let stopped = ContinuousClock.now
+        ahead.cancel()
+        let fetched = await ahead.value
+        XCTAssertFalse(fetched)
+        XCTAssertLessThan(ContinuousClock.now - stopped, .seconds(1), "the read under way went on after its start was stopped")
+    }
 }
 
 #if DEBUG
