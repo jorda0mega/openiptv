@@ -117,20 +117,21 @@ final class FilmFrames: @unchecked Sendable {
 
     /// Called by libmpv on any thread (nothing of libmpv's may be called here).
     private func due() {
-        let skip = lock.withLock { () -> Bool in
-            if closed || waiting { return true }
+        let scheduled = lock.withLock { () -> Bool in
+            guard !closed, !waiting else { return false }
             waiting = true
-            return false
+            return true
         }
-        if !skip { queue.async { [self] in draw() } }
+        if scheduled { queue.async { [self] in draw() } }
     }
 
     private func draw() {
         let state = lock.withLock { () -> (inputs: Inputs, redraw: Bool)? in
             waiting = false
             guard !closed else { return nil }
-            defer { inputs.redraw = false }
-            return (inputs, inputs.redraw)
+            let redraw = inputs.redraw
+            inputs.redraw = false
+            return (inputs, redraw)
         }
         guard let state, let context else { return }
         let fresh = mpv_render_context_update(context) & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0

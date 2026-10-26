@@ -326,9 +326,9 @@ final class MPVPlayer: @unchecked Sendable {
     private func leftApp() {
         #if os(iOS)
         if let frames {
-            let away = DispatchWorkItem { if !frames.isInWindow { frames.setAway(true) } }
             queue.async { [self] in
                 goingAway?.cancel()
+                let away = DispatchWorkItem { if !frames.isInWindow { frames.setAway(true) } }
                 goingAway = away
                 queue.asyncAfter(deadline: .now() + 1, execute: away)
             }
@@ -1245,6 +1245,19 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_set_property_string(mpv, "panscan", plan.fills ? "1.0" : "0.0")
         }
     }
+
+    private func noteFilmSize() {
+        guard let frames, let mpv else { return }
+        var width: Int64 = 0, height: Int64 = 0
+        mpv_get_property(mpv, "video-params/dw", MPV_FORMAT_INT64, &width)
+        mpv_get_property(mpv, "video-params/dh", MPV_FORMAT_INT64, &height)
+        guard width > 0, height > 0 else { return }
+        let gamma = mpv_get_property_string(mpv, "video-params/gamma").map { raw -> String in
+            defer { mpv_free(raw) }
+            return String(cString: raw)
+        }
+        apply(frames.video(PixelSize(width: Int(width), height: Int(height)), color: FrameColor(gamma: gamma)))
+    }
     #endif
 
     /// Plays this audio track.
@@ -1530,18 +1543,7 @@ final class MPVPlayer: @unchecked Sendable {
         if event.event_id == MPV_EVENT_PLAYBACK_RESTART { gap?.restarted() }
         #endif
         #if os(iOS)
-        if event.event_id == MPV_EVENT_VIDEO_RECONFIG, let frames, let mpv {
-            var width: Int64 = 0, height: Int64 = 0
-            mpv_get_property(mpv, "video-params/dw", MPV_FORMAT_INT64, &width)
-            mpv_get_property(mpv, "video-params/dh", MPV_FORMAT_INT64, &height)
-            let gamma = mpv_get_property_string(mpv, "video-params/gamma").map { raw in
-                defer { mpv_free(raw) }
-                return String(cString: raw)
-            }
-            if width > 0, height > 0 {
-                apply(frames.video(PixelSize(width: Int(width), height: Int(height)), color: FrameColor(gamma: gamma)))
-            }
-        }
+        if event.event_id == MPV_EVENT_VIDEO_RECONFIG { noteFilmSize() }
         #endif
         switch event.event_id {
         case MPV_EVENT_HOOK:

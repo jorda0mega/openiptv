@@ -23,12 +23,12 @@ final class WindowFlowTests: XCTestCase {
     }
 
     func testOpeningTheAppPutsTheFilmBackInlineWhicheverWayIOSAnswers() {
-        let stopped = flow([.offered, .willStart, .didStart, .appOpened, .didStop])
-        XCTAssertEqual(stopped.1[3], [.measureReturn, .framesToScreen, .stopWindow])
-        XCTAssertEqual(stopped.0.phase, .inline)
-        let restored = flow([.offered, .willStart, .didStart, .appOpened, .restoreAsked, .didStop])
-        XCTAssertEqual(restored.1[4], [.finishRestore(true)])
-        XCTAssertEqual(restored.0.phase, .inline)
+        let (stopped, stoppedEffects) = flow([.offered, .willStart, .didStart, .appOpened, .didStop])
+        XCTAssertEqual(stoppedEffects[3], [.measureReturn, .framesToScreen, .stopWindow])
+        XCTAssertEqual(stopped.phase, .inline)
+        let (restored, restoredEffects) = flow([.offered, .willStart, .didStart, .appOpened, .restoreAsked, .didStop])
+        XCTAssertEqual(restoredEffects[4], [.finishRestore(true)])
+        XCTAssertEqual(restored.phase, .inline)
     }
 
     func testClosingTheWindowOverTheScreenPausesTheFilm() {

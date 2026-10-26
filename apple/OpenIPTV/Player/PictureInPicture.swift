@@ -4,6 +4,7 @@ import CoreMedia
 import Observation
 import UIKit
 
+#if DEBUG
 /// Debug builds: what Picture in Picture is doing, for UI tests (shown in
 /// an invisible element, "debug-pip").
 @MainActor @Observable
@@ -14,6 +15,7 @@ final class PictureInPictureProbe {
     var gaps: [SwitchGap.Kind: String] = [:]
     var gapText: String { [SwitchGap.Kind.start, .return].compactMap { gaps[$0] }.joined(separator: " | ") }
 }
+#endif
 
 /// Picture in Picture for films and episodes (iPhone and iPad). The film's one layer (FilmFrames) is on the
 /// player screen, and the floating window shows that same layer, so nothing in the player changes and
@@ -244,10 +246,8 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         guard var film else { return }
         switch event {
         case let .time(raw, _):
-            if let until = film.jumpUntil {
-                guard Date() >= until else { return }
-                film.jumpUntil = nil
-            }
+            if let until = film.jumpUntil, Date() < until { return }
+            film.jumpUntil = nil
             film.position = film.total > 0 ? min(raw + film.stream.clockStart, film.total) : raw + film.stream.clockStart
             if abs(film.position - film.lastReport) >= 10 {
                 film.lastReport = film.position

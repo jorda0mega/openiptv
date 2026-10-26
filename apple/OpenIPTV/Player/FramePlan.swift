@@ -28,9 +28,9 @@ struct FramePlan: Equatable, Sendable {
         let shown = video.aspect > shape
             ? (width: Double(video.height) * shape, height: Double(video.height))
             : (width: Double(video.width), height: Double(video.width) / shape)
-        var width = min(shown.width, Double(box.width), Double(box.height) * shape)
-        let most = (Double(mostPixels) * shape).squareRoot()
-        width = min(width, most)
+        let fitted = min(shown.width, Double(box.width), Double(box.height) * shape)
+        let cap = (Double(mostPixels) * shape).squareRoot()
+        let width = min(fitted, cap)
         return FramePlan(size: PixelSize(width: even(width), height: even(width / shape)), fills: fills)
     }
 
