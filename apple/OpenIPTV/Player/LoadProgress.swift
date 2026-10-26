@@ -202,7 +202,7 @@ struct LoadTrack: Equatable {
         guard pictureOn else { return }
         pictureOn = false
         dropped = true
-        began = now
+        began = stalledSince ?? now
         tries = 0
     }
 
