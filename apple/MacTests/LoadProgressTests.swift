@@ -237,6 +237,18 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertEqual(track.tries, 1)
     }
 
+    func testAStreamAskedForAfterAFrozenPictureCountsFromTheFreeze() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.pictured()
+        track.stalled(at: at(50))
+        track.asked(at: at(63))
+        XCTAssertTrue(track.dropped)
+        XCTAssertEqual(track.began, at(50), "the reconnect after a frozen picture counted from the reopen")
+        let reconnecting = LoadProgress(subject: .channel("PPV 1"), wait: .reconnect, stage: track.stage, cause: .channel, began: track.began)
+        XCTAssertEqual(reconnecting.shown(at: at(63))?.line, "Reconnecting to PPV 1…", "the notice went away for 3 s at the reopen")
+    }
+
     func testAFailureCountsItsTriesAndSeconds() {
         var track = LoadTrack(began: tap)
         for second in [0.0, 15, 16, 22] { track.asked(at: at(second)) }
