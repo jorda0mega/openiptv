@@ -69,10 +69,15 @@ enum Need: Hashable, Sendable {
     case previews
 }
 
-/// How much of each card at a place shows on screen: on a phone network
-/// under 150 MB a day only the most shown counts as rested on.
+/// How much of each card shows on screen: on a phone network under 150 MB
+/// a day only the most shown, at any place, counts as rested on.
 @MainActor
 final class Showing {
+    private struct Card: Hashable {
+        let target: Target
+        let place: Place
+    }
+
     private struct Shown {
         var share: Double
         var origin: CGPoint
@@ -85,38 +90,42 @@ final class Showing {
         }
     }
 
-    private var shown: [Place: [Target: Shown]] = [:]
-    private var waiting: [UUID: (target: Target, place: Place, turn: CheckedContinuation<Bool, Never>)] = [:]
+    private var shown: [Card: Shown] = [:]
+    private var waiting: [UUID: (card: Card, turn: CheckedContinuation<Bool, Never>)] = [:]
 
     func show(_ target: Target, at place: Place, share: Double, from origin: CGPoint) {
-        shown[place, default: [:]][target] = Shown(share: share, origin: origin)
+        shown[Card(target: target, place: place)] = Shown(share: share, origin: origin)
         wake()
     }
 
     func hide(_ target: Target, at place: Place) {
-        shown[place]?[target] = nil
+        shown[Card(target: target, place: place)] = nil
         wake()
     }
 
-    /// Nothing measured (an Apple TV's focus): each card held is rested on.
     func isMostShown(_ target: Target, at place: Place) -> Bool {
-        guard let cards = shown[place], !cards.isEmpty else { return true }
-        return cards.max { $0.value.showsLess(than: $1.value) }?.key == target
+        isMostShown(Card(target: target, place: place))
     }
 
     /// False when cancelled first.
     func untilMostShown(_ target: Target, at place: Place) async -> Bool {
-        if isMostShown(target, at: place) { return true }
+        let card = Card(target: target, place: place)
+        if isMostShown(card) { return true }
         let id = UUID()
         return await withTaskCancellationHandler {
-            await withCheckedContinuation { turn in waiting[id] = (target, place, turn) }
+            await withCheckedContinuation { turn in waiting[id] = (card, turn) }
         } onCancel: {
             Task { @MainActor in self.waiting.removeValue(forKey: id)?.turn.resume(returning: false) }
         }
     }
 
+    /// Nothing measured (an Apple TV's focus): each card held is rested on.
+    private func isMostShown(_ card: Card) -> Bool {
+        shown.isEmpty || shown.max { $0.value.showsLess(than: $1.value) }?.key == card
+    }
+
     private func wake() {
-        for (id, waiter) in waiting where isMostShown(waiter.target, at: waiter.place) {
+        for (id, waiter) in waiting where isMostShown(waiter.card) {
             waiting[id] = nil
             waiter.turn.resume(returning: true)
         }
