@@ -42,6 +42,9 @@ struct LoadProgress: Equatable {
     var received: Double?
     var cause: Cause
     var began: Date
+    /// When the picture went (a freeze, or the loss itself): the notice
+    /// counts its 3 s from there, the request's own wait from `began`.
+    var pictureLost: Date?
     var failure: Failure?
 
     static let wordsAfter = 1.0
@@ -74,7 +77,7 @@ struct LoadProgress: Equatable {
             guard elapsed >= Self.wordsAfter else { return Shown(ring: fill) }
             line = stageLine
         case .reconnect:
-            guard elapsed >= Self.dropShownAfter else { return nil }
+            guard now.timeIntervalSince(pictureLost ?? began) >= Self.dropShownAfter else { return nil }
             line = reconnectLine
         case .stall:
             guard elapsed >= Self.dropShownAfter else { return nil }
@@ -156,6 +159,7 @@ struct LoadTrack: Equatable {
     private(set) var addressed = false
     private(set) var dropped = false
     private(set) var stalledSince: Date?
+    private(set) var pictureLost: Date?
     private var failedAt: Date?
     private var pictureOn = false
 
@@ -196,13 +200,15 @@ struct LoadTrack: Equatable {
         pictureOn = true
         dropped = false
         stalledSince = nil
+        pictureLost = nil
     }
 
     mutating func lost(at now: Date) {
         guard pictureOn else { return }
         pictureOn = false
         dropped = true
-        began = stalledSince ?? now
+        began = now
+        pictureLost = stalledSince ?? now
         tries = 0
     }
 
