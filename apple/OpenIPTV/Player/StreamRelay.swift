@@ -63,6 +63,7 @@ final class StreamRelay: @unchecked Sendable {
 
     private static let aheadRedirects = AheadRedirects()
     var firstByteWait = StartPatience.firstByte
+    var phoneNetworkUse = PhoneNetworkUse.shared
     /// Film reads asked again for want of a first byte.
     let askedAgain = Locked(0)
 
@@ -624,7 +625,7 @@ final class StreamRelay: @unchecked Sendable {
         let asked = from..<from + count
         let task = HTTP.session.dataTask(with: request) { [weak self] data, response, _ in
             if let key, let made { self?.lock.withLock { self?.ahead[key]?.removeAll { $0 === made } } }
-            if key != nil, let data { PhoneNetworkUse.shared.noteArrived(data.count, over: NetworkStatus.shared.network) }
+            if key != nil, let data, let self { self.phoneNetworkUse.noteArrived(data.count, reserved: 0) }
             let http = response as? HTTPURLResponse
             let total = http?.value(forHTTPHeaderField: "Content-Range").flatMap { $0.split(separator: "/").last.flatMap { Int64($0) } }
             #if DEBUG

@@ -200,12 +200,15 @@ final class PhoneNetworkUse: @unchecked Sendable {
     private static let key = "phoneNetworkUse"
     private let defaults: UserDefaults
     private let calendar: Calendar
+    private let network: @Sendable () -> Conditions.Network
     private let lock = NSLock()
     private var kept: (day: String, bytes: Int64)
 
-    init(defaults: UserDefaults, calendar: Calendar = .autoupdatingCurrent) {
+    init(defaults: UserDefaults, calendar: Calendar = .autoupdatingCurrent,
+         network: @escaping @Sendable () -> Conditions.Network = { NetworkStatus.shared.network }) {
         self.defaults = defaults
         self.calendar = calendar
+        self.network = network
         let stored = defaults.dictionary(forKey: Self.key)
         kept = (stored?["day"] as? String ?? "", (stored?["bytes"] as? NSNumber)?.int64Value ?? 0)
     }
@@ -213,6 +216,14 @@ final class PhoneNetworkUse: @unchecked Sendable {
     func usedToday(at now: Date = Date()) -> Int64 {
         let today = day(of: now)
         return lock.withLock { kept.day == today ? kept.bytes : 0 }
+    }
+
+    func reserve(_ bytes: Int64, at now: Date = Date()) -> Int64? {
+        0
+    }
+
+    func noteArrived(_ bytes: Int, reserved: Int64, at now: Date = Date()) {
+        noteArrived(bytes, over: network(), at: now)
     }
 
     func noteArrived(_ bytes: Int, over network: Conditions.Network, at now: Date = Date()) {

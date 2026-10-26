@@ -55,6 +55,38 @@ final class PhoneNetworkUseTests: XCTestCase {
         XCTAssertEqual(store(device).usedToday(at: october(24, 10, 0)), 0)
     }
 
+    func testUnder150MBADayAReadAheadGoesOnlyIfItFitsInWhatIsLeft() {
+        let device = defaults()
+        let use = PhoneNetworkUse(defaults: device, calendar: newYork) { .expensive }
+        use.noteArrived(100_000_000, over: .expensive, at: october(23, 20, 0))
+        XCTAssertEqual(use.reserve(32_000_000, at: october(23, 20, 1)), 32_000_000)
+        XCTAssertNil(use.reserve(20_000_000, at: october(23, 20, 1)), "two reads under way took the day past 150 MB")
+        XCTAssertEqual(use.reserve(18_000_000, at: october(23, 20, 1)), 18_000_000)
+        use.noteArrived(10_000_000, reserved: 32_000_000, at: october(23, 20, 2))
+        XCTAssertEqual(use.usedToday(at: october(23, 20, 3)), 110_000_000, "a read stopped short counts what came")
+        XCTAssertEqual(use.reserve(22_000_000, at: october(23, 20, 3)), 22_000_000, "what a read stopped short didn't take was kept")
+        XCTAssertNil(use.reserve(1, at: october(23, 20, 3)))
+    }
+
+    func testEachChoiceAndNetworkGivesAReadAheadItsRoom() {
+        let device = defaults()
+        let network = Locked(Conditions.Network.expensive)
+        let use = PhoneNetworkUse(defaults: device, calendar: newYork) { network.value }
+        use.noteArrived(Int(PhoneNetworkFilms.dailyBytes), over: .expensive, at: october(23, 20, 0))
+        func room(_ choice: PhoneNetworkFilms, _ on: Conditions.Network) -> Int64? {
+            device.set(choice.rawValue, forKey: PhoneNetworkFilms.key)
+            network.mutate { $0 = on }
+            return use.reserve(500_000_000, at: october(23, 21, 0))
+        }
+        XCTAssertNil(room(.daily, .expensive), "today's 150 MB is used")
+        XCTAssertNil(room(.none, .expensive))
+        XCTAssertEqual(room(.wifi, .expensive), 0, "As on Wi-Fi: counted, with no limit")
+        for choice in PhoneNetworkFilms.allCases {
+            XCTAssertEqual(room(choice, .unmetered), 0, "\(choice) on Wi-Fi")
+            XCTAssertNil(room(choice, .constrained), "\(choice) in Low Data Mode")
+        }
+    }
+
     func testTheChoiceIsReadFromTheDeviceAndALaunchArgument() {
         let device = defaults()
         XCTAssertEqual(PhoneNetworkFilms.chosen(in: device), .daily, "the default for everyone")

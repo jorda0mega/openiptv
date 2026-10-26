@@ -177,6 +177,21 @@ final class KeptStartUseTests: XCTestCase {
     }
 }
 
+final class PhoneNetworkDayTests: XCTestCase {
+    func testAStartAheadNeverTakesTheDayPast150MB() async throws {
+        let suite = "phone-network-\(UUID())"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let use = PhoneNetworkUse(defaults: try XCTUnwrap(UserDefaults(suiteName: suite))) { .expensive }
+        use.noteArrived(Int(PhoneNetworkFilms.dailyBytes - StreamRelay.firstRead / 2), over: .expensive)
+        let server = try FilmServer(size: 64 << 20, delay: 0)
+        let relay = StreamRelay()
+        relay.phoneNetworkUse = use
+        _ = await relay.fetchStart(FileStart(EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)))
+        XCTAssertLessThanOrEqual(use.usedToday(), PhoneNetworkFilms.dailyBytes, "a start ahead took the day past 150 MB")
+        XCTAssertEqual(server.ranges, [], "a read that didn't fit in what was left was asked")
+    }
+}
+
 #if DEBUG
 final class KeptStartTests: XCTestCase {
     private let film = URL(string: "http://server/emby/Videos/m1/stream.mkv?Static=true&MediaSourceId=ms1&PlaySessionId=a")!
