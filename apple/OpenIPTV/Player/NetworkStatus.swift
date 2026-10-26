@@ -25,14 +25,31 @@ final class NetworkStatus: @unchecked Sendable {
     private var path: NWPath?
     #endif
 
+    #if DEBUG
+    private let debugNetwork: String?
+
+    private convenience init() {
+        self.init(debugNetwork: UserDefaults.standard.string(forKey: "debugNetwork"))
+    }
+
+    /// UI tests: -debugNetwork metered or lowData. The simulator's link is
+    /// the Mac's, never a phone network.
+    init(debugNetwork: String?) {
+        self.debugNetwork = debugNetwork
+        start()
+    }
+    #else
     private init() {
+        start()
+    }
+    #endif
+
+    private func start() {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
             var (expensive, constrained) = (path.isExpensive, path.isConstrained)
             #if DEBUG
-            // UI tests: -debugNetwork metered or lowData. The simulator's
-            // link is the Mac's, never a phone network.
-            switch UserDefaults.standard.string(forKey: "debugNetwork") {
+            switch debugNetwork {
             case "metered": expensive = true
             case "lowData": constrained = true
             default: break
