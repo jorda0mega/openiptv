@@ -76,6 +76,20 @@ final class FirstByteTests: XCTestCase {
         XCTAssertEqual(server.ranges, ["bytes=0-524287", "bytes=0-524287"])
     }
 
+    /// The first answer came as the wait for it ran out: the player reads
+    /// only the answer to the ask that replaced it.
+    func testAnAnswerComingAsItsReadIsAskedAgainIsNotSentToThePlayer() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0.3)
+        let relay = StreamRelay()
+        relay.firstByteWait = .milliseconds(600)
+        // The relay hears of the first answer only once its wait ran out.
+        HTTP.session.delegateQueue.addOperation { Thread.sleep(forTimeInterval: 1) }
+        let (bytes, response) = try await read(through: relay, server)
+        XCTAssertEqual(server.ranges.count, 2)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 206)
+        XCTAssertEqual(bytes, Data(count: 524_288), "the player read the second answer's header as film")
+    }
+
     /// Over a bare connection: URLSession sends an unanswered read again by itself.
     func testAReadNeverAnsweredTwiceEndsSoTheStartCanGoOn() async throws {
         let server = try FilmServer(size: 64 << 20, delay: 0, silent: 2)
