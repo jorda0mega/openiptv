@@ -570,6 +570,16 @@ final class ShelfTests: XCTestCase {
                                allowed(onPhoneNetwork(.none), at: place, likelihood), "\(place) \(likelihood)")
             }
         }
+        XCTAssertFalse(onPhoneNetwork(.daily, used: PhoneNetworkFilms.dailyBytes).restsOnOneCard)
+    }
+
+    func testOnlyADayWithSomeLeftRestsOnOneCard() {
+        for choice in PhoneNetworkFilms.allCases {
+            for network in [Conditions.Network.unknown, .unmetered, .expensive, .constrained] {
+                XCTAssertEqual(onPhoneNetwork(choice, used: PhoneNetworkFilms.dailyBytes - 1) { $0.network = network }.restsOnOneCard,
+                               choice == .daily && network == .expensive, "\(choice) \(network)")
+            }
+        }
     }
 
     func testOnAPhoneNetworkAsOnWiFiIsTheWiFiRule() {

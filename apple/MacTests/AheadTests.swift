@@ -79,6 +79,69 @@ final class AheadTests: XCTestCase {
 
     private let card = Target.playable(id: "m5", kind: "Movie")
 
+    @MainActor
+    private final class Rests {
+        var started: [String] = []
+        let ahead: Ahead
+
+        init(oneCard: Bool) {
+            var rests: Rests?
+            ahead = Ahead(Ahead.Work(page: { _, _ in }, plan: { target, _ in
+                guard case let .playable(id, _) = target else { return nil }
+                return EmbyPlayback(itemId: id, title: id, subtitle: nil, url: URL(string: "http://server/Videos/\(id)/stream")!,
+                                    durationSeconds: 7200)
+            }, fileStart: { plan, _ in rests?.started.append(plan.itemId) }, connection: { _, _ in }, subtitle: { _, _ in },
+            previews: { _, _ in }), platform: .phone, sleep: { if $0 >= .seconds(1) { try await Task.sleep(for: .seconds(3600)) } },
+            restsOnOneCard: { oneCard })
+            rests = self
+        }
+
+        func hold(_ cards: [(id: String, share: Double, x: Double, y: Double)]) -> [String: Task<Void, Never>] {
+            var held: [String: Task<Void, Never>] = [:]
+            for card in cards {
+                let target = Target.playable(id: card.id, kind: "Movie")
+                ahead.showing.show(target, at: .continueWatching, share: card.share, from: CGPoint(x: card.x, y: card.y))
+                held[card.id] = Task { await ahead.holding(target, at: .continueWatching) }
+            }
+            return held
+        }
+
+        func leave(_ id: String, _ held: Task<Void, Never>?) {
+            held?.cancel()
+            ahead.showing.hide(.playable(id: id, kind: "Movie"), at: .continueWatching)
+        }
+    }
+
+    func testOnAPhoneNetworkADayOnlyTheMostShownCardIsRestedOn() async {
+        let rests = Rests(oneCard: true)
+        let held = rests.hold([("m1", 1, 20, 300), ("m2", 0.7, 272, 300)])
+        await settle()
+        XCTAssertEqual(rests.started, ["m1"], "the card 70% on screen beside it got its start too")
+        rests.leave("m1", held["m1"])
+        await settle()
+        XCTAssertEqual(rests.started, ["m1", "m2"], "the card left on screen didn't become the one rested on")
+        rests.leave("m2", held["m2"])
+        for task in held.values { await task.value }
+    }
+
+    func testOnAPhoneNetworkADayATieGoesToTheFirstInReadingOrder() async {
+        let rests = Rests(oneCard: true)
+        let held = rests.hold([("m2", 1, 272, 300), ("m1", 1, 20, 300), ("m0", 1, 400, 100)])
+        await settle()
+        XCTAssertEqual(rests.started, ["m0"])
+        for (id, task) in held { rests.leave(id, task) }
+        for task in held.values { await task.value }
+    }
+
+    func testOnWiFiEveryCardOnScreenIsRestedOn() async {
+        let rests = Rests(oneCard: false)
+        let held = rests.hold([("m1", 1, 20, 300), ("m2", 0.7, 272, 300)])
+        await settle()
+        XCTAssertEqual(Set(rests.started), ["m1", "m2"])
+        for (id, task) in held { rests.leave(id, task) }
+        for task in held.values { await task.value }
+    }
+
     func testAFastScrollPastACardAsksNothing() async {
         let asked = await asked(card, at: .continueWatching, stays: .milliseconds(400))
         XCTAssertEqual(asked, [])

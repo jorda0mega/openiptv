@@ -69,6 +69,15 @@ enum Need: Hashable, Sendable {
     case previews
 }
 
+/// How much of each card at a place shows on screen: on a phone network
+/// under 150 MB a day only the most shown counts as rested on.
+@MainActor
+final class Showing {
+    func show(_ target: Target, at place: Place, share: Double, from origin: CGPoint) {}
+
+    func hide(_ target: Target, at place: Place) {}
+}
+
 @MainActor
 final class Ahead {
     struct Work {
@@ -84,14 +93,18 @@ final class Ahead {
     #if DEBUG
     private(set) var held = 0
     #endif
+    let showing = Showing()
     private let platform: Platform
     private let sleep: @Sendable (Duration) async throws -> Void
+    private let restsOnOneCard: @MainActor () -> Bool
 
     init(_ work: Work, platform: Platform = .current,
-         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         restsOnOneCard: @escaping @MainActor () -> Bool = { Conditions.current().restsOnOneCard }) {
         self.work = work
         self.platform = platform
         self.sleep = sleep
+        self.restsOnOneCard = restsOnOneCard
     }
 
     nonisolated static func needs(_ target: Target, _ likelihood: Likelihood) -> [Need] {

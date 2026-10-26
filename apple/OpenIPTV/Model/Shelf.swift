@@ -88,6 +88,8 @@ struct Conditions: Equatable, Sendable {
     var phoneNetwork = PhoneNetworkFilms.none
     var usedToday: Int64 = 0
 
+    var restsOnOneCard: Bool { false }
+
     func allows(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Bool {
         refusal(weight, at: place, likelihood) == nil
     }
