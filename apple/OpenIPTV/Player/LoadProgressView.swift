@@ -1,15 +1,10 @@
 import SwiftUI
 
-/// What the buttons under a slow or failed start do.
 struct LoadActions {
     var tryAgain: () -> Void
     var otherChannels: () -> Void = {}
 }
 
-/// A start's progress (see LoadProgress): the ring where play/pause is, at
-/// the middle of the screen, and its words under it. `otherwise` shows
-/// while it has nothing to draw (a drop's first seconds). Apple TV: the
-/// remote moves between the buttons, and `focused` is the one it's on.
 struct LoadProgressView<Otherwise: View>: View {
     let load: LoadProgress
     let actions: LoadActions
@@ -76,7 +71,8 @@ private struct LoadProgressShown: View {
             if !shown.buttons.isEmpty {
                 HStack(spacing: gap * 0.8) {
                     ForEach(shown.buttons, id: \.self) { button in
-                        LoadButtonView(button: button, focused: focus == button, action: action(button))
+                        LoadButtonView(button: button, focused: focus == button,
+                                       action: button == .tryAgain ? actions.tryAgain : actions.otherChannels)
                     }
                 }
                 .padding(.top, gap * 0.4)
@@ -89,24 +85,15 @@ private struct LoadProgressShown: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// Apple TV: the remote starts on the first button.
     private var focus: LoadProgress.Button? {
         #if os(tvOS)
-        shown.buttons.contains { $0 == focused } ? focused : shown.buttons.first
+        if let focused, shown.buttons.contains(focused) { focused } else { shown.buttons.first }
         #else
         nil
         #endif
     }
-
-    private func action(_ button: LoadProgress.Button) -> () -> Void {
-        switch button {
-        case .tryAgain: actions.tryAgain
-        case .otherChannels: actions.otherChannels
-        }
-    }
 }
 
-/// White on a faint track, turning, so a long step still looks alive.
 private struct LoadRing: View {
     let fill: Double
     let size: CGFloat
@@ -156,8 +143,6 @@ private struct LoadDashes: View {
     }
 }
 
-/// iPhone: Try again in glass, Other channels in white. Apple TV: white is
-/// where the remote is, as everywhere on the TV.
 private struct LoadButtonView: View {
     let button: LoadProgress.Button
     let focused: Bool

@@ -272,8 +272,6 @@ struct MoviePlayerView: View {
     /// builds with the stats on).
     @State private var timing: String?
     @State private var warmStart = false
-    /// The start (from the tap: the server's plan is in by now) for its
-    /// progress, or a stall's.
     @State private var track = LoadTrack(began: Date(), stage: .fetching)
     /// The file's audio and subtitle tracks, and the picture's badges ("4K",
     /// "HDR") for the Info panel.
@@ -423,7 +421,7 @@ struct MoviePlayerView: View {
                 }, isEnabled: UIDevice.current.userInterfaceIdiom == .phone)
                 .accessibilityHidden(true)
             #endif
-            // With the controls up, their play button turns into it.
+            // With the controls up, their play button turns into the progress.
             if let load, !controlsVisible {
                 LoadProgressView(load: load, actions: loadActions)
             }
@@ -979,7 +977,6 @@ struct MoviePlayerView: View {
 
     private var total: Double { duration ?? playback.durationSeconds ?? 0 }
 
-    /// What the screen says while there's no picture (see LoadProgress).
     private var load: LoadProgress? {
         let subject = LoadProgress.Subject.film(playback.title)
         let cause: LoadProgress.Cause = NetworkStatus.shared.online ? .server : .offline
@@ -993,13 +990,13 @@ struct MoviePlayerView: View {
 
     private var loadActions: LoadActions { LoadActions(tryAgain: { retry() }) }
 
-    /// Opens the film again from where it is (Try again).
     private func retry() {
         error = nil
         attempt = 0
         started = false
-        track = LoadTrack(began: Date(), stage: .fetching)
-        track.asked(.fetching, at: Date())
+        let now = Date()
+        track = LoadTrack(began: now)
+        track.asked(.fetching, at: now)
         playFile(playback.url, headers: playback.headers, at: startedOnce ? position : playback.startSeconds,
                  readahead: NetworkStatus.shared.fileReadahead)
         showControls()
@@ -1154,7 +1151,7 @@ struct MoviePlayerView: View {
             }
         }
         #endif
-        track = LoadTrack(began: playback.requestedAt, stage: .fetching)
+        track = LoadTrack(began: playback.requestedAt)
         track.asked(.fetching, at: Date())
         if let warmPlayer = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
@@ -1791,10 +1788,6 @@ struct MoviePlayerView: View {
         }
     }
 
-    /// On the round buttons: left and right between them (a click on the
-    /// ring, or a swipe), a click opens its menu, down or Menu back to the
-    /// bar.
-    /// A slow or failed start's button: Select presses it.
     private func inLoad(_ input: TVRemoteSurface.Input) -> Bool {
         guard load?.shown(at: Date())?.buttons.contains(.tryAgain) == true else { return false }
         switch input {
@@ -1808,6 +1801,9 @@ struct MoviePlayerView: View {
         }
     }
 
+    /// On the round buttons: left and right between them (a click on the
+    /// ring, or a swipe), a click opens its menu, down or Menu back to the
+    /// bar.
     private func onButtons(_ input: TVRemoteSurface.Input) {
         func move(_ by: Int) {
             let buttons: [TVPlayerFocus] = (subtitleTracks.isEmpty ? [] : [.subtitles]) + [.audio, .speed]

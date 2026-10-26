@@ -64,7 +64,6 @@ struct LivePlayerView: View {
     /// A channel picked in Watch On, kept for its league once it plays (a
     /// feed that never starts isn't tried first next time).
     @State private var pendingPick: (choice: AppModel.WatchChoice, league: String)?
-    /// The start (or a drop) for its progress.
     @State private var startTrack = LoadTrack(began: Date())
     #if os(tvOS)
     @State private var loadFocus = LoadProgress.Button.tryAgain
@@ -85,7 +84,6 @@ struct LivePlayerView: View {
     private var playingCopy: LiveChannel? { session.copy }
     private var failed: Bool { session.failure != nil }
     private var loading: Bool { (buffering || session.isLoading) && !failed }
-    /// What the screen says while there's no picture (see LoadProgress).
     private var load: LoadProgress? {
         let subject = LoadProgress.Subject.channel(displayName)
         if let failure = session.failure {
@@ -104,7 +102,6 @@ struct LivePlayerView: View {
         guard started, let since = startTrack.stalledSince else { return nil }
         return LoadProgress(subject: subject, wait: .stall, stage: startTrack.stage, cause: loadCause, began: since)
     }
-    /// The provider until it gives the stream's address, the channel after.
     private var loadCause: LoadProgress.Cause {
         if case .offline = session.phase { return .offline }
         if !NetworkStatus.shared.online { return .offline }
@@ -136,7 +133,7 @@ struct LivePlayerView: View {
                     .accessibilityAction(.escape) { close() }
             }
             if !controlsVisible { picture.ignoresSafeArea() }
-            // With the controls up, their play button turns into it.
+            // With the controls up, their play button turns into the progress.
             if let load, !controlsVisible {
                 LoadProgressView(load: load, actions: loadActions, focused: tvLoadFocus)
             }
@@ -404,18 +401,20 @@ struct LivePlayerView: View {
     #if os(tvOS)
     private var tvLoadFocus: LoadProgress.Button? { loadFocus }
 
-    /// Apple TV: left and right between a slow or failed start's buttons.
+    private var loadButtons: [LoadProgress.Button] {
+        load?.shown(at: Date())?.buttons ?? []
+    }
+
     private func moveInLoad(_ direction: MoveCommandDirection) -> Bool {
-        let buttons = load?.shown(at: Date())?.buttons ?? []
+        let buttons = loadButtons
         guard !buttons.isEmpty, direction == .left || direction == .right else { return false }
         let at = buttons.firstIndex(of: loadFocus) ?? 0
         loadFocus = buttons[min(max(at + (direction == .left ? -1 : 1), 0), buttons.count - 1)]
         return true
     }
 
-    /// Apple TV: Select on a slow or failed start's button.
     private func pressInLoad() -> Bool {
-        let buttons = load?.shown(at: Date())?.buttons ?? []
+        let buttons = loadButtons
         guard let button = buttons.first(where: { $0 == loadFocus }) ?? buttons.first else { return false }
         switch button {
         case .tryAgain: retry()
