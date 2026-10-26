@@ -31,6 +31,8 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         case failed(Attempt, StreamFailure, shown: Failure)
         case timedOut(Attempt, StreamFailure)
         case ended(Attempt, StreamFailure)
+        /// The picture stands still while libmpv waits for data, or moves again.
+        case picture(Attempt, frozen: Bool)
         case online
         case paused(Bool)
         case away(keepsStream: Bool)
@@ -39,7 +41,8 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
 
         private var attempt: Attempt? {
             switch self {
-            case let .opening(at), let .started(at), let .failed(at, _, _), let .timedOut(at, _), let .ended(at, _): at
+            case let .opening(at), let .started(at), let .failed(at, _, _), let .timedOut(at, _), let .ended(at, _),
+                 let .picture(at, _): at
             case .play, .recording, .online, .paused, .away, .back, .closed: nil
             }
         }
@@ -71,6 +74,10 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     /// let go for a moment, and refuse the next.
     static var refusalWindow: TimeInterval { 3 }
 
+    /// A provider's connection can stop sending and stay open: libmpv waits
+    /// 60 s before it ends such a stream, the picture frozen meanwhile.
+    static var stallLimit: TimeInterval { 10 }
+
     /// On an Apple TV, AirPlay is its own speakers.
     static func keepsStreamAway(airPlay: Bool, onTV: Bool) -> Bool {
         airPlay && !onTV
@@ -90,7 +97,9 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     private var cueing = false
     private var cuts = LiveCuts()
     private(set) var paused = false
-    private var deadline: Attempt?
+    private var opened: Attempt?
+    private var deadline: Deadline?
+    private(set) var frozen = false
     private var inBackground = InBackground.no
     private var releasedAt = Date.distantPast
     private var startLimit: Double = 15
@@ -139,17 +148,30 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         }
     }
 
-    private var deadlineOutlivedItsLoad: Bool {
-        guard let deadline else { return false }
-        return deadline != attempt || !isOpening
+    private struct Deadline: Equatable {
+        let attempt: Attempt
+        let after: Double
+    }
+
+    /// While a copy opens, its start limit; while it plays with its picture
+    /// standing still, the stall limit.
+    private var wantedDeadline: Deadline? {
+        if isOpening, opened == attempt { return Deadline(attempt: attempt, after: startLimit) }
+        if case .playing = phase, frozen, !paused { return Deadline(attempt: attempt, after: Self.stallLimit) }
+        return nil
     }
 
     mutating func handle(_ input: Input, now: Date = Date()) -> [Action] {
         guard !input.isStale(current: attempt) else { return [] }
-        let actions = step(input, now)
-        guard deadlineOutlivedItsLoad else { return actions }
-        deadline = nil
-        return [.cancelDeadline] + actions
+        let load = attempt
+        var actions = step(input, now)
+        if attempt != load { frozen = false }
+        let wanted = wantedDeadline
+        guard wanted != deadline else { return actions }
+        if deadline != nil { actions = [.cancelDeadline] + actions }
+        deadline = wanted
+        if let wanted { actions.append(.deadline(wanted.attempt, after: wanted.after)) }
+        return actions
     }
 
     private mutating func step(_ input: Input, _ now: Date) -> [Action] {
@@ -170,19 +192,21 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             return [.clearTimeline, .unpause, .loadRecording(attempt, resume: false)]
         case let .opening(at):
             releasedAt = now
-            guard isOpening else { return [] }
-            deadline = at
-            return [.deadline(at, after: startLimit)]
+            opened = at
+            return []
         case .started:
             return started(now)
         case let .failed(_, failure, shown):
             return failed(failure, shown, now)
         case let .timedOut(_, failure):
-            guard isOpening else { return [] }
+            guard deadline != nil else { return [] }
             return failed(failure, .notPlaying, now)
         case let .ended(_, failure):
             if case .recording(started: true) = phase { return [.goLive] }
             return failed(failure, .ended, now)
+        case let .picture(_, isFrozen):
+            frozen = isFrozen
+            return []
         case .online:
             guard case let .offline(copy, hadPicture) = phase else { return [] }
             guard !(hadPicture && paused) else {
@@ -238,6 +262,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         switch phase {
         case let .opening(copy), let .reopening(copy):
             phase = .playing(copy)
+            frozen = false
             cuts.played(copy.id, at: now)
             guard cueing, let picked else { return [.picture, .played(copy)] }
             cueing = false

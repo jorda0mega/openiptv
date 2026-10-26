@@ -52,7 +52,8 @@ struct LivePlayerView: View {
     @State private var timingUntil = Date.distantPast
     @State private var cue: LiveChannel?
     @State private var cueTask: Task<Void, Never>?
-    /// Gives up on a copy that sends no picture (see startLimit).
+    /// Gives up on a copy that sends no picture (see startLimit), or whose
+    /// picture stands still while it plays (LiveSession.stallLimit).
     @State private var noPictureDeadline: Task<Void, Never>?
     /// A game: every channel showing it, the one to play first at the top
     /// ("Watch On"); empty for anything else.
@@ -808,6 +809,7 @@ struct LivePlayerView: View {
         case let .buffering(isBuffering):
             guard current else { return }
             buffering = isBuffering
+            send(.picture(attempt, frozen: isBuffering))
             if isBuffering, started { startTrack.stalled(at: Date()) } else { startTrack.flowing() }
             #if DEBUG
             perf.buffering(isBuffering)
