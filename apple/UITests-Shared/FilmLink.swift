@@ -108,13 +108,28 @@ extension FilmLink {
 
     func startParts(within seconds: Int = 60) -> String {
         var parts: [Substring] = []
-        for _ in 0..<(seconds * 4) where parts.count < 4 {
+        var instead: String?
+        let tapped = Date()
+        for _ in 0..<(seconds * 4) where parts.count < 4 && instead == nil {
             usleep(250_000)
             parts = readout("debug-start")?.split(separator: " ") ?? []
+            instead = shownInstead()
         }
-        guard parts.count == 4 else { return "no start in \(seconds) s" }
+        if let instead { return String(format: "no start: %@, %.1f s after the tap", instead, Date().timeIntervalSince(tapped)) }
+        guard parts.count == 4 else {
+            return "no start in \(seconds) s | on screen: " + (app.staticTexts["debug-item"].exists ? "the player's spinner" : "the card's spinner")
+        }
         let player = parts[0] == "warm" ? "a kept player" : "a new player"
         return "tap to first frame \(parts[1]) s at \(parts[3]) s (\(player)) | \(readout("debug-start-parts") ?? "no parts")"
+    }
+
+    /// What the viewer is shown in place of a start: the "Couldn't play" alert, or the player's message.
+    func shownInstead() -> String? {
+        let alert = app.alerts.firstMatch
+        if alert.exists {
+            return "the \"\(alert.label)\" alert (\(alert.staticTexts.allElementsBoundByIndex.dropFirst().first?.label ?? ""))"
+        }
+        return readout("debug-start-error").flatMap { $0.isEmpty ? nil : "the player's message (\($0))" }
     }
 
     /// The subtitle menu's entry under Off, picked, and what followed: the

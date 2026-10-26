@@ -70,6 +70,11 @@ import json, sys
 r = json.load(sys.stdin)
 print("test server reports: " + ("; ".join("%s %s" % (event, ", ".join("%d %s" % (n, kind) for kind, n in sorted(kinds.items())))
                                            for event, kinds in sorted(r.items())) or "none"))'
+  curl -sf "$MOCK/mock/hung" | python3 -c '
+import json, sys
+h = json.load(sys.stdin)
+if h:
+    print("test server: never answered " + ", ".join("%d %s" % (n, kind) for kind, n in sorted(h.items())))'
 }
 # The runs of one platform, a line each: link, network, the phone network setting (- for none).
 runs() {

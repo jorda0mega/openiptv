@@ -471,6 +471,7 @@ struct MoviePlayerView: View {
                 ClockReadout(clock: playClock)
                 debugReadout(startReadout, "debug-start")
                 debugReadout(startParts, "debug-start-parts")
+                debugReadout(error ?? "", "debug-start-error")
                 debugReadout(convertedReadout, "debug-converted")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")

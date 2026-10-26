@@ -78,7 +78,11 @@ CONNECTIONS = set()
 # "plan_delay" (seconds before PlaybackInfo answers: 0.2-4 s on a real one),
 # "copies" ("m7": that film has a second copy, c7, in another library: the
 # same IMDb id, the same picture width), "launches" ("99": that many of the
-# app's launches have the profile's launch spell, in place of its count).
+# app's launches have the profile's launch spell, in place of its count),
+# "hang" ("plan,open:1": those requests never answer, the first N of a kind
+# when it says N: "plan" PlaybackInfo, "item" an item's full record, "open"
+# a read of a film, "convert" a converted version's list; GET /mock/hung
+# counts them).
 #
 # A real server's timing and a slow network, apart from CONTROL (a reset
 # keeps it): OPENIPTV_MOCK_PROFILE (a name in net_profiles.json: real-quiet,
@@ -118,6 +122,10 @@ PLAYBACKINFO_REQUESTS = []
 # counts the reports by whether they carry a session given for their item.
 PLAY_SESSIONS = {}
 REPORTS = []
+# Requests that never answered, by kind ("hang"), and how long one waits for its client to hang up.
+HUNG = {}
+HUNG_LOCK = threading.Lock()
+HANG_S = 900
 KEY_CHECKS = []
 CANCELLED = []
 SUBTITLES_CUT = []
@@ -670,6 +678,23 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return True
 
+    def never_answers(self, kind):
+        """Under "hang", a `kind` request holds its connection, sending nothing, till the client hangs up."""
+        for spec in filter(None, CONTROL.get("hang", "").split(",")):
+            name, _, count = spec.partition(":")
+            if name != kind:
+                continue
+            with HUNG_LOCK:
+                if count and HUNG.get(kind, 0) >= int(count):
+                    return False
+                HUNG[kind] = HUNG.get(kind, 0) + 1
+            self.close_connection = True
+            until = time.time() + HANG_S
+            while time.time() < until and not self.client_gone():
+                time.sleep(0.5)
+            return True
+        return False
+
     def key_check(self, kind, q):
         headed = self.headers.get("X-Emby-Token") == TOKEN
         # The app's own requests name it; the player's (ffmpeg's) don't.
@@ -761,6 +786,8 @@ class Handler(BaseHTTPRequestHandler):
         if "/PlaybackInfo" in self.path and self.headers.get("X-Emby-Token") == TOKEN:
             item = self.path.split("/Items/", 1)[1].split("/", 1)[0]
             PLAYBACKINFO_REQUESTS.append((time.time(), item))
+            if self.never_answers("plan"):
+                return
             time.sleep(float(CONTROL.get("plan_delay", 0)))
             session = f"ps{len(PLAY_SESSIONS) + 1}"
             PLAY_SESSIONS[session] = item
@@ -854,6 +881,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"items": [r[1] for r in asked], "keyed": [r[1] for r in asked if r[2]],
                               "headerless": [r[1] for r in asked if not r[3]],
                               "cut": [track for t, track in SUBTITLES_CUT if t >= since]})
+        if path == "/mock/hung":
+            with HUNG_LOCK:
+                return self.send(dict(HUNG))
         if path == "/mock/reports":
             counts = {}
             for event, session, item in REPORTS:
@@ -884,6 +914,8 @@ class Handler(BaseHTTPRequestHandler):
                 SUBTITLES_CUT.clear()
                 PLAYBACKINFO_REQUESTS.clear()
                 REPORTS.clear()
+                with HUNG_LOCK:
+                    HUNG.clear()
                 KEY_CHECKS.clear()
                 CANCELLED.clear()
                 XTREAM_REQUESTS.clear()
@@ -1335,6 +1367,8 @@ class Handler(BaseHTTPRequestHandler):
                                           for n in range(3, 3 + int(os.environ.get("OPENIPTV_MOCK_EXTRA_LIBRARIES", "0")))]})
         if path.startswith("/Users/U1/Items/") and path.count("/") == 4 and not path.endswith(("/Latest", "/Resume")):
             item_id = path.rsplit("/", 1)[1]
+            if self.never_answers("item"):
+                return
             if item_id in KNOWN_BY_ID:
                 item = known_item(KNOWN_BY_ID[item_id], played=item_id == "a9") | {"MediaSources": [media_source(item_id)]}
                 if "People" in q.get("Fields", ""):
@@ -1380,6 +1414,8 @@ class Handler(BaseHTTPRequestHandler):
         converting = CONTROL.get("emby_convert") == "1" and os.environ.get("OPENIPTV_MOCK_VIDEO")
         if path.startswith("/Videos/") and path.endswith("/master.m3u8") and not self.key_check(f"hls:{path.split('/')[2]}", q):
             return self.send({"error": "unauthorized"}, status=401)
+        if path.startswith("/Videos/") and path.endswith("/master.m3u8") and self.never_answers("convert"):
+            return
         if converting and path.startswith("/Videos/") and path.endswith("/master.m3u8"):
             time.sleep(float(CONTROL.get("hls_delay", 0)))
             start = int(int(q.get("StartTimeTicks", "0")) / 10_000_000 / SEGMENT)
@@ -1522,6 +1558,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             print(f"{time.time():.2f} stream {path.split('/')[2]} {self.headers.get('Range', '')}", flush=True)
             VIDEO_REQUESTS.append((time.time(), path.split('/')[2]))
+            if self.never_answers("open"):
+                return
             first, _, last = self.headers.get("Range", "")[6:].partition("-")
             speed = first.isdigit() and last.isdigit() and int(first) % 4194304 == 0 and int(last) - int(first) == 4194303
             kind = f"{'speed' if speed else 'stream'}:{path.split('/')[2]}"
