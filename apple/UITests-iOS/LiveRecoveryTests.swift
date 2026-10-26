@@ -72,6 +72,36 @@ final class LiveRecoveryTests: XCTestCase {
         }
     }
 
+    /// The server stops sending 10 s in and keeps the connection open, as a
+    /// dead provider connection does: the stream opens again within 15 s,
+    /// not after libmpv's 60 s with the picture frozen and nothing said.
+    func testASilentStreamOpensAgainSoon() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "120"
+        let server = try launch(["live_stall": "10:600"])
+        let since = try markTime(server)
+        openChannel(7)
+        XCTAssertTrue(waitForState("playing", within: 15), "channel 7 didn't play")
+        let deadline = Date().addingTimeInterval(30)
+        var opens = 0
+        var seen: Set<String> = []
+        var asked = Date.distantPast
+        while !(opens >= 2 && seen.contains("reopening")), Date() < deadline {
+            seen.insert(state())
+            if Date().timeIntervalSince(asked) >= 1 {
+                asked = Date()
+                opens = try liveRequests(server, since: since).filter { $0.id == "7" }.count
+            }
+            usleep(50_000)
+        }
+        XCTAssertGreaterThanOrEqual(opens, 2, "a stream that stopped sending wasn't opened again within 15 s")
+        let times = try liveRequests(server, since: since).filter { $0.id == "7" }.map(\.t)
+        if times.count >= 2 {
+            XCTAssertLessThanOrEqual(times[1] - times[0], 1 + 10 + 15, "opened again more than 16 s after the server went silent 10 s in")
+        }
+        XCTAssertTrue(seen.contains("reopening"), "the stream wasn't opened again in place: \(seen)")
+        XCTAssertTrue(waitForState("playing", within: 15), "the stream opened again didn't play: \(state())")
+    }
+
     func testCutsAreCapped() throws {
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "120"
         let server = try launch(["hd_copy": "1", "live_chunked": "1", "live_cut": "3", "live_cut_reset": "1", "live_cut_ids": "951"])

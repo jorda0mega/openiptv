@@ -110,6 +110,96 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(retry, [.cancelDeadline, .load(a, session.attempt, after: 2.5)], "a quick return ended on the refusal")
     }
 
+    private func isDeadline(_ action: Session.Action) -> Bool {
+        if case .deadline = action { true } else { false }
+    }
+
+    func testAPictureFrozenPastTheStallLimitOpensTheSameCopyAgain() {
+        var session = playing()
+        let load = session.attempt
+        XCTAssertEqual(session.handle(.picture(load, frozen: true), now: at(20)), [.deadline(load, after: Session.stallLimit)])
+        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(30)), [.cancelDeadline, .clearTimeline, .load(a, load + 1, after: 0)])
+        XCTAssertEqual(session.phase, .reopening(a))
+        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(31)), [], "the deadline of the stream let go opened it again")
+    }
+
+    func testAPictureMovingAgainCancelsTheStallDeadline() {
+        var session = playing()
+        let load = session.attempt
+        _ = session.handle(.picture(load, frozen: true), now: at(20))
+        XCTAssertEqual(session.handle(.picture(load, frozen: false), now: at(24)), [.cancelDeadline])
+        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(30)), [], "a stall deadline outlived the picture moving again")
+        XCTAssertEqual(session.phase, .playing(a))
+    }
+
+    func testPausingCancelsTheStallDeadlineAndPlayingAgainStartsIt() {
+        var session = playing()
+        let load = session.attempt
+        _ = session.handle(.picture(load, frozen: true), now: at(20))
+        XCTAssertEqual(session.handle(.paused(true), now: at(22)), [.cancelDeadline])
+        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(30)), [])
+        XCTAssertEqual(session.handle(.paused(false), now: at(40)), [.deadline(load, after: Session.stallLimit)],
+                       "played again with the picture still frozen and nothing watching it")
+        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(50)), [.cancelDeadline, .clearTimeline, .load(a, load + 1, after: 0)])
+    }
+
+    func testAFrozenPictureWhileOfflineWaitsForTheNetwork() {
+        var session = playing()
+        let load = session.attempt
+        _ = session.handle(.picture(load, frozen: true), now: at(20))
+        XCTAssertEqual(session.handle(.timedOut(load, .offline), now: at(30)), [.cancelDeadline, .stop, .waitForNetwork])
+        XCTAssertEqual(session.phase, .offline(a, hadPicture: true))
+    }
+
+    func testAFrozenPictureLeavesTheStartLimitAloneAndTheRecordingUnwatched() {
+        var starting = opening()
+        XCTAssertEqual(starting.handle(.picture(starting.attempt, frozen: true), now: at(5)), [], "before the first picture the start limit decides")
+        var recording = Session()
+        _ = recording.handle(.recording, now: at(0))
+        _ = recording.handle(.started(recording.attempt), now: at(1))
+        XCTAssertEqual(recording.handle(.picture(recording.attempt, frozen: true), now: at(20)), [])
+        XCTAssertEqual(recording.handle(.timedOut(recording.attempt, .timeout), now: at(30)), [])
+    }
+
+    func testTheReopenedCopyIsWatchedFromItsOwnPicture() {
+        var session = playing()
+        let load = session.attempt
+        _ = session.handle(.picture(load, frozen: true), now: at(20))
+        _ = session.handle(.timedOut(load, .timeout), now: at(30))
+        let reopened = session.attempt
+        XCTAssertEqual(session.handle(.opening(reopened), now: at(30.5)), [.deadline(reopened, after: 15)])
+        XCTAssertEqual(session.handle(.picture(reopened, frozen: true), now: at(31)), [], "the start limit still decides")
+        let started = session.handle(.started(reopened), now: at(32))
+        XCTAssertEqual(started.first, .cancelDeadline)
+        XCTAssertFalse(started.contains(where: isDeadline), "a picture just shown was taken for a frozen one: \(started)")
+    }
+
+    func testLeavingPlayWhileFrozenCancelsTheStallDeadline() {
+        var ended = playing()
+        _ = ended.handle(.picture(ended.attempt, frozen: true), now: at(20))
+        XCTAssertEqual(ended.handle(.ended(ended.attempt, .eof_before_frame), now: at(22)).first, .cancelDeadline)
+        var closed = playing()
+        _ = closed.handle(.picture(closed.attempt, frozen: true), now: at(20))
+        XCTAssertEqual(closed.handle(.closed, now: at(22)), [.cancelDeadline])
+    }
+
+    func testStallsWaitLongerEachTimeAndTheFourthMovesToTheNextCopy() {
+        var session = playing()
+        var waits: [Double] = []
+        var last: [Session.Action] = []
+        for i in 0..<4 {
+            let load = session.attempt
+            _ = session.handle(.picture(load, frozen: true), now: at(Double(20 + 30 * i)))
+            last = session.handle(.timedOut(load, .timeout), now: at(Double(30 + 30 * i)))
+            for case let .load(_, _, wait) in last { waits.append(wait) }
+            guard i < 3 else { break }
+            _ = session.handle(.opening(session.attempt), now: at(Double(31 + 30 * i)))
+            _ = session.handle(.started(session.attempt), now: at(Double(32 + 30 * i)))
+        }
+        XCTAssertEqual(waits.prefix(3), [0, 1, 2])
+        XCTAssertTrue(last.contains(.load(b, session.attempt, after: 0)), "four stalls in 3 min stayed on the copy: \(last)")
+    }
+
     func testACutWhilePausedWaitsForPlay() {
         var session = playing()
         _ = session.handle(.paused(true), now: at(5))
