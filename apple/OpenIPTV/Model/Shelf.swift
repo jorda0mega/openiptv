@@ -369,6 +369,12 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
     #endif
 
+    /// Fetched anew, beside any fetch under way and outside the lane, and
+    /// not kept: a start's second ask.
+    func fresh(_ key: Key) async throws -> Value {
+        try await fetch(key)
+    }
+
     func take(_ key: Key) async throws -> Value {
         let value = try await value(for: key)
         if case .kept? = entries[key] { entries[key] = nil }

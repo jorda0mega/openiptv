@@ -63,6 +63,8 @@ final class StreamRelay: @unchecked Sendable {
 
     private static let aheadRedirects = AheadRedirects()
     var firstByteWait = StartPatience.firstByte
+    /// Film reads asked again for want of a first byte.
+    let askedAgain = Locked(0)
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
     func start() {
@@ -531,6 +533,7 @@ final class StreamRelay: @unchecked Sendable {
         if !StartPatience.off {
             DispatchQueue.global().asyncAfter(deadline: .now() + firstByteWait / .seconds(1)) { [weak self] in
                 guard relay.giveUpUnanswered(closing: again) else { return }
+                self?.askedAgain.mutate { $0 += 1 }
                 self?.fetch(route, method: method, range: range, connection: connection, cache: cache, head: head,
                             redirected: redirected, again: true)
             }

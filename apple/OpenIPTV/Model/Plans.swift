@@ -32,14 +32,44 @@ enum Plans {
                          retried: @escaping @MainActor () -> Void = {}) async throws -> EmbyPlayback {
         let deadline = ContinuousClock.now + failAfter
         var playback = try await StartPatience.by(deadline) {
-            do {
-                return try await shelf.take(key)
-            } catch {
-                return try await shelf.take(key)
-            }
+            StartPatience.off ? try await taken(key, on: shelf) : try await asked(key, on: shelf, againAfter: retryAfter, retried: retried)
         }
         if !playback.listed, let listed = try? await StartPatience.by(deadline, { try await shelf.take(key) }) { playback = listed }
         return playback
+    }
+
+    private static func taken(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>) async throws -> EmbyPlayback {
+        do {
+            return try await shelf.take(key)
+        } catch {
+            return try await shelf.take(key)
+        }
+    }
+
+    /// The plan, and with none by `againAfter` a fresh ask beside it: the
+    /// first answer plays. One that fails before then fails the start.
+    private static func asked(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, againAfter: Duration,
+                              retried: @escaping @MainActor () -> Void) async throws -> EmbyPlayback {
+        let began = ContinuousClock.now
+        return try await withThrowingTaskGroup(of: EmbyPlayback.self) { group in
+            group.addTask { try await taken(key, on: shelf) }
+            group.addTask {
+                try await Task.sleep(for: againAfter)
+                await retried()
+                return try await shelf.fresh(key)
+            }
+            defer { group.cancelAll() }
+            var failure: Error = CancellationError()
+            while let answer = await group.nextResult() {
+                switch answer {
+                case let .success(playback): return playback
+                case let .failure(error):
+                    failure = error
+                    if ContinuousClock.now - began < againAfter { throw error }
+                }
+            }
+            throw failure
+        }
     }
 
     /// Home's Continue Watching: every card's plan, in the row's order and
@@ -77,9 +107,18 @@ struct StartProgress: Equatable, Sendable {
 
     func waited(at now: ContinuousClock.Instant = .now) -> Duration { now - tapped }
 
-    func cause(at now: ContinuousClock.Instant = .now) -> Cause? { nil }
+    func cause(at now: ContinuousClock.Instant = .now) -> Cause? {
+        guard !failed(at: now), waited(at: now) >= StartPatience.causeAfter else { return nil }
+        return switch stage {
+        case .askingServer: .serverSlowToAnswer
+        case .openingFilm: .filmSlowToArrive
+        case .starting: .slowToStart
+        }
+    }
 
-    func failed(at now: ContinuousClock.Instant = .now) -> Bool { false }
+    func failed(at now: ContinuousClock.Instant = .now) -> Bool {
+        failure != nil || (!StartPatience.off && waited(at: now) >= StartPatience.failAfter)
+    }
 }
 
 /// How long each part of a start may take before the viewer is told: a

@@ -491,11 +491,19 @@ final class AppModel {
             return playback
         }
         let key = planKey(itemId, kind: kind)
+        startProgress = StartProgress(stage: .askingServer, tapped: .now)
         #if DEBUG
         lastPlanKept = plans.isKept(key)
         let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
         #endif
-        var playback = withLocalResume(try await Plans.forStart(key, on: plans))
+        var playback: EmbyPlayback
+        do {
+            playback = withLocalResume(try await Plans.forStart(key, on: plans) { [weak self] in self?.noteStartAskedAgain() })
+        } catch {
+            endStart(failure: SourceError.wrap(error).localizedDescription)
+            throw error
+        }
+        noteStart(.openingFilm)
         #if DEBUG
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         lastPlan = debugPlanClocks[key].map { clock in
@@ -1238,6 +1246,24 @@ final class AppModel {
         warmExpiry?.cancel()
         warm?.player.shutdown()
         warm = nil
+    }
+
+    /// The start under way, for the loading progress; nil once it plays or
+    /// the viewer leaves it, its failure kept till the next.
+    private(set) var startProgress: StartProgress?
+
+    func noteStart(_ stage: StartProgress.Stage) {
+        guard let start = startProgress, start.stage != stage, start.failure == nil else { return }
+        startProgress?.stage = stage
+    }
+
+    func noteStartAskedAgain() {
+        guard startProgress?.retried == false else { return }
+        startProgress?.retried = true
+    }
+
+    func endStart(failure: String? = nil) {
+        if let failure { startProgress?.failure = failure } else { startProgress = nil }
     }
 
     #if DEBUG

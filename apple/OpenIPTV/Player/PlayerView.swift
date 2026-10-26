@@ -1195,14 +1195,25 @@ struct MoviePlayerView: View {
         probeTask = Task { await probeWhileConverted() }
     }
 
-    /// No first frame a while after the open, each way of opening it tried
-    /// meanwhile: the viewer is told, rather than left with the spinner.
+    /// Till the first frame: the start's stage for the loading progress;
+    /// at its bound (StartPatience) the player stops and says so, rather
+    /// than leave the spinner up.
     private func watchTheOpen() async {
-        guard !StartPatience.off, (try? await Task.sleep(for: StartPatience.failAfter)) != nil, !started, error == nil else { return }
-        player?.shutdown()
-        player = nil
-        error = "Couldn't play: \(StartPatience.tooLong.localizedDescription)"
-        showControls(autoHide: false)
+        let failAt = playback.requestedAt.addingTimeInterval(StartPatience.failAfter / .seconds(1))
+        let askedAgain = StreamRelay.shared.askedAgain.value
+        while !started, error == nil {
+            model.noteStart(player?.openedAfter == nil ? .openingFilm : .starting)
+            if StreamRelay.shared.askedAgain.value > askedAgain { model.noteStartAskedAgain() }
+            if !StartPatience.off, Date() >= failAt {
+                player?.shutdown()
+                player = nil
+                error = "Couldn't play: \(StartPatience.tooLong.localizedDescription)"
+                showControls(autoHide: false)
+                break
+            }
+            guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { break }
+        }
+        model.endStart(failure: error)
     }
 
     #if os(iOS)
