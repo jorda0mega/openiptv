@@ -193,14 +193,16 @@ final class StreamRelay: @unchecked Sendable {
     }
 
     /// The same bytes on their way, asked for ahead of the tap, are waited
-    /// for (up to 3 s), not asked for again: on a server 1-3 s a read, the
-    /// read under way at the tap is the start's first.
+    /// for (up to 3 s, once: that fetch has no wait for a first byte of its
+    /// own), not asked for again: on a server 1-3 s a read, the read under
+    /// way at the tap is the start's first.
     private func serve(_ route: (url: URL, headers: [(String, String)]), method: String, range: String?, connection: NWConnection,
                        cache: ByteCache?, waitedSince: Double? = nil) {
         let since = waitedSince ?? CFAbsoluteTimeGetCurrent()
-        if let cache, let (from, count) = Self.asked(range), cache.whenHere(from, needing: count, within: .seconds(3), then: { [weak self] in
-            self?.queue.async { self?.serve(route, method: method, range: range, connection: connection, cache: cache, waitedSince: since) }
-        }) { return }
+        if waitedSince == nil, let cache, let (from, count) = Self.asked(range),
+           cache.whenHere(from, needing: count, within: .seconds(3), then: { [weak self] in
+               self?.queue.async { self?.serve(route, method: method, range: range, connection: connection, cache: cache, waitedSince: since) }
+           }) { return }
         #if DEBUG
         if let waitedSince { noteWaited(connection, device: Self.kept(range, in: cache), for: CFAbsoluteTimeGetCurrent() - waitedSince) }
         #endif
