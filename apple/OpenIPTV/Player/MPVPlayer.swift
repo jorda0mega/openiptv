@@ -25,6 +25,8 @@ final class MPVMetalLayer: CAMetalLayer {
 final class MPVPlayer: @unchecked Sendable {
     enum Event {
         case opening
+        /// The stream is open (its first data read): its picture is next.
+        case opened
         /// First frame is on screen; seconds since `load`.
         case started(Double)
         case buffering(Bool)
@@ -1446,6 +1448,7 @@ final class MPVPlayer: @unchecked Sendable {
             }
         case MPV_EVENT_FILE_LOADED:
             openedAfter = CFAbsoluteTimeGetCurrent() - loadStarted
+            emit(.opened)
             #if DEBUG
             stateLock.withLock { perf.opened = Int(((openedAfter ?? 0) * 1000).rounded()) }
             #endif
