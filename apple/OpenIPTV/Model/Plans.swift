@@ -104,6 +104,9 @@ struct StartProgress: Equatable, Sendable {
     let tapped: ContinuousClock.Instant
     var retried = false
     var failure: String?
+    /// Nil for a start asked inside the player (the next episode, another copy).
+    var title: String?
+    var began = Date()
 
     func waited(at now: ContinuousClock.Instant = .now) -> Duration { now - tapped }
 

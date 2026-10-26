@@ -190,10 +190,11 @@ struct HomeView: View {
             defer { loadingCard = nil }
             do {
                 if let episode = card.episodeId {
-                    playing = .vod(try await model.playback(itemId: episode, kind: "Episode"))
+                    playing = .vod(try await model.playback(itemId: episode, kind: "Episode", title: card.title))
                 } else {
-                    playing = .vod(try await model.playback(itemId: card.id, kind: card.kind))
+                    playing = .vod(try await model.playback(itemId: card.id, kind: card.kind, title: card.title))
                 }
+            } catch is CancellationError {
             } catch {
                 playError = error.localizedDescription
             }

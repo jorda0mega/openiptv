@@ -307,7 +307,8 @@ struct ShowView: View {
         Task {
             defer { loadingItem = nil }
             do {
-                playing = .vod(try await model.playback(itemId: id, kind: kind))
+                playing = .vod(try await model.playback(itemId: id, kind: kind, title: route.title))
+            } catch is CancellationError {
             } catch {
                 playError = error.localizedDescription
             }

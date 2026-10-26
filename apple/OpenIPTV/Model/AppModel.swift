@@ -481,8 +481,10 @@ final class AppModel {
     private static let maxWidth: Int? = 1920
     #endif
 
-    func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
-        let started = Date()
+    /// `title`: a tap outside the player, whose wait and failure show over
+    /// the page (RootView); a failure there waits for Try again or Close.
+    func playback(itemId: String, kind: String? = nil, title: String? = nil) async throws -> EmbyPlayback {
+        var started = Date()
         // Just closed here, and kept: no need to ask the server anything.
         if let warm, warm.parked, warm.key == itemId {
             var playback = warm.playback
@@ -491,17 +493,28 @@ final class AppModel {
             return playback
         }
         let key = planKey(itemId, kind: kind)
-        startProgress = StartProgress(stage: .askingServer, tapped: .now)
         #if DEBUG
         lastPlanKept = plans.isKept(key)
         let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
         #endif
         var playback: EmbyPlayback
-        do {
-            playback = withLocalResume(try await Plans.forStart(key, on: plans) { [weak self] in self?.noteStartAskedAgain() })
-        } catch {
-            endStart(failure: SourceError.wrap(error).localizedDescription)
-            throw error
+        while true {
+            startClosed = false
+            startProgress = StartProgress(stage: .askingServer, tapped: .now, title: title)
+            do {
+                playback = withLocalResume(try await Plans.forStart(key, on: plans) { [weak self] in self?.noteStartAskedAgain() })
+            } catch {
+                endStart(failure: SourceError.wrap(error).localizedDescription)
+                guard title != nil else { throw error }
+                guard !startClosed, await withCheckedContinuation({ startDecision = $0 }) else {
+                    startProgress = nil
+                    throw CancellationError()
+                }
+                started = Date()
+                continue
+            }
+            guard !startClosed else { throw CancellationError() }
+            break
         }
         noteStart(.openingFilm)
         #if DEBUG
@@ -1264,6 +1277,24 @@ final class AppModel {
 
     func endStart(failure: String? = nil) {
         if let failure { startProgress?.failure = failure } else { startProgress = nil }
+    }
+
+    @ObservationIgnored private var startDecision: CheckedContinuation<Bool, Never>?
+    @ObservationIgnored private var startClosed = false
+
+    func retryStart() { decideStart(true) }
+
+    /// No player for this tap: closed while asking, or after it failed.
+    func closeStart() {
+        guard startDecision == nil else { return decideStart(false) }
+        startClosed = true
+        startProgress = nil
+    }
+
+    private func decideStart(_ again: Bool) {
+        let decision = startDecision
+        startDecision = nil
+        decision?.resume(returning: again)
     }
 
     #if DEBUG

@@ -150,7 +150,8 @@ struct MovieView: View {
         Task {
             defer { loading = false }
             do {
-                playing = .vod(try await model.playback(itemId: route.id, kind: "Movie"))
+                playing = .vod(try await model.playback(itemId: route.id, kind: "Movie", title: route.title))
+            } catch is CancellationError {
             } catch {
                 playError = error.localizedDescription
             }
