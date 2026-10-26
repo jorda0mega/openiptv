@@ -24,6 +24,18 @@ enum Plans {
         Shelf(.init(lane: lane ?? .emby, lifetime: .seconds(180), failureKept: .zero), now: now, fetch: fetch)
     }
 
+    static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>,
+                         within limit: Duration = StartPatience.plan) async throws -> EmbyPlayback {
+        var playback: EmbyPlayback
+        do {
+            playback = try await shelf.take(key)
+        } catch {
+            playback = try await shelf.take(key)
+        }
+        if !playback.listed { playback = (try? await shelf.take(key)) ?? playback }
+        return playback
+    }
+
     /// Home's Continue Watching: every card's plan, in the row's order and
     /// one at a time (the server can be slow right after a launch, and the
     /// row's other requests go on meanwhile), each at the least likelihood,
@@ -33,6 +45,16 @@ enum Plans {
             _ = await shelf.warm(key, for: Interest(at: .continueWatching, .glance))
         }
     }
+}
+
+/// How long each part of a start may take before the viewer is told.
+enum StartPatience {
+    /// Plans took up to about 40 s on a busy server.
+    static let plan = Duration.seconds(45)
+    /// A read's first byte took up to 9 s on a busy server.
+    static let firstByte = Duration.seconds(15)
+    /// From the player's open to its first frame.
+    static let open = Duration.seconds(60)
 }
 
 #if DEBUG

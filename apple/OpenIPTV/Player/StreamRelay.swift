@@ -62,6 +62,7 @@ final class StreamRelay: @unchecked Sendable {
     }
 
     private static let aheadRedirects = AheadRedirects()
+    var firstByteWait = StartPatience.firstByte
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
     func start() {

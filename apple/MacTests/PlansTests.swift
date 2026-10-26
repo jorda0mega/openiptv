@@ -15,10 +15,15 @@ final class PlansTests: XCTestCase {
         private(set) var mostAtOnce = 0
         private let failing: Set<Int>
         private let wait: Double
+        private let waits: [Int: Double]
+        private let unlisted: Set<Int>
 
-        init(failing: Set<Int> = [], wait: Double = 0) {
+        /// `waits` and `unlisted` by the ask's number: its own wait, and a plan without the server's track list.
+        init(failing: Set<Int> = [], wait: Double = 0, waits: [Int: Double] = [:], unlisted: Set<Int> = []) {
             self.failing = failing
             self.wait = wait
+            self.waits = waits
+            self.unlisted = unlisted
         }
 
         var asked: Int { lock.withLock { count } }
@@ -31,12 +36,13 @@ final class PlansTests: XCTestCase {
                 order.append(key.itemId)
                 return count
             }
-            try? await Task.sleep(for: .seconds(wait))
+            try? await Task.sleep(for: .seconds(waits[number] ?? wait))
             lock.withLock { underWay -= 1 }
             if failing.contains(number) { throw SourceError.http(503) }
             var playback = EmbyPlayback(itemId: key.itemId, title: key.itemId, subtitle: nil, url: URL(string: "http://server/\(key.itemId)")!,
                                         durationSeconds: 7200)
             playback.playSessionId = "session \(number)"
+            playback.listed = !unlisted.contains(number)
             return playback
         }
     }
@@ -124,6 +130,32 @@ final class PlansTests: XCTestCase {
         }
         for ask in asks { _ = await ask.value }
         XCTAssertEqual(server.order, ["m0", "m1", "m2"], "the card held on screen waited behind one only Home asked for")
+    }
+
+    func testAStartsPlanThatDoesNotComeInTimeEndsInTheServerTookTooLong() async throws {
+        let server = Server(wait: 3)
+        let began = ContinuousClock.now
+        do {
+            _ = try await Plans.forStart(film, on: plans(server), within: .seconds(0.5))
+            XCTFail("a plan 3 s away was waited for")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "The server took too long to answer.")
+        }
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1.5))
+    }
+
+    func testAStartsPlanThatFailsIsAskedOnceMore() async throws {
+        let played = try await Plans.forStart(film, on: plans(Server(failing: [1])))
+        XCTAssertEqual(played.playSessionId, "session 2")
+    }
+
+    func testAPlanWithoutTheTrackListIsAskedAgainOnlyWhileThereIsTime() async throws {
+        let quick = try await Plans.forStart(film, on: plans(Server(unlisted: [1])))
+        XCTAssertEqual(quick.playSessionId, "session 2", "the track list asked again")
+        let began = ContinuousClock.now
+        let late = try await Plans.forStart(film, on: plans(Server(waits: [2: 3], unlisted: [1])), within: .seconds(0.5))
+        XCTAssertEqual(late.playSessionId, "session 1", "the plan in hand plays when asking again takes too long")
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1.5))
     }
 
     func testAStopForgetsThatTitlesPlanOnly() async throws {

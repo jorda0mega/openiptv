@@ -2,19 +2,21 @@ import Network
 import XCTest
 @testable import OpenIPTV
 
-/// A server for one film of zeros: each answer after `delay`, and each
-/// range asked for noted.
+/// A server for one film of zeros: each answer after `delay`, none to the
+/// first `silent` asks, and each range asked for noted.
 private final class FilmServer: @unchecked Sendable {
     private let size: Int64
     private let delay: Double
+    private var silent: Int
     private let listener: NWListener
     private let queue = DispatchQueue(label: "film-server")
     private let lock = NSLock()
     private var asked: [String] = []
 
-    init(size: Int64, delay: Double) throws {
+    init(size: Int64, delay: Double, silent: Int = 0) throws {
         self.size = size
         self.delay = delay
+        self.silent = silent
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -36,7 +38,12 @@ private final class FilmServer: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [self] data, _, _, _ in
             let lines = String(decoding: data ?? Data(), as: UTF8.self).components(separatedBy: "\r\n")
             let range = lines.first { $0.lowercased().hasPrefix("range:") }.map { $0.dropFirst(6).trimmingCharacters(in: .whitespaces) } ?? ""
-            lock.withLock { asked.append(range) }
+            let answers = lock.withLock {
+                asked.append(range)
+                silent -= 1
+                return silent < 0
+            }
+            guard answers else { return }
             let parts = range.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
             let from = Int64(parts.first ?? "") ?? 0
             let to = min(parts.count == 2 ? Int64(parts[1]) ?? size - 1 : size - 1, size - 1)
@@ -47,6 +54,36 @@ private final class FilmServer: @unchecked Sendable {
                                 completion: .contentProcessed { _ in connection.cancel() })
             }
         }
+    }
+}
+
+final class FirstByteTests: XCTestCase {
+    private func read(through relay: StreamRelay, _ server: FilmServer) async throws -> (Data, URLResponse) {
+        let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+        read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
+        read.timeoutInterval = 5
+        return try await URLSession(configuration: .ephemeral).data(for: read)
+    }
+
+    func testAReadTheServerNeverAnswersIsAskedOnceMore() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0, silent: 1)
+        let relay = StreamRelay()
+        relay.firstByteWait = .milliseconds(500)
+        let (bytes, response) = try await read(through: relay, server)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 206)
+        XCTAssertEqual(bytes.count, 524_288)
+        XCTAssertEqual(server.ranges, ["bytes=0-524287", "bytes=0-524287"])
+    }
+
+    func testAReadNeverAnsweredTwiceEndsSoTheStartCanGoOn() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0, silent: 2)
+        let relay = StreamRelay()
+        relay.firstByteWait = .milliseconds(500)
+        let began = ContinuousClock.now
+        let answer = try? await read(through: relay, server)
+        XCTAssertNotEqual((answer?.1 as? HTTPURLResponse)?.statusCode, 206)
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(2), "the player waited past two waits for a first byte")
     }
 }
 

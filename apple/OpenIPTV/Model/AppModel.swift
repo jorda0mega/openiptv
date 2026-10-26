@@ -495,14 +495,7 @@ final class AppModel {
         lastPlanKept = plans.isKept(key)
         let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
         #endif
-        var playback: EmbyPlayback
-        do {
-            playback = try await plans.take(key)
-        } catch {
-            playback = try await plans.take(key)
-        }
-        if !playback.listed { playback = (try? await plans.take(key)) ?? playback }
-        playback = withLocalResume(playback)
+        var playback = withLocalResume(try await Plans.forStart(key, on: plans))
         #if DEBUG
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         lastPlan = debugPlanClocks[key].map { clock in
