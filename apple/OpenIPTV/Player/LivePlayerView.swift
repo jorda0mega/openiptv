@@ -54,7 +54,7 @@ struct LivePlayerView: View {
     @State private var cueTask: Task<Void, Never>?
     /// Gives up on a copy that sends no picture (see startLimit), or whose
     /// picture stands still while it plays (LiveSession.stallLimit).
-    @State private var noPictureDeadline: Task<Void, Never>?
+    @State private var giveUpTask: Task<Void, Never>?
     /// A game: every channel showing it, the one to play first at the top
     /// ("Watch On"); empty for anything else.
     @State private var choices: [AppModel.WatchChoice] = []
@@ -98,7 +98,8 @@ struct LivePlayerView: View {
         }
         if session.isLoading {
             return LoadProgress(subject: subject, wait: started ? .reconnect : .start, stage: startTrack.stage,
-                                received: startTrack.received, cause: loadCause, began: startTrack.began)
+                                received: startTrack.received, cause: loadCause, began: startTrack.began,
+                                pictureLost: startTrack.pictureLost)
         }
         guard started, let since = startTrack.stalledSince else { return nil }
         return LoadProgress(subject: subject, wait: .stall, stage: startTrack.stage, cause: loadCause, began: since)
@@ -606,8 +607,8 @@ struct LivePlayerView: View {
         case .stop:
             if session.failure != nil { startTrack.failed(at: Date()) }
             stopStream()
-        case let .deadline(attempt, limit): giveUpWithoutPicture(attempt, after: limit)
-        case .cancelDeadline: noPictureDeadline?.cancel()
+        case let .deadline(attempt, limit): giveUp(attempt, after: limit)
+        case .cancelDeadline: giveUpTask?.cancel()
         case .waitForNetwork:
             startTrack.lost(at: Date())
             waitForNetwork()
@@ -689,9 +690,9 @@ struct LivePlayerView: View {
         }
     }
 
-    private func giveUpWithoutPicture(_ attempt: Int, after limit: Double) {
-        noPictureDeadline?.cancel()
-        noPictureDeadline = Task {
+    private func giveUp(_ attempt: Int, after limit: Double) {
+        giveUpTask?.cancel()
+        giveUpTask = Task {
             try? await Task.sleep(for: .seconds(limit))
             guard !Task.isCancelled, session.attempt == attempt else { return }
             #if DEBUG

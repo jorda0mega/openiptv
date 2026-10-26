@@ -99,7 +99,7 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
     private(set) var paused = false
     private var opened: Attempt?
     private var deadline: Deadline?
-    private(set) var frozen = false
+    private var frozen = false
     private var inBackground = InBackground.no
     private var releasedAt = Date.distantPast
     private var startLimit: Double = 15
@@ -263,7 +263,6 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         switch phase {
         case let .opening(copy), let .reopening(copy):
             phase = .playing(copy)
-            frozen = false
             cuts.played(copy.id, at: now)
             guard cueing, let picked else { return [.picture, .played(copy)] }
             cueing = false
@@ -327,7 +326,8 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         return [.load(copy, attempt, after: wait)]
     }
 
-    private mutating func nextCopy(after copy: Copy, marking: Bool, _ failure: StreamFailure, _ shown: Failure, _ now: Date) -> [Action] {
+    private mutating func nextCopy(after copy: Copy, marking: Bool, _ failure: StreamFailure, _ shown: Failure, _ now: Date,
+                                   after wait: Double = 0) -> [Action] {
         let marks: [Action] = marking ? [.markFailed(copy)] : []
         guard let picked, let next = WatchOn.next(after: picked.id, feeds: feeds, tried: tried) else {
             return marks + (failure == .no_data ? [.markNotPlaying] : []) + stop(shown, now)
@@ -335,27 +335,23 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
         tried.insert(next.id)
         let cue: [Action] = cueing ? [] : [.switching(from: picked)]
         cueing = true
-        return marks + cue + open(next, after: 0)
+        return marks + cue + open(next, after: wait)
     }
 
     /// The connection that stopped sending still counts as the account's
     /// one stream until it closes, and a moment after.
     private mutating func stalled(_ copy: Copy, _ failure: StreamFailure, _ now: Date) -> [Action] {
         guard failure.kind != .offline else { return waitForNetwork(copy, hadPicture: true, now) }
-        switch cuts.cut(copy.id, at: now) {
-        case let .reopen(after: wait):
-            return [.stop] + reopen(copy, after: max(wait, Self.refusalWindow))
-        case .giveUp:
-            return [.stop] + nextCopy(after: copy, marking: false, .unknown, .notPlaying, now)
-        }
+        let next = cut(copy, now, atLeast: Self.refusalWindow)
+        return next.contains(.stop) ? next : [.stop] + next
     }
 
-    private mutating func cut(_ copy: Copy, _ now: Date) -> [Action] {
+    private mutating func cut(_ copy: Copy, _ now: Date, atLeast floor: Double = 0) -> [Action] {
         switch cuts.cut(copy.id, at: now) {
         case let .reopen(after: wait):
-            return reopen(copy, after: wait)
+            return reopen(copy, after: max(wait, floor))
         case .giveUp:
-            return nextCopy(after: copy, marking: false, .unknown, .notPlaying, now)
+            return nextCopy(after: copy, marking: false, .unknown, .notPlaying, now, after: floor)
         }
     }
 
