@@ -6,6 +6,7 @@
 # read, three audio tracks, a sparse Spanish track inside). PLATFORMS ("ios tvos"), NETWORK, METERED_LINKS,
 # PHONE_FILMS, TEST, SEED and LOW_DISK as the runner and the test server take them: by default the iPhone
 # runs unmetered and then metered over the phone link once per setting, and the Apple TV unmetered.
+# SET: more test server settings ("copies=m7&hang=plan,item").
 # Prints and saves the runner's lines.
 set -u
 profile=$1 out=$2
@@ -20,7 +21,7 @@ env "OPENIPTV_MOCK_VIDEO=$media/$film.mkv" "OPENIPTV_MOCK_RUNTIME=900" "OPENIPTV
   "OPENIPTV_MOCK_SEED=${SEED:-1}" python3 -u $here/mock_server.py $port > /dev/null 2>&1 &
 trap 'kill $(lsof -t -iTCP:$port -sTCP:LISTEN) 2>/dev/null' EXIT INT TERM HUP
 for _ in {1..20}; do curl -sf -o /dev/null "http://127.0.0.1:$port/mock/mark" && break; sleep 1; done
-curl -sf -o /dev/null "http://127.0.0.1:$port/mock/set?home_delay=6&wide_pictures=1&watched_elsewhere=m7&emby_convert=1"
+curl -sf -o /dev/null "http://127.0.0.1:$port/mock/set?home_delay=6&wide_pictures=1&watched_elsewhere=m7&emby_convert=1${SET:+&$SET}"
 curl -sf -o /dev/null -X POST -H "X-Emby-Token: tok" -H "Content-Type: application/json" \
   -d '{"ItemId": "m7", "PositionTicks": 2160000000}' "http://127.0.0.1:$port/emby/Sessions/Playing/Stopped"
 FEED=http://localhost:$port/mock/feed MOCK=http://127.0.0.1:$port PROFILE=$profile LINKS=none OWNER=${OWNER:-fsr-mock} \
