@@ -222,6 +222,21 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertFalse(track.dropped, "back with a picture and still called a drop")
     }
 
+    func testThePictureLostWithNoStreamAskedForCountsFromThen() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.lost(at: at(5))
+        XCTAssertFalse(track.dropped, "a start that never had a picture called a drop")
+        XCTAssertEqual(track.began, tap)
+        track.pictured()
+        track.lost(at: at(60))
+        XCTAssertTrue(track.dropped)
+        XCTAssertEqual(track.began, at(60), "offline during play counted from the tap")
+        track.asked(at: at(65))
+        XCTAssertEqual(track.began, at(60), "the stream asked for once back online restarted the clock")
+        XCTAssertEqual(track.tries, 1)
+    }
+
     func testAFailureCountsItsTriesAndSeconds() {
         var track = LoadTrack(began: tap)
         for second in [0.0, 15, 16, 22] { track.asked(at: at(second)) }
