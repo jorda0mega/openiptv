@@ -106,6 +106,7 @@ struct StartProgress: Equatable, Sendable {
     var failure: String?
     /// Nil for a start asked inside the player (the next episode, another copy).
     var title: String?
+    var backdrop: [CardImage] = []
     var began = Date()
 
     func waited(at now: ContinuousClock.Instant = .now) -> Duration { now - tapped }

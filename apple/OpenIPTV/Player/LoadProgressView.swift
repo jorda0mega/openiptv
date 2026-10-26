@@ -13,10 +13,10 @@ struct LoadProgressView<Otherwise: View>: View {
     @ViewBuilder var otherwise: Otherwise
 
     var body: some View {
-        TimelineView(.periodic(from: load.began, by: 1)) { context in
+        TimelineView(.periodic(from: load.began, by: 0.5)) { context in
             if let shown = load.shown(at: context.date) {
                 let content = LoadProgressShown(shown: shown, actions: actions, focused: focused)
-                if overPicture {
+                if overPicture, load.wait != .start || load.failure != nil {
                     content
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background { Color.black.opacity(0.5).ignoresSafeArea().allowsHitTesting(false) }
@@ -36,15 +36,32 @@ extension LoadProgressView where Otherwise == EmptyView {
     }
 }
 
+/// Under a film's start: its backdrop, dimmed for the ring.
+struct StartBackdrop: View {
+    let images: [CardImage]
+    let title: String
+
+    var body: some View {
+        ZStack {
+            Color.black
+            CoverImage(images: images, title: title, backdrop: true)
+            Color.black.opacity(0.35)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct LoadProgressShown: View {
     let shown: LoadProgress.Shown
     let actions: LoadActions
     let focused: LoadProgress.Button?
 
     #if os(tvOS)
-    private let ringSize: CGFloat = 80, lineFont: CGFloat = 38, detailFont: CGFloat = 29, gap: CGFloat = 22, width: CGFloat = 1100
+    private let ringSize: CGFloat = 60, lineFont: CGFloat = 38, detailFont: CGFloat = 29, gap: CGFloat = 22, width: CGFloat = 1100
     #else
-    private let ringSize: CGFloat = 44, lineFont: CGFloat = 17, detailFont: CGFloat = 15, gap: CGFloat = 12, width: CGFloat = 330
+    private let ringSize: CGFloat = 34, lineFont: CGFloat = 17, detailFont: CGFloat = 15, gap: CGFloat = 12, width: CGFloat = 330
     #endif
 
     var body: some View {
@@ -75,7 +92,6 @@ private struct LoadProgressShown: View {
                     .monospacedDigit()
                     .foregroundStyle(.white.opacity(0.78))
             }
-            if let dashes = shown.dashes { LoadDashes(reached: dashes) }
             if !shown.buttons.isEmpty {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: gap * 0.8) { buttons }
@@ -121,7 +137,6 @@ private struct LoadRing: View {
                 .trim(from: 0, to: fill)
                 .stroke(.white, style: StrokeStyle(lineWidth: width, lineCap: .round))
                 .rotationEffect(.degrees(turning ? 270 : -90))
-                .animation(.easeInOut(duration: 0.4), value: fill)
         }
         .frame(width: size, height: size)
         .shadow(color: .black.opacity(0.45), radius: 6)
@@ -131,28 +146,6 @@ private struct LoadRing: View {
         }
         .accessibilityElement()
         .accessibilityLabel("Loading")
-    }
-}
-
-private struct LoadDashes: View {
-    let reached: Int
-
-    #if os(tvOS)
-    private let size = CGSize(width: 40, height: 6)
-    #else
-    private let size = CGSize(width: 20, height: 3.5)
-    #endif
-
-    var body: some View {
-        HStack(spacing: size.height * 1.5) {
-            ForEach(LoadProgress.Stage.allCases, id: \.self) { stage in
-                Capsule()
-                    .fill(.white.opacity(stage.rawValue < reached ? 1 : 0.25))
-                    .frame(width: size.width, height: size.height)
-            }
-        }
-        .accessibilityElement()
-        .accessibilityLabel("Step \(reached) of \(LoadProgress.Stage.allCases.count)")
     }
 }
 

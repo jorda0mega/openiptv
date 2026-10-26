@@ -402,6 +402,9 @@ struct MoviePlayerView: View {
                     .accessibilityAction { showControls() }
                     .accessibilityAction(.escape) { close() }
             }
+            if !startedOnce {
+                StartBackdrop(images: model.startBackdrop(playback.itemId, episode: playback.seriesId != nil), title: playback.title)
+            }
             // Choosing where to jump: the still for that moment, full-screen,
             // until the player has the frame itself.
             StillWhileChoosing(clock: playClock, thumbnails: thumbnails, previewShown: previewShown, offset: offset)
@@ -991,8 +994,10 @@ struct MoviePlayerView: View {
             return LoadProgress(subject: subject, cause: cause, began: track.began, failure: track.failure(.refused(error)))
         }
         if !started { return LoadProgress(subject: subject, stage: track.stage, cause: cause, began: track.began) }
-        guard buffering, let since = track.stalledSince else { return nil }
-        return LoadProgress(subject: subject, wait: .stall, stage: track.stage, cause: cause, began: since)
+        if buffering, let since = track.stalledSince {
+            return LoadProgress(subject: subject, wait: .stall, stage: track.stage, cause: cause, began: since)
+        }
+        return track.startEndedAt.map { LoadProgress(subject: subject, cause: cause, began: track.began, endedAt: $0) }
     }
 
     private var loadActions: LoadActions { LoadActions(tryAgain: { retry() }) }
@@ -1397,7 +1402,7 @@ struct MoviePlayerView: View {
             ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false
-            track.pictured()
+            track.pictured(at: Date())
             governor?.notePlaying()
             guard !startedOnce else { return }
             startedOnce = true
