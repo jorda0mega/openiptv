@@ -1527,7 +1527,7 @@ struct MoviePlayerView: View {
             if let newDuration, offset == 0, duration != newDuration {
                 duration = newDuration
                 #if os(iOS)
-                offerPictureInPicture()
+                if let player { PictureInPicture.shared.update(player, total: total) }
                 #endif
             }
             if let until = jumpUntil {

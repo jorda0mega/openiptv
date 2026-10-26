@@ -44,9 +44,10 @@ struct SwitchGap {
         return "\(ms(stretchesPlaying.map { Self.longestStall(Self.clock($0, value)) }.max() ?? 0))"
     }
 
-    private var dropped: Int {
+    private var dropped: String {
         let counts = samples.compactMap(\.drops)
-        return (counts.last ?? 0) - (counts.first ?? 0)
+        guard counts.count >= 2, let first = counts.first, let last = counts.last, last >= first else { return "unread" }
+        return "\(last - first)"
     }
 
     private var stretchesPlaying: [[Sample]] {

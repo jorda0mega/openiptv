@@ -341,13 +341,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// Back in the app: the picture on again, through a fresh video output
     /// (even one that failed while away is replaced).
     private func cameBack() {
+        #if os(iOS)
+        if let frames {
+            if frames.isUndrawn { stateLock.withLock { awayReturns += 1 } }
+            return frames.setInBackground(false)
+        }
+        #endif
         queue.async { [self] in
-            #if os(iOS)
-            if let frames {
-                if frames.isUndrawn { stateLock.withLock { awayReturns += 1 } }
-                return frames.setInBackground(false)
-            }
-            #endif
             guard let mpv, let track = awayTrack else { return }
             awayTrack = nil
             mpv_set_property_string(mpv, "vid", track)
@@ -1920,7 +1920,7 @@ final class MPVHostView: UIView {
     private var settle: DispatchWorkItem?
 
     /// `hosted`: the picture is on a screen in this view.
-    init(player: MPVPlayer, hosted: @escaping () -> Void = {}) {
+    init(player: MPVPlayer, hosted: @escaping () -> Void) {
         picture = player.pictureLayer
         self.player = player
         self.hosted = hosted

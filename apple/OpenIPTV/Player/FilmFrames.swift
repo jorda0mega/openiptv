@@ -14,7 +14,8 @@ final class FilmFrames: @unchecked Sendable {
     private var context: OpaquePointer?
     private let queue = DispatchQueue(label: "openiptv.film-frames", qos: .userInteractive)
     private let lock = NSLock()
-    private var inputs = Inputs()
+    private var inputs = FrameInputs()
+    private var redraw = false
     private var waiting = false
     private var closed = false
     private var pool: CVPixelBufferPool?
@@ -24,20 +25,6 @@ final class FilmFrames: @unchecked Sendable {
     var onFrame: (@Sendable (Double) -> Void)?
     #endif
 
-    private struct Inputs {
-        var video = PixelSize(width: 1920, height: 1080)
-        var color = FrameColor.bt709
-        var screen: PixelSize?
-        var window: PixelSize?
-        var fill = false
-        var inBackground = false
-        var redraw = false
-
-        /// Behind the app with no window to show them: frames go by undrawn, and the sound plays on.
-        var undrawn: Bool { inBackground && window == nil }
-
-        var plan: FramePlan { FramePlan.make(video: video, screen: screen, window: window, fill: fill) }
-    }
 
     init() {
         var clock: CMTimebase?
@@ -99,10 +86,10 @@ final class FilmFrames: @unchecked Sendable {
         mpv_render_context_free(context)
     }
 
-    private func change(_ edit: (inout Inputs) -> Void) -> FramePlan {
+    private func change(_ edit: (inout FrameInputs) -> Void) -> FramePlan {
         let plan = lock.withLock {
             edit(&inputs)
-            inputs.redraw = true
+            redraw = true
             return inputs.plan
         }
         due()
@@ -120,11 +107,10 @@ final class FilmFrames: @unchecked Sendable {
     }
 
     private func draw() {
-        let state = lock.withLock { () -> (inputs: Inputs, redraw: Bool, context: OpaquePointer)? in
+        let state = lock.withLock { () -> (inputs: FrameInputs, redraw: Bool, context: OpaquePointer)? in
             waiting = false
             guard !closed, let current = self.context else { return nil }
-            let redraw = inputs.redraw
-            inputs.redraw = false
+            defer { redraw = false }
             return (inputs, redraw, current)
         }
         guard let state else { return }

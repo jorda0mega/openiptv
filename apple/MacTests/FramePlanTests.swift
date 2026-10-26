@@ -50,6 +50,18 @@ final class FramePlanTests: XCTestCase {
         XCTAssertEqual(plan.size.height % 2, 0)
     }
 
+    func testFramesGoUndrawnOnlyBehindTheAppWithNoWindow() {
+        var inputs = FrameInputs()
+        XCTAssertFalse(inputs.undrawn)
+        inputs.inBackground = true
+        XCTAssertTrue(inputs.undrawn, "behind the app with no window")
+        inputs.window = PixelSize(width: 640, height: 360)
+        XCTAssertFalse(inputs.undrawn, "a window that opens late draws at once")
+        inputs.window = nil
+        inputs.inBackground = false
+        XCTAssertFalse(inputs.undrawn, "back in the app")
+    }
+
     func testHDRKeepsItsTransferForTheTags() {
         XCTAssertEqual(FrameColor(gamma: "pq"), .pq)
         XCTAssertEqual(FrameColor(gamma: "hlg"), .hlg)
