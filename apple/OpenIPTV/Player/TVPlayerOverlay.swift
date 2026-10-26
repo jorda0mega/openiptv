@@ -276,7 +276,8 @@ struct TVMovieOverlay: View {
     let caption: String?
     let title: String
     var note: (text: String, color: Color)?
-    var busy = false
+    var load: LoadProgress?
+    var loadActions = LoadActions(tryAgain: {})
     let bar: TVClockedBar
     /// The bar alone (playing, or just after a jump).
     let compact: Bool
@@ -291,7 +292,7 @@ struct TVMovieOverlay: View {
     var body: some View {
         ZStack {
             TVPlayerShade(full: !compact || panel != nil || note != nil)
-            if busy { ProgressView().controlSize(.large) }
+            if let load { LoadProgressView(load: load, actions: loadActions) }
             if panel == .episodes {
                 // The row has no glass box: a fade from the middle down keeps
                 // its words clear of a bright picture.

@@ -120,7 +120,7 @@ final class LiveSportsTests: XCTestCase {
         let deadline = Date().addingTimeInterval(40)
         while state.label != "failed", Date() < deadline { usleep(250_000) }
         XCTAssertEqual(state.label, "failed", "still trying after every channel: \(liveCopy())")
-        let note = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'playing right now'")).firstMatch
+        let note = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'sending a picture'")).firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 3), "no word that the game isn't playing")
 
         // Back in Sports, the game no longer says LIVE: it says it isn't

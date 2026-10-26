@@ -42,6 +42,7 @@
 		155CEA99E45526C19A9E2E15 /* IPTVLoginLeakTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF9B0D6D8D57792C2CC377E /* IPTVLoginLeakTests.swift */; };
 		16CD43F670583A93B6D7F02E /* LoadEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA38D24AAC5091B4859CE0C6 /* LoadEvents.swift */; };
 		17243955F351E795FB4C4893 /* SubtitleStopwatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194E5155111600ED590FA9F4 /* SubtitleStopwatch.swift */; };
+		180CB8DEE8C8EF2370031D87 /* LoadProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAA9B090680866E89E3A67C5 /* LoadProgress.swift */; };
 		199695CF489DC54ED1DF885A /* lcms2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074484FE2CEF6B50EF9F9286 /* lcms2.xcframework */; };
 		1AF1788EF8A4B32D780F066E /* LiveModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF28B344CA01BCD1800A4E3 /* LiveModels.swift */; };
 		1B573875ED79BC2420B63AE6 /* HomeStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6E6C6920060C5CF3CC65EF /* HomeStabilityTests.swift */; };
@@ -71,6 +72,7 @@
 		30946DBB482F4C1006EC80F5 /* StreamRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857825645808317F48AB50AA /* StreamRelay.swift */; };
 		32E3EBA6B43800F1D291B93E /* Libavcodec.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00F1FC9461B74262DC81FCD8 /* Libavcodec.xcframework */; };
 		330A2AE3555A65DCFB5FD0A9 /* M3UProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9B9AD0C2539A2BABA83C97 /* M3UProvider.swift */; };
+		337F8222828513EB5E4E4B03 /* LoadProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D8494B58267BC6E3A09F242 /* LoadProgressView.swift */; };
 		34E70119C971F106D5D3427C /* Libavdevice.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C26407BD93F001EDE4CBAEDF /* Libavdevice.xcframework */; };
 		357A9F8A39BDB356513CDC50 /* Libavdevice.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C26407BD93F001EDE4CBAEDF /* Libavdevice.xcframework */; };
 		366915DC310FCD8803B32C5C /* WatchOn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC398B1A86F920C4D5309FE /* WatchOn.swift */; };
@@ -192,6 +194,7 @@
 		9259FCFBEFAD1A28D4C6ECB0 /* gnutls.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C88C33388E442BAFF7BCA4C9 /* gnutls.xcframework */; };
 		929935BAF2C575D8C698AB7A /* PictureInPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 404C86B1D60778438688EBC2 /* PictureInPicture.swift */; };
 		957B94088B5D3887723013A3 /* GenreShelves.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CAE1CF7CCB0FDCBC324E5F0 /* GenreShelves.swift */; };
+		96B6CCFB1311C671C66C1EF9 /* LoadProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D8494B58267BC6E3A09F242 /* LoadProgressView.swift */; };
 		972CFEF9670619E14A53FC6D /* QualityGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28837EF1B9AE6C67082BB45 /* QualityGovernor.swift */; };
 		976B05916C747916000E1666 /* LivePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */; };
 		9814D33104D9D0F2479E7BE8 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
@@ -260,6 +263,7 @@
 		D100BAFC37A38921D2726122 /* Shelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03687A5122C40ADC0462D4BE /* Shelf.swift */; };
 		D1687C4DEC91CFE4F95E3ED7 /* TVPlayerOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */; };
 		D23BC078C762E09CCD49BD29 /* nettle.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57788799C7CF36103C03E61C /* nettle.xcframework */; };
+		D26506D782BB004A56AF41DC /* LoadProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAA9B090680866E89E3A67C5 /* LoadProgress.swift */; };
 		D2A1BED86DD0C13F86E2EF6D /* WatchOn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC398B1A86F920C4D5309FE /* WatchOn.swift */; };
 		D3B1612E9F3D51A62240956C /* PlaylistKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEC4A175B06BF50066727F04 /* PlaylistKeys.swift */; };
 		D57BDC4BD51A60B08A48786B /* PlayerChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25632E2613497E37F388902A /* PlayerChrome.swift */; };
@@ -344,6 +348,7 @@
 		0888A0AF0DE6B28F24365AE1 /* SpeechHeard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechHeard.swift; sourceTree = "<group>"; };
 		098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerOrientation.swift; sourceTree = "<group>"; };
 		0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVPlayerOverlay.swift; sourceTree = "<group>"; };
+		0D8494B58267BC6E3A09F242 /* LoadProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadProgressView.swift; sourceTree = "<group>"; };
 		0DB0608EF8F4FD0776FD5759 /* Scrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scrubber.swift; sourceTree = "<group>"; };
 		0E5942F5AAE604E70FB64FBD /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK.xcframework; path = Vendor/MoltenVK.xcframework; sourceTree = "<group>"; };
 		12195947E258462DA892954B /* RealFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealFeedTests.swift; sourceTree = "<group>"; };
@@ -471,6 +476,7 @@
 		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
 		D7C7B40E07692829A697DF27 /* OpenIPTV UITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "OpenIPTV UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D98E8646EA291A2E9297C377 /* RelayRoutes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayRoutes.swift; sourceTree = "<group>"; };
+		DAA9B090680866E89E3A67C5 /* LoadProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadProgress.swift; sourceTree = "<group>"; };
 		DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVHomeView.swift; sourceTree = "<group>"; };
 		DB4C4ECAD884618771521E44 /* MPVPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MPVPlayer.swift; sourceTree = "<group>"; };
 		DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerLookTests.swift; sourceTree = "<group>"; };
@@ -621,6 +627,8 @@
 				E6F0061726E90B7BD6DAB284 /* LivePerf.swift */,
 				E2FCEE4A90495657B458EC56 /* LivePlayerView.swift */,
 				AA38D24AAC5091B4859CE0C6 /* LoadEvents.swift */,
+				DAA9B090680866E89E3A67C5 /* LoadProgress.swift */,
+				0D8494B58267BC6E3A09F242 /* LoadProgressView.swift */,
 				639680A5419B6E8D2BBE7319 /* Matroska.swift */,
 				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
 				F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */,
@@ -1163,6 +1171,8 @@
 				244127A393B955C4418AEB4A /* LiveShelfViews.swift in Sources */,
 				A840D6E6AF4AC2A2E533428B /* LiveView.swift in Sources */,
 				FC8D421583F21B1D8F31EB3B /* LoadEvents.swift in Sources */,
+				180CB8DEE8C8EF2370031D87 /* LoadProgress.swift in Sources */,
+				337F8222828513EB5E4E4B03 /* LoadProgressView.swift in Sources */,
 				C4B8046237E84B860469F18F /* LocalArea.swift in Sources */,
 				330A2AE3555A65DCFB5FD0A9 /* M3UProvider.swift in Sources */,
 				7E8E70B831C4BE5F7BEBC6F6 /* MPVPlayer.swift in Sources */,
@@ -1278,6 +1288,8 @@
 				0F5DA94E3A68E664F7B7DDFD /* LiveShelfViews.swift in Sources */,
 				9D6E4B51F78DB9408BD6CB1E /* LiveView.swift in Sources */,
 				16CD43F670583A93B6D7F02E /* LoadEvents.swift in Sources */,
+				D26506D782BB004A56AF41DC /* LoadProgress.swift in Sources */,
+				96B6CCFB1311C671C66C1EF9 /* LoadProgressView.swift in Sources */,
 				10E6DBCB2E85AE6FC761AF98 /* LocalArea.swift in Sources */,
 				808B66520C8C418D89B0EC89 /* M3UProvider.swift in Sources */,
 				FFB2BF63F71C83887DFCC92F /* MPVPlayer.swift in Sources */,

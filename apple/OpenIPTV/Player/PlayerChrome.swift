@@ -36,8 +36,11 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     var note: (text: String, color: Color)?
     let paused: Bool
     var canGoForward = true
-    /// Opening or buffering: a spinner where play/pause is.
-    var busy = false
+    /// Opening, or the picture gone: its progress where play/pause is.
+    var load: LoadProgress?
+    var loadActions = LoadActions(tryAgain: {})
+    /// Apple TV: the progress's button the remote is on.
+    var loadFocus: LoadProgress.Button?
     /// Playing has started (the skip buttons need something to skip in).
     var ready = true
     /// iPhone: icons in the capsule beside close (after rotate), and the
@@ -123,26 +126,24 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
             PlayerGlassButton(systemName: "gobackward.10", label: "Back 10 seconds", size: 63, glyph: 30, action: back)
                 .opacity(ready ? 1 : 0)
                 .allowsHitTesting(ready)
-            Group {
-                if busy {
-                    ProgressView()
-                        .controlSize(.large)
-                        .tint(.white)
-                        .frame(width: 92, height: 92)
-                        .glassEffect(.regular, in: .circle)
-                        .accessibilityLabel("Loading")
-                } else {
-                    // The icon changes at once (a symbol animation took
-                    // about half a second).
-                    PlayerGlassButton(systemName: paused ? "play.fill" : "pause.fill", label: paused ? "Play" : "Pause",
-                                      size: 92, glyph: 42, action: playPause)
-                }
+            if let load {
+                LoadProgressView(load: load, actions: loadActions) { playPauseButton }
+                    .frame(width: 92, height: 92)
+            } else {
+                playPauseButton
             }
             PlayerGlassButton(systemName: "goforward.10", label: "Forward 10 seconds", size: 63, glyph: 30, action: forward)
                 .opacity(ready ? (canGoForward ? 1 : 0.4) : 0)
                 .disabled(!canGoForward)
                 .allowsHitTesting(ready)
         }
+    }
+
+    /// The icon changes at once (a symbol animation took about half a
+    /// second).
+    private var playPauseButton: some View {
+        PlayerGlassButton(systemName: paused ? "play.fill" : "pause.fill", label: paused ? "Play" : "Pause",
+                          size: 92, glyph: 42, action: playPause)
     }
 
     /// Close and the icon capsule at the top; the title, "…", the bar and
@@ -269,7 +270,7 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     private var tv: some View {
         ZStack {
             TVPlayerShade(full: true)
-            if busy { ProgressView().controlSize(.large) }
+            if let load { LoadProgressView(load: load, actions: loadActions, focused: loadFocus) }
             TVPlayerLayout(showsBelow: !pills.isEmpty) {
                 TVPlayerTitles(caption: caption, title: title, note: note) { accessory }
             } buttons: {
@@ -287,12 +288,13 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
 
 extension PlayerChrome where Trailing == EmptyView {
     init(caption: String?, title: String, note: (text: String, color: Color)?, paused: Bool, canGoForward: Bool = true,
-         busy: Bool = false, ready: Bool = true, topActions: [PlayerAction] = [], pills: [PlayerAction] = [],
+         load: LoadProgress? = nil, loadActions: LoadActions = LoadActions(tryAgain: {}), ready: Bool = true,
+         topActions: [PlayerAction] = [], pills: [PlayerAction] = [],
          close: @escaping () -> Void, back: @escaping () -> Void, playPause: @escaping () -> Void, forward: @escaping () -> Void,
          @ViewBuilder accessory: () -> Accessory, @ViewBuilder bar: () -> Bar) {
-        self.init(caption: caption, title: title, note: note, paused: paused, canGoForward: canGoForward, busy: busy, ready: ready,
-                  topActions: topActions, pills: pills, close: close, back: back, playPause: playPause, forward: forward,
-                  trailing: { EmptyView() }, accessory: accessory, bar: bar)
+        self.init(caption: caption, title: title, note: note, paused: paused, canGoForward: canGoForward, load: load,
+                  loadActions: loadActions, ready: ready, topActions: topActions, pills: pills, close: close, back: back,
+                  playPause: playPause, forward: forward, trailing: { EmptyView() }, accessory: accessory, bar: bar)
     }
 }
 
