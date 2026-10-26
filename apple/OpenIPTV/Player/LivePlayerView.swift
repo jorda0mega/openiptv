@@ -91,6 +91,7 @@ struct LivePlayerView: View {
             let kind: LoadProgress.Failure.Kind = switch failure {
             case .notPlaying: .noPicture
             case .ended: .ended
+            case .offline: .refused("No internet connection.")
             case let .message(text): .refused(text)
             }
             return LoadProgress(subject: subject, cause: .channel, began: startTrack.began,
@@ -178,6 +179,7 @@ struct LivePlayerView: View {
             if phase == .active { send(.back) }
         }
         .task { start() }
+        .task(id: load?.deadline) { await endWait(at: load?.deadline) }
         .onAppear {
             PlaybackActivity.began()
             model.playerShown = true
@@ -688,6 +690,15 @@ struct LivePlayerView: View {
                 send(.failed(attempt, .unknown, shown: .message(SourceError.wrap(error).localizedDescription)))
             }
         }
+    }
+
+    /// A wait still on at its deadline (the start, a drop, offline, a
+    /// frozen picture) ends with the failure, rather than leave the ring up.
+    private func endWait(at deadline: Date?) async {
+        guard let deadline else { return }
+        try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
+        guard !Task.isCancelled, load?.overdue(at: Date()) == true else { return }
+        send(.gaveUp)
     }
 
     private func giveUp(_ attempt: Int, after limit: Double) {
