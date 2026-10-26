@@ -30,10 +30,13 @@ final class Interest: Identifiable, Sendable {
     let place: Place
     let likelihood: Likelihood
     let since = ContinuousClock.now
+    /// Whether its card is the one rested on now (Showing).
+    let isRestedOn: @MainActor @Sendable () -> Bool
 
-    init(at place: Place, _ likelihood: Likelihood) {
+    init(at place: Place, _ likelihood: Likelihood, isRestedOn: @escaping @MainActor @Sendable () -> Bool = { true }) {
         self.place = place
         self.likelihood = likelihood
+        self.isRestedOn = isRestedOn
     }
 }
 
@@ -94,17 +97,18 @@ struct Conditions: Equatable, Sendable {
     /// most shown is rested on (Showing).
     var restsOnOneCard: Bool { network == .expensive && phoneNetwork == .daily && usedToday < PhoneNetworkFilms.dailyBytes }
 
-    func allows(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Bool {
-        refusal(weight, at: place, likelihood) == nil
+    func allows(_ weight: Weight, at place: Place, _ likelihood: Likelihood, restedOn: Bool = true) -> Bool {
+        refusal(weight, at: place, likelihood, restedOn: restedOn) == nil
     }
 
-    func refusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Refusal? {
+    /// `restedOn`: the card is the one rested on now.
+    func refusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood, restedOn: Bool = true) -> Refusal? {
         if network == .constrained { return .lowDataMode }
         if [.serious, .critical].contains(thermal) { return .thermal(thermal) }
         if memoryWarned { return .memoryWarned }
         if playing { return weight == .light && place == .upNext ? nil : .playing }
         if [.light, .iptv].contains(weight) { return nil }
-        if network == .expensive, let refusal = phoneNetworkRefusal(weight, at: place, likelihood) { return refusal }
+        if network == .expensive, let refusal = phoneNetworkRefusal(weight, at: place, likelihood, restedOn: restedOn) { return refusal }
         if weight == .connection { return nil }
         if network == .unknown { return .network(network) }
         if weight == .bytes, freeDisk.bytes < freeDisk.neededAhead { return .disk(free: freeDisk.bytes, needs: freeDisk.neededAhead) }
@@ -112,10 +116,10 @@ struct Conditions: Equatable, Sendable {
         return nil
     }
 
-    private func phoneNetworkRefusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood) -> Refusal? {
+    private func phoneNetworkRefusal(_ weight: Weight, at place: Place, _ likelihood: Likelihood, restedOn: Bool) -> Refusal? {
         switch phoneNetwork {
         case .none: .phoneNetworkNone
-        case .daily where ![.bytes, .files, .connection].contains(weight) || !place.isRestedOn(at: likelihood): .notTheRestedStart
+        case .daily where ![.bytes, .files, .connection].contains(weight) || !place.isRestedOn(at: likelihood) || !restedOn: .notTheRestedStart
         case .daily where usedToday >= PhoneNetworkFilms.dailyBytes: .usedToday
         case .daily, .wifi: nil
         }
@@ -177,9 +181,7 @@ final class Lane {
         if ticket.running { return }
         try Task.checkCancellation()
         if ticket.plays { return start(ticket) }
-        guard let interest = ticket.interest, conditions().allows(weight, at: interest.place, interest.likelihood) else {
-            throw CancellationError()
-        }
+        guard ticket.interest != nil, allows(ticket, conditions()) else { throw CancellationError() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { turn in
                 ticket.turn = turn
@@ -271,7 +273,8 @@ final class Lane {
     }
 
     private func allows(_ ticket: Ticket, _ now: Conditions) -> Bool {
-        now.allows(weight, at: ticket.interest?.place ?? .page, ticket.interest?.likelihood ?? .next)
+        guard let interest = ticket.interest else { return now.allows(weight, at: .page, .next) }
+        return now.allows(weight, at: interest.place, interest.likelihood, restedOn: interest.isRestedOn())
     }
 
     private func goesBefore(_ a: Ticket, _ b: Ticket) -> Bool {

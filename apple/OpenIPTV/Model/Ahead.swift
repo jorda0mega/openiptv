@@ -91,6 +91,7 @@ final class Showing {
     }
 
     private var shown: [Card: Shown] = [:]
+    private var mostShown: Card?
     private var waiting: [UUID: (card: Card, turn: CheckedContinuation<Bool, Never>)] = [:]
 
     func show(_ target: Target, at place: Place, share: Double, from origin: CGPoint) {
@@ -121,10 +122,16 @@ final class Showing {
 
     /// Nothing measured (an Apple TV's focus): each card held is rested on.
     private func isMostShown(_ card: Card) -> Bool {
-        shown.isEmpty || shown.max { $0.value.showsLess(than: $1.value) }?.key == card
+        shown.isEmpty || mostShown == card
     }
 
+    /// A card that lost the place stops what it fetched under way.
     private func wake() {
+        let now = shown.max { $0.value.showsLess(than: $1.value) }?.key
+        if now != mostShown {
+            mostShown = now
+            Lane.conditionsChangedEverywhere()
+        }
         for (id, waiter) in waiting where isMostShown(waiter.card) {
             waiting[id] = nil
             waiter.turn.resume(returning: true)
@@ -184,7 +191,7 @@ final class Ahead {
                 if place.isRestedOn(at: step.likelihood, on: platform), restsOnOneCard() {
                     guard await showing.untilMostShown(target, at: place) else { return }
                 }
-                let interest = Interest(at: place, step.likelihood)
+                let interest = Interest(at: place, step.likelihood) { [showing] in showing.isMostShown(target, at: place) }
                 let needs = Self.needs(target, step.likelihood).filter { started.insert($0).inserted }
                 group.addTask { await self.run(needs, for: target, interest) }
             }
