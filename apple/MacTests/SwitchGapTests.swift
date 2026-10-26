@@ -6,7 +6,7 @@ final class SwitchGapTests: XCTestCase {
         var gap = SwitchGap(.start, at: 0)
         for i in 0...100 {
             let wall = Double(i) / 100
-            gap.sample(at: wall, time: 60 + Double(i / 4 * 4) / 100, audio: 60 + wall)
+            gap.sample(at: wall, time: 60 + Double(i / 4 * 4) / 100, audio: 60 + wall, drops: 0)
             if i % 4 == 0 { gap.frame(at: wall) }
         }
         XCTAssertEqual(gap.readout(until: 1), "start seeks=0 restarts=0 paused=0 drops=0 time=30 audio=0 frames=40")
@@ -24,12 +24,12 @@ final class SwitchGapTests: XCTestCase {
 
     func testAPauseIsCountedApartFromStalls() {
         var gap = SwitchGap(.start, at: 0)
-        gap.sample(at: 0, time: 10, audio: 10)
-        gap.sample(at: 0.1, time: 10.1, audio: 10.1)
-        gap.sample(at: 0.2, time: 10.2, audio: 10.2, paused: true)
-        gap.sample(at: 2.2, time: 10.2, audio: 10.2, paused: true)
-        gap.sample(at: 2.3, time: 10.2, audio: 10.2)
-        gap.sample(at: 2.4, time: 10.3, audio: 10.3)
+        gap.sample(at: 0, time: 10, audio: 10, drops: 0)
+        gap.sample(at: 0.1, time: 10.1, audio: 10.1, drops: 0)
+        gap.sample(at: 0.2, time: 10.2, audio: 10.2, paused: true, drops: 0)
+        gap.sample(at: 2.2, time: 10.2, audio: 10.2, paused: true, drops: 0)
+        gap.sample(at: 2.3, time: 10.2, audio: 10.2, drops: 0)
+        gap.sample(at: 2.4, time: 10.3, audio: 10.3, drops: 0)
         XCTAssertTrue(gap.readout(until: 2.4).hasPrefix("start seeks=0 restarts=0 paused=2100 drops=0 time=0 audio=0 "), gap.readout(until: 2.4))
     }
 
@@ -45,6 +45,20 @@ final class SwitchGapTests: XCTestCase {
         gap.sample(at: 0.5, time: 10.5, audio: 10.5, drops: 6)
         gap.sample(at: 1, time: 11, audio: 11, drops: 7)
         XCTAssertTrue(gap.readout(until: 1).contains(" drops=3 "), gap.readout(until: 1))
+    }
+
+    func testDropsReadFewerThanTwiceAreUnread() {
+        var gap = SwitchGap(.start, at: 0)
+        gap.sample(at: 0, time: 10, audio: 10, drops: 4)
+        gap.sample(at: 0.5, time: 10.5, audio: 10.5)
+        XCTAssertTrue(gap.readout(until: 1).contains(" drops=unread "), gap.readout(until: 1))
+    }
+
+    func testADropCountThatWentBackIsUnread() {
+        var gap = SwitchGap(.start, at: 0)
+        gap.sample(at: 0, time: 10, audio: 10, drops: 9)
+        gap.sample(at: 0.5, time: 10.5, audio: 10.5, drops: 0)
+        XCTAssertTrue(gap.readout(until: 1).contains(" drops=unread "), gap.readout(until: 1))
     }
 
     func testFramesWaitFromTheSwitchAndToItsEnd() {

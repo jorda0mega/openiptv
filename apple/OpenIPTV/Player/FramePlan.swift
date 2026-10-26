@@ -33,6 +33,21 @@ struct FramePlan: Equatable, Sendable {
     private static func nonEmpty(_ size: PixelSize) -> PixelSize? { size.width > 0 && size.height > 0 ? size : nil }
 }
 
+/// What a film's frames are drawn for: written by the player, its view and Picture in Picture.
+struct FrameInputs: Equatable, Sendable {
+    var video = PixelSize(width: 1920, height: 1080)
+    var color = FrameColor.bt709
+    var screen: PixelSize?
+    var window: PixelSize?
+    var fill = false
+    var inBackground = false
+
+    /// Behind the app with no window to show them: frames go by undrawn, and the sound plays on.
+    var undrawn: Bool { inBackground && window == nil }
+
+    var plan: FramePlan { FramePlan.make(video: video, screen: screen, window: window, fill: fill) }
+}
+
 /// libmpv's software renderer converts the matrix only, so an HDR film's RGB stays coded for its own transfer and primaries.
 enum FrameColor: Equatable, Sendable {
     case bt709, pq, hlg

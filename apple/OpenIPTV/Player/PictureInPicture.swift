@@ -56,17 +56,16 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { PictureInPicture.shared.happen(.appOpened) }
         }
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { PictureInPicture.shared.happen(.appLeft) }
+        }
     }
 
     func offer(_ player: MPVPlayer, playback: EmbyPlayback, total: Double, skip: @escaping (Double) -> Void) {
         guard Self.isSupported, let frames = player.frames else { return }
-        if let film, film.player === player {
-            self.film?.screenSkip = skip
-            guard film.total != total else { return }
-            self.film?.total = total
-            facts.set(total: total, frames: frames)
-            film.controller.invalidatePlaybackState()
-            return
+        if film?.player === player {
+            film?.screenSkip = skip
+            return update(player, total: total)
         }
         if film != nil { happen(.screenLetGo) }
         // iOS asks whether the film plays as soon as the controller is made; answered "paused" then, it never
@@ -81,6 +80,20 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         }
         controller.invalidatePlaybackState()
         happen(.offered)
+    }
+
+    /// The film's length, once the player knows it (no window before the film plays).
+    func update(_ player: MPVPlayer, total: Double) {
+        guard var film, film.player === player else { return }
+        setTotal(total, of: &film)
+        self.film = film
+    }
+
+    private func setTotal(_ total: Double, of film: inout Film) {
+        guard film.total != total else { return }
+        film.total = total
+        facts.set(total: total, frames: film.frames)
+        film.controller.invalidatePlaybackState()
     }
 
     func startFromButton(stream: FilmStream, position: Double, paused: Bool, started: @escaping () -> Void, failed: @escaping () -> Void) {
@@ -102,7 +115,6 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             happen(.otherTitle)
             return nil
         }
-        if case .windowed = flow.phase { happen(.chosenAgain) }
         happen(.reclaimed)
         film.player.onEvent = nil
         endActivity()
@@ -218,8 +230,12 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     private func dockedEvent(_ event: MPVPlayer.Event) {
         guard var film else { return }
         switch event {
-        case let .time(raw, _):
-            if let until = film.ignoreTimeUntil, Date() < until { return }
+        case let .time(raw, duration):
+            if let duration, film.stream.clockStart == 0 { setTotal(duration, of: &film) }
+            if let until = film.ignoreTimeUntil, Date() < until {
+                self.film = film
+                return
+            }
             film.ignoreTimeUntil = nil
             film.position = film.total > 0 ? min(raw + film.stream.clockStart, film.total) : raw + film.stream.clockStart
             if abs(film.position - film.lastReport) >= 10 {

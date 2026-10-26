@@ -66,14 +66,14 @@ final class WindowFlowTests: XCTestCase {
     }
 
     func testChoosingTheFilmAgainBringsItBack() {
-        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .chosenAgain, .didStop, .screenHosts])
+        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .reclaimed, .didStop, .screenHosts])
         XCTAssertEqual(effects[3], [.measureReturn, .stopWindow])
         XCTAssertEqual(effects[5], [.framesToScreen])
         XCTAssertEqual(flow.phase, .inline)
     }
 
     func testChoosingTheFilmAgainWhileIOSRestoresFinishesOnceTheScreenHolds() {
-        let (_, effects) = flow([.offered, .buttonTapped, .didStart, .chosenAgain, .restoreAsked, .screenHosts])
+        let (_, effects) = flow([.offered, .buttonTapped, .didStart, .reclaimed, .restoreAsked, .screenHosts])
         XCTAssertEqual(effects[4], [.armRestoreTimeout])
         XCTAssertEqual(effects[5], [.framesToScreen, .finishRestore(true)])
     }
@@ -121,6 +121,12 @@ final class WindowFlowTests: XCTestCase {
         XCTAssertEqual(flow.phase, .inline)
     }
 
+    func testLeavingAgainBeforeTheWindowIsUpKeepsIt() {
+        let (flow, effects) = flow([.offered, .willStart, .appOpened, .appLeft, .didStart])
+        XCTAssertEqual(effects[4], [])
+        XCTAssertEqual(flow.phase, .windowed(screenClosed: false))
+    }
+
     func testARestoreTimingOutAfterTheScreenTookThePlayerLeavesItPlaying() {
         let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .restoreAsked, .reclaimed, .restoreTimedOut, .screenHosts])
         XCTAssertEqual(effects[4], [])
@@ -130,8 +136,20 @@ final class WindowFlowTests: XCTestCase {
         XCTAssertFalse(flow.keepsFilm)
     }
 
+    func testASecondRestoreKeepsTheWait() {
+        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .restoreAsked, .restoreAsked, .restoreTimedOut])
+        XCTAssertEqual(effects[4], [])
+        XCTAssertEqual(effects[5], [.finishRestore(false), .stopWindow, .stopFilm, .releaseController])
+        XCTAssertEqual(flow.phase, .none)
+    }
+
+    func testTheScreenThatTookThePlayerClosingLetsTheWindowGo() {
+        let (_, effects) = flow([.offered, .buttonTapped, .didStart, .restoreAsked, .reclaimed, .screenLetGo])
+        XCTAssertEqual(effects[5], [.finishRestore(false), .stopWindow, .releaseController])
+    }
+
     func testTheScreenThatTookThePlayerOwnsIt() {
-        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .chosenAgain, .reclaimed, .otherTitle])
+        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .reclaimed, .reclaimed, .otherTitle])
         XCTAssertFalse(flow.keepsFilm)
         XCTAssertEqual(effects[5], [], "another title doesn't stop a film the screen has")
     }

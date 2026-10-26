@@ -18,8 +18,8 @@ struct WindowFlow: Equatable, Sendable {
         case offered, buttonTapped, willStart, didStart, failedToStart
         /// iOS waits until `finishRestore` runs.
         case restoreAsked
-        case appOpened
-        case chosenAgain
+        case appOpened, appLeft
+        /// The player screen took the film back (the window's restore, or the film chosen again).
         case reclaimed
         case screenHosts
         case didStop, restoreTimedOut
@@ -61,6 +61,9 @@ struct WindowFlow: Equatable, Sendable {
         case (.starting(byButton: false, _), .appOpened):
             phase = .starting(byButton: false, appBack: true)
             return []
+        case (.starting(byButton: false, appBack: true), .appLeft):
+            phase = .starting(byButton: false, appBack: false)
+            return []
         case (.starting(_, appBack: true), .didStart):
             phase = .closingWindow
             return [.measureReturn, .framesToScreen, .stopWindow]
@@ -83,8 +86,8 @@ struct WindowFlow: Equatable, Sendable {
         case (.windowed(screenClosed: true), .restoreAsked):
             phase = .awaitingScreen(reclaimed: false, restoreWaiting: true, windowUp: true)
             return [.measureReturn, .presentScreen, .armRestoreTimeout]
-        case (.windowed(screenClosed: true), .chosenAgain):
-            phase = .awaitingScreen(reclaimed: false, restoreWaiting: false, windowUp: true)
+        case (.windowed(screenClosed: true), .reclaimed):
+            phase = .awaitingScreen(reclaimed: true, restoreWaiting: false, windowUp: true)
             return [.measureReturn, .stopWindow]
         case (.windowed(screenClosed: true), .didStop):
             phase = .none
@@ -110,6 +113,8 @@ struct WindowFlow: Equatable, Sendable {
         case let (.awaitingScreen(reclaimed, false, windowUp), .restoreAsked):
             phase = .awaitingScreen(reclaimed: reclaimed, restoreWaiting: true, windowUp: windowUp)
             return [.armRestoreTimeout]
+        case (.awaitingScreen(_, restoreWaiting: true, _), .restoreAsked):
+            return []
         case let (.awaitingScreen(reclaimed, restoreWaiting, true), .didStop):
             phase = .awaitingScreen(reclaimed: reclaimed, restoreWaiting: restoreWaiting, windowUp: false)
             return []
