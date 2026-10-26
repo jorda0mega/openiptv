@@ -7,10 +7,11 @@ final class PlanCopiesTests: XCTestCase {
     private static let ids = ["copy-hd-0001", "copy-4k-0002"]
 
     /// `info`: each copy's PlaybackInfo wait, by its place in `ids`;
-    /// `width`: the picture's width in each; `itemSource`: the protocol of
-    /// the source in each copy's item, as Emby lists it in an item's full
-    /// record (nil: the item lists none); `failing`: answered 500.
-    private func server(info: [Double], width: [Int] = [1280, 1920], itemSource: String? = nil,
+    /// `item`: each item's wait; `width`: the picture's width in each;
+    /// `itemSource`: the protocol of the source in each copy's item, as
+    /// Emby lists it in an item's full record (nil: the item lists none);
+    /// `failing`: answered 500.
+    private func server(info: [Double], item: Double = 0, width: [Int] = [1280, 1920], itemSource: String? = nil,
                         failing: @escaping @Sendable (String) -> Bool = { _ in false }) throws -> (LocalServer, EmbyClient) {
         let ids = Self.ids
         func copy(_ target: String) -> Int? { ids.firstIndex { target.contains("/\($0)") } }
@@ -22,8 +23,8 @@ final class PlanCopiesTests: XCTestCase {
             """
         }
         let server = try LocalServer(pause: { target in
-            guard target.contains("/PlaybackInfo"), let n = copy(target) else { return 0 }
-            return info[n]
+            guard let n = copy(target) else { return 0 }
+            return target.contains("/PlaybackInfo") ? info[n] : item
         }, answer: { target in
             guard let n = copy(target), !failing(target) else { return (500, [:], "{}") }
             if target.contains("/PlaybackInfo") {
@@ -135,6 +136,21 @@ final class PlanCopiesTests: XCTestCase {
         defer { server.stop() }
         let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
         let session = await playback.session()
+        XCTAssertEqual(session, "ps0", "the reports carried no play session")
+    }
+
+    func testAPlaySessionIsAskedAgainWhenPlaybackInfoFailedBeforeTheItemCame() async throws {
+        let asked = Locked(0)
+        let (server, client) = try server(info: [0], item: 0.5, itemSource: "File", failing: { target in
+            guard target.contains("/PlaybackInfo") else { return false }
+            var first = false
+            asked.mutate { $0 += 1; first = $0 == 1 }
+            return first
+        })
+        defer { server.stop() }
+        let playback = try await client.playback(versions: [Self.ids[0]], kind: "Movie", maxWidth: 1920)
+        XCTAssertEqual(playback.mediaSourceId, "ms0", "it started from its item's source")
+        let session = await playback.session(within: .seconds(10))
         XCTAssertEqual(session, "ps0", "the reports carried no play session")
     }
 
