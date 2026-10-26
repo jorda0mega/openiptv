@@ -423,7 +423,7 @@ struct MoviePlayerView: View {
             #endif
             // With the controls up, their play button turns into the progress.
             if let load, !controlsVisible {
-                LoadProgressView(load: load, actions: loadActions)
+                LoadProgressView(load: load, actions: loadActions, overPicture: true)
             }
             if controlsVisible { controls.transition(.opacity) }
             #if os(iOS)

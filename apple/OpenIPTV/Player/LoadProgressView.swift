@@ -9,12 +9,19 @@ struct LoadProgressView<Otherwise: View>: View {
     let load: LoadProgress
     let actions: LoadActions
     var focused: LoadProgress.Button?
+    var overPicture = false
     @ViewBuilder var otherwise: Otherwise
 
     var body: some View {
         TimelineView(.periodic(from: load.began, by: 1)) { context in
             if let shown = load.shown(at: context.date) {
-                LoadProgressShown(shown: shown, actions: actions, focused: focused)
+                if overPicture {
+                    LoadProgressShown(shown: shown, actions: actions, focused: focused)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background { Color.black.opacity(0.5).ignoresSafeArea().allowsHitTesting(false) }
+                } else {
+                    LoadProgressShown(shown: shown, actions: actions, focused: focused)
+                }
             } else {
                 otherwise
             }
@@ -23,8 +30,8 @@ struct LoadProgressView<Otherwise: View>: View {
 }
 
 extension LoadProgressView where Otherwise == EmptyView {
-    init(load: LoadProgress, actions: LoadActions, focused: LoadProgress.Button? = nil) {
-        self.init(load: load, actions: actions, focused: focused) { EmptyView() }
+    init(load: LoadProgress, actions: LoadActions, focused: LoadProgress.Button? = nil, overPicture: Bool = false) {
+        self.init(load: load, actions: actions, focused: focused, overPicture: overPicture) { EmptyView() }
     }
 }
 

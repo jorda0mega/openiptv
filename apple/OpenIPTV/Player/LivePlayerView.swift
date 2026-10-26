@@ -135,7 +135,7 @@ struct LivePlayerView: View {
             if !controlsVisible { picture.ignoresSafeArea() }
             // With the controls up, their play button turns into the progress.
             if let load, !controlsVisible {
-                LoadProgressView(load: load, actions: loadActions, focused: tvLoadFocus)
+                LoadProgressView(load: load, actions: loadActions, focused: tvLoadFocus, overPicture: true)
             }
             if controlsVisible { controls.transition(.opacity) }
             if let cue, let playingCopy { switchCue(cue, playingCopy) }
