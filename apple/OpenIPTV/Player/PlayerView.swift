@@ -517,6 +517,7 @@ struct MoviePlayerView: View {
             start()
             await watchTheOpen()
         }
+        .task(id: load?.deadline) { await endWait(at: load?.deadline) }
         .task(id: playback.itemId) { await loadSeason() }
         .onAppear {
             PlaybackActivity.began()
@@ -1195,25 +1196,28 @@ struct MoviePlayerView: View {
         probeTask = Task { await probeWhileConverted() }
     }
 
-    /// Till the first frame: the start's stage for the loading progress;
-    /// at its bound (StartPatience) the player stops and says so, rather
-    /// than leave the spinner up.
+    /// Till the first frame: the start's stage for the loading progress.
     private func watchTheOpen() async {
-        let failAt = playback.requestedAt.addingTimeInterval(StartPatience.failAfter / .seconds(1))
         let askedAgain = StreamRelay.shared.askedAgain.value
         while !started, error == nil {
             model.noteStart(player?.openedAfter == nil ? .openingFilm : .starting)
             if StreamRelay.shared.askedAgain.value > askedAgain { model.noteStartAskedAgain() }
-            if !StartPatience.off, Date() >= failAt {
-                player?.shutdown()
-                player = nil
-                error = "Couldn't play: \(StartPatience.tooLong.localizedDescription)"
-                showControls(autoHide: false)
-                break
-            }
             guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { break }
         }
         model.endStart(failure: error)
+    }
+
+    /// A wait still on at its deadline (the start, Try again, a stall)
+    /// stops the film and says so, rather than leave the ring up.
+    private func endWait(at deadline: Date?) async {
+        guard let deadline else { return }
+        try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
+        guard !Task.isCancelled, load?.overdue(at: Date()) == true else { return }
+        convertedOpen?.cancel()
+        player?.stop {}
+        error = StartPatience.tooLong.localizedDescription
+        track.failed(at: Date())
+        showControls(autoHide: false)
     }
 
     #if os(iOS)
