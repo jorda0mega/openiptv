@@ -1219,13 +1219,11 @@ struct MoviePlayerView: View {
     }
 
     #if os(iOS)
-    /// The window may open from this film's picture (by itself as the app goes, or from the button).
     private func offerPictureInPicture() {
         guard let player else { return }
         PictureInPicture.shared.offer(player, playback: playback, total: total) { skip($0) }
     }
 
-    /// The player from Picture in Picture, on this screen again.
     private func adopt(_ back: (player: MPVPlayer, stream: FilmStream, position: Double, paused: Bool)) {
         PlaybackAudio.activate()
         stream = back.stream
@@ -1611,7 +1609,7 @@ struct MoviePlayerView: View {
         #if os(iOS)
         // Playing on in Picture in Picture: the window has the player now,
         // and reports when it stops.
-        if let player, PictureInPicture.shared.letGo(player) {
+        if let player, PictureInPicture.shared.letGo(player) == .keepPlaying {
             self.player = nil
             return
         }
