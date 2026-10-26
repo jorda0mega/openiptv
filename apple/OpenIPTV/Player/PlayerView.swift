@@ -513,7 +513,10 @@ struct MoviePlayerView: View {
         .statusBarHidden(!controlsVisible)
         #endif
         .persistentSystemOverlays(.hidden)
-        .task { start() }
+        .task {
+            start()
+            await watchTheOpen()
+        }
         .task(id: playback.itemId) { await loadSeason() }
         .onAppear {
             PlaybackActivity.began()
@@ -1190,6 +1193,16 @@ struct MoviePlayerView: View {
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         showControls()
         probeTask = Task { await probeWhileConverted() }
+    }
+
+    /// No first frame a while after the open, each way of opening it tried
+    /// meanwhile: the viewer is told, rather than left with the spinner.
+    private func watchTheOpen() async {
+        guard !StartPatience.off, (try? await Task.sleep(for: StartPatience.open)) != nil, !started, error == nil else { return }
+        player?.shutdown()
+        player = nil
+        error = "Couldn't play: \(StartPatience.tooLong.localizedDescription)"
+        showControls(autoHide: false)
     }
 
     #if os(iOS)

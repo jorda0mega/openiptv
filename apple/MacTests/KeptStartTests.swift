@@ -76,13 +76,31 @@ final class FirstByteTests: XCTestCase {
         XCTAssertEqual(server.ranges, ["bytes=0-524287", "bytes=0-524287"])
     }
 
+    /// Over a bare connection: URLSession sends an unanswered read again by itself.
     func testAReadNeverAnsweredTwiceEndsSoTheStartCanGoOn() async throws {
         let server = try FilmServer(size: 64 << 20, delay: 0, silent: 2)
         let relay = StreamRelay()
         relay.firstByteWait = .milliseconds(500)
+        let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
+        let local = try XCTUnwrap(relay.localURL(for: film.url, headers: []))
+        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: UInt16(try XCTUnwrap(local.port)))!, using: .tcp)
         let began = ContinuousClock.now
-        let answer = try? await read(through: relay, server)
-        XCTAssertNotEqual((answer?.1 as? HTTPURLResponse)?.statusCode, 206)
+        let answer = await withCheckedContinuation { (done: CheckedContinuation<Data, Never>) in
+            var got = Data()
+            func receive() {
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, error in
+                    got += data ?? Data()
+                    if isComplete || error != nil { done.resume(returning: got) } else { receive() }
+                }
+            }
+            connection.start(queue: .global())
+            let path = local.path + (local.query.map { "?" + $0 } ?? "")
+            connection.send(content: Data("GET \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=0-524287\r\n\r\n".utf8),
+                            completion: .contentProcessed { _ in receive() })
+        }
+        connection.cancel()
+        XCTAssertTrue(answer.isEmpty, "the relay answered a read the server never did")
+        XCTAssertEqual(server.ranges.count, 2)
         XCTAssertLessThan(ContinuousClock.now - began, .seconds(2), "the player waited past two waits for a first byte")
     }
 }

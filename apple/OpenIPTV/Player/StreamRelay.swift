@@ -502,9 +502,12 @@ final class StreamRelay: @unchecked Sendable {
 
     /// From the server: `head` sends its answer's headers to the player
     /// (not when kept bytes have gone first, with their own).
+    /// A read with no first byte within `firstByteWait` is asked once
+    /// more (`again`), then ends, and the player goes on to its next way.
     private func fetch(_ route: (url: URL, headers: [(String, String)]), method: String = "GET", range: String?,
                        connection: NWConnection, cache: ByteCache?, head: Bool,
-                       redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest = StreamRelay.redirected) {
+                       redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest = StreamRelay.redirected,
+                       again: Bool = false) {
         var upstream = URLRequest(url: route.url)
         upstream.httpMethod = method
         upstream.timeoutInterval = 30
@@ -525,6 +528,14 @@ final class StreamRelay: @unchecked Sendable {
             }
         }
         task.resume()
+        if !StartPatience.off {
+            DispatchQueue.global().asyncAfter(deadline: .now() + firstByteWait / .seconds(1)) { [weak self] in
+                guard relay.giveUpUnanswered(closing: again) else { return }
+                self?.fetch(route, method: method, range: range, connection: connection, cache: cache, head: head,
+                            redirected: redirected, again: true)
+            }
+        }
+        guard !again else { return }
         // A hang-up shows as the end of what the player sends (it sends
         // nothing more after its request): notice it at once, rather than
         // only when the next piece fails to send.
@@ -753,6 +764,9 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private var pending = 0
     private var suspended = false
     private var finished = false
+    private var answered = false
+    /// Stopped before any answer, the player's connection left for another ask.
+    private var replaced = false
     /// Where in the file the next byte received goes (for the cache).
     private var offset: Int64?
     #if DEBUG
@@ -777,6 +791,21 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
         task.cancel()
     }
 
+    /// No answer yet: stopped, and the player's connection closed when
+    /// `closing`, else kept for another ask (true: ask again).
+    func giveUpUnanswered(closing: Bool) -> Bool {
+        lock.lock()
+        guard !answered, !finished else {
+            lock.unlock()
+            return false
+        }
+        finished = true
+        replaced = !closing
+        lock.unlock()
+        task.cancel()
+        return !closing
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(redirected(request, task))
@@ -784,6 +813,9 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        lock.lock()
+        answered = true
+        lock.unlock()
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 502
         #if DEBUG
@@ -865,7 +897,9 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         lock.lock()
         finished = true
+        let replaced = replaced
         lock.unlock()
+        guard !replaced else { return }
         // Close once everything queued has gone out.
         connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [connection] _ in
             connection.cancel()

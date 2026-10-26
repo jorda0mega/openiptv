@@ -24,15 +24,20 @@ enum Plans {
         Shelf(.init(lane: lane ?? .emby, lifetime: .seconds(180), failureKept: .zero), now: now, fetch: fetch)
     }
 
+    /// A start's plan, asked once more if it fails, and again for the
+    /// server's track list if it came without, while time is left; none by
+    /// `limit`: the server took too long.
     static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>,
                          within limit: Duration = StartPatience.plan) async throws -> EmbyPlayback {
-        var playback: EmbyPlayback
-        do {
-            playback = try await shelf.take(key)
-        } catch {
-            playback = try await shelf.take(key)
+        let deadline = ContinuousClock.now + limit
+        var playback = try await StartPatience.by(deadline) {
+            do {
+                return try await shelf.take(key)
+            } catch {
+                return try await shelf.take(key)
+            }
         }
-        if !playback.listed { playback = (try? await shelf.take(key)) ?? playback }
+        if !playback.listed, let listed = try? await StartPatience.by(deadline, { try await shelf.take(key) }) { playback = listed }
         return playback
     }
 
@@ -55,6 +60,28 @@ enum StartPatience {
     static let firstByte = Duration.seconds(15)
     /// From the player's open to its first frame.
     static let open = Duration.seconds(60)
+    static let tooLong = SourceError.network("The server took too long to answer.", .timedOut)
+
+    #if DEBUG
+    /// -noStartBounds YES: a start waits as long as its requests do (the start before).
+    static var off: Bool { UserDefaults.standard.bool(forKey: "noStartBounds") }
+    #else
+    static let off = false
+    #endif
+
+    /// `work`'s answer, or `tooLong` at `deadline`.
+    static func by<T: Sendable>(_ deadline: ContinuousClock.Instant, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        if off { return try await work() }
+        return try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                try await Task.sleep(until: deadline, clock: .continuous)
+                throw tooLong
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
+    }
 }
 
 #if DEBUG
