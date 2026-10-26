@@ -376,6 +376,37 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertNil(track.startEndedAt, "a reconnect's end held the ring")
     }
 
+    func testAJumpThatHasntLandedIsAWaitFromTheJump() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0))
+        track.pictured(at: at(1))
+        track.jumping(at: at(50))
+        XCTAssertEqual(track.stalledSince, at(50), "a jump into a server that stopped answering showed nothing")
+        let wait = LoadProgress(subject: .film("Heat"), wait: .stall, stage: track.stage, cause: .server, began: at(50))
+        XCTAssertNil(wait.shown(at: at(52)), "a quick jump showed the ring")
+        XCTAssertNotNil(wait.shown(at: at(53))?.ring)
+        XCTAssertEqual(wait.shown(at: at(58))?.tryAgain, true)
+        XCTAssertTrue(wait.overdue(at: at(80)), "a jump that never lands spins past 30 s")
+        track.landed()
+        XCTAssertNil(track.stalledSince, "a jump that landed still waits")
+    }
+
+    func testAStallAndAJumpWaitUntilBothEnd() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0))
+        track.pictured(at: at(1))
+        track.stalled(at: at(40))
+        track.jumping(at: at(45))
+        XCTAssertEqual(track.stalledSince, at(40))
+        track.flowing()
+        XCTAssertEqual(track.stalledSince, at(45), "data coming again ended the wait for a jump still on its way")
+        track.landed()
+        XCTAssertNil(track.stalledSince)
+        track.jumping(at: at(60))
+        track.pictured(at: at(61))
+        XCTAssertNil(track.stalledSince, "the picture back still waits")
+    }
+
     func testAStallCountsFromItsStart() {
         var track = LoadTrack(began: tap)
         track.asked(at: at(0))
