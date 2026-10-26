@@ -92,6 +92,7 @@ final class LoadProgressTests: XCTestCase {
         XCTAssertEqual(shown?.details, ["The app tried 4 times in 30 s."])
         XCTAssertEqual(shown?.tryAgain, true)
         XCTAssertEqual(shown?.otherChannels, true)
+        XCTAssertEqual(shown?.buttons, [.tryAgain, .otherChannels], "the remote's first stop isn't Try again")
         XCTAssertNil(shown?.dashes)
     }
 
@@ -156,5 +157,96 @@ final class LoadProgressTests: XCTestCase {
         var drop = channel(.asking, wait: .reconnect)
         drop.failure = .init(kind: .noPicture, tries: 3, seconds: 1)
         XCTAssertEqual(drop.shown(at: at(1))?.line, "PPV 1 isn’t sending a picture")
+    }
+}
+
+final class LoadTrackTests: XCTestCase {
+    private let tap = Date(timeIntervalSinceReferenceDate: 1000)
+
+    private func at(_ seconds: Double) -> Date { tap.addingTimeInterval(seconds) }
+
+    func testAChannelConnectsThenGetsThePictureThenStarts() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        XCTAssertEqual(track.stage, .asking)
+        XCTAssertFalse(track.addressed)
+        track.gotAddress()
+        XCTAssertTrue(track.addressed)
+        track.opened()
+        XCTAssertEqual(track.stage, .fetching)
+        XCTAssertEqual(track.received, 0)
+        track.received(1, of: 2)
+        XCTAssertEqual(track.received, 0.5)
+        XCTAssertEqual(track.stage, .fetching)
+        track.received(2.4, of: 2)
+        XCTAssertEqual(track.stage, .starting, "all the start needs is in, and it still says it's getting the picture")
+    }
+
+    func testAFilmOpensItsFileThenStarts() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0.4))
+        XCTAssertEqual(track.began, tap, "the clock restarted at the file instead of the tap")
+        track.opened()
+        XCTAssertEqual(track.stage, .starting)
+        track.received(5, of: 2)
+        XCTAssertEqual(track.stage, .starting, "data counted past the picture's step")
+    }
+
+    func testEveryStreamAskedForIsATryAndStartsItsStepsAgain() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.gotAddress()
+        track.opened()
+        track.received(1, of: 2)
+        track.asked(at: at(15))
+        XCTAssertEqual(track.tries, 2)
+        XCTAssertEqual(track.stage, .asking)
+        XCTAssertNil(track.received)
+        XCTAssertFalse(track.addressed, "the next copy's address was taken as known")
+        XCTAssertEqual(track.began, tap, "a retry restarted the clock")
+    }
+
+    func testAStreamAskedForAfterThePictureIsADrop() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.pictured()
+        XCTAssertFalse(track.dropped)
+        track.asked(at: at(60))
+        XCTAssertTrue(track.dropped)
+        XCTAssertEqual(track.began, at(60), "a drop counted from the tap")
+        XCTAssertEqual(track.tries, 1)
+        track.asked(at: at(62))
+        XCTAssertEqual(track.began, at(60))
+        XCTAssertEqual(track.tries, 2)
+        track.pictured()
+        XCTAssertFalse(track.dropped, "back with a picture and still called a drop")
+    }
+
+    func testAFailureCountsItsTriesAndSeconds() {
+        var track = LoadTrack(began: tap)
+        for second in [0.0, 15, 16, 22] { track.asked(at: at(second)) }
+        track.failed(at: at(30.2))
+        track.failed(at: at(40))
+        let failure = track.failure(.noPicture, otherChannels: true)
+        XCTAssertEqual(failure.tries, 4)
+        XCTAssertEqual(failure.seconds, 30.2, accuracy: 0.001, "a later failure moved its time")
+        XCTAssertTrue(failure.otherChannels)
+    }
+
+    func testAFailureBeforeAnyStreamWasAskedForIsOneTry() {
+        var track = LoadTrack(began: tap)
+        track.failed(at: at(2))
+        XCTAssertEqual(track.failure(.refused("No such channel.")).tries, 1)
+    }
+
+    func testAStallCountsFromItsStart() {
+        var track = LoadTrack(began: tap)
+        track.asked(at: at(0))
+        track.pictured()
+        track.stalled(at: at(50))
+        track.stalled(at: at(51))
+        XCTAssertEqual(track.stalledSince, at(50))
+        track.flowing()
+        XCTAssertNil(track.stalledSince)
     }
 }
