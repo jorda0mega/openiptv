@@ -169,21 +169,42 @@ struct LoadTrack: Equatable {
     private(set) var dropped = false
     private(set) var stalledSince: Date?
     private(set) var pictureLost: Date?
+    private(set) var attempt: Int
     private var failedAt: Date?
     private var pictureOn = false
+    private let firstStage: LoadProgress.Stage
 
-    init(began: Date, stage: LoadProgress.Stage = .asking) {
+    init(began: Date, stage: LoadProgress.Stage = .asking, attempt: Int = 0) {
         self.began = began
         self.stage = stage
+        self.attempt = attempt
+        firstStage = stage
     }
 
-    mutating func asked(_ stage: LoadProgress.Stage = .asking, at now: Date) {
+    @discardableResult
+    mutating func asked(_ stage: LoadProgress.Stage = .asking, at now: Date) -> Int {
         lost(at: now)
         tries += 1
         self.stage = stage
         received = nil
         addressed = false
         failedAt = nil
+        return nextAttempt()
+    }
+
+    /// A load that isn't a try of its own (another quality during play).
+    mutating func nextAttempt() -> Int {
+        attempt += 1
+        return attempt
+    }
+
+    func isCurrent(_ attempt: Int) -> Bool {
+        attempt == self.attempt
+    }
+
+    /// Try again: the wait starts over, the attempts keep counting.
+    mutating func restart(at now: Date) {
+        self = LoadTrack(began: now, stage: firstStage, attempt: attempt)
     }
 
     mutating func gotAddress() {
