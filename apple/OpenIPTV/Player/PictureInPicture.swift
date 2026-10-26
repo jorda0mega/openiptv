@@ -282,6 +282,8 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         MainActor.assumeIsolated {
             guard controller === film?.controller else { return }
             happen(.willStart)
+            // iOS can start the window by itself after the viewer is already back in the app.
+            if UIApplication.shared.applicationState == .active { happen(.appOpened) }
         }
     }
 
