@@ -13,12 +13,16 @@
 # set), and its link half too on the none link, set afresh as the run starts; after it, what the test
 # server did, counts only. Each run says the Mac's free disk: an iPhone fetches no film ahead under
 # 2 GB, an Apple TV under 0.5 GB. LOW_DISK=1: the app reads it as under that whatever it is (-lowDisk YES).
-# Builds (iOS into DD, tvOS into TV_DD) wait for the simulator lock, so a run holding it never finds
-# its products changed under it.
+# Builds go into folders no other run uses: a real run's into dd-ios-real and dd-tv-real, which no
+# helper builds into; a test server run's into dd-ios-<worktree> and dd-tv-<worktree> (DD and TV_DD
+# override). Each folder is held from its build to its last run (<folder>.lock), and builds wait for
+# the simulator lock too. Each platform's section, and each run, starts with the build stamp of the
+# app it runs (scripts/build-stamp.sh), and says whether it is this tree's.
 set -u
 APPLE=$(cd "$(dirname "$0")/.." && pwd)
-DD=${DD:-/tmp/openiptv/dd-ios}
-TV_DD=${TV_DD:-/tmp/openiptv/dd-tv}
+WORKTREE=$(basename "$(git -C $APPLE rev-parse --show-toplevel)")
+DD=${DD:-/tmp/openiptv/dd-ios-$([ -n "${MOCK:-}" ] && echo $WORKTREE || echo real)}
+TV_DD=${TV_DD:-/tmp/openiptv/dd-tv-$([ -n "${MOCK:-}" ] && echo $WORKTREE || echo real)}
 PHONE=${PHONE:-8D05A43B-1F37-4121-86D6-1E95520EC19B}
 TV=${TV:-180EEA27-C2F9-4FA8-97C7-4DC3F7D7EB9C}
 OWNER=${OWNER:-film-buffering-real}
@@ -32,6 +36,8 @@ BUILD_LOCK=/tmp/openiptv/build.lock
 PROXY_PORT=${PROXY_PORT:-8859}
 typeset -A SCHEME=(ios OpenIPTV tvos "OpenIPTV TV") TARGET=(ios "OpenIPTV UITests" tvos "OpenIPTV TV UITests")
 typeset -A OS=(ios iOS tvos tvOS) SIM=(ios $PHONE tvos $TV) PRODUCTS=(ios $DD tvos $TV_DD)
+typeset -A APP=(ios Debug-iphonesimulator/OpenIPTV.app tvos Debug-appletvsimulator/OpenIPTV.app)
+held=()
 export TEST_RUNNER_REAL_FEED=${FEED:-http://127.0.0.1:8799}
 export TEST_RUNNER_FILM_BUFFERING_SECONDS=${SECONDS_PLAYED:-240}
 export TEST_RUNNER_LOW_DISK=${LOW_DISK:-0}
@@ -69,7 +75,13 @@ runs() {
     fi
   done
 }
+hold() {
+  until mkdir $1.lock 2>/dev/null; do echo "$1 in use by $(cat $1.lock/owner 2>/dev/null), waiting 60 s"; sleep 60; done
+  echo $OWNER > $1.lock/owner
+  held+=($1.lock)
+}
 build() {
+  hold ${PRODUCTS[$1]}
   until mkdir $BUILD_LOCK 2>/dev/null; do echo "build lock held by $(cat $BUILD_LOCK/owner 2>/dev/null), waiting 60 s"; sleep 60; done
   echo $OWNER > $BUILD_LOCK/owner
   local errors=$(xcodebuild build-for-testing -scheme "${SCHEME[$1]}" -destination "platform=${OS[$1]} Simulator,id=${SIM[$1]}" \
@@ -80,13 +92,15 @@ build() {
 finish() {
   stop_proxy
   [ "$(cat $BUILD_LOCK/owner 2>/dev/null)" = $OWNER ] && rm -rf $BUILD_LOCK
+  for lock in $held; do [ "$(cat $lock/owner 2>/dev/null)" = $OWNER ] && rm -rf $lock; done
   # Film bytes the relay kept fill a simulator's disk: each one used is erased.
   for platform in ${=PLATFORMS}; do xcrun simctl shutdown ${SIM[$platform]} 2>/dev/null; xcrun simctl erase ${SIM[$platform]} 2>/dev/null; done
   rm -rf $LOCK
 }
 [ $(free_mb) -ge 3500 ] || { echo "$(free_mb) MB free, a build needs 3500: not run"; exit 1; }
 cd $APPLE
-echo "$(git rev-parse --short HEAD) $(date '+%H:%M') $TEST on $PLATFORMS"
+export TEST_RUNNER_TREE=$($APPLE/scripts/build-stamp.sh)
+echo "$TEST_RUNNER_TREE $(date '+%H:%M') $TEST on $PLATFORMS"
 until mkdir $LOCK 2>/dev/null; do echo "lock held by $(cat $LOCK/owner 2>/dev/null), waiting 60 s"; sleep 60; done
 echo $OWNER > $LOCK/owner
 trap finish EXIT INT TERM HUP
@@ -95,6 +109,8 @@ for platform in ${=PLATFORMS}; do
   [ -n "$(runs $platform)" ] || { echo "== $platform: nothing to run ($TEST)"; continue; }
   [ $(free_mb) -ge 3500 ] || { echo "$(free_mb) MB free, a build needs 3500: $platform not run"; continue; }
   build $platform || continue
+  built=$(/usr/libexec/PlistBuddy -c "Print :OpenreelBuild" ${PRODUCTS[$platform]}/Build/Products/${APP[$platform]}/Info.plist 2>/dev/null)
+  echo "== $platform app build ${built:-without a stamp}$([ "$built" = "$TEST_RUNNER_TREE" ] && echo ', this tree' || echo ", not this tree ($TEST_RUNNER_TREE)"), in ${PRODUCTS[$platform]}"
   for run in "${(@f)$(runs $platform)}"; do
     parts=(${=run}); link=$parts[1] network=$parts[2] films=$parts[3]
     [ $(free_mb) -ge 1500 ] || { echo "$(free_mb) MB free: stopped before the $platform $link run"; exit 1; }
