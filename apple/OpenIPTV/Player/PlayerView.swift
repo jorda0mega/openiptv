@@ -1455,7 +1455,7 @@ struct MoviePlayerView: View {
         case let .seeking(on):
             // A jump that doesn't land (the server stopped answering) waits
             // like a stall; choosing where to jump doesn't.
-            if on, started, scrubbing == nil { track.jumping(at: Date()) } else if !on { track.landed() }
+            track.seeking(on && started, choosing: scrubbing != nil, at: Date())
         case let .seeked(seconds):
             jumpUntil = nil
             if prefs.performanceStats { showTiming(String(format: "Jumped in %.1f s", seconds), for: 3) }
@@ -1760,6 +1760,7 @@ struct MoviePlayerView: View {
         position = target
         jumpUntil = Date().addingTimeInterval(0.5)
         scrubbing = nil
+        track.choosingEnded(at: Date())
         scrubOrigin = nil
         let play = RemoteSwipe.playsAfterChoosing(byClick: byClick, wasPlaying: resumeAfterScrub)
         resumeAfterScrub = false
@@ -2111,6 +2112,7 @@ struct MoviePlayerView: View {
             lastSeek = Date()
         }
         scrubbing = nil
+        track.choosingEnded(at: Date())
         scrubOrigin = nil
         if resumeAfterScrub {
             resumeAfterScrub = false

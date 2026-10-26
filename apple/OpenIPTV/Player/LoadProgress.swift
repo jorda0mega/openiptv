@@ -167,6 +167,7 @@ struct LoadTrack: Equatable {
     var stalledSince: Date? { [dataStoppedAt, jumpAskedAt].compactMap { $0 }.min() }
     private var dataStoppedAt: Date?
     private var jumpAskedAt: Date?
+    private var playerSeeking = false
     private(set) var pictureLost: Date?
     /// The first picture of a start (not of a drop).
     private(set) var startEndedAt: Date?
@@ -252,6 +253,18 @@ struct LoadTrack: Equatable {
 
     mutating func landed() {
         jumpAskedAt = nil
+    }
+
+    /// The player on its way to a jump, or landed. While choosing where to
+    /// jump its previews don't wait; a jump still on its way once the
+    /// choice ends does, from then.
+    mutating func seeking(_ on: Bool, choosing: Bool, at now: Date) {
+        playerSeeking = on
+        if !on { landed() } else if !choosing { jumping(at: now) }
+    }
+
+    mutating func choosingEnded(at now: Date) {
+        if playerSeeking { jumping(at: now) }
     }
 
     mutating func failed(at now: Date) {
