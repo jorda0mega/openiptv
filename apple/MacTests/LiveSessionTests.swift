@@ -45,6 +45,44 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(session.handle(.timedOut(second, .no_data), now: at(18)).prefix(2), [.cancelDeadline, .markFailed(b)])
     }
 
+    func testAStartStillWaitingAtItsDeadlineGivesUp() {
+        var session = opening()
+        XCTAssertEqual(session.handle(.gaveUp, now: at(30)), [.cancelDeadline, .stop], "the copies kept being tried past the deadline")
+        XCTAssertEqual(session.failure, .notPlaying)
+        XCTAssertEqual(session.handle(.timedOut(session.attempt, .no_data), now: at(31)), [], "a copy's late timeout after giving up")
+    }
+
+    func testOfflineGivesUpAtItsDeadlineSayingSo() {
+        var session = playing()
+        XCTAssertEqual(session.handle(.failed(session.attempt, .offline, shown: .notPlaying), now: at(5)), [.stop, .waitForNetwork])
+        XCTAssertEqual(session.handle(.gaveUp, now: at(35)), [.stop], "offline, it waits forever")
+        XCTAssertEqual(session.failure, .offline)
+        XCTAssertEqual(session.handle(.online, now: at(40)), [], "back online after giving up reopened it")
+    }
+
+    func testAFrozenPictureOrAReopenGivesUpAtItsDeadline() {
+        var stalled = playing()
+        XCTAssertEqual(stalled.handle(.gaveUp, now: at(31)), [.stop], "a frozen picture spins forever")
+        XCTAssertEqual(stalled.failure, .notPlaying)
+        var reopening = playing()
+        _ = reopening.handle(.failed(reopening.attempt, .reset, shown: .notPlaying), now: at(5))
+        XCTAssertEqual(reopening.phase, .reopening(a))
+        XCTAssertEqual(reopening.handle(.gaveUp, now: at(35)), [.stop])
+        XCTAssertEqual(reopening.failure, .notPlaying)
+    }
+
+    func testGivingUpChangesNothingWithoutAWait() {
+        var failed = opening([[a]])
+        _ = failed.handle(.timedOut(failed.attempt, .no_data), now: at(15))
+        XCTAssertEqual(failed.handle(.gaveUp, now: at(30)), [])
+        XCTAssertEqual(failed.failure, .notPlaying)
+        var idle = Session()
+        XCTAssertEqual(idle.handle(.gaveUp, now: at(30)), [])
+        var closed = playing()
+        _ = closed.handle(.closed, now: at(2))
+        XCTAssertEqual(closed.handle(.gaveUp, now: at(30)), [])
+    }
+
     func testNothingReloadsAfterGivingUp() {
         var session = opening([[a]])
         let given = session.attempt

@@ -153,6 +153,20 @@ final class LoadProgressTests: XCTestCase {
         XCTAssertEqual(stall.shown(at: at(10))?.tryAgain, true)
     }
 
+    func testEveryWaitEndsThirtySecondsAfterItBegan() {
+        let trickle = film(.starting)
+        XCTAssertEqual(trickle.deadline, at(30))
+        XCTAssertFalse(trickle.overdue(at: at(29.9)))
+        XCTAssertTrue(trickle.overdue(at: at(30)), "a film sending a few bytes now and then still spins at 30 s")
+        XCTAssertTrue(channel(.asking, cause: .offline, wait: .reconnect).overdue(at: at(31)), "offline, it waits forever")
+        let stall = LoadProgress(subject: .film("Heat"), wait: .stall, stage: .fetching, cause: .server, began: tap)
+        XCTAssertTrue(stall.overdue(at: at(30)), "a stall during play spins forever")
+        var failed = trickle
+        failed.failure = .init(kind: .noPicture, tries: 1, seconds: 30)
+        XCTAssertNil(failed.deadline, "a failure still has a deadline to fire")
+        XCTAssertFalse(failed.overdue(at: at(600)))
+    }
+
     func testAFailureAfterADropShowsAtOnce() {
         var drop = channel(.asking, wait: .reconnect)
         drop.failure = .init(kind: .noPicture, tries: 3, seconds: 1)
