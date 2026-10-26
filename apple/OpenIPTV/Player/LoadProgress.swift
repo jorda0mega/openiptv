@@ -202,6 +202,10 @@ struct LoadTrack: Equatable {
         attempt == self.attempt
     }
 
+    func stillFailed(_ attempt: Int) -> Bool {
+        isCurrent(attempt) && failedAt != nil
+    }
+
     /// Try again: the wait starts over, the attempts keep counting.
     mutating func restart(at now: Date) {
         self = LoadTrack(began: now, stage: firstStage, attempt: attempt)
