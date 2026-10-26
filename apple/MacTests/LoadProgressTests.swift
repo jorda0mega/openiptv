@@ -352,7 +352,7 @@ final class LoadTrackTests: XCTestCase {
         track.pictured()
         track.stalled(at: at(50))
         track.asked(at: at(58))
-        XCTAssertEqual(track.began, at(50), "the reconnect counted from the reopen, not from when the picture went")
+        XCTAssertEqual(track.pictureLost, at(50), "the reconnect counted from the reopen, not from when the picture went")
         XCTAssertTrue(track.dropped)
     }
 
@@ -369,7 +369,8 @@ final class LoadTrackTests: XCTestCase {
         track.asked(at: at(58))
         let reopening = LoadProgress.channel("PPV 1", track: track, loading: true, hasPicture: true, cause: .channel)
         XCTAssertEqual(reopening?.wait, .reconnect)
-        XCTAssertEqual(reopening?.began, at(50), "the reopen restarted the drop's clock")
+        XCTAssertEqual(reopening?.pictureLost, at(50), "the reopen restarted the drop's clock")
+        XCTAssertEqual(reopening?.deadline, at(80), "the drop's deadline counted from the reopen")
     }
 
     func testALiveStartAndAFailureAreWhatTheyWere() {

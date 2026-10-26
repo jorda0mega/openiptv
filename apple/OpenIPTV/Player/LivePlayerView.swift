@@ -86,24 +86,17 @@ struct LivePlayerView: View {
     private var failed: Bool { session.failure != nil }
     private var loading: Bool { (buffering || session.isLoading) && !failed }
     private var load: LoadProgress? {
-        let subject = LoadProgress.Subject.channel(displayName)
-        if let failure = session.failure {
+        let failure = session.failure.map { failure in
             let kind: LoadProgress.Failure.Kind = switch failure {
             case .notPlaying: .noPicture
             case .ended: .ended
             case .offline: .refused("No internet connection.")
             case let .message(text): .refused(text)
             }
-            return LoadProgress(subject: subject, cause: .channel, began: startTrack.began,
-                                failure: startTrack.failure(kind, otherChannels: choices.count > 1))
+            return startTrack.failure(kind, otherChannels: choices.count > 1)
         }
-        if session.isLoading {
-            return LoadProgress(subject: subject, wait: started ? .reconnect : .start, stage: startTrack.stage,
-                                received: startTrack.received, cause: loadCause, began: startTrack.began,
-                                pictureLost: startTrack.pictureLost)
-        }
-        guard started, let since = startTrack.stalledSince else { return nil }
-        return LoadProgress(subject: subject, wait: .stall, stage: startTrack.stage, cause: loadCause, began: since)
+        return LoadProgress.channel(displayName, track: startTrack, loading: session.isLoading, hasPicture: started,
+                                    cause: loadCause, failure: failure)
     }
     private var loadCause: LoadProgress.Cause {
         if case .offline = session.phase { return .offline }
