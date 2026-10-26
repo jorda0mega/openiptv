@@ -81,7 +81,7 @@ final class LiveRecoveryTests: XCTestCase {
         let since = try markTime(server)
         openChannel(7)
         XCTAssertTrue(waitForState("playing", within: 15), "channel 7 didn't play")
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(35)
         var opens = 0
         var seen: Set<String> = []
         var asked = Date.distantPast
@@ -96,7 +96,8 @@ final class LiveRecoveryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(opens, 2, "a stream that stopped sending wasn't opened again within 15 s")
         let times = try liveRequests(server, since: since).filter { $0.id == "7" }.map(\.t)
         if times.count >= 2 {
-            XCTAssertLessThanOrEqual(times[1] - times[0], 1 + 10 + 15, "opened again more than 16 s after the server went silent 10 s in")
+            XCTAssertGreaterThanOrEqual(times[1] - times[0], 10 + 10, "opened again before the picture stood still 10 s")
+            XCTAssertLessThanOrEqual(times[1] - times[0], 1 + 10 + 18, "opened again more than 18 s after the server went silent 10 s in")
         }
         XCTAssertTrue(seen.contains("reopening"), "the stream wasn't opened again in place: \(seen)")
         XCTAssertTrue(waitForState("playing", within: 15), "the stream opened again didn't play: \(state())")

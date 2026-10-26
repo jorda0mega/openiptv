@@ -118,7 +118,9 @@ final class LiveSessionTests: XCTestCase {
         var session = playing()
         let load = session.attempt
         XCTAssertEqual(session.handle(.picture(load, frozen: true), now: at(20)), [.deadline(load, after: Session.stallLimit)])
-        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(30)), [.cancelDeadline, .clearTimeline, .load(a, load + 1, after: 0)])
+        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(30)),
+                       [.cancelDeadline, .stop, .clearTimeline, .load(a, load + 1, after: Session.refusalWindow)],
+                       "the dead connection must close, and the account free it, before the copy opens again")
         XCTAssertEqual(session.phase, .reopening(a))
         XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(31)), [], "the deadline of the stream let go opened it again")
     }
@@ -140,7 +142,8 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(30)), [])
         XCTAssertEqual(session.handle(.paused(false), now: at(40)), [.deadline(load, after: Session.stallLimit)],
                        "played again with the picture still frozen and nothing watching it")
-        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(50)), [.cancelDeadline, .clearTimeline, .load(a, load + 1, after: 0)])
+        XCTAssertEqual(session.handle(.timedOut(load, .timeout), now: at(50)),
+                       [.cancelDeadline, .stop, .clearTimeline, .load(a, load + 1, after: Session.refusalWindow)])
     }
 
     func testAFrozenPictureWhileOfflineWaitsForTheNetwork() {
@@ -183,7 +186,7 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(closed.handle(.closed, now: at(22)), [.cancelDeadline])
     }
 
-    func testStallsWaitLongerEachTimeAndTheFourthMovesToTheNextCopy() {
+    func testStallsWaitOutTheRefusalAndTheFourthMovesToTheNextCopy() {
         var session = playing()
         var waits: [Double] = []
         var last: [Session.Action] = []
@@ -196,8 +199,8 @@ final class LiveSessionTests: XCTestCase {
             _ = session.handle(.opening(session.attempt), now: at(Double(31 + 30 * i)))
             _ = session.handle(.started(session.attempt), now: at(Double(32 + 30 * i)))
         }
-        XCTAssertEqual(waits.prefix(3), [0, 1, 2])
-        XCTAssertTrue(last.contains(.load(b, session.attempt, after: 0)), "four stalls in 3 min stayed on the copy: \(last)")
+        XCTAssertEqual(waits.prefix(3), [3, 3, 3])
+        XCTAssertTrue(last.contains(.stop) && last.contains(.load(b, session.attempt, after: 0)), "four stalls in 3 min stayed on the copy: \(last)")
     }
 
     func testACutWhilePausedWaitsForPlay() {
