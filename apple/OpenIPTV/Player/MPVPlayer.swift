@@ -70,6 +70,9 @@ final class MPVPlayer: @unchecked Sendable {
     private var failureUnheard: (message: String, class: StreamFailure?, attempt: Int)?
     private var logged: (failure: StreamFailure, at: CFAbsoluteTime, attempt: Int)?
     private var loads = LoadEvents()
+    private var askedAttempt = 0
+    /// The attempt events carry for the last load asked for.
+    var currentAttempt: Int { stateLock.withLock { askedAttempt } }
     private static let ids = NSLock()
     nonisolated(unsafe) private static var lastID = 0
     private let ledgerID: Int = MPVPlayer.ids.withLock {
@@ -389,7 +392,13 @@ final class MPVPlayer: @unchecked Sendable {
     /// asked for (Emby's converted versions).
     func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, sequential: Bool = false,
               converting: Bool = false, readahead: Readahead = .live, tracks: TrackPlan? = nil, sameFilm clock: Double? = nil,
-              attempt: Int = 0) {
+              attempt: Int? = nil) {
+        // A reload of its own (a converted version's open, a jump in it)
+        // keeps the attempt its owner last asked for.
+        let attempt = stateLock.withLock {
+            askedAttempt = attempt ?? askedAttempt
+            return askedAttempt
+        }
         // Files go through the in-app relay, which keeps one warm HTTP/2
         // connection to the server instead of a new one per seek.
         var url = url, headers = headers

@@ -1000,10 +1000,9 @@ struct MoviePlayerView: View {
         attempt = 0
         started = false
         let now = Date()
-        track = LoadTrack(began: now)
-        track.asked(.fetching, at: now)
+        track.restart(at: now)
         playFile(playback.url, headers: playback.headers, at: startedOnce ? position : playback.startSeconds,
-                 readahead: NetworkStatus.shared.fileReadahead)
+                 readahead: NetworkStatus.shared.fileReadahead, attempt: track.asked(.fetching, at: now))
         showControls()
     }
 
@@ -1157,18 +1156,17 @@ struct MoviePlayerView: View {
             }
         }
         #endif
-        track = LoadTrack(began: playback.requestedAt)
-        track.asked(.fetching, at: Date())
         if let warmPlayer = model.takeWarm(playback.itemId, at: playback.startSeconds) {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
             PlaybackAudio.activate()
-            warmPlayer.onEvent = { event, _ in handle(event) }
+            track = LoadTrack(began: playback.requestedAt, stage: .fetching, attempt: warmPlayer.currentAttempt)
+            warmPlayer.onEvent = { event, attempt in handle(event, attempt) }
             self.player = warmPlayer
             #if DEBUG
             warmPlayer.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
             #endif
-            if warmPlayer.hasStarted { handle(.started(0)) }
+            if warmPlayer.hasStarted { handle(.started(0), track.attempt) }
             // Now it's being watched: download the rest of it.
             warmPlayer.setReadahead(NetworkStatus.shared.fileReadahead)
             warmPlayer.setPaused(false)
@@ -1177,8 +1175,9 @@ struct MoviePlayerView: View {
             // the connection.
             model.coolDown()
             let player = makePlayer(prefs: prefs)
-            player.onEvent = { event, _ in handle(event) }
+            player.onEvent = { event, attempt in handle(event, attempt) }
             self.player = player
+            track = LoadTrack(began: playback.requestedAt, stage: .fetching)
             #if DEBUG
             player.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
             #endif
@@ -1187,7 +1186,8 @@ struct MoviePlayerView: View {
             // begin (and every seek restarts it). Quality only drops if the
             // original actually stalls.
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
-                        readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks)
+                        readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks,
+                        attempt: track.asked(.fetching, at: Date()))
             player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
             player.addCopies(playback.subtitleCopies)
         }
@@ -1230,7 +1230,8 @@ struct MoviePlayerView: View {
         started = true
         startedOnce = true
         warmStart = true
-        back.player.onEvent = { event, _ in handle(event) }
+        track = LoadTrack(began: Date(), stage: .fetching, attempt: back.player.currentAttempt)
+        back.player.onEvent = { event, attempt in handle(event, attempt) }
         player = back.player
         trackSwitched()
         back.player.drawOnScreen()
@@ -1282,22 +1283,24 @@ struct MoviePlayerView: View {
             revertTo = nil
             lastConverted = bitrate
             guard let url = model.convertedURL(for: playback, bitrate: bitrate, start: at, audio: player.audioStreamIndex) else { return }
-            playConverted(url)
+            playConverted(url, attempt: track.nextAttempt())
         case .original:
             revertTo = lastConverted
             jumpUntil = Date().addingTimeInterval(1.5)
-            playFile(playback.url, headers: playback.headers, at: at, readahead: NetworkStatus.shared.fileReadahead)
+            playFile(playback.url, headers: playback.headers, at: at, readahead: NetworkStatus.shared.fileReadahead,
+                     attempt: track.nextAttempt())
         }
     }
 
-    private func playFile(_ url: URL, headers: [String], at: Double?, readahead: MPVPlayer.Readahead = .live) {
+    private func playFile(_ url: URL, headers: [String], at: Double?, readahead: MPVPlayer.Readahead = .live, attempt: Int) {
         convertedOpen?.cancel()
         stream = .whole
-        player?.load(url, headers: headers, start: at, file: true, readahead: readahead, tracks: playback.tracks, sameFilm: 0)
+        player?.load(url, headers: headers, start: at, file: true, readahead: readahead, tracks: playback.tracks, sameFilm: 0,
+                     attempt: attempt)
     }
 
     /// Opens from where the film is once the playlists arrive, so a jump during the wait holds.
-    private func playConverted(_ url: URL) {
+    private func playConverted(_ url: URL, attempt: Int) {
         guard let player else { return }
         #if DEBUG
         player.askedForConverted()
@@ -1311,7 +1314,7 @@ struct MoviePlayerView: View {
             switch opening {
             case let .refused(why): refuseConverted(why, player)
             case let .listed(list):
-                guard let opened = player.openConverted(address, list, at: position, for: playback) else {
+                guard let opened = player.openConverted(address, list, at: position, for: playback, attempt: attempt) else {
                     return refuseConverted("relay not running", player)
                 }
                 // The stream playing reports where it was for a moment after
@@ -1326,7 +1329,7 @@ struct MoviePlayerView: View {
         #if DEBUG
         convertedReadout = "not opened, " + why
         #endif
-        if player.hasFailed { return handle(.failed("The converted version didn't open.", nil)) }
+        if player.hasFailed { return handle(.failed("The converted version didn't open.", nil), track.attempt) }
         governor = nil
     }
 
@@ -1375,7 +1378,14 @@ struct MoviePlayerView: View {
         }
     }
 
-    private func handle(_ event: MPVPlayer.Event) {
+    /// An event of a load replaced since (Try again, the next way to open
+    /// it, another quality) changes nothing; the player's own pause, jumps
+    /// and tracks aren't any one load's.
+    private func handle(_ event: MPVPlayer.Event, _ loadAttempt: Int) {
+        switch event {
+        case .paused, .seeked, .previewShown, .tracksChanged: break
+        default: guard track.isCurrent(loadAttempt) else { return }
+        }
         switch event {
         case let .started(playerSeconds):
             ScreenAwake.set(awakeID, playing: !paused)
@@ -1470,23 +1480,23 @@ struct MoviePlayerView: View {
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
                 revertTo = nil
                 governor?.revert(to: bitrate)
-                playConverted(url)
+                playConverted(url, attempt: track.nextAttempt())
                 return
             }
             // A converted version the server won't make: go back to the
             // original and stop adapting.
             if started, governor?.current != nil {
                 governor = nil
-                playFile(playback.url, headers: playback.headers, at: position)
+                playFile(playback.url, headers: playback.headers, at: position, attempt: track.nextAttempt())
                 return
             }
             if !started, attempt < playback.fallbacks.count {
                 // The original didn't open; try the next way Emby offers.
                 let next = playback.fallbacks[attempt]
                 attempt += 1
-                track.asked(.fetching, at: Date())
-                if next.path().hasSuffix(".m3u8") { playConverted(next); return }
-                playFile(next, headers: playback.fallbackHeaders, at: playback.startSeconds)
+                let asked = track.asked(.fetching, at: Date())
+                if next.path().hasSuffix(".m3u8") { playConverted(next, attempt: asked); return }
+                playFile(next, headers: playback.fallbackHeaders, at: playback.startSeconds, attempt: asked)
                 return
             }
             error = message.prefix(1).uppercased() + message.dropFirst()
