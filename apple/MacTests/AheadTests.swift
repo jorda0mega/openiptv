@@ -146,6 +146,99 @@ final class AheadTests: XCTestCase {
         for task in Array(hero.values) + Array(row.values) { await task.value }
     }
 
+    /// Cards whose starts go through a lane and a shelf, as in the app, on
+    /// a phone network: 150 MB a day (one card) or As on Wi-Fi.
+    @MainActor
+    private final class Fetching {
+        let started = Locked<[String]>([])
+        let stopped = Locked<[String]>([])
+        let ahead: Ahead
+        let shelf: Shelf<String, Int>
+        private var planHeld: CheckedContinuation<Void, Never>?
+
+        init(oneCard: Bool, holdingPlanOf held: String? = nil) {
+            let device = Conditions(network: .expensive, playing: false, lowPower: false, thermal: .nominal, memoryWarned: false,
+                                    freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true), phoneNetwork: oneCard ? .daily : .wifi)
+            let (started, stopped) = (started, stopped)
+            let shelf = Shelf<String, Int>(.init(lane: Lane(.bytes, atOnce: 2) { device }, lifetime: .seconds(60))) { id in
+                started.mutate { $0.append(id) }
+                do { try await Task.sleep(for: .seconds(3600)) } catch {
+                    stopped.mutate { $0.append(id) }
+                    throw error
+                }
+                return 0
+            }
+            self.shelf = shelf
+            var fetching: Fetching?
+            ahead = Ahead(Ahead.Work(page: { _, _ in }, plan: { target, _ in
+                guard case let .playable(id, _) = target else { return nil }
+                if id == held { await withCheckedContinuation { fetching?.planHeld = $0 } }
+                return EmbyPlayback(itemId: id, title: id, subtitle: nil, url: URL(string: "http://server/Videos/\(id)/stream")!,
+                                    durationSeconds: 7200)
+            }, fileStart: { plan, interest in _ = await shelf.warm(plan.itemId, for: interest) }, connection: { _, _ in },
+            subtitle: { _, _ in }, previews: { _, _ in }), platform: .phone,
+            sleep: { if $0 > .seconds(1) { try await Task.sleep(for: .seconds(3600)) } }, restsOnOneCard: { oneCard })
+            fetching = self
+        }
+
+        func show(_ id: String, share: Double, x: Double) {
+            ahead.showing.show(.playable(id: id, kind: "Movie"), at: .continueWatching, share: share, from: CGPoint(x: x, y: 300))
+        }
+
+        func hold(_ id: String, share: Double, x: Double) -> Task<Void, Never> {
+            show(id, share: share, x: x)
+            return Task { await ahead.holding(.playable(id: id, kind: "Movie"), at: .continueWatching) }
+        }
+
+        func letPlanGo() {
+            planHeld?.resume()
+            planHeld = nil
+        }
+
+        func leave(_ held: [Task<Void, Never>]) async {
+            for task in held { task.cancel() }
+            for task in held { await task.value }
+            shelf.forgetAll()
+        }
+    }
+
+    func testOnAPhoneNetworkADayACardNoLongerMostShownWhenItsPlanCameFetchesNothing() async {
+        let fetching = Fetching(oneCard: true, holdingPlanOf: "m1")
+        let held = [fetching.hold("m1", share: 1, x: 20), fetching.hold("m2", share: 0.7, x: 272)]
+        await settle()
+        fetching.show("m1", share: 0.65, x: -120)
+        fetching.show("m2", share: 1, x: 132)
+        await settle()
+        fetching.letPlanGo()
+        await settle()
+        XCTAssertEqual(fetching.started.value, ["m2"], "the card scrolled from fetched its start when its plan came")
+        await fetching.leave(held)
+    }
+
+    func testOnAPhoneNetworkADayACardNoLongerMostShownStopsItsFetch() async {
+        let fetching = Fetching(oneCard: true)
+        let held = [fetching.hold("m1", share: 1, x: 20), fetching.hold("m2", share: 0.7, x: 272)]
+        await settle()
+        fetching.show("m1", share: 0.65, x: -120)
+        fetching.show("m2", share: 1, x: 132)
+        await settle()
+        XCTAssertEqual(fetching.started.value, ["m1", "m2"])
+        XCTAssertEqual(fetching.stopped.value, ["m1"], "the card scrolled from went on fetching")
+        await fetching.leave(held)
+    }
+
+    func testAsOnWiFiACardNoLongerMostShownGoesOnFetching() async {
+        let fetching = Fetching(oneCard: false)
+        let held = [fetching.hold("m1", share: 1, x: 20), fetching.hold("m2", share: 0.7, x: 272)]
+        await settle()
+        fetching.show("m1", share: 0.65, x: -120)
+        fetching.show("m2", share: 1, x: 132)
+        await settle()
+        XCTAssertEqual(Set(fetching.started.value), ["m1", "m2"])
+        XCTAssertEqual(fetching.stopped.value, [])
+        await fetching.leave(held)
+    }
+
     func testOnWiFiEveryCardOnScreenIsRestedOn() async {
         let rests = Rests(oneCard: false)
         let held = rests.hold([("m1", 1, 20, 300), ("m2", 0.7, 272, 300)])
