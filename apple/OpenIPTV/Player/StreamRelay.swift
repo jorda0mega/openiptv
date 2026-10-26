@@ -819,8 +819,11 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         lock.lock()
+        let stopped = finished
         answered = true
         lock.unlock()
+        // Given up as it came: the ask replacing it answers the player.
+        guard !stopped else { return completionHandler(.cancel) }
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 502
         #if DEBUG
@@ -862,6 +865,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard !lock.withLock({ finished }) else { return }
         #if DEBUG
         relay?.noteFetched(data.count, for: read)
         #endif
