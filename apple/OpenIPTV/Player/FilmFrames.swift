@@ -30,8 +30,11 @@ final class FilmFrames: @unchecked Sendable {
         var screen: PixelSize?
         var window: PixelSize?
         var fill = false
-        var undrawn = false
+        var inBackground = false
         var redraw = false
+
+        /// Behind the app with no window to show them: frames go by undrawn, and the sound plays on.
+        var undrawn: Bool { inBackground && window == nil }
 
         var plan: FramePlan { FramePlan.make(video: video, screen: screen, window: window, fill: fill) }
     }
@@ -52,7 +55,7 @@ final class FilmFrames: @unchecked Sendable {
         var params = [mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(api)),
                       mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)]
         guard mpv_render_context_create(&made, mpv, &params) >= 0, let made else { return }
-        context = made
+        lock.withLock { context = made }
         mpv_render_context_set_update_callback(made, { raw in
             guard let raw else { return }
             Unmanaged<FilmFrames>.fromOpaque(raw).takeUnretainedValue().due()
@@ -69,8 +72,7 @@ final class FilmFrames: @unchecked Sendable {
         }
     }
 
-    func setUndrawn(_ undrawn: Bool) { _ = change { $0.undrawn = undrawn } }
-    var isInWindow: Bool { lock.withLock { inputs.window != nil } }
+    func setInBackground(_ inBackground: Bool) { _ = change { $0.inBackground = inBackground } }
     var isUndrawn: Bool { lock.withLock { inputs.undrawn } }
 
     func syncClock(_ seconds: Double, playing: Bool) {
@@ -86,12 +88,15 @@ final class FilmFrames: @unchecked Sendable {
     var isPlaying: Bool { clock.map { CMTimebaseGetRate($0) != 0 } ?? false }
 
     func close() {
-        lock.withLock { closed = true }
+        let context = lock.withLock {
+            closed = true
+            defer { self.context = nil }
+            return self.context
+        }
         queue.sync {}
         guard let context else { return }
         mpv_render_context_set_update_callback(context, nil, nil)
         mpv_render_context_free(context)
-        self.context = nil
     }
 
     private func change(_ edit: (inout Inputs) -> Void) -> FramePlan {
@@ -115,14 +120,15 @@ final class FilmFrames: @unchecked Sendable {
     }
 
     private func draw() {
-        let state = lock.withLock { () -> (inputs: Inputs, redraw: Bool)? in
+        let state = lock.withLock { () -> (inputs: Inputs, redraw: Bool, context: OpaquePointer)? in
             waiting = false
-            guard !closed else { return nil }
+            guard !closed, let context else { return nil }
             let redraw = inputs.redraw
             inputs.redraw = false
-            return (inputs, redraw)
+            return (inputs, redraw, context)
         }
-        guard let state, let context else { return }
+        guard let state else { return }
+        let context = state.context
         let fresh = mpv_render_context_update(context) & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0
         guard fresh || state.redraw else { return }
         let plan = state.inputs.plan

@@ -5,9 +5,13 @@ struct WindowFlow: Equatable, Sendable {
         case none
         /// iOS may start the window by itself.
         case inline
-        case starting(byButton: Bool)
+        /// `appBack`: the app came back before iOS said the window was up.
+        case starting(byButton: Bool, appBack: Bool)
         case windowed(screenClosed: Bool)
-        case returning(screenClosed: Bool, restoreWaiting: Bool, windowUp: Bool)
+        /// The player screen shows the film; the window is up until iOS says it stopped.
+        case closingWindow
+        /// The dock holds the film's layer until the player screen takes it. `reclaimed`: the screen has the player.
+        case awaitingScreen(reclaimed: Bool, restoreWaiting: Bool, windowUp: Bool)
     }
 
     enum Event: Equatable, Sendable {
@@ -16,6 +20,7 @@ struct WindowFlow: Equatable, Sendable {
         case restoreAsked
         case appOpened
         case chosenAgain
+        case reclaimed
         case screenHosts
         case didStop, restoreTimedOut
         case screenLetGo
@@ -36,7 +41,7 @@ struct WindowFlow: Equatable, Sendable {
 
     var keepsFilm: Bool {
         switch phase {
-        case .windowed(screenClosed: true), .returning(screenClosed: true, _, _): true
+        case .windowed(screenClosed: true), .awaitingScreen(reclaimed: false, _, _): true
         default: false
         }
     }
@@ -48,74 +53,88 @@ struct WindowFlow: Equatable, Sendable {
             phase = .inline
             return []
         case (.inline, .buttonTapped):
-            phase = .starting(byButton: true)
+            phase = .starting(byButton: true, appBack: false)
             return [.measureStart, .framesToWindow, .startWindow]
         case (.inline, .willStart):
-            phase = .starting(byButton: false)
+            phase = .starting(byButton: false, appBack: false)
             return [.measureStart, .framesToWindow]
-        case let (.starting(byButton), .didStart):
+        case (.starting(byButton: false, _), .appOpened):
+            phase = .starting(byButton: false, appBack: true)
+            return []
+        case (.starting(_, appBack: true), .didStart):
+            phase = .closingWindow
+            return [.measureReturn, .framesToScreen, .stopWindow]
+        case let (.starting(byButton, _), .didStart):
             phase = .windowed(screenClosed: byButton)
             return byButton ? [.dock, .closeScreen] : []
-        case let (.starting(byButton), .failedToStart):
+        case let (.starting(byButton, _), .failedToStart):
             phase = .inline
             return byButton ? [.framesToScreen, .noteUnavailable] : [.framesToScreen]
 
         case (.windowed(screenClosed: false), .restoreAsked):
-            phase = .returning(screenClosed: false, restoreWaiting: false, windowUp: true)
+            phase = .closingWindow
             return [.measureReturn, .framesToScreen, .finishRestore(true)]
         case (.windowed(screenClosed: false), .appOpened):
-            phase = .returning(screenClosed: false, restoreWaiting: false, windowUp: true)
+            phase = .closingWindow
             return [.measureReturn, .framesToScreen, .stopWindow]
         case (.windowed(screenClosed: false), .didStop):
             phase = .inline
             return [.framesToScreen, .pausePlayer]
         case (.windowed(screenClosed: true), .restoreAsked):
-            phase = .returning(screenClosed: true, restoreWaiting: true, windowUp: true)
+            phase = .awaitingScreen(reclaimed: false, restoreWaiting: true, windowUp: true)
             return [.measureReturn, .presentScreen, .armRestoreTimeout]
         case (.windowed(screenClosed: true), .chosenAgain):
-            phase = .returning(screenClosed: true, restoreWaiting: false, windowUp: true)
+            phase = .awaitingScreen(reclaimed: false, restoreWaiting: false, windowUp: true)
             return [.measureReturn, .stopWindow]
         case (.windowed(screenClosed: true), .didStop):
             phase = .none
             return [.stopFilm, .releaseController]
         case (.windowed(screenClosed: true), .filmEnded):
             return [.stopWindow]
-
-        case let (.returning(screenClosed, restoreWaiting, windowUp), .screenHosts) where screenClosed:
-            phase = windowUp ? .returning(screenClosed: false, restoreWaiting: false, windowUp: true) : .inline
-            return [.framesToScreen] + (restoreWaiting ? [.finishRestore(true)] : [])
-        case let (.returning(screenClosed, restoreWaiting, windowUp), .restoreAsked) where !restoreWaiting:
-            if screenClosed {
-                phase = .returning(screenClosed: true, restoreWaiting: true, windowUp: windowUp)
-                return [.armRestoreTimeout]
-            }
-            return [.finishRestore(true)]
-        case let (.returning(screenClosed, restoreWaiting, windowUp), .didStop) where windowUp:
-            phase = screenClosed ? .returning(screenClosed: true, restoreWaiting: restoreWaiting, windowUp: false) : .inline
-            return []
-        case let (.returning(screenClosed, restoreWaiting, windowUp), .restoreTimedOut) where screenClosed,
-             let (.returning(screenClosed, restoreWaiting, windowUp), .otherTitle) where screenClosed:
-            return releaseDockedFilm(restoreWaiting: restoreWaiting, windowUp: windowUp)
         case (.windowed(screenClosed: true), .otherTitle):
-            return releaseDockedFilm(restoreWaiting: false, windowUp: true)
+            phase = .none
+            return [.stopWindow, .stopFilm, .releaseController]
+
+        case (.closingWindow, .restoreAsked):
+            return [.finishRestore(true)]
+        case (.closingWindow, .didStop):
+            phase = .inline
+            return []
+
+        case let (.awaitingScreen(false, restoreWaiting, windowUp), .reclaimed):
+            phase = .awaitingScreen(reclaimed: true, restoreWaiting: restoreWaiting, windowUp: windowUp)
+            return []
+        case let (.awaitingScreen(_, restoreWaiting, windowUp), .screenHosts):
+            phase = windowUp ? .closingWindow : .inline
+            return [.framesToScreen] + (restoreWaiting ? [.finishRestore(true)] : [])
+        case let (.awaitingScreen(reclaimed, false, windowUp), .restoreAsked):
+            phase = .awaitingScreen(reclaimed: reclaimed, restoreWaiting: true, windowUp: windowUp)
+            return [.armRestoreTimeout]
+        case let (.awaitingScreen(reclaimed, restoreWaiting, true), .didStop):
+            phase = .awaitingScreen(reclaimed: reclaimed, restoreWaiting: restoreWaiting, windowUp: false)
+            return []
+        case let (.awaitingScreen(true, restoreWaiting, windowUp), .restoreTimedOut):
+            phase = .awaitingScreen(reclaimed: true, restoreWaiting: false, windowUp: windowUp)
+            return restoreWaiting ? [.finishRestore(false)] : []
+        case let (.awaitingScreen(false, restoreWaiting, windowUp), .restoreTimedOut),
+             let (.awaitingScreen(false, restoreWaiting, windowUp), .otherTitle):
+            phase = .none
+            return (restoreWaiting ? [.finishRestore(false)] : []) + (windowUp ? [.stopWindow] : []) + [.stopFilm, .releaseController]
+        case let (.awaitingScreen(true, restoreWaiting, windowUp), .screenLetGo):
+            phase = .none
+            return (restoreWaiting ? [.finishRestore(false)] : []) + (windowUp ? [.stopWindow] : []) + [.releaseController]
 
         case (.inline, .screenLetGo):
             phase = .none
             return [.releaseController]
-        case (.starting, .screenLetGo), (.windowed(screenClosed: false), .screenLetGo):
+        case (.starting, .screenLetGo), (.windowed(screenClosed: false), .screenLetGo), (.closingWindow, .screenLetGo):
             phase = .none
             return [.stopWindow, .releaseController]
-        case let (.returning(screenClosed, _, windowUp), .screenLetGo) where !screenClosed:
-            phase = .none
-            return (windowUp ? [.stopWindow] : []) + [.releaseController]
 
+        case (_, .restoreAsked):
+            return [.finishRestore(false)]
         default:
             return []
         }
-    }
-
-    private mutating func releaseDockedFilm(restoreWaiting: Bool, windowUp: Bool) -> [Effect] {
-        phase = .none
-        return (restoreWaiting ? [.finishRestore(false)] : []) + (windowUp ? [.stopWindow] : []) + [.stopFilm, .releaseController]
     }
 }

@@ -51,8 +51,6 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         var ignoreTimeUntil: Date?
     }
 
-    var isActive: Bool { film?.controller.isPictureInPictureActive ?? false }
-
     override private init() {
         super.init()
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
@@ -62,10 +60,12 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
 
     func offer(_ player: MPVPlayer, playback: EmbyPlayback, total: Double, skip: @escaping (Double) -> Void) {
         guard Self.isSupported, let frames = player.frames else { return }
-        if film?.player === player {
-            film?.screenSkip = skip
-            film?.total = total
+        if let film, film.player === player {
+            self.film?.screenSkip = skip
+            guard film.total != total else { return }
+            self.film?.total = total
             facts.set(total: total, frames: frames)
+            film.controller.invalidatePlaybackState()
             return
         }
         if film != nil { happen(.screenLetGo) }
@@ -103,6 +103,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             return nil
         }
         if case .windowed = flow.phase { happen(.chosenAgain) }
+        happen(.reclaimed)
         film.player.onEvent = nil
         endActivity()
         return (film.player, film.stream, film.position, film.paused)
@@ -125,18 +126,16 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
 
     private func happen(_ event: WindowFlow.Event) {
         for effect in flow.on(event) { run(effect) }
-        if let done = restoreDone, !waitsForScreen {
-            restoreDone = nil
-            done(false)
-        }
-    }
-
-    private var waitsForScreen: Bool {
-        if case .returning(screenClosed: true, restoreWaiting: true, _) = flow.phase { return true }
-        return false
     }
 
     private func run(_ effect: WindowFlow.Effect) {
+        if case let .finishRestore(ok) = effect {
+            restoreTimeout?.cancel()
+            let done = restoreDone
+            restoreDone = nil
+            done?(ok)
+            return
+        }
         guard let film else { return }
         switch effect {
         case .startWindow:
@@ -177,11 +176,8 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
                 guard !Task.isCancelled else { return }
                 self?.happen(.restoreTimedOut)
             }
-        case let .finishRestore(ok):
-            restoreTimeout?.cancel()
-            let done = restoreDone
-            restoreDone = nil
-            done?(ok)
+        case .finishRestore:
+            break
         case .pausePlayer:
             film.player.setPaused(true)
         case .stopFilm:

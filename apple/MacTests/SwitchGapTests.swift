@@ -9,7 +9,7 @@ final class SwitchGapTests: XCTestCase {
             gap.sample(at: wall, time: 60 + Double(i / 4 * 4) / 100, audio: 60 + wall)
             if i % 4 == 0 { gap.frame(at: wall) }
         }
-        XCTAssertEqual(gap.readout(until: 1), "start seeks=0 restarts=0 paused=0 time=30 audio=0 frames=40")
+        XCTAssertEqual(gap.readout(until: 1), "start seeks=0 restarts=0 paused=0 drops=0 time=30 audio=0 frames=40")
     }
 
     func testAFrozenClockIsAStall() {
@@ -30,7 +30,21 @@ final class SwitchGapTests: XCTestCase {
         gap.sample(at: 2.2, time: 10.2, audio: 10.2, paused: true)
         gap.sample(at: 2.3, time: 10.2, audio: 10.2)
         gap.sample(at: 2.4, time: 10.3, audio: 10.3)
-        XCTAssertTrue(gap.readout(until: 2.4).hasPrefix("start seeks=0 restarts=0 paused=2100 time=0 audio=0 "), gap.readout(until: 2.4))
+        XCTAssertTrue(gap.readout(until: 2.4).hasPrefix("start seeks=0 restarts=0 paused=2100 drops=0 time=0 audio=0 "), gap.readout(until: 2.4))
+    }
+
+    func testAClockMostlyUnreadIsNoMeasure() {
+        var gap = SwitchGap(.start, at: 0)
+        for i in 0...10 { gap.sample(at: Double(i) / 10, time: i < 3 ? 10 + Double(i) / 10 : nil, audio: 10 + Double(i) / 10) }
+        XCTAssertTrue(gap.readout(until: 1).contains(" time=unread audio=0 "), gap.readout(until: 1))
+    }
+
+    func testDroppedFramesCountWithinTheSwitch() {
+        var gap = SwitchGap(.return, at: 0)
+        gap.sample(at: 0, time: 10, audio: 10, drops: 4)
+        gap.sample(at: 0.5, time: 10.5, audio: 10.5, drops: 6)
+        gap.sample(at: 1, time: 11, audio: 11, drops: 7)
+        XCTAssertTrue(gap.readout(until: 1).contains(" drops=3 "), gap.readout(until: 1))
     }
 
     func testFramesWaitFromTheSwitchAndToItsEnd() {

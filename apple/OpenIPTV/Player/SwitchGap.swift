@@ -9,6 +9,7 @@ struct SwitchGap {
         var time: Double?
         var audio: Double?
         var paused: Bool
+        var drops: Int?
     }
 
     let kind: Kind
@@ -26,18 +27,26 @@ struct SwitchGap {
     mutating func seeked() { seeks += 1 }
     mutating func restarted() { restarts += 1 }
 
-    mutating func sample(at wall: Double, time: Double?, audio: Double?, paused: Bool = false) {
-        samples.append(Sample(wall: wall, time: time, audio: audio, paused: paused))
+    mutating func sample(at wall: Double, time: Double?, audio: Double?, paused: Bool = false, drops: Int? = nil) {
+        samples.append(Sample(wall: wall, time: time, audio: audio, paused: paused, drops: drops))
     }
 
     mutating func frame(at wall: Double) { frames.append(wall) }
 
     func readout(until end: Double) -> String {
-        let playing = stretchesPlaying
-        let time = playing.map { Self.longestStall(Self.clock($0, \.time)) }.max() ?? 0
-        let audio = playing.map { Self.longestStall(Self.clock($0, \.audio)) }.max() ?? 0
-        return "\(kind.rawValue) seeks=\(seeks) restarts=\(restarts) paused=\(ms(pausedFor)) time=\(ms(time)) audio=\(ms(audio)) "
-            + "frames=\(ms(longestWait(until: end)))"
+        "\(kind.rawValue) seeks=\(seeks) restarts=\(restarts) paused=\(ms(pausedFor)) drops=\(dropped) time=\(stall(\.time)) "
+            + "audio=\(stall(\.audio)) frames=\(ms(longestWait(until: end)))"
+    }
+
+    /// "unread" when the clock was read in fewer than half the samples.
+    private func stall(_ value: (Sample) -> Double?) -> String {
+        guard samples.filter({ value($0) != nil }).count * 2 >= samples.count else { return "unread" }
+        return "\(ms(stretchesPlaying.map { Self.longestStall(Self.clock($0, value)) }.max() ?? 0))"
+    }
+
+    private var dropped: Int {
+        let counts = samples.compactMap(\.drops)
+        return (counts.last ?? 0) - (counts.first ?? 0)
     }
 
     private var stretchesPlaying: [[Sample]] {
