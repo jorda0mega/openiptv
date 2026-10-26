@@ -41,6 +41,7 @@ let package = Package(
                 "Player/FilmStream.swift",
                 "Player/FoundSubtitles.swift",
                 "Player/LoadEvents.swift",
+                "Player/LoadProgress.swift",
                 "Player/Matroska.swift",
                 "Player/NetworkStatus.swift",
                 "Player/PlayerFacing.swift",
