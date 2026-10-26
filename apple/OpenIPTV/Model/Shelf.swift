@@ -224,10 +224,14 @@ final class Lane {
         start(ticket)
     }
 
-    /// What the conditions refuse now stops, under way or waiting; a play goes on.
+    /// What the conditions refuse now stops: waiting, or under way on a
+    /// phone network or in Low Data Mode (a play goes on). Wi-Fi that drops
+    /// a moment reads as no network known: under way, that goes on.
     func conditionsChanged() {
         let now = conditions()
-        for ticket in underWay where !ticket.plays && !allows(ticket, now) { ticket.stop?() }
+        if [.expensive, .constrained].contains(now.network) {
+            for ticket in underWay where !ticket.plays && !allows(ticket, now) { ticket.stop?() }
+        }
         admit()
     }
 
