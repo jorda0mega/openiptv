@@ -25,7 +25,7 @@ import slow_link  # noqa: E402
 
 SERVER_KEYS = {"base", "connect_s", "answer_s", "plan_s", "first_byte_s", "read_mb_s", "convert_first_s", "convert_segment_s",
                "subtitle_extract_s", "hang", "reset", "convert_refused"}
-LINK_KEYS = {"connect_s", "round_trip_s", "mbit_s", "stall", "network_change_s"}
+LINK_KEYS = {"connect_s", "round_trip_s", "mbit_s", "stall", "network_change_s", "offline", "metered_after_change"}
 PORT = 8858
 FILM = os.environ.get("OPENIPTV_MOCK_VIDEO", "/tmp/openiptv/net-media/net.mkv")
 
@@ -70,7 +70,7 @@ class Profiles(unittest.TestCase):
         self.assertEqual(slow_link.half("busy", "link"), {})
         self.assertEqual(slow_link.half("far", "server"), {})
         self.assertEqual(slow_link.half("far", "link")["mbit_s"], 8)
-        self.assertEqual(set(slow_link.half("worst", "link")), LINK_KEYS)
+        self.assertEqual(set(slow_link.half("worst", "link")), {"connect_s", "round_trip_s", "mbit_s", "stall", "network_change_s"})
 
     def test_worst_is_the_busy_server_with_its_faults(self):
         busy, worst = slow_link.half("real-busy", "server"), slow_link.half("worst", "server")
@@ -209,6 +209,83 @@ class NetworkChange(unittest.TestCase):
         self.assertEqual(changes, [])
 
 
+class Extreme(unittest.TestCase):
+    def setUp(self):
+        self.clock, self.real = Clock(), slow_link.time.monotonic
+        slow_link.time.monotonic = self.clock
+
+    def tearDown(self):
+        slow_link.time.monotonic = self.real
+
+    def test_extreme_is_worst_s_server_with_the_plan_at_30_to_40_s_and_no_setup_of_its_own(self):
+        worst, extreme = slow_link.half("worst", "server"), slow_link.half("extreme", "server")
+        self.assertEqual(extreme, worst | {"plan_s": [30, 40], "connect_s": 0})
+
+    def test_extreme_s_link_as_written(self):
+        self.assertEqual(slow_link.half("extreme", "link"), {
+            "connect_s": [2, 5], "round_trip_s": [0.6, 0.8], "mbit_s": 1, "stall": {"every_s": 5, "s": [0.5, 3]},
+            "offline": {"per_hour": 2, "s": [10, 30]}, "network_change_s": [120, 300], "metered_after_change": 1})
+
+    def test_extreme_carries_1_mbit_between_stalls_of_half_a_second_to_3_s_every_few_seconds(self):
+        link = slow_link.Link("extreme")
+        connection, began, step = link.connection(), self.clock.now, slow_link.PIECE / 125e3
+        gaps, before = [], None
+        while self.clock.now < began + 900:
+            at = link.book(connection, slow_link.PIECE)
+            if before is not None and at - before > step + 0.3:
+                gaps.append((before, at - before - step))
+            before = self.clock.now = at
+        done = link.readout()
+        offline = [w for w in link.schedule()["offline"] if w[0] < 900]
+        stalls = [g for at, g in gaps if not any(s - 1 <= at - began <= e for s, e, _ in offline)]
+        self.assertAlmostEqual(done["mb_s"], 0.125, delta=0.002)
+        self.assertTrue(all(0.5 - step - 0.01 <= g <= 3 + 0.01 for g in stalls), stalls)
+        self.assertAlmostEqual(len(stalls), 900 / (5 + 1.75), delta=20)
+        self.assertAlmostEqual(done["stalls"], len(stalls), delta=2)
+
+    def test_extreme_is_offline_twice_an_hour_for_10_to_30_s_once_in_each_half_and_repeats_with_the_seed(self):
+        windows = slow_link.Link("extreme").schedule()["offline"]
+        first_hour = [w for w in windows if w[0] < 3600]
+        self.assertEqual(len(first_hour), 2)
+        for half_hour, (start, end, kind) in enumerate(first_hour):
+            self.assertTrue(1800 * half_hour <= start and end <= 1800 * (half_hour + 1))
+            self.assertTrue(10 <= end - start <= 30)
+        self.assertEqual([w[2] for w in first_hour], ["hang", "refused"])
+        self.assertEqual(slow_link.Link("extreme").schedule(), slow_link.Link("extreme").schedule())
+        self.assertNotEqual(slow_link.Link("extreme", seed=2).schedule()["offline"], windows)
+
+    def test_every_connection_waits_out_an_offline_window(self):
+        link = slow_link.Link("extreme")
+        start, end, _ = link.schedule()["offline"][0]
+        connection = link.connection()
+        self.clock.now = link.began + start + 0.5
+        self.assertAlmostEqual(link.book(connection, slow_link.PIECE), link.began + end, delta=0.01)
+        self.assertEqual(link.offline(link.began + start + 0.5), "hang")
+        self.assertIsNone(link.offline(link.began + end + 0.1))
+
+    def test_the_schedule_names_the_change_and_counts_from_the_run_s_start_however_far_in_it_begins(self):
+        fresh, later = slow_link.Link("extreme"), slow_link.Link("extreme", ago=600)
+        self.assertEqual(fresh.schedule(), later.schedule())
+        self.assertTrue(120 <= fresh.schedule()["change_s"] <= 300)
+        self.assertTrue(fresh.schedule()["metered_after_change"])
+        self.assertFalse(slow_link.Link("worst").schedule()["metered_after_change"])
+        self.assertEqual(later.began, self.clock.now - 600)
+        self.assertAlmostEqual(later.schedule()["change_at"] - fresh.schedule()["change_at"], -600, delta=0.01)
+        self.assertEqual(slow_link.Link("worst").schedule()["offline"], [])
+
+    def test_a_refused_window_drops_every_open_connection_as_it_begins(self):
+        slow_link.time.monotonic = self.real
+        dropped = []
+        with Profile({"blinking": {"link": {"offline": {"per_hour": 3600, "s": [0.2, 0.2]}}}}):
+            link = slow_link.Link("blinking", on_offline=lambda: dropped.append(time.monotonic() - link.began))
+            time.sleep(2.1)
+            link.stop()
+        refused = [s for s, _, kind in link.schedule()["offline"] if kind == "refused" and s < 2]
+        self.assertEqual(len(dropped), len(refused))
+        for at, start in zip(dropped, refused):
+            self.assertAlmostEqual(at, start, delta=0.1)
+
+
 class Extractions(unittest.TestCase):
     def test_a_track_of_the_film_waits_for_its_extraction_once(self):
         import mock_server
@@ -250,6 +327,7 @@ LIVE = {
     "hanging": {"server": {"hang": {"one_in": 1, "s": 1.5}}},
     "faulty": {"server": {"read_mb_s": 2, "reset": {"one_in": 1}, "convert_first_s": 0.5, "convert_segment_s": 0.1,
                           "convert_refused": 1}},
+    "offline": {"link": {"offline": {"per_hour": 3600, "s": [0.6, 0.6]}}},
 }
 
 
@@ -351,6 +429,23 @@ class TestServer(unittest.TestCase):
         net = self.control("/mock/net")
         self.assertEqual((net["server"]["resets"], net["server"]["refused"]), (2, 1))
         self.control("/mock/set?reset=1")
+        self.control("/mock/profile?name=none")
+
+    def test_offline_a_request_waits_out_a_hang_window_and_is_reset_in_a_refused_one(self):
+        self.control("/mock/profile?name=offline")
+        windows = self.control("/mock/net")["schedule"]["offline"]
+        began = time.monotonic()
+        hang = next(w for w in windows if w[2] == "hang" and w[0] > 0.3)
+        refused = next(w for w in windows if w[2] == "refused" and w[0] > hang[1])
+        time.sleep(max(0.0, began + hang[0] + 0.1 - time.monotonic()))
+        connection = http.client.HTTPConnection("127.0.0.1", PORT, timeout=60)
+        head, *_ = self.ask(connection, "GET", "/emby/System/Info/Public")
+        self.assertAlmostEqual(time.monotonic() - began, hang[1], delta=0.15)
+        connection.close()
+        time.sleep(max(0.0, began + refused[0] + 0.1 - time.monotonic()))
+        with self.assertRaises(OSError):
+            self.ask(http.client.HTTPConnection("127.0.0.1", PORT, timeout=60), "GET", "/emby/System/Info/Public")
+        self.assertEqual(self.control("/mock/net")["profile"], "offline", "/mock/ answers in a window")
         self.control("/mock/profile?name=none")
 
 
