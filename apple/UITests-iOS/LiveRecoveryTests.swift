@@ -73,7 +73,7 @@ final class LiveRecoveryTests: XCTestCase {
     }
 
     /// The server stops sending 10 s in and keeps the connection open, as a
-    /// dead provider connection does: the stream opens again within 15 s,
+    /// dead provider connection does: the stream opens again within 18 s,
     /// not after libmpv's 60 s with the picture frozen and nothing said.
     func testASilentStreamOpensAgainSoon() throws {
         app.launchEnvironment["OPENREEL_DEBUG_LIVE_START_LIMIT"] = "120"
@@ -93,10 +93,10 @@ final class LiveRecoveryTests: XCTestCase {
             }
             usleep(50_000)
         }
-        XCTAssertGreaterThanOrEqual(opens, 2, "a stream that stopped sending wasn't opened again within 15 s")
+        XCTAssertGreaterThanOrEqual(opens, 2, "a stream that stopped sending wasn't opened again within 18 s of going silent")
         let times = try liveRequests(server, since: since).filter { $0.id == "7" }.map(\.t)
         if times.count >= 2 {
-            XCTAssertGreaterThanOrEqual(times[1] - times[0], 10 + 10, "opened again before the picture stood still 10 s")
+            XCTAssertGreaterThanOrEqual(times[1] - times[0], 10 + 10 + 3, "opened again before 10 s of a still picture and the 3 s refusal")
             XCTAssertLessThanOrEqual(times[1] - times[0], 1 + 10 + 18, "opened again more than 18 s after the server went silent 10 s in")
         }
         XCTAssertTrue(seen.contains("reopening"), "the stream wasn't opened again in place: \(seen)")
