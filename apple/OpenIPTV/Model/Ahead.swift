@@ -73,9 +73,54 @@ enum Need: Hashable, Sendable {
 /// under 150 MB a day only the most shown counts as rested on.
 @MainActor
 final class Showing {
-    func show(_ target: Target, at place: Place, share: Double, from origin: CGPoint) {}
+    private struct Shown {
+        var share: Double
+        var origin: CGPoint
 
-    func hide(_ target: Target, at place: Place) {}
+        /// Less shown, or as much and later in reading order.
+        func showsLess(than other: Shown) -> Bool {
+            let (mine, theirs) = ((share * 100).rounded(), (other.share * 100).rounded())
+            if mine != theirs { return mine < theirs }
+            return origin.y != other.origin.y ? origin.y > other.origin.y : origin.x > other.origin.x
+        }
+    }
+
+    private var shown: [Place: [Target: Shown]] = [:]
+    private var waiting: [UUID: (target: Target, place: Place, turn: CheckedContinuation<Bool, Never>)] = [:]
+
+    func show(_ target: Target, at place: Place, share: Double, from origin: CGPoint) {
+        shown[place, default: [:]][target] = Shown(share: share, origin: origin)
+        wake()
+    }
+
+    func hide(_ target: Target, at place: Place) {
+        shown[place]?[target] = nil
+        wake()
+    }
+
+    /// Nothing measured (an Apple TV's focus): each card held is rested on.
+    func isMostShown(_ target: Target, at place: Place) -> Bool {
+        guard let cards = shown[place], !cards.isEmpty else { return true }
+        return cards.max { $0.value.showsLess(than: $1.value) }?.key == target
+    }
+
+    /// False when cancelled first.
+    func untilMostShown(_ target: Target, at place: Place) async -> Bool {
+        if isMostShown(target, at: place) { return true }
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { turn in waiting[id] = (target, place, turn) }
+        } onCancel: {
+            Task { @MainActor in self.waiting.removeValue(forKey: id)?.turn.resume(returning: false) }
+        }
+    }
+
+    private func wake() {
+        for (id, waiter) in waiting where isMostShown(waiter.target, at: waiter.place) {
+            waiting[id] = nil
+            waiter.turn.resume(returning: true)
+        }
+    }
 }
 
 @MainActor
@@ -127,6 +172,9 @@ final class Ahead {
             for step in place.ladder(on: platform) {
                 guard (try? await sleep(step.after - waited)) != nil, !Task.isCancelled else { return }
                 waited = step.after
+                if place.isRestedOn(at: step.likelihood, on: platform), restsOnOneCard() {
+                    guard await showing.untilMostShown(target, at: place) else { return }
+                }
                 let interest = Interest(at: place, step.likelihood)
                 let needs = Self.needs(target, step.likelihood).filter { started.insert($0).inserted }
                 group.addTask { await self.run(needs, for: target, interest) }
