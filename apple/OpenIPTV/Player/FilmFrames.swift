@@ -32,6 +32,9 @@ final class FilmFrames: @unchecked Sendable {
         self.clock = clock
         layer.videoGravity = .resizeAspect
         layer.backgroundColor = UIColor.black.cgColor
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_BEHIND_PICTURE"] == "red" { layer.backgroundColor = UIColor.red.cgColor }
+        #endif
         layer.controlTimebase = clock
     }
 
