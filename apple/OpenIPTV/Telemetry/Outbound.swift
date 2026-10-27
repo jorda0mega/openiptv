@@ -13,7 +13,7 @@ enum Outbound {
                   ["127.0.0.1", "localhost", "::1"].contains(host) else { return nil }
             return dsn
         case .release:
-            guard let dsn = info[plistDSNKey] as? String, let url = URL(string: dsn), url.scheme == "https", url.host() != nil else { return nil }
+            guard environment[debugDSNKey] == nil, let dsn = info[plistDSNKey] as? String, let url = URL(string: dsn), url.scheme == "https", url.host() != nil else { return nil }
             return dsn
         }
     }
@@ -43,16 +43,26 @@ enum Outbound {
         "device": ["family", "model", "model_id", "arch", "simulator", "memory_size", "free_memory", "usable_memory",
                    "processor_count", "thermal_state", "battery_level", "charging", "orientation", "low_memory", "low_power_mode"],
         "os": ["name", "version", "build", "rooted"],
-        "app": ["app_build", "app_version", "build_type", "in_foreground", "app_memory", "app_start_time"],
+        "app": ["app_build", "app_version", "build_type", "in_foreground", "app_memory"],
     ]
 
     static func contexts(_ contexts: [String: [String: Any]]) -> [String: [String: Any]] {
         contexts.reduce(into: [:]) { kept, context in
             guard let keys = contextKeys[context.key] else { return }
             kept[context.key] = context.value.filter { keys.contains($0.key) }.mapValues { value in
-                (value as? String).map { stillHoldsAddress($0) ? Redaction.removed : $0 } ?? value
+                (value as? String).map { Redaction.holdsAddress($0) ? Redaction.removed : $0 } ?? value
             }
         }
+    }
+
+    static let sdkWrittenMechanisms: Set<String> = [
+        "mach", "signal", "AppHang", "watchdog_termination",
+        "MXCrashDiagnostic", "mx_disk_write_exception", "mx_cpu_exception", "mx_hang_diagnostic",
+    ]
+
+    static func exceptionText(_ text: String?, mechanism: String?) -> String? {
+        guard let mechanism, sdkWrittenMechanisms.contains(mechanism) else { return nil }
+        return text.map(Redaction.clean)
     }
 
     static func installID(_ id: String?) -> String? {

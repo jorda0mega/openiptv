@@ -16,6 +16,7 @@ final class OutboundTests: XCTestCase {
     func testAReleaseBuildSendsOnlyToTheDSNItWasArchivedWith() {
         XCTAssertEqual(Outbound.dsn(.release, environment: [:], info: [Outbound.plistDSNKey: real]), real)
         XCTAssertNil(Outbound.dsn(.release, environment: [Outbound.debugDSNKey: local], info: [:]))
+        XCTAssertNil(Outbound.dsn(.release, environment: [Outbound.debugDSNKey: local], info: [Outbound.plistDSNKey: real]))
         XCTAssertNil(Outbound.dsn(.release, environment: [Outbound.debugDSNKey: real], info: [Outbound.plistDSNKey: ""]))
         XCTAssertNil(Outbound.dsn(.release, environment: [:], info: [Outbound.plistDSNKey: "$(SENTRY_DSN)"]))
         XCTAssertNil(Outbound.dsn(.release, environment: [:], info: [Outbound.plistDSNKey: local]))
@@ -43,6 +44,19 @@ final class OutboundTests: XCTestCase {
     func testAnSDKFieldHoldingAnAddressOrANameIsDropped() {
         let kept = Outbound.metricAttributes(name: "live.switch", ["os.name": "http://203.0.113.9", "user.id": "tester"])
         XCTAssertEqual(kept, [:])
+    }
+
+    func testOnlyTextTheSDKOrTheSystemWroteStaysOnACrash() {
+        XCTAssertEqual(Outbound.exceptionText("Exception 1, Code 1, Subcode 16", mechanism: "mach"), "Exception 1, Code 1, Subcode 16")
+        XCTAssertEqual(Outbound.exceptionText("Fatal error: Index out of range", mechanism: "signal"), "Fatal error: Index out of range")
+        XCTAssertEqual(Outbound.exceptionText("App hanging for at least 2000 ms.", mechanism: "AppHang"), "App hanging for at least 2000 ms.")
+        XCTAssertEqual(Outbound.exceptionText("MXHangDiagnostic hangDuration:3 sec", mechanism: "mx_hang_diagnostic"),
+                       "MXHangDiagnostic hangDuration:3 sec")
+        XCTAssertEqual(Outbound.exceptionText("at http://203.0.113.9/live", mechanism: "mach"), "at [removed]")
+        for mechanism in ["nsexception", "cpp_exception", "user", "NSError", "HTTPClientError", "new_one"] {
+            XCTAssertNil(Outbound.exceptionText("Cannot play The Long Film", mechanism: mechanism))
+        }
+        XCTAssertNil(Outbound.exceptionText("Cannot play The Long Film", mechanism: nil))
     }
 
     func testOnlyTheInstallIDsShapeGoesOut() {
@@ -73,8 +87,10 @@ final class OutboundTests: XCTestCase {
     }
 
     func testAContextStringHoldingAnAddressIsCleaned() {
-        let kept = Outbound.contexts(["device": ["model": "http://203.0.113.9/x"]])
+        let kept = Outbound.contexts(["device": ["model": "http://203.0.113.9/x", "model_id": "emby.local", "arch": "arm64e"]])
         XCTAssertEqual(kept["device"]?["model"] as? String, Redaction.removed)
+        XCTAssertEqual(kept["device"]?["model_id"] as? String, Redaction.removed)
+        XCTAssertEqual(kept["device"]?["arch"] as? String, "arm64e")
     }
 
     func testTheLastLockFindsAnAddressAnywhereInASerializedEvent() {

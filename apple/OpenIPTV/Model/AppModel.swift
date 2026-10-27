@@ -489,19 +489,20 @@ final class AppModel {
 
     func playback(itemId: String, kind: String? = nil, title: String? = nil) async throws -> EmbyPlayback {
         var started = Date()
-        let firstTap = !filmTapped
+        let first = !filmTapped
         filmTapped = true
         // Just closed here, and kept: no need to ask the server anything.
         if let warm, warm.parked, warm.key == itemId {
             var playback = warm.playback
             playback.resolvedIn = 0
             playback.requestedAt = started
-            playback.firstTapSinceLaunch = firstTap
+            playback.tap = Metric.FilmTap(first: first, prepared: true)
             return playback
         }
         let key = planKey(itemId, kind: kind)
+        let prepared = plans.isKept(key)
         #if DEBUG
-        lastPlanKept = plans.isKept(key)
+        lastPlanKept = prepared
         let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
         #endif
         var playback: EmbyPlayback
@@ -536,7 +537,7 @@ final class AppModel {
         #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
-        playback.firstTapSinceLaunch = firstTap
+        playback.tap = Metric.FilmTap(first: first, prepared: prepared)
         return playback
     }
 

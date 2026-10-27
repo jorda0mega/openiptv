@@ -382,11 +382,11 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         }
     }
 
-    #if DEBUG
     func isKept(_ key: Key) -> Bool {
         if case .kept? = current(key) { true } else { false }
     }
 
+    #if DEBUG
     func debugState(_ key: Key, at place: Place, _ likelihood: Likelihood) -> String {
         switch current(key) {
         case .waiting?: "waiting its turn (\(policy.lane.debugCounts))"

@@ -448,7 +448,7 @@ struct LivePlayerView: View {
             return showControls()
         }
         pendingPick = league.map { (choice, $0) }
-        resetScreen()
+        resetScreen(timing: .switch)
         recording = nil
         send(.play(choice.channel, feeds: feeds, after: 0, startLimit: startLimit))
         showControls()
@@ -579,8 +579,7 @@ struct LivePlayerView: View {
         #if DEBUG
         perf.began()
         #endif
-        resetScreen()
-        self.opening = opening
+        resetScreen(timing: opening)
         recording = nil
         pendingPick = nil
         choices = model.watchChoices(for: channel)
@@ -607,8 +606,7 @@ struct LivePlayerView: View {
         case .stop:
             if session.failure != nil {
                 startTrack.failed(at: Date())
-                let reason = lastFailure ?? .no_frame
-                Telemetry.report(pictured ? .liveStopped(reason) : .liveDidNotStart(reason))
+                Telemetry.report(Problem(subject: .live, started: pictured, reason: lastFailure ?? .no_frame))
             }
             stopStream()
         case let .deadline(attempt, limit): giveUp(attempt, after: limit)
@@ -781,15 +779,16 @@ struct LivePlayerView: View {
     }
 
     private func retry() {
-        if let recording { watch(recording) } else { play() }
+        if let recording { watch(recording) } else { play(opening: .start) }
     }
 
-    private func resetScreen() {
+    private func resetScreen(timing opening: Metric.LiveOpen? = nil) {
         cueTask?.cancel()
         cue = nil
         timing = "Starting…"
         buffering = false
         startTrack = LoadTrack(began: Date())
+        self.opening = opening
         pictured = false
         lastFailure = nil
         #if os(tvOS)

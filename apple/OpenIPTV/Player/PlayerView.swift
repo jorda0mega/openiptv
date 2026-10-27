@@ -1217,7 +1217,7 @@ struct MoviePlayerView: View {
         convertedOpen?.cancel()
         player?.stop {}
         error = StartPatience.tooLong.localizedDescription
-        Telemetry.report(startedOnce ? .filmStopped(.no_data) : .filmDidNotStart(.no_frame))
+        Telemetry.report(Problem(subject: .film, started: startedOnce, reason: startedOnce ? .no_data : .no_frame))
         track.failed(at: Date())
         showControls(autoHide: false)
     }
@@ -1412,9 +1412,10 @@ struct MoviePlayerView: View {
             #endif
             guard !startedOnce else { return }
             startedOnce = true
-            Telemetry.note(.filmStarted(firstTap: playback.firstTapSinceLaunch, prepared: warmStart,
-                                        resumes: (playback.startSeconds ?? 0) > 0, picture: picture,
-                                        seconds: Date().timeIntervalSince(track.began)))
+            if let tap = playback.tap {
+                Telemetry.note(.filmStarted(tap, resumes: (playback.startSeconds ?? 0) > 0, picture: picture,
+                                            seconds: Date().timeIntervalSince(track.began)))
+            }
             // Whole start from the tap: server, then screen/player setup,
             // opening the file, and seeking + the first frame.
             let total = Date().timeIntervalSince(playback.requestedAt)
@@ -1527,7 +1528,7 @@ struct MoviePlayerView: View {
                 return
             }
             error = message.prefix(1).uppercased() + message.dropFirst()
-            Telemetry.report(startedOnce ? .filmStopped(logged ?? .unknown) : .filmDidNotStart(logged ?? .unknown))
+            Telemetry.report(Problem(subject: .film, started: startedOnce, reason: logged ?? .unknown))
             track.failed(at: Date())
             showControls(autoHide: false)
             let failed = track.attempt
@@ -1598,7 +1599,7 @@ struct MoviePlayerView: View {
             position = end.place
             if end.cutOff {
                 error = "The server stopped sending the film."
-                Telemetry.report(.filmStopped(logged ?? .unknown))
+                Telemetry.report(Problem(subject: .film, started: true, reason: logged ?? .unknown))
                 cutOff = true
                 track.cutOff(at: Date())
                 showControls(autoHide: false)

@@ -53,11 +53,16 @@ enum Metric {
         init(drawsFrames: Bool) { self = drawsFrames ? .software : .gpu }
     }
 
+    struct FilmTap: Hashable, Sendable {
+        let first: Bool
+        let prepared: Bool
+    }
+
     enum PipEdge: Sendable { case start, `return` }
     enum LiveOpen: Sendable { case start, `switch` }
 
     enum Reading: Sendable {
-        case filmStarted(firstTap: Bool, prepared: Bool, resumes: Bool, picture: Picture, seconds: Double)
+        case filmStarted(FilmTap, resumes: Bool, picture: Picture, seconds: Double)
         case filmJumped(by: Double, picture: Picture, seconds: Double)
         case pipGap(PipEdge, seconds: Double)
         case liveOpened(LiveOpen, seconds: Double)
@@ -75,13 +80,12 @@ enum Metric {
         func sample(_ reading: Reading, network: Network) -> Sample? {
             var states: [Key: String] = [.platform: platform.rawValue, .network: network.rawValue]
             switch reading {
-            case let .filmStarted(firstTap, prepared, resumes, picture, seconds):
+            case let .filmStarted(tap, resumes, picture, seconds):
                 states[.picture] = picture.rawValue
-                states[.prepared] = Key.word(prepared)
+                states[.prepared] = Key.word(tap.prepared)
                 states[.resumed] = Key.word(resumes)
                 states[.loadingShown] = Key.word(seconds >= LoadProgress.ringAfter)
-                return Sample(name: Self.filmStartName(firstTap: firstTap, prepared: prepared, resumes: resumes),
-                              seconds: seconds, states: states)
+                return Sample(name: Self.filmStartName(tap, resumes: resumes), seconds: seconds, states: states)
             case let .filmJumped(by, picture, seconds):
                 guard let name = Self.jumpName(by) else { return nil }
                 states[.picture] = picture.rawValue
@@ -97,9 +101,9 @@ enum Metric {
             }
         }
 
-        private static func filmStartName(firstTap: Bool, prepared: Bool, resumes: Bool) -> Name {
-            if firstTap { return .filmStartFirstTap }
-            if prepared { return .filmStartPrepared }
+        private static func filmStartName(_ tap: FilmTap, resumes: Bool) -> Name {
+            if tap.first { return .filmStartFirstTap }
+            if tap.prepared { return .filmStartPrepared }
             return resumes ? .filmStartResume : .filmStartFromBeginning
         }
 
@@ -140,35 +144,24 @@ enum Metric {
     }
 }
 
-enum Problem: Equatable, Sendable {
-    case filmDidNotStart(StreamFailure)
-    case filmStopped(StreamFailure)
-    case liveDidNotStart(StreamFailure)
-    case liveStopped(StreamFailure)
+struct Problem: Equatable, Sendable {
+    enum Subject: String, CaseIterable, Sendable { case film, live }
 
-    enum Kind: String, CaseIterable, Sendable {
-        case filmDidNotStart = "film_did_not_start"
-        case filmStopped = "film_stopped"
-        case liveDidNotStart = "live_did_not_start"
-        case liveStopped = "live_stopped"
-    }
+    let subject: Subject
+    let started: Bool
+    let reason: StreamFailure
 
-    var kind: Kind {
-        switch self {
-        case .filmDidNotStart: .filmDidNotStart
-        case .filmStopped: .filmStopped
-        case .liveDidNotStart: .liveDidNotStart
-        case .liveStopped: .liveStopped
-        }
-    }
-
-    var reason: StreamFailure {
-        switch self {
-        case let .filmDidNotStart(reason), let .filmStopped(reason), let .liveDidNotStart(reason), let .liveStopped(reason): reason
-        }
-    }
+    var kind: String { Self.kind(subject, started: started) }
 
     var reasonWord: String {
         reason.rawValue.replacingOccurrences(of: "http_", with: "status_")
+    }
+
+    static var kinds: [String] {
+        Subject.allCases.flatMap { [kind($0, started: false), kind($0, started: true)] }
+    }
+
+    private static func kind(_ subject: Subject, started: Bool) -> String {
+        subject.rawValue + (started ? "_stopped" : "_did_not_start")
     }
 }

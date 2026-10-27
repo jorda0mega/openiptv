@@ -16,10 +16,10 @@ enum SentryGate {
 
     static func send(_ problem: Problem, platform: Metric.Platform, network: Metric.Network) {
         let event = Event(level: .warning)
-        event.message = SentryMessage(formatted: problem.kind.rawValue)
+        event.message = SentryMessage(formatted: problem.kind)
         event.tags = [problemReason: problem.reasonWord, Metric.Key.platform.rawValue: platform.rawValue,
                       Metric.Key.network.rawValue: network.rawValue]
-        event.fingerprint = [problem.kind.rawValue, problem.reasonWord]
+        event.fingerprint = [problem.kind, problem.reasonWord]
         SentrySDK.capture(event: event)
     }
 
@@ -38,6 +38,7 @@ enum SentryGate {
         options.environment = build == .release ? "release" : "debug"
         options.debug = false
         options.sendDefaultPii = false
+        options.enableMemoryIntrospection = false
         options.enableSwizzling = false
         options.enableNetworkBreadcrumbs = false
         options.enableNetworkTracking = false
@@ -97,7 +98,7 @@ enum SentryGate {
         event.message = event.message.map { SentryMessage(formatted: Redaction.clean($0.formatted)) }
         for exception in event.exceptions ?? [] {
             exception.type = exception.type.map(Redaction.clean)
-            exception.value = exception.value.map(Redaction.clean)
+            exception.value = Outbound.exceptionText(exception.value, mechanism: exception.mechanism?.type)
             exception.module = nil
             exception.mechanism?.desc = exception.mechanism?.desc.map(Redaction.clean)
             exception.mechanism?.data = nil
@@ -118,6 +119,7 @@ enum SentryGate {
     }
 
     private static func scrub(_ stacktrace: SentryStacktrace?) {
+        stacktrace?.registers = [:]
         for frame in stacktrace?.frames ?? [] {
             frame.package = frame.package.map(Redaction.fileName)
             frame.function = frame.function.flatMap { Redaction.holdsAddress($0) ? nil : $0 }
@@ -131,9 +133,9 @@ enum SentryGate {
     }
 
     private static func serialized(_ event: Event) -> String? {
-        guard let data = try? JSONSerialization.data(withJSONObject: event.serialize(), options: [.withoutEscapingSlashes]) else {
-            return nil
-        }
+        let fields = event.serialize()
+        guard JSONSerialization.isValidJSONObject(fields),
+              let data = try? JSONSerialization.data(withJSONObject: fields, options: [.withoutEscapingSlashes]) else { return nil }
         return String(decoding: data, as: UTF8.self)
     }
 

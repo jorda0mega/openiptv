@@ -22,7 +22,7 @@ final class FilmFrames: @unchecked Sendable {
     private var pool: CVPixelBufferPool?
     private var pooled = PixelSize(width: 0, height: 0)
     private var format: CMVideoFormatDescription?
-    private var gap: Metric.FrameGap?
+    private var gap: (window: Metric.FrameGap, done: @Sendable (Double) -> Void)?
     #if DEBUG
     var onFrame: (@Sendable (Double) -> Void)?
     #endif
@@ -74,7 +74,7 @@ final class FilmFrames: @unchecked Sendable {
             CMTimebaseSetTime(clock, time: CMTime(seconds: seconds, preferredTimescale: 600))
         }
         CMTimebaseSetRate(clock, rate: playing ? 1 : 0)
-        if !playing { lock.withLock { gap?.held() } }
+        if !playing { lock.withLock { gap?.window.held() } }
         if was != playing { onPlayingChanged?(playing) }
     }
 
@@ -82,19 +82,28 @@ final class FilmFrames: @unchecked Sendable {
 
     func timeLongestFrameWait(for seconds: Double, done: @escaping @Sendable (Double) -> Void) {
         let began = CFAbsoluteTimeGetCurrent()
-        let playing = isPlaying
-        lock.withLock {
-            gap = Metric.FrameGap(began: began)
-            if !playing { gap?.held() }
+        var window = Metric.FrameGap(began: began)
+        if !isPlaying { window.held() }
+        let cutShort = lock.withLock { () -> Measured? in
+            defer { gap = (window, done) }
+            return gap.flatMap { earlier in earlier.window.longest(until: began).map { Measured(done: earlier.done, longest: $0) } }
         }
+        cutShort?.report()
         queue.asyncAfter(deadline: .now() + seconds) { [self] in
-            let longest = lock.withLock { () -> Double? in
-                guard let window = gap, window.began == began else { return nil }
+            let ended = lock.withLock { () -> Measured? in
+                guard let current = gap, current.window.began == began else { return nil }
                 gap = nil
-                return window.longest(until: CFAbsoluteTimeGetCurrent())
+                return current.window.longest(until: CFAbsoluteTimeGetCurrent()).map { Measured(done: current.done, longest: $0) }
             }
-            if let longest { done(longest) }
+            ended?.report()
         }
+    }
+
+    private struct Measured {
+        let done: @Sendable (Double) -> Void
+        let longest: Double
+
+        func report() { done(longest) }
     }
 
     func close() {
@@ -230,7 +239,7 @@ final class FilmFrames: @unchecked Sendable {
         let renderer = layer.sampleBufferRenderer
         if renderer.status == .failed || renderer.requiresFlushToResumeDecoding { renderer.flush() }
         renderer.enqueue(sample)
-        lock.withLock { gap?.frame(at: CFAbsoluteTimeGetCurrent()) }
+        lock.withLock { gap?.window.frame(at: CFAbsoluteTimeGetCurrent()) }
         #if DEBUG
         onFrame?(CFAbsoluteTimeGetCurrent())
         #endif

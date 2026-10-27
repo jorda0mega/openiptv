@@ -6,6 +6,8 @@ final class TelemetryLeakTests: XCTestCase {
     private let metrics = ["film.start.first_tap", "film.jump.forward_10s", "film.jump.back_10s", "live.start", "live.switch"]
     private let problems = ["live_did_not_start"]
     private let sendable: Set<String> = ["event", "trace_metric", "session", "client_report"]
+    private let leakWords: Set<String> = ["address", "http", "localhost", "mac_paths", "password", "port", "registers",
+                                          "server", "titles", "token", "user", "username"]
 
     override func setUpWithError() throws {
         continueAfterFailure = true
@@ -88,7 +90,7 @@ final class TelemetryLeakTests: XCTestCase {
     private func assertNothingLeaked(_ seen: Seen) {
         XCTAssertGreaterThan(seen.envelopes, 0, "nothing reached the capture")
         XCTAssertEqual(seen.leaks.filter { $0.value != 0 }.map(\.key).sorted(), [], "words that must never go out went out")
-        XCTAssertGreaterThan(seen.leaks.count, 8, "the capture didn't count every leak word")
+        XCTAssertEqual(Set(seen.leaks.keys), leakWords, "the capture didn't count every leak word")
         XCTAssertEqual(Set(seen.items.keys).subtracting(sendable).sorted(), [], "items that must never go out went out")
     }
 
