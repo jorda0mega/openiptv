@@ -51,6 +51,8 @@ final class RedactionTests: XCTestCase {
         assertNothingOf(["Long Film"], in: "Fatal error: Duplicate values for key: 'The Long Film'")
         assertNothingOf(["Lost Film"], in: "for key: 'A Director's Lost Film' here")
         assertNothingOf(["Long", "Film"], in: "for key: 'The Long\nFilm' here")
+        assertNothingOf(["Lost Film"], in: "for key: ‘A Director’s Lost Film’ here")
+        assertNothingOf(["Lost Film"], in: "key:'A Director's Lost Film' and ('The Lost Film')")
         XCTAssertEqual(Redaction.clean("Couldn't play the film's sound"), "Couldn't play the film's sound")
     }
 

@@ -64,10 +64,18 @@ enum Outbound {
         guard let text, let mechanism else { return nil }
         if sdkWrittenMechanisms.contains(mechanism) { return Redaction.clean(text) }
         guard crashMechanisms.contains(mechanism) else { return nil }
-        return text.wholeMatch(of: sdkCrashShape) == nil ? fatalErrorWords(text) : text
+        let parts = text.components(separatedBy: " >\n")
+        guard parts.count <= 2, parts[0].wholeMatch(of: sdkCrashShape) != nil else { return fatalErrorWords(text) }
+        guard parts.count == 2 else { return text }
+        return sdkDiagnoses.contains(parts[1]) || parts[1].wholeMatch(of: pointerDiagnosis) != nil ? text : parts[0]
     }
 
-    private static let sdkCrashShape = #/(?:Exception|Signal) \S+, Code \S+(?:, Subcode \S+)?/#
+    private static let sdkCrashShape = #/(?:Exception|Signal) (?:-?\d+|\(null\)), Code (?:-?\d+|\(null\))(?:, Subcode (?:-?\d+|\(null\)))?/#
+    private static let pointerDiagnosis = #/(?:Attempted to dereference garbage pointer|(?:KERN|EXC)_[A-Z_]+) at 0x[0-9a-fA-F]+\./#
+    private static let sdkDiagnoses: Set<String> = [
+        "Attempted to dereference null pointer.", "Stack overflow", "Rogue memory write has corrupted memory.",
+        "Math error (usually caused from division by 0).", "Graceful OS termination requested.",
+    ]
 
     private static func fatalErrorWords(_ text: String) -> String? {
         let opening = "Fatal error:"
