@@ -1,11 +1,3 @@
-"""The app's Sentry envelopes on the test server, read back as counts only.
-
-mock_server.py keeps each envelope it gets at POST /api/<project>/envelope/ in memory,
-unpacked, and answers GET /mock/sentry_seen?since= with seen() of the ones since then.
-The leak words (the made-up login, the token, the server's address, the titles) stay in
-the server: the test gets how many times each was found, never the words or the envelopes.
-"""
-
 import gzip
 import json
 import re
