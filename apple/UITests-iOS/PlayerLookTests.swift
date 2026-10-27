@@ -188,16 +188,22 @@ final class PlayerLookTests: XCTestCase {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         openFilm()
         sleep(4)
-        XCUIDevice.shared.press(.home)
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let window = board.otherElements["Video"].firstMatch
-        XCTAssertTrue(window.waitForExistence(timeout: 5), "swiping home didn't start Picture in Picture")
-        sleep(6)
-        app.activate()
-        sleep(6)
-        shot("opened again")
-        XCTAssertFalse(window.exists, "the floating window stayed up over the app")
-        assertNothingStopped()
+        for round in 1...2 {
+            XCUIDevice.shared.press(.home)
+            XCTAssertTrue(window.waitForExistence(timeout: 5), "swiping home didn't start Picture in Picture (\(round))")
+            sleep(6)
+            app.activate()
+            sleep(6)
+            shot("opened again \(round)")
+            XCTAssertFalse(window.exists, "the floating window stayed up over the app (\(round))")
+            // Regression: iOS's "playing in Picture in Picture" icon showed on the film as the app came back, then the
+            // window flew back over it.
+            let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
+            XCTAssertTrue(readout.contains("open icon=hidden"), "the Picture in Picture icon wasn't hidden as the app came back (\(round)): \(readout)")
+            assertNothingStopped()
+        }
         XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
         controlsUp()
         XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
