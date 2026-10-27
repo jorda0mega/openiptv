@@ -59,6 +59,13 @@ final class OutboundTests: XCTestCase {
         XCTAssertEqual(Outbound.exceptionText("Fatal error: 'try!' expression unexpectedly raised an error", mechanism: "mach"),
                        "Fatal error:")
         XCTAssertNil(Outbound.exceptionText("The Long Film > lu5f0c2e9a", mechanism: "mach"))
+        XCTAssertEqual(Outbound.exceptionText("Exception 1, Code 1, Subcode 16 >\nKERN_INVALID_ADDRESS at 0x10.", mechanism: "mach"),
+                       "Exception 1, Code 1, Subcode 16 >\nKERN_INVALID_ADDRESS at 0x10.")
+        XCTAssertEqual(Outbound.exceptionText("Signal 11, Code 0 >\nAttempted to dereference null pointer.", mechanism: "signal"),
+                       "Signal 11, Code 0 >\nAttempted to dereference null pointer.")
+        XCTAssertEqual(Outbound.exceptionText("Signal 11, Code 0 >\nPossible zombie in call: The Long Film", mechanism: "signal"),
+                       "Signal 11, Code 0")
+        XCTAssertNil(Outbound.exceptionText("Exception The Long Film, Code 1", mechanism: "mach"))
         XCTAssertNil(Outbound.exceptionText("BUG IN CLIENT: The Long Film", mechanism: "signal"))
         XCTAssertEqual(Outbound.exceptionText("App hanging for at least 2000 ms.", mechanism: "AppHang"), "App hanging for at least 2000 ms.")
         XCTAssertEqual(Outbound.exceptionText("MXHangDiagnostic hangDuration:3 sec", mechanism: "mx_hang_diagnostic"),

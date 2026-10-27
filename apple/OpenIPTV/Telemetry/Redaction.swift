@@ -42,8 +42,8 @@ enum Redaction {
         path.split(separator: "/").last.map(String.init) ?? removed
     }
 
-    private static let quoted = #/"[^"]*"|“[^”]*”|‘[^’]*’/#
-    private static let singleQuoted = #/(?s)(^|\s)'.*'/#
+    private static let quoted = #/(?s)"[^"]*"|“[^”]*”|‘.*’/#
+    private static let singleQuoted = #/(?s)(^|[\s(:=])'.*'/#
 
     private static let addressShapes: [Regex<Substring>] = [
         #/:\/\/|^\/\/|(?i:www\.)/#,
