@@ -468,6 +468,7 @@ struct EmbyPlayback: Hashable, Identifiable {
         var copy = self
         copy.startSeconds = seconds
         copy.requestedAt = Date()
+        copy.tap = nil
         return copy
     }
 

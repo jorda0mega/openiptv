@@ -35,7 +35,7 @@ final class MPVPlayer: @unchecked Sendable {
         /// Seconds buffered ahead and the current download speed (bytes/s),
         /// about once a second.
         case network(buffer: Double, bytesPerSecond: Double)
-        case seeked(Double, by: Double?)
+        case seeked(after: Double, by: Double?)
         /// The player is on its way to a jump (true), or done seeking (false,
         /// also when the jump's read ended with nothing).
         case seeking(Bool)
@@ -1608,7 +1608,7 @@ final class MPVPlayer: @unchecked Sendable {
                 let read = Double(StreamRelay.shared.serverBytes - stateLock.withLock { serverBytesAtSeek }) / 1e6
                 stateLock.withLock { bufferingLog.seeked(after: CFAbsoluteTimeGetCurrent() - asked.at, megabytes: read) }
                 #endif
-                emit(.seeked(CFAbsoluteTimeGetCurrent() - asked.at, by: asked.by))
+                emit(.seeked(after: CFAbsoluteTimeGetCurrent() - asked.at, by: asked.by))
             }
         #if DEBUG
         case MPV_EVENT_AUDIO_RECONFIG:

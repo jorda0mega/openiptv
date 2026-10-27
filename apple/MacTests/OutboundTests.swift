@@ -48,11 +48,21 @@ final class OutboundTests: XCTestCase {
 
     func testOnlyTextTheSDKOrTheSystemWroteStaysOnACrash() {
         XCTAssertEqual(Outbound.exceptionText("Exception 1, Code 1, Subcode 16", mechanism: "mach"), "Exception 1, Code 1, Subcode 16")
+        XCTAssertEqual(Outbound.exceptionText("Signal 6, Code 0", mechanism: "signal"), "Signal 6, Code 0")
         XCTAssertEqual(Outbound.exceptionText("Fatal error: Index out of range", mechanism: "signal"), "Fatal error: Index out of range")
+        XCTAssertEqual(Outbound.exceptionText("Swift/ContiguousArrayBuffer.swift:600: Fatal error: Index out of range", mechanism: "mach"),
+                       "Fatal error: Index out of range")
+        XCTAssertEqual(Outbound.exceptionText("Fatal error: Duplicate values for key: 'A Director's Lost Film'", mechanism: "mach"),
+                       "Fatal error: Duplicate values for")
+        XCTAssertEqual(Outbound.exceptionText("Fatal error: crash at http://203.0.113.9:8080/live/a/b/1.ts", mechanism: "mach"),
+                       "Fatal error: crash at")
+        XCTAssertEqual(Outbound.exceptionText("Fatal error: 'try!' expression unexpectedly raised an error", mechanism: "mach"),
+                       "Fatal error:")
+        XCTAssertNil(Outbound.exceptionText("The Long Film > lu5f0c2e9a", mechanism: "mach"))
+        XCTAssertNil(Outbound.exceptionText("BUG IN CLIENT: The Long Film", mechanism: "signal"))
         XCTAssertEqual(Outbound.exceptionText("App hanging for at least 2000 ms.", mechanism: "AppHang"), "App hanging for at least 2000 ms.")
         XCTAssertEqual(Outbound.exceptionText("MXHangDiagnostic hangDuration:3 sec", mechanism: "mx_hang_diagnostic"),
                        "MXHangDiagnostic hangDuration:3 sec")
-        XCTAssertEqual(Outbound.exceptionText("at http://203.0.113.9/live", mechanism: "mach"), "at [removed]")
         for mechanism in ["nsexception", "cpp_exception", "user", "NSError", "HTTPClientError", "new_one"] {
             XCTAssertNil(Outbound.exceptionText("Cannot play The Long Film", mechanism: mechanism))
         }
