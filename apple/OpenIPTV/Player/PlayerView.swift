@@ -1459,7 +1459,7 @@ struct MoviePlayerView: View {
             // like a stall; choosing where to jump doesn't.
             track.seeking(on && started, choosing: scrubbing != nil, at: Date())
         case .restarted:
-            track.landed()
+            track.landed(at: Date())
         case let .seeked(seconds):
             jumpUntil = nil
             if prefs.performanceStats { showTiming(String(format: "Jumped in %.1f s", seconds), for: 3) }
