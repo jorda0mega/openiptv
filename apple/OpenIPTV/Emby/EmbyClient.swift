@@ -1083,6 +1083,7 @@ struct EmbyClient {
         let source = info?.MediaSources?.first ?? copy.itemSource
         playback.lateSession = late
         playback.bitrate = source?.Bitrate
+        playback.surface = FilmSurface(videoSubType: source?.MediaStreams?.first { $0.Type == "Video" }?.ExtendedVideoSubType)
         playback.listed = source != nil
         playback.seriesId = item.seriesId
         playback.overview = item.overview
@@ -1299,6 +1300,7 @@ struct EmbyClient {
             let IsExternal: Bool?
             let IsForced: Bool?
             let IsHearingImpaired: Bool?
+            let ExtendedVideoSubType: String?
         }
         let MediaSources: [Source]?
         let PlaySessionId: String?

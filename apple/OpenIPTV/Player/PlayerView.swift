@@ -760,7 +760,7 @@ struct MoviePlayerView: View {
 
     /// Picture in Picture (where the device has it), then fill or fit.
     private var pictureActions: [PlayerAction] {
-        guard PictureInPicture.isSupported, started else { return [fillAction] }
+        guard PictureInPicture.isSupported, started, playback.surface.offersPictureInPicture else { return [fillAction] }
         return [PlayerAction(title: "Picture in Picture", systemImage: "pip.enter") { startPictureInPicture() }, fillAction]
     }
 
@@ -1173,7 +1173,7 @@ struct MoviePlayerView: View {
             // A player warmed up for something else would only compete for
             // the connection.
             model.coolDown()
-            let player = makePlayer(prefs: prefs, picture: .film)
+            let player = makePlayer(prefs: prefs, picture: .film(playback.surface))
             player.onEvent = { event, attempt in handle(event, attempt) }
             self.player = player
             track = LoadTrack(began: playback.requestedAt, stage: .fetching)
