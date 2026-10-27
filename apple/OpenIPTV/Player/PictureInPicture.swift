@@ -10,7 +10,12 @@ final class PictureInPictureProbe {
     static let shared = PictureInPictureProbe()
     var text = ""
     var gaps: [SwitchGap.Kind: String] = [:]
-    var gapText: String { [SwitchGap.Kind.start, .return].compactMap { gaps[$0] }.joined(separator: " | ") }
+    /// iOS's "playing in Picture in Picture" icon on the film's layer as the app came back with the window up.
+    var iconOnOpen: String?
+    var gapText: String {
+        ([SwitchGap.Kind.start, .return].compactMap { gaps[$0] } + [iconOnOpen.map { "open icon=\($0)" }].compactMap(\.self))
+            .joined(separator: " | ")
+    }
 }
 #endif
 
@@ -54,7 +59,12 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     override private init() {
         super.init()
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { PictureInPicture.shared.happen(.appOpened) }
+            MainActor.assumeIsolated {
+                #if DEBUG
+                PictureInPicture.shared.noteIcon()
+                #endif
+                PictureInPicture.shared.happen(.appOpened)
+            }
         }
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { PictureInPicture.shared.happen(.appLeft) }
@@ -271,6 +281,13 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     }
 
     #if DEBUG
+    private func noteIcon() {
+        guard let film, film.controller.isPictureInPictureActive else { return }
+        let icon: AnyClass? = NSClassFromString("AVPictureInPictureIndicatorLayer")
+        let icons = film.frames.layer.sublayers?.filter { layer in icon.map { layer.isKind(of: $0) } ?? false } ?? []
+        PictureInPictureProbe.shared.iconOnOpen = icons.isEmpty ? "none" : icons.allSatisfy(\.isHidden) ? "hidden" : "shown"
+    }
+
     private func probe() {
         guard let film, film.controller.isPictureInPictureActive else { return }
         let clock = film.frames.layer.controlTimebase.map { CMTimebaseGetTime($0).seconds } ?? 0
@@ -281,6 +298,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
             guard controller === film?.controller else { return }
+            #if DEBUG
+            PictureInPictureProbe.shared.iconOnOpen = nil
+            #endif
             happen(.willStart)
             // iOS can start the window by itself after the viewer is already back in the app.
             if UIApplication.shared.applicationState == .active { happen(.appOpened) }

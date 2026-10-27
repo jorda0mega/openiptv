@@ -1883,6 +1883,7 @@ final class MPVPlayer: @unchecked Sendable {
 #if os(iOS) && DEBUG
 extension MPVPlayer {
     func measureGap(_ kind: SwitchGap.Kind) {
+        Task { @MainActor in PictureInPictureProbe.shared.gaps[kind] = nil }
         queue.async { [self] in
             gapTimer?.cancel()
             let began = CFAbsoluteTimeGetCurrent()
