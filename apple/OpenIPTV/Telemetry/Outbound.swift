@@ -80,7 +80,7 @@ enum Outbound {
     private static func fatalErrorWords(_ text: String) -> String? {
         let opening = "Fatal error:"
         guard let start = text.range(of: opening) else { return nil }
-        let words = text[start.upperBound...].split(whereSeparator: \.isWhitespace).prefix { !$0.contains { ":'\"".contains($0) } }
+        let words = text[start.upperBound...].split(whereSeparator: \.isWhitespace).prefix { !$0.contains { ":'\">".contains($0) } }
         return Redaction.clean(([opening] + words.map(String.init)).joined(separator: " "))
     }
 

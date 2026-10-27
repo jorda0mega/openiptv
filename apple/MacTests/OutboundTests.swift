@@ -66,6 +66,8 @@ final class OutboundTests: XCTestCase {
         XCTAssertEqual(Outbound.exceptionText("Signal 11, Code 0 >\nPossible zombie in call: The Long Film", mechanism: "signal"),
                        "Signal 11, Code 0")
         XCTAssertNil(Outbound.exceptionText("Exception The Long Film, Code 1", mechanism: "mach"))
+        XCTAssertEqual(Outbound.exceptionText("Fatal error: Index out of range >\nAttempted to dereference null pointer.", mechanism: "mach"),
+                       "Fatal error: Index out of range")
         XCTAssertNil(Outbound.exceptionText("BUG IN CLIENT: The Long Film", mechanism: "signal"))
         XCTAssertEqual(Outbound.exceptionText("App hanging for at least 2000 ms.", mechanism: "AppHang"), "App hanging for at least 2000 ms.")
         XCTAssertEqual(Outbound.exceptionText("MXHangDiagnostic hangDuration:3 sec", mechanism: "mx_hang_diagnostic"),
