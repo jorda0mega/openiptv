@@ -109,6 +109,16 @@ final class LoadProgressTests: XCTestCase {
         }
     }
 
+    func testAFilmCutOffMidPlaySaysTheServerStoppedSendingIt() {
+        var load = film(.fetching)
+        load.failure = .init(kind: .cutOff, tries: 1, seconds: 27)
+        let shown = load.shown(at: at(27))
+        XCTAssertEqual(shown?.line, "Your server stopped sending Heat")
+        XCTAssertEqual(shown?.details, ["The app tried once in 27 s."])
+        XCTAssertEqual(shown?.tryAgain, true)
+        XCTAssertNil(shown?.ring)
+    }
+
     func testATryInUnderASecondCountsAsOne() {
         var load = channel(.asking)
         load.failure = .init(kind: .refused("Your provider turned the stream away."), tries: 1, seconds: 0.2)
@@ -423,6 +433,34 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertNil(track.stalledSince, "a jump that landed while choosing waited after")
         track.seeking(true, choosing: false, at: at(80))
         XCTAssertEqual(track.stalledSince, at(80), "a jump outside choosing didn't wait")
+    }
+
+    func testAReadThatEndsAfterAJumpIsAFailureThatKeepsThePlace() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0))
+        track.pictured(at: at(1))
+        track.seeking(true, choosing: false, at: at(10))
+        XCTAssertEqual(track.end(at: 186, of: 600), FilmEnd(cutOff: true, place: 186),
+                       "a jump's read the server never answered closed the film and saved its place as the end")
+        track.cutOff(at: at(37))
+        XCTAssertEqual(track.failure(.cutOff), .init(kind: .cutOff, tries: 1, seconds: 27), "counted from the jump")
+    }
+
+    func testAReadThatEndsMidPlayIsAFailureThatKeepsThePlace() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0))
+        track.pictured(at: at(1))
+        XCTAssertEqual(track.end(at: 186, of: 7200), FilmEnd(cutOff: true, place: 186), "an end two hours early closed the film")
+        track.stalled(at: at(50))
+        XCTAssertEqual(track.end(at: 7195, of: 7200), FilmEnd(cutOff: true, place: 7195), "an end during a stall closed the film")
+    }
+
+    func testARealEndStillGoesToUpNext() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0))
+        track.pictured(at: at(1))
+        XCTAssertEqual(track.end(at: 7199, of: 7200), FilmEnd(cutOff: false, place: 7200), "the film's own end taken for a failure")
+        XCTAssertFalse(track.end(at: 186, of: 0).cutOff, "a film of unknown length can't end early")
     }
 
     func testAStallCountsFromItsStart() {
