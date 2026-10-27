@@ -225,19 +225,25 @@ def compare(paths, known, platforms):
 
 
 def best(samples, known):
-    """The lowest landed sample per metric, target, link and platform, with its build."""
-    table, skipped = {}, 0
+    """Per metric, target, link and platform: the run (one source file) with the lowest median, with its
+    build, sample count and spread. A run's median, not its single best sample, so that perf.py compare
+    weighs like against like."""
+    runs, skipped = {}, 0
     for s in samples:
         main = None if s["changed"] else landed(s["commit"])
         if s["metric"] not in known or not main:
             skipped += 1
             continue
-        key = (s["metric"], s["target"], s["link"], s["platform"])
-        entry = table.setdefault(key, dict(samples=0))
-        entry["samples"] += 1
-        if "value" not in entry or s["value"] < entry["value"]:
-            entry.update(value=s["value"], commit=s["commit"], landed_as=main, testflight=first_build(main),
-                         date=s["date"], source=s["source"])
+        runs.setdefault((s["metric"], s["target"], s["link"], s["platform"], s["source"]), []).append((s, main))
+    table = {}
+    for (metric, target, link, platform, source), found in runs.items():
+        values = sorted(s["value"] for s, _ in found)
+        median, (first, main) = pct(values, 50), found[0]
+        entry = table.setdefault((metric, target, link, platform), dict(runs=0))
+        entry["runs"] += 1
+        if "value" not in entry or median < entry["value"]:
+            entry.update(value=median, samples=len(values), spread=round(pct(values, 75) - pct(values, 25), 3),
+                         commit=first["commit"], landed_as=main, testflight=first_build(main), date=first["date"], source=source)
     out = {}
     for (metric, target, link, platform), entry in sorted(table.items()):
         out.setdefault(metric, []).append(dict(target=target, link=link, platform=platform, unit=known[metric], **entry))
@@ -259,8 +265,10 @@ def main(argv):
         unknown = sorted({s["metric"] for s in samples} - set(known))
         assert not unknown, f"samples under names PerfMetric lacks: {unknown}"
         with open(BEST, "w") as f:
-            json.dump(dict(about="Best recorded value per metric, target (real Emby or mock:<profile>), link and platform. "
-                                 "Lower is better for every metric. Rebuilt by perf/perf.py best; extended by perf/eval.sh.",
+            json.dump(dict(about="Best recorded run per metric, target (real Emby or mock:<profile>), link and platform: the "
+                                 "run's median (value), its sample count and interquartile spread, and the build. Lower is "
+                                 "better for every metric. Rebuilt by perf/perf.py best from the runs under /tmp/openiptv, "
+                                 "eval runs (perf/eval.sh) included.",
                            metrics={name: dict(unit=unit, best=table.get(name, [])) for name, unit in known.items()}),
                       f, indent=1)
             f.write("\n")
