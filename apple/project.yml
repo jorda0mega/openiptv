@@ -5,6 +5,10 @@ options:
     iOS: "26.0"
     tvOS: "26.0"
   createIntermediateGroups: true
+packages:
+  Sentry:
+    url: https://github.com/getsentry/sentry-apple-binaries
+    exactVersion: 9.31.0
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -16,6 +20,8 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     OTHER_LDFLAGS: ["-ObjC"]
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    # Hidden telemetry: empty unless the archive step passes SENTRY_DSN.
+    SENTRY_DSN: ""
 
 # Shared by both apps. MPVKit's LGPL static libraries come from
 # scripts/fetch-mpvkit.sh (run automatically before the first build).
@@ -93,6 +99,8 @@ targetTemplates:
         embed: false
       - framework: Vendor/Libbluray.xcframework
         embed: false
+      - package: Sentry
+        product: Sentry-Static
       - sdk: AVFoundation.framework
       - sdk: AudioToolbox.framework
       - sdk: CoreAudio.framework
@@ -125,6 +133,7 @@ targets:
         CFBundleDisplayName: Openreel
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        SentryDSN: $(SENTRY_DSN)
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIApplicationSceneManifest:
@@ -169,6 +178,7 @@ targets:
         CFBundleDisplayName: Openreel
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        SentryDSN: $(SENTRY_DSN)
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIBackgroundModes: [audio]

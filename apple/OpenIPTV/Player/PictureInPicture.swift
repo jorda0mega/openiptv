@@ -170,15 +170,15 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             windowSize = nil
             film.player.showFrames(inWindow: nil)
         case .measureStart:
+            timeGap(.start, film.frames)
             #if DEBUG
             film.player.measureGap(.start)
             #endif
-            break
         case .measureReturn:
+            timeGap(.return, film.frames)
             #if DEBUG
             film.player.measureGap(.return)
             #endif
-            break
         case .dock:
             dock.hold(film.frames.layer)
             film.player.onEvent = { [weak self] event, _ in self?.dockedEvent(event) }
@@ -264,6 +264,12 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         #if DEBUG
         probe()
         #endif
+    }
+
+    private func timeGap(_ edge: Metric.PipEdge, _ frames: FilmFrames) {
+        frames.timeLongestFrameWait(for: 4) { seconds in
+            Task { @MainActor in Telemetry.note(.pipGap(edge, seconds: seconds)) }
+        }
     }
 
     private func skip(by seconds: Double) {

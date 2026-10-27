@@ -35,8 +35,9 @@ final class MPVPlayer: @unchecked Sendable {
         /// Seconds buffered ahead and the current download speed (bytes/s),
         /// about once a second.
         case network(buffer: Double, bytesPerSecond: Double)
-        /// A jump landed and playback carried on; seconds since it was asked.
-        case seeked(Double)
+        /// A jump landed and playback carried on; seconds since it was asked,
+        /// and by how many seconds when it was a jump by an amount.
+        case seeked(Double, by: Double?)
         /// The player is on its way to a jump (true), or done seeking (false,
         /// also when the jump's read ended with nothing).
         case seeking(Bool)
@@ -239,7 +240,7 @@ final class MPVPlayer: @unchecked Sendable {
     /// When the file was open (headers read), for the start-up breakdown.
     private(set) var openedAfter: Double?
     /// When the last explicit jump was asked for (not scrubbing previews).
-    private var seekStarted: CFAbsoluteTime?
+    private var seekAsked: (at: CFAbsoluteTime, by: Double?)?
     /// Choosing where to jump: when the picture's current jump was asked
     /// for, and the newest target to show once it lands.
     private var followStarted: CFAbsoluteTime?
@@ -677,7 +678,7 @@ final class MPVPlayer: @unchecked Sendable {
             }
             #endif
             stopFollowing()
-            seekStarted = CFAbsoluteTimeGetCurrent()
+            seekAsked = (CFAbsoluteTimeGetCurrent(), seconds)
             #if DEBUG
             let read = StreamRelay.shared.serverBytes
             stateLock.withLock { serverBytesAtSeek = read }
@@ -693,7 +694,7 @@ final class MPVPlayer: @unchecked Sendable {
     func seek(to seconds: Double, exact: Bool = true, report: Bool = false) {
         queue.async { [self] in
             stopFollowing()
-            seekStarted = report ? CFAbsoluteTimeGetCurrent() : nil
+            seekAsked = report ? (CFAbsoluteTimeGetCurrent(), nil) : nil
             command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
         }
     }
@@ -731,7 +732,7 @@ final class MPVPlayer: @unchecked Sendable {
             let (at, precise) = followStarted == nil ? (followShown, followShownExact) : (followTarget, followTargetExact)
             if followNext == nil, let at, abs(at - seconds) < 0.5, precise || !exact { return }
             stopFollowing()
-            seekStarted = CFAbsoluteTimeGetCurrent()
+            seekAsked = (CFAbsoluteTimeGetCurrent(), nil)
             command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
         }
     }
@@ -742,7 +743,7 @@ final class MPVPlayer: @unchecked Sendable {
         followTargetExact = exact
         followShown = nil
         followNext = nil
-        seekStarted = nil
+        seekAsked = nil
         command(["seek", String(seconds), exact ? "absolute+exact" : "absolute+keyframes"])
     }
 
@@ -1590,7 +1591,7 @@ final class MPVPlayer: @unchecked Sendable {
                 }
                 #endif
                 readableWhileQueueIsBusy.withLock { firstPictureShown = true }
-                seekStarted = nil
+                seekAsked = nil
                 if let mpv { mpv_set_property_string(mpv, "hr-seek", "default") }
                 emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted), attempt: attempt)
                 return
@@ -1603,13 +1604,13 @@ final class MPVPlayer: @unchecked Sendable {
                 if let shown = followTarget { emit(.previewShown(shown)) }
                 if let next = followNext { startFollowing(next.seconds, exact: next.exact) }
             }
-            if let asked = seekStarted {
-                seekStarted = nil
+            if let asked = seekAsked {
+                seekAsked = nil
                 #if DEBUG
                 let read = Double(StreamRelay.shared.serverBytes - stateLock.withLock { serverBytesAtSeek }) / 1e6
-                stateLock.withLock { bufferingLog.seeked(after: CFAbsoluteTimeGetCurrent() - asked, megabytes: read) }
+                stateLock.withLock { bufferingLog.seeked(after: CFAbsoluteTimeGetCurrent() - asked.at, megabytes: read) }
                 #endif
-                emit(.seeked(CFAbsoluteTimeGetCurrent() - asked))
+                emit(.seeked(CFAbsoluteTimeGetCurrent() - asked.at, by: asked.by))
             }
         #if DEBUG
         case MPV_EVENT_AUDIO_RECONFIG:

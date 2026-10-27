@@ -50,6 +50,13 @@ struct LiveSession<Copy: Identifiable & Equatable> where Copy.ID == String {
             }
         }
 
+        var failure: StreamFailure? {
+            switch self {
+            case let .failed(_, failure, _), let .timedOut(_, failure), let .ended(_, failure): failure
+            case .play, .recording, .opening, .started, .picture, .online, .paused, .away, .back, .gaveUp, .closed: nil
+            }
+        }
+
         func isStale(current: Attempt) -> Bool {
             attempt.map { $0 != current } ?? false
         }

@@ -8,13 +8,14 @@ struct OpenIPTVApp: App {
     @State private var model = AppModel()
     @State private var prefs = Preferences()
 
-    #if DEBUG
     init() {
+        Telemetry.start()
+        #if DEBUG
         TrackChoice.forgetForTesting()
         AppModel.forgetMyListOrderForTesting()
         AppModel.forgetWatchOnPicksForTesting()
+        #endif
     }
-    #endif
 
     var body: some Scene {
         WindowGroup {

@@ -1217,6 +1217,7 @@ struct MoviePlayerView: View {
         convertedOpen?.cancel()
         player?.stop {}
         error = StartPatience.tooLong.localizedDescription
+        Telemetry.report(startedOnce ? .filmStopped(.no_data) : .filmDidNotStart(.no_frame))
         track.failed(at: Date())
         showControls(autoHide: false)
     }
@@ -1411,6 +1412,9 @@ struct MoviePlayerView: View {
             #endif
             guard !startedOnce else { return }
             startedOnce = true
+            Telemetry.note(.filmStarted(firstTap: playback.firstTapSinceLaunch, prepared: warmStart,
+                                        resumes: (playback.startSeconds ?? 0) > 0, picture: picture,
+                                        seconds: Date().timeIntervalSince(track.began)))
             // Whole start from the tap: server, then screen/player setup,
             // opening the file, and seeking + the first frame.
             let total = Date().timeIntervalSince(playback.requestedAt)
@@ -1460,8 +1464,9 @@ struct MoviePlayerView: View {
             track.seeking(on && started, choosing: scrubbing != nil, at: Date())
         case .restarted:
             track.landed(at: Date())
-        case let .seeked(seconds):
+        case let .seeked(seconds, by):
             jumpUntil = nil
+            if let by { Telemetry.note(.filmJumped(by: by, picture: picture, seconds: seconds)) }
             if prefs.performanceStats { showTiming(String(format: "Jumped in %.1f s", seconds), for: 3) }
             #if DEBUG
             NSLog("%@", String(format: "PERF seek %.3f at %.1f", seconds, position))
@@ -1496,7 +1501,7 @@ struct MoviePlayerView: View {
             stats = String(format: "%@ · %@ · speed %.1f Mbps · %.0f s buffered", quality, file,
                            (governor?.speed ?? bytesPerSecond * 8) / 1e6, buffer)
             #endif
-        case let .failed(message, _):
+        case let .failed(message, logged):
             // Back to full quality didn't open: carry on at the lower one.
             if started, let bitrate = revertTo,
                let url = model.convertedURL(for: playback, bitrate: bitrate, start: position, audio: player?.audioStreamIndex) {
@@ -1522,6 +1527,7 @@ struct MoviePlayerView: View {
                 return
             }
             error = message.prefix(1).uppercased() + message.dropFirst()
+            Telemetry.report(startedOnce ? .filmStopped(logged ?? .unknown) : .filmDidNotStart(logged ?? .unknown))
             track.failed(at: Date())
             showControls(autoHide: false)
             let failed = track.attempt
@@ -1587,11 +1593,12 @@ struct MoviePlayerView: View {
             }
             #endif
             if isPaused { showControls(autoHide: false) } else { showControls() }
-        case .ended:
+        case let .ended(logged):
             let end = track.end(at: position, of: total)
             position = end.place
             if end.cutOff {
                 error = "The server stopped sending the film."
+                Telemetry.report(.filmStopped(logged ?? .unknown))
                 cutOff = true
                 track.cutOff(at: Date())
                 showControls(autoHide: false)
@@ -2196,6 +2203,8 @@ struct MoviePlayerView: View {
 
     /// Seconds from here to the end of the file, when its length is known.
     private var secondsLeft: Double? { total > 0 ? max(0, total - position) : nil }
+
+    private var picture: Metric.Picture { Metric.Picture(drawsFrames: player?.drawsFrames == true) }
 
     /// To the intro's end, straight away.
     private func skipIntro() {

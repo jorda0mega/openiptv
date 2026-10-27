@@ -22,6 +22,7 @@ final class FilmFrames: @unchecked Sendable {
     private var pool: CVPixelBufferPool?
     private var pooled = PixelSize(width: 0, height: 0)
     private var format: CMVideoFormatDescription?
+    private var gap: Metric.FrameGap?
     #if DEBUG
     var onFrame: (@Sendable (Double) -> Void)?
     #endif
@@ -73,10 +74,28 @@ final class FilmFrames: @unchecked Sendable {
             CMTimebaseSetTime(clock, time: CMTime(seconds: seconds, preferredTimescale: 600))
         }
         CMTimebaseSetRate(clock, rate: playing ? 1 : 0)
+        if !playing { lock.withLock { gap?.held() } }
         if was != playing { onPlayingChanged?(playing) }
     }
 
     var isPlaying: Bool { clock.map { CMTimebaseGetRate($0) != 0 } ?? false }
+
+    func timeLongestFrameWait(for seconds: Double, done: @escaping @Sendable (Double) -> Void) {
+        let began = CFAbsoluteTimeGetCurrent()
+        let playing = isPlaying
+        lock.withLock {
+            gap = Metric.FrameGap(began: began)
+            if !playing { gap?.held() }
+        }
+        queue.asyncAfter(deadline: .now() + seconds) { [self] in
+            let longest = lock.withLock { () -> Double? in
+                guard let window = gap, window.began == began else { return nil }
+                gap = nil
+                return window.longest(until: CFAbsoluteTimeGetCurrent())
+            }
+            if let longest { done(longest) }
+        }
+    }
 
     func close() {
         let context = lock.withLock {
@@ -211,6 +230,7 @@ final class FilmFrames: @unchecked Sendable {
         let renderer = layer.sampleBufferRenderer
         if renderer.status == .failed || renderer.requiresFlushToResumeDecoding { renderer.flush() }
         renderer.enqueue(sample)
+        lock.withLock { gap?.frame(at: CFAbsoluteTimeGetCurrent()) }
         #if DEBUG
         onFrame?(CFAbsoluteTimeGetCurrent())
         #endif
