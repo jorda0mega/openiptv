@@ -5,13 +5,24 @@ enum Redaction {
     static let longest = 256
 
     static func clean(_ text: String) -> String {
-        var afterKeyWord = false
-        let cleaned = text.replacing(quoted, with: removed).replacing(#/\S+/#) { match in
+        var next = Next.word
+        let unquoted = text.replacing(quoted, with: removed).replacing(singleQuoted) { "\($0.output.1)\(removed)" }
+        let cleaned = unquoted.replacing(#/\S+/#) { match in
             let word = match.output
-            defer { afterKeyWord = word.wholeMatch(of: keyWord) != nil }
-            return afterKeyWord || holdsAddress(word) || word.contains(longKey) ? removed : String(word)
+            let now = next
+            next = Next.after(word, now)
+            return now == .value || holdsAddress(word) || word.contains(longKey) ? removed : String(word)
         }
         return String(cleaned.prefix(longest))
+    }
+
+    private enum Next {
+        case word, separator, value
+
+        static func after(_ word: Substring, _ now: Next) -> Next {
+            if let key = word.wholeMatch(of: keyWord) { return key.output.1.isEmpty ? .separator : .value }
+            return now == .separator && (word == "=" || word == ":") ? .value : .word
+        }
     }
 
     static func holdsAddress(_ text: some StringProtocol) -> Bool {
@@ -29,6 +40,7 @@ enum Redaction {
     }
 
     private static let quoted = #/"[^"]*"|“[^”]*”|‘[^’]*’/#
+    private static let singleQuoted = #/(^|\s)'[^']+'/#
 
     private static let addressShapes: [Regex<Substring>] = [
         #/:\/\/|^\/\/|(?i:www\.)/#,
@@ -43,5 +55,5 @@ enum Redaction {
 
     private static let longKey = #/(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]{24,}/#
 
-    private static let keyWord = #/(?i)(?:api_?key|x-emby-token|x-emby-authorization|access_?token|token|password|passwd|pass|username|user|login|auth|authorization|key):/#
+    private static let keyWord = #/(?i)(?:api_?key|x-emby-token|x-emby-authorization|access_?token|token|password|passwd|pass|username|user|login|auth|authorization|key)([:=]?)/#
 }

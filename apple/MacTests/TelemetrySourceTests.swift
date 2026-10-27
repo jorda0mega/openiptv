@@ -15,7 +15,7 @@ final class TelemetrySourceTests: XCTestCase {
     }
 
     func testNoCrashMessageCarriesAValue() throws {
-        let interpolated = #/(fatalError|preconditionFailure|precondition|assertionFailure|assert|NSException)\([^)]*\\\(/#
+        let interpolated = #/(fatalError|preconditionFailure|precondition|assertionFailure|assert|NSException|raise)\(.*\\\(/#
         let lines = try appFiles().flatMap { file in
             try String(contentsOf: file, encoding: .utf8).split(separator: "\n").filter { $0.contains(interpolated) }
                 .map { "\(file.lastPathComponent): \($0.trimmingCharacters(in: .whitespaces))" }

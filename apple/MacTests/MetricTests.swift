@@ -10,15 +10,14 @@ final class MetricTests: XCTestCase {
             "film.jump.forward_10s", "film.jump.back_10s", "film.jump.forward_5min",
             "film.pip.start_gap", "film.pip.return_gap", "live.start", "live.switch",
         ])
-        XCTAssertEqual(Problem.Kind.allCases.map(\.rawValue),
-                       ["film_did_not_start", "film_stopped", "live_did_not_start", "live_stopped"])
+        XCTAssertEqual(Problem.kinds, ["film_did_not_start", "film_stopped", "live_did_not_start", "live_stopped"])
     }
 
     private let phone = Metric.Recorder(platform: .iphone)
 
     private func start(firstTap: Bool = false, prepared: Bool, resumes: Bool, seconds: Double = 0.5) -> Metric.Sample? {
-        phone.sample(.filmStarted(firstTap: firstTap, prepared: prepared, resumes: resumes, picture: .software, seconds: seconds),
-                     network: .wifi)
+        phone.sample(.filmStarted(Metric.FilmTap(first: firstTap, prepared: prepared), resumes: resumes, picture: .software,
+                                  seconds: seconds), network: .wifi)
     }
 
     func testTheFirstTapAfterLaunchIsItsOwnNameWhateverElseItIs() {
@@ -41,7 +40,7 @@ final class MetricTests: XCTestCase {
 
     func testAStartSaysWhereItRanAndWhetherItsLoadingShowed() {
         let recorder = Metric.Recorder(platform: .appletv)
-        let quick = recorder.sample(.filmStarted(firstTap: true, prepared: true, resumes: false, picture: .gpu,
+        let quick = recorder.sample(.filmStarted(Metric.FilmTap(first: true, prepared: true), resumes: false, picture: .gpu,
                                                  seconds: LoadProgress.ringAfter - 0.01), network: .phone)
         XCTAssertEqual(quick, Metric.Sample(name: .filmStartFirstTap, seconds: LoadProgress.ringAfter - 0.01, states: [
             .platform: "appletv", .network: "phone", .picture: "gpu", .prepared: "yes", .resumed: "no", .loadingShown: "no",
@@ -82,7 +81,7 @@ final class MetricTests: XCTestCase {
     func testEverySampleGoesOutWhole() {
         let recorder = Metric.Recorder(platform: .ipad)
         let readings: [Metric.Reading] = [
-            .filmStarted(firstTap: false, prepared: false, resumes: true, picture: .software, seconds: 2), .filmJumped(by: -10, picture: .gpu, seconds: 4),
+            .filmStarted(Metric.FilmTap(first: false, prepared: false), resumes: true, picture: .software, seconds: 2), .filmJumped(by: -10, picture: .gpu, seconds: 4),
             .pipGap(.start, seconds: 0.1), .liveOpened(.switch, seconds: 0.5),
         ]
         for reading in readings {
@@ -102,19 +101,18 @@ final class MetricTests: XCTestCase {
     }
 
     func testAProblemIsAKindAndAReasonWord() {
-        XCTAssertEqual(Problem.liveDidNotStart(.http_404).kind, .liveDidNotStart)
-        XCTAssertEqual(Problem.liveDidNotStart(.http_404).reason, .http_404)
-        XCTAssertEqual(Problem.filmStopped(.reset).kind, .filmStopped)
-        XCTAssertEqual(Problem.filmDidNotStart(.no_frame).reason, .no_frame)
-        XCTAssertEqual(Problem.liveStopped(.timeout).kind, .liveStopped)
+        XCTAssertEqual(Problem(subject: .live, started: false, reason: .http_404).kind, "live_did_not_start")
+        XCTAssertEqual(Problem(subject: .film, started: true, reason: .reset).kind, "film_stopped")
+        XCTAssertEqual(Problem(subject: .film, started: false, reason: .no_frame).kind, "film_did_not_start")
+        XCTAssertEqual(Problem(subject: .live, started: true, reason: .timeout).kind, "live_stopped")
     }
 
     func testAProblemsReasonWordNeverSpellsAnAddressScheme() {
-        XCTAssertEqual(Problem.liveDidNotStart(.http_404).reasonWord, "status_404")
-        XCTAssertEqual(Problem.filmStopped(.http_5xx).reasonWord, "status_5xx")
-        XCTAssertEqual(Problem.filmStopped(.reset).reasonWord, "reset")
+        XCTAssertEqual(Problem(subject: .live, started: false, reason: .http_404).reasonWord, "status_404")
+        XCTAssertEqual(Problem(subject: .film, started: true, reason: .http_5xx).reasonWord, "status_5xx")
+        XCTAssertEqual(Problem(subject: .film, started: true, reason: .reset).reasonWord, "reset")
         for reason in StreamFailure.allCases {
-            XCTAssertFalse(Problem.liveStopped(reason).reasonWord.contains("http"))
+            XCTAssertFalse(Problem(subject: .live, started: true, reason: reason).reasonWord.contains("http"))
         }
     }
 

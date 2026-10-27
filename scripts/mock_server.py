@@ -711,7 +711,8 @@ class Handler(BaseHTTPRequestHandler):
         titles = {name.rstrip(".*") for _, name, *_ in KNOWN_TITLES} | set(GUIDE_TITLES) | set(SERIES_NAMES)
         words = {"address": rb"127\.0\.0\.1", "localhost": rb"(?i)localhost", "http": rb"(?i)http",
                  "port": rb":%d(?!\d)|(?<![\d.])%d(?![\d.])" % (port, port), "token": re.escape(TOKEN.encode()),
-                 "user": rb"\btester\b", "server": rb"\bMock\b", "mac_paths": rb"/Users/|CoreSimulator",
+                 "user": rb"\btester\b", "server": rb"\bMock\b", "mac_paths": rb"\\?/Users\\?/|CoreSimulator",
+                 "registers": rb'"registers":\s*\{\s*"',
                  "titles": rb"\b(?:" + b"|".join(re.escape(t.encode()) for t in sorted(titles, key=len, reverse=True))
                            + rb")\b|\b(?:Movie|Episode|Channel|Case|Season|Library Title) \d+\b"}
         if FAKE_LOGIN:

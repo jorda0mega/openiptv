@@ -48,6 +48,15 @@ final class RedactionTests: XCTestCase {
     func testQuotedTextLeavesNothing() {
         assertNothingOf(["Long Film"], in: "Couldn't play “The Long Film” here")
         assertNothingOf(["Long Film"], in: "title \"The Long Film\" missing")
+        assertNothingOf(["Long Film"], in: "Fatal error: Duplicate values for key: 'The Long Film'")
+        XCTAssertEqual(Redaction.clean("Couldn't play the film's sound"), "Couldn't play the film's sound")
+    }
+
+    func testAValueAfterALoginWordLeavesNothing() {
+        assertNothingOf(["hunter2x"], in: "password: hunter2x")
+        assertNothingOf(["hunter2x"], in: "password = hunter2x")
+        assertNothingOf(["hunter2x"], in: "user : hunter2x refused")
+        XCTAssertEqual(Redaction.clean("the user cancelled"), "the user cancelled")
     }
 
     func testCrashWordsStayReadable() {
@@ -64,7 +73,7 @@ final class RedactionTests: XCTestCase {
     }
 
     func testOurOwnWordsSurvive() {
-        let words = Problem.Kind.allCases.map(\.rawValue) + StreamFailure.allCases.map(\.rawValue)
+        let words = Problem.kinds + StreamFailure.allCases.map { Problem(subject: .film, started: true, reason: $0).reasonWord }
             + Metric.Key.allCases.flatMap { [$0.rawValue] + $0.values }
         for word in words {
             XCTAssertEqual(Redaction.clean(word), word)
