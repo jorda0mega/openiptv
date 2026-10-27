@@ -397,7 +397,7 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertNotNil(wait.shown(at: at(53))?.ring)
         XCTAssertEqual(wait.shown(at: at(58))?.tryAgain, true)
         XCTAssertTrue(wait.overdue(at: at(80)), "a jump that never lands spins past 30 s")
-        track.landed()
+        track.landed(at: at(60))
         XCTAssertNil(track.stalledSince, "a jump that landed still waits")
     }
 
@@ -410,7 +410,7 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertEqual(track.stalledSince, at(40))
         track.flowing()
         XCTAssertEqual(track.stalledSince, at(45), "data coming again ended the wait for a jump still on its way")
-        track.landed()
+        track.landed(at: at(46))
         XCTAssertNil(track.stalledSince)
         track.jumping(at: at(60))
         track.pictured(at: at(61))
@@ -427,11 +427,11 @@ final class LoadTrackTests: XCTestCase {
         XCTAssertEqual(track.stalledSince, at(53), "a jump begun while choosing (Apple TV's held press, iPhone's drag) never waited once let go")
         track.seeking(false, choosing: false, at: at(60))
         XCTAssertEqual(track.stalledSince, at(53), "the player done seeking with no picture back ended the wait")
-        track.landed()
+        track.landed(at: at(60))
         XCTAssertNil(track.stalledSince)
         track.seeking(true, choosing: true, at: at(70))
         track.seeking(false, choosing: true, at: at(71))
-        track.landed()
+        track.landed(at: at(71))
         track.choosingEnded(at: at(72))
         XCTAssertNil(track.stalledSince, "a jump that landed while choosing waited after")
         track.seeking(true, choosing: false, at: at(80))
@@ -444,10 +444,22 @@ final class LoadTrackTests: XCTestCase {
         track.pictured(at: at(1))
         track.seeking(true, choosing: false, at: at(10))
         track.seeking(false, choosing: false, at: at(37))
+        track.landed(at: at(37))
         XCTAssertEqual(track.end(at: 186, of: 600), FilmEnd(cutOff: true, place: 186),
                        "a jump's read the server never answered closed the film and saved its place as the end")
-        track.cutOff(at: at(37))
-        XCTAssertEqual(track.failure(.cutOff), .init(kind: .cutOff, tries: 1, seconds: 27), "counted from the jump")
+        track.cutOff(at: at(37.2))
+        XCTAssertEqual(track.failure(.cutOff).seconds, 27.2, accuracy: 0.01,
+                       "the player calls a jump landed just before its read's end: counted from the jump")
+    }
+
+    func testAJumpThatLandedLongBeforeAnEndIsntItsWait() {
+        var track = LoadTrack(began: tap, stage: .fetching)
+        track.asked(.fetching, at: at(0))
+        track.pictured(at: at(1))
+        track.seeking(true, choosing: false, at: at(10))
+        track.landed(at: at(11))
+        track.cutOff(at: at(100))
+        XCTAssertEqual(track.failure(.cutOff).seconds, 0, "an end long after a jump counted from the jump")
     }
 
     func testAReadThatEndsMidPlayIsAFailureThatKeepsThePlace() {
