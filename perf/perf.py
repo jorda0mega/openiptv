@@ -6,7 +6,7 @@ and nowhere else.
     perf.py names                       every metric name and unit
     perf.py parse FILE...               runner output to JSON lines, one sample each
     perf.py best [--keep-current]       rebuild best.json from SOURCES (the recorded runs)
-    perf.py compare SAMPLES.jsonl TARGET  a table against best.json: better, same or REGRESSION
+    perf.py compare SAMPLES.jsonl...     a table against best.json: better, same or REGRESSION (PLATFORMS)
 
 A sample is {metric, value, unit, platform, target, link, commit, source}; target
 is "real" or "mock:<profile>". Counts and numbers only: runner lines carry no
@@ -22,7 +22,7 @@ import subprocess
 import sys
 from datetime import datetime
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.environ.get("REPO") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(REPO, "apple/OpenIPTV/Player/PerfMetric.swift")
 BEST = os.path.join(REPO, "perf/best.json")
 RESULTS = "/tmp/openiptv"
@@ -178,7 +178,49 @@ def recorded():
         for path in sorted(glob.glob(os.path.join(RESULTS, pattern))):
             what = dict(what, commit=what["commit"] and git("rev-parse", "--short", what["commit"]))
             samples += parse(path, **what)
+    for path in sorted(glob.glob(os.path.join(RESULTS, "perf-runs/**/samples.jsonl"), recursive=True)):
+        samples += [dict(dict(changed=False, link="none"), **json.loads(line)) for line in open(path) if line.strip()]
     return samples
+
+
+def pct(values, p):
+    values = sorted(values)
+    return values[min(len(values) - 1, round(p / 100 * (len(values) - 1)))]
+
+
+# Below this, a difference is no change whatever the run's own spread: a frame at 24 fps, a tenth of a second.
+FLOOR = dict(s=0.1, ms=42, count=0.5, ratio=0.05)
+
+
+def compare(paths, known, platforms):
+    """Each metric this run measured against the best for its target, link and platform: better or
+    REGRESSION when its median is further from the best than the run's own spread (its interquartile
+    range, at least FLOOR), else same."""
+    samples = [json.loads(line) for path in paths for line in open(path) if line.strip()]
+    with open(BEST) as f:
+        table = json.load(f)["metrics"]
+    groups = {}
+    for s in samples:
+        groups.setdefault((s["platform"], s["metric"], s["target"], s.get("link", "none")), []).append(s["value"])
+    targets = sorted({(s["target"], s.get("link", "none")) for s in samples})
+    print(f"{'platform':8} {'metric':28} {'n':>3} {'p50':>9} {'p95':>9} {'max':>9}  {'best':>9} {'set by':<22} verdict")
+    for platform in platforms:
+        for metric, unit in known.items():
+            for target, link in targets:
+                values = groups.get((platform, metric, target, link))
+                best = next((b for b in table.get(metric, {}).get("best", [])
+                             if (b["target"], b["link"], b["platform"]) == (target, link, platform)), None)
+                fmt = (lambda v: f"{v:.2f} {unit}") if unit in ("s", "ratio") else (lambda v: f"{v:.0f} {unit}")
+                set_by = f"{best['testflight'] or best['commit']} {best['date'][5:]}" if best else "-"
+                if not values:
+                    print(f"{platform:8} {metric:28} {0:>3} {'-':>9} {'-':>9} {'-':>9}  {fmt(best['value']) if best else '-':>9} {set_by:<22} not measured")
+                    continue
+                p50, p95, top = pct(values, 50), pct(values, 95), max(values)
+                noise = max(pct(values, 75) - pct(values, 25), FLOOR[unit])
+                verdict = ("no best yet" if best is None else "better" if p50 < best["value"] - noise
+                           else "REGRESSION" if p50 > best["value"] + noise else "same")
+                print(f"{platform:8} {metric:28} {len(values):>3} {fmt(p50):>9} {fmt(p95):>9} {fmt(top):>9}  "
+                      f"{fmt(best['value']) if best else '-':>9} {set_by:<22} {verdict}")
 
 
 def best(samples, known):
@@ -223,6 +265,9 @@ def main(argv):
             f.write("\n")
         print(f"{len(samples)} samples, {len(samples) - skipped} from code on main, "
               f"{sum(len(v) for v in table.values())} best entries over {len(table)} of {len(known)} metrics")
+    elif argv[:1] == ["compare"]:
+        platforms = (os.environ.get("PLATFORMS") or "ios tvos").split()
+        compare(argv[1:], known, platforms)
     else:
         print(__doc__)
         return 2
