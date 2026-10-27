@@ -151,7 +151,6 @@ XTREAM_REQUESTS = []
 # the provider takes it beside u/p, and the simulator's log and the API
 # addresses are searched for it. Never printed or sent back.
 FAKE_LOGIN = {}
-# The app's Sentry envelopes, (time, unpacked bytes): GET /mock/sentry_seen?since= counts them.
 SENTRY_ENVELOPES = []
 IPTV_ADDRESSES = []
 LIVE_REQUESTS = []

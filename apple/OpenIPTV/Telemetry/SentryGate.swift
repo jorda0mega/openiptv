@@ -113,7 +113,8 @@ enum SentryGate {
         for image in event.debugMeta ?? [] {
             image.codeFile = image.codeFile.map(Redaction.fileName)
         }
-        return Outbound.stillHoldsAddress(serialized(event)) ? nil : event
+        guard let text = serialized(event), !Outbound.stillHoldsAddress(text) else { return nil }
+        return event
     }
 
     private static func scrub(_ stacktrace: SentryStacktrace?) {
@@ -129,9 +130,9 @@ enum SentryGate {
         }
     }
 
-    private static func serialized(_ event: Event) -> String {
+    private static func serialized(_ event: Event) -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: event.serialize(), options: [.withoutEscapingSlashes]) else {
-            return "://"
+            return nil
         }
         return String(decoding: data, as: UTF8.self)
     }

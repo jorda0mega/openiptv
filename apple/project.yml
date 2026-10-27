@@ -20,7 +20,6 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     OTHER_LDFLAGS: ["-ObjC"]
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-    # Hidden telemetry: empty unless the archive step passes SENTRY_DSN.
     SENTRY_DSN: ""
 
 # Shared by both apps. MPVKit's LGPL static libraries come from

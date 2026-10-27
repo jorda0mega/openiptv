@@ -35,8 +35,6 @@ final class MPVPlayer: @unchecked Sendable {
         /// Seconds buffered ahead and the current download speed (bytes/s),
         /// about once a second.
         case network(buffer: Double, bytesPerSecond: Double)
-        /// A jump landed and playback carried on; seconds since it was asked,
-        /// and by how many seconds when it was a jump by an amount.
         case seeked(Double, by: Double?)
         /// The player is on its way to a jump (true), or done seeking (false,
         /// also when the jump's read ended with nothing).
