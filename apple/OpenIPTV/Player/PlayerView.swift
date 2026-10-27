@@ -257,6 +257,7 @@ struct MoviePlayerView: View {
     @State private var started = false
     @State private var buffering = false
     @State private var error: String?
+    @State private var cutOff = false
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var lastReport: Double = 0
@@ -984,7 +985,7 @@ struct MoviePlayerView: View {
         let subject = LoadProgress.Subject.film(playback.title)
         let cause: LoadProgress.Cause = NetworkStatus.shared.online ? .server : .offline
         if let error {
-            return LoadProgress(subject: subject, cause: cause, began: track.began, failure: track.failure(.refused(error)))
+            return LoadProgress(subject: subject, cause: cause, began: track.began, failure: track.failure(cutOff ? .cutOff : .refused(error)))
         }
         if !started { return LoadProgress(subject: subject, stage: track.stage, cause: cause, began: track.began) }
         if let since = track.stalledSince {
@@ -998,6 +999,7 @@ struct MoviePlayerView: View {
     private func retry() {
         diagnosis?.cancel()
         error = nil
+        cutOff = false
         attempt = 0
         started = false
         let now = Date()
@@ -1584,7 +1586,15 @@ struct MoviePlayerView: View {
             #endif
             if isPaused { showControls(autoHide: false) } else { showControls() }
         case .ended:
-            position = total
+            let end = track.end(at: position, of: total)
+            position = end.place
+            if end.cutOff {
+                error = "The server stopped sending the film."
+                cutOff = true
+                track.cutOff(at: Date())
+                showControls(autoHide: false)
+                return
+            }
             if let next = upNext, switchTo != nil { return playNext(next) }
             close()
         case let .previewShown(seconds):

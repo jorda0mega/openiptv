@@ -27,6 +27,7 @@ struct LoadProgress: Equatable {
         enum Kind: Equatable {
             case noPicture
             case ended
+            case cutOff
             case refused(String)
         }
 
@@ -145,6 +146,8 @@ struct LoadProgress: Equatable {
         case let (.noPicture, .channel(name)): headline = "\(name) isn’t sending a picture"
         case let (.noPicture, .film(title)): headline = "Your server isn’t sending \(title)"
         case let (.ended, .channel(name)), let (.ended, .film(name)): headline = "\(name) stopped before it started"
+        case let (.cutOff, .film(title)): headline = "Your server stopped sending \(title)"
+        case let (.cutOff, .channel(name)): headline = "\(name) stopped sending"
         case let (.refused(why), .channel(name)), let (.refused(why), .film(name)):
             headline = "\(name) didn’t open"
             details.append(why)
@@ -271,7 +274,25 @@ struct LoadTrack: Equatable {
         if failedAt == nil { failedAt = now }
     }
 
+    func end(at position: Double, of total: Double) -> FilmEnd {
+        let cutOff = stalledSince != nil || (total > 0 && total - position > Self.endSlack)
+        return FilmEnd(cutOff: cutOff, place: cutOff ? position : total)
+    }
+
+    mutating func cutOff(at now: Date) {
+        let since = stalledSince ?? now
+        lost(at: since)
+        failed(at: now)
+    }
+
+    static let endSlack = 10.0
+
     func failure(_ kind: LoadProgress.Failure.Kind, otherChannels: Bool = false) -> LoadProgress.Failure {
         .init(kind: kind, tries: max(tries, 1), seconds: (failedAt ?? began).timeIntervalSince(began), otherChannels: otherChannels)
     }
+}
+
+struct FilmEnd: Equatable {
+    var cutOff: Bool
+    var place: Double
 }
