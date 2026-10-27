@@ -6,6 +6,7 @@ and nowhere else.
     perf.py names                       every metric name and unit
     perf.py parse FILE...               runner output to JSON lines, one sample each
     perf.py best [--keep-current]       rebuild best.json from SOURCES (the recorded runs)
+    perf.py live LOG.ndjson              the app's live opens as METRIC lines (live.start, then live.switch)
     perf.py compare SAMPLES.jsonl...     a table against best.json: better, same or REGRESSION (PLATFORMS)
 
 A sample is {metric, value, unit, platform, target, link, commit, source}; target
@@ -265,7 +266,16 @@ def main(argv):
             f.write("\n")
         print(f"{len(samples)} samples, {len(samples) - skipped} from code on main, "
               f"{sum(len(v) for v in table.values())} best entries over {len(table)} of {len(known)} metrics")
-    elif argv[:1] == ["compare"]:
+    elif argv[:1] == ["live"]:
+        # The app's "PERF live open ... tap=<ms>" lines with a frame, in order: the first opens the channel, each
+        # next one is a switch.
+        opens = []
+        for line in open(argv[1], errors="replace"):
+            m = re.search(r"PERF live open .*\btap=(\d+)", line)
+            if m:
+                opens.append(int(m.group(1)))
+        for k, ms in enumerate(opens):
+            print(f"METRIC {'live.start' if k == 0 else 'live.switch'} {ms} ms")
         platforms = (os.environ.get("PLATFORMS") or "ios tvos").split()
         compare(argv[1:], known, platforms)
     else:

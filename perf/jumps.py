@@ -21,6 +21,7 @@ the new picture (tap to seek + picture stood still); --metric adds METRIC lines.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -113,9 +114,12 @@ def pct(values, p):
 
 
 def time(series_path, recorder_log, test_log, ndjson, metric):
-    series = [(t, n or None) for t, n in json.load(open(series_path))]
+    # No recording (the real feeds): the picture is taken as back at libmpv's restart, which the
+    # test server's recordings match within a frame or two.
+    recorded = os.path.exists(series_path) and os.path.exists(recorder_log)
+    series = [(t, n or None) for t, n in json.load(open(series_path))] if recorded else []
     found, logged, shown = taps(test_log), seeks(ndjson), visible_jumps(series)
-    started = next(float(line.split()[0]) for line in open(recorder_log) if "Recording started" in line)
+    started = next((float(line.split()[0]) for line in open(recorder_log) if "Recording started" in line), 0) if recorded else 0
     drift, calibrated = 0.0, False
     print(f"{len(found)} taps, {sum(1 for s in logged if abs(s[2]) == 10)} seeks in the app's log, {len(shown)} jumps of the picture, "
           f"{sum(1 for _, n in series if n is not None)} of {len(series)} recorded frames read")
@@ -142,6 +146,8 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
         if pair:
             drift += pair["at"] - expected
             calibrated = True
+        if not recorded and j["restart"] is not None:
+            j["still"] = j["restart"] / 1000
         total = None if j["to_seek"] is None or j["still"] is None else j["to_seek"] + j["still"]
         j["total"] = total
         ms = lambda s: "-" if s is None else f"{s * 1000:.0f}"
