@@ -33,6 +33,22 @@ struct FramePlan: Equatable, Sendable {
     private static func nonEmpty(_ size: PixelSize) -> PixelSize? { size.width > 0 && size.height > 0 ? size : nil }
 }
 
+/// How a film is drawn on iPhone and iPad.
+enum FilmSurface: Equatable, Sendable {
+    /// One layer drawn by libmpv's software renderer, the one Picture in Picture shows.
+    case frames
+    /// libmpv's GPU output: Dolby Vision profile 5 has no HDR10 or SDR base, and only its reshaping there shows
+    /// the colours right.
+    case gpu
+
+    /// From Emby's "ExtendedVideoSubType" for the film's picture.
+    init(videoSubType: String?) {
+        self = videoSubType == "DoviProfile50" ? .gpu : .frames
+    }
+
+    var offersPictureInPicture: Bool { self == .frames }
+}
+
 /// What a film's frames are drawn for: written by the player, its view and Picture in Picture.
 struct FrameInputs: Equatable, Sendable {
     var video = PixelSize(width: 1920, height: 1080)
