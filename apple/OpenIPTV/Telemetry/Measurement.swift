@@ -56,10 +56,26 @@ enum Metric {
     struct FilmTap: Hashable, Sendable {
         let first: Bool
         let prepared: Bool
+
+        static func at(first: Bool, planKept: Bool, openPlayer: Bool) -> FilmTap {
+            FilmTap(first: first, prepared: planKept || openPlayer)
+        }
     }
 
     enum PipEdge: Sendable { case start, `return` }
     enum LiveOpen: Sendable { case start, `switch` }
+
+    enum LiveAsk: Sendable {
+        case open, step, watchOn, tryAgain, backToLive, recording
+
+        var timed: LiveOpen? {
+            switch self {
+            case .open, .tryAgain: .start
+            case .step, .watchOn: .switch
+            case .backToLive, .recording: nil
+            }
+        }
+    }
 
     enum Reading: Sendable {
         case filmStarted(FilmTap, resumes: Bool, picture: Picture, seconds: Double)
@@ -114,6 +130,36 @@ enum Metric {
             case 300: .filmJumpForward5min
             default: nil
             }
+        }
+    }
+
+    struct FrameGapWatch: Sendable {
+        private var open: (edge: PipEdge, gap: FrameGap)?
+
+        mutating func start(_ edge: PipEdge, at time: Double, playing: Bool) -> (edge: PipEdge, seconds: Double)? {
+            let earlier = finish(at: time)
+            var gap = FrameGap(began: time)
+            if !playing { gap.held() }
+            open = (edge, gap)
+            return earlier
+        }
+
+        mutating func frame(at time: Double) {
+            open?.gap.frame(at: time)
+        }
+
+        mutating func held() {
+            open?.gap.held()
+        }
+
+        mutating func end(began: Double, at time: Double) -> (edge: PipEdge, seconds: Double)? {
+            guard open?.gap.began == began else { return nil }
+            return finish(at: time)
+        }
+
+        private mutating func finish(at time: Double) -> (edge: PipEdge, seconds: Double)? {
+            defer { open = nil }
+            return open.flatMap { open in open.gap.longest(until: time).map { (open.edge, $0) } }
         }
     }
 

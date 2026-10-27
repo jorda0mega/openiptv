@@ -116,6 +116,53 @@ final class MetricTests: XCTestCase {
         }
     }
 
+    func testATapIsPreparedWhenItsPlanWasReadyOrItsPlayerStillOpen() {
+        XCTAssertFalse(Metric.FilmTap.at(first: true, planKept: false, openPlayer: false).prepared)
+        XCTAssertTrue(Metric.FilmTap.at(first: false, planKept: true, openPlayer: false).prepared)
+        XCTAssertTrue(Metric.FilmTap.at(first: false, planKept: false, openPlayer: true).prepared)
+        XCTAssertTrue(Metric.FilmTap.at(first: true, planKept: false, openPlayer: false).first)
+    }
+
+    func testAPictureInPictureReturnDoesNotTakeTheStartsPlace() {
+        var playback = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: URL(string: "http://server/stream")!,
+                                    durationSeconds: 7200)
+        playback.tap = Metric.FilmTap(first: true, prepared: true)
+        XCTAssertNil(playback.resuming(at: 60).tap)
+    }
+
+    func testWhichLiveAsksAreTimedAndHow() {
+        XCTAssertEqual(Metric.LiveAsk.open.timed, .start)
+        XCTAssertEqual(Metric.LiveAsk.tryAgain.timed, .start)
+        XCTAssertEqual(Metric.LiveAsk.step.timed, .switch)
+        XCTAssertEqual(Metric.LiveAsk.watchOn.timed, .switch)
+        XCTAssertNil(Metric.LiveAsk.backToLive.timed)
+        XCTAssertNil(Metric.LiveAsk.recording.timed)
+    }
+
+    func testAWindowThatEndsAtOnceReportsItsGapAndTheNextStillCounts() {
+        var watch = Metric.FrameGapWatch()
+        XCTAssertNil(watch.start(.start, at: 10, playing: true))
+        watch.frame(at: 10.3)
+        let cut = watch.start(.return, at: 11, playing: true)
+        XCTAssertEqual(cut?.edge, .start)
+        XCTAssertEqual(cut?.seconds ?? -1, 0.7, accuracy: 1e-9)
+        XCTAssertNil(watch.end(began: 10, at: 14))
+        watch.frame(at: 11.1)
+        let returned = watch.end(began: 11, at: 15)
+        XCTAssertEqual(returned?.edge, .return)
+        XCTAssertEqual(returned?.seconds ?? -1, 3.9, accuracy: 1e-9)
+        XCTAssertNil(watch.end(began: 11, at: 16))
+    }
+
+    func testAPausedWindowReportsNothing() {
+        var watch = Metric.FrameGapWatch()
+        _ = watch.start(.start, at: 10, playing: false)
+        XCTAssertNil(watch.end(began: 10, at: 14))
+        _ = watch.start(.start, at: 20, playing: true)
+        watch.held()
+        XCTAssertNil(watch.end(began: 20, at: 24))
+    }
+
     func testAFrameGapIsTheLongestWaitBetweenFrames() {
         var gap = Metric.FrameGap(began: 10)
         for i in 1...50 { gap.frame(at: 10 + Double(i) * 0.04) }

@@ -56,13 +56,24 @@ enum Outbound {
     }
 
     static let sdkWrittenMechanisms: Set<String> = [
-        "mach", "signal", "AppHang", "watchdog_termination",
-        "MXCrashDiagnostic", "mx_disk_write_exception", "mx_cpu_exception", "mx_hang_diagnostic",
+        "AppHang", "watchdog_termination", "MXCrashDiagnostic", "mx_disk_write_exception", "mx_cpu_exception", "mx_hang_diagnostic",
     ]
+    static let crashMechanisms: Set<String> = ["mach", "signal"]
 
     static func exceptionText(_ text: String?, mechanism: String?) -> String? {
-        guard let mechanism, sdkWrittenMechanisms.contains(mechanism) else { return nil }
-        return text.map(Redaction.clean)
+        guard let text, let mechanism else { return nil }
+        if sdkWrittenMechanisms.contains(mechanism) { return Redaction.clean(text) }
+        guard crashMechanisms.contains(mechanism) else { return nil }
+        return text.wholeMatch(of: sdkCrashShape) == nil ? fatalErrorWords(text) : text
+    }
+
+    private static let sdkCrashShape = #/(?:Exception|Signal) \S+, Code \S+(?:, Subcode \S+)?/#
+
+    private static func fatalErrorWords(_ text: String) -> String? {
+        let opening = "Fatal error:"
+        guard let start = text.range(of: opening) else { return nil }
+        let words = text[start.upperBound...].split(whereSeparator: \.isWhitespace).prefix { !$0.contains { ":'\"".contains($0) } }
+        return Redaction.clean(([opening] + words.map(String.init)).joined(separator: " "))
     }
 
     static func installID(_ id: String?) -> String? {

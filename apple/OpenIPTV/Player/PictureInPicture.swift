@@ -267,7 +267,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     }
 
     private func timeGap(_ edge: Metric.PipEdge, _ frames: FilmFrames) {
-        frames.timeLongestFrameWait(for: 4) { seconds in
+        frames.timeFrameGap(edge, for: 4) { edge, seconds in
             Task { @MainActor in Telemetry.note(.pipGap(edge, seconds: seconds)) }
         }
     }

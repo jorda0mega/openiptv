@@ -496,7 +496,7 @@ final class AppModel {
             var playback = warm.playback
             playback.resolvedIn = 0
             playback.requestedAt = started
-            playback.tap = Metric.FilmTap(first: first, prepared: true)
+            playback.tap = .at(first: first, planKept: plans.isKept(planKey(itemId, kind: kind)), openPlayer: !warm.player.hasFailed)
             return playback
         }
         let key = planKey(itemId, kind: kind)
@@ -537,7 +537,7 @@ final class AppModel {
         #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
-        playback.tap = Metric.FilmTap(first: first, prepared: prepared)
+        playback.tap = .at(first: first, planKept: prepared, openPlayer: false)
         return playback
     }
 

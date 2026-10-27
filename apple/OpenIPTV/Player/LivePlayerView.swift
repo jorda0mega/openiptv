@@ -147,7 +147,7 @@ struct LivePlayerView: View {
         #if os(iOS)
         .statusBarHidden(!controlsVisible)
         .sheet(isPresented: $showGuide) {
-            ChannelGuideSheet(channel: channel, playing: recording, onWatch: watch, onLive: { play() })
+            ChannelGuideSheet(channel: channel, playing: recording, onWatch: watch, onLive: { play(.backToLive) })
                 .presentationDetents([.medium, .large])
         }
         #else
@@ -166,7 +166,7 @@ struct LivePlayerView: View {
             default: showControls()
             }
         }
-        .onPlayPauseCommand { failed ? play() : togglePause() }
+        .onPlayPauseCommand { failed ? retry() : togglePause() }
         .onExitCommand { showWatchOn ? closeWatchOn() : close() }
         #endif
         .persistentSystemOverlays(.hidden)
@@ -448,7 +448,7 @@ struct LivePlayerView: View {
             return showControls()
         }
         pendingPick = league.map { (choice, $0) }
-        resetScreen(timing: .switch)
+        resetScreen(.watchOn)
         recording = nil
         send(.play(choice.channel, feeds: feeds, after: 0, startLimit: startLimit))
         showControls()
@@ -485,7 +485,7 @@ struct LivePlayerView: View {
                 Button("Start Over") { watch(now) }
             }
             if recording != nil {
-                Button("Back to Live") { play() }
+                Button("Back to Live") { play(.backToLive) }
             }
             Button("Previous Channel") { step(-1) }
             Button("Next Channel") { step(1) }
@@ -567,7 +567,7 @@ struct LivePlayerView: View {
         player.sayLiveConfig()
         NetworkStatus.shared.sayLivePath()
         #endif
-        play(copy: startCopy, opening: .start)
+        play(.open, copy: startCopy)
         if let startCopy, let choice = choices.first(where: { $0.id == startCopy.id }), let league = model.event(of: channel)?.league {
             pendingPick = (choice, league)
         }
@@ -575,11 +575,11 @@ struct LivePlayerView: View {
 
     /// Live, after `delay` seconds (zapping quickly). A game: on the
     /// channel that comes first in Watch On, unless `copy` says which.
-    private func play(after delay: Double = 0, copy: LiveChannel? = nil, opening: Metric.LiveOpen? = nil) {
+    private func play(_ asked: Metric.LiveAsk, after delay: Double = 0, copy: LiveChannel? = nil) {
         #if DEBUG
         perf.began()
         #endif
-        resetScreen(timing: opening)
+        resetScreen(asked)
         recording = nil
         pendingPick = nil
         choices = model.watchChoices(for: channel)
@@ -622,7 +622,7 @@ struct LivePlayerView: View {
             scrubbing = nil
         case .unpause: if paused { player?.setPaused(false) }
         case .picture: pictureShown()
-        case .goLive: play()
+        case .goLive: play(.backToLive)
         case let .markFailed(copy): model.noteLiveFailure(copy)
         case .markNotPlaying: if model.event(of: channel) != nil { model.shareGameNotPlaying(channel) }
         case let .played(copy):
@@ -772,23 +772,23 @@ struct LivePlayerView: View {
         #if DEBUG
         perf.closed()
         #endif
-        resetScreen()
+        resetScreen(.recording)
         recording = programme
         send(.recording)
         showControls()
     }
 
     private func retry() {
-        if let recording { watch(recording) } else { play(opening: .start) }
+        if let recording { watch(recording) } else { play(.tryAgain) }
     }
 
-    private func resetScreen(timing opening: Metric.LiveOpen? = nil) {
+    private func resetScreen(_ asked: Metric.LiveAsk) {
         cueTask?.cancel()
         cue = nil
         timing = "Starting…"
         buffering = false
         startTrack = LoadTrack(began: Date())
-        self.opening = opening
+        opening = asked.timed
         pictured = false
         lastFailure = nil
         #if os(tvOS)
@@ -901,7 +901,7 @@ struct LivePlayerView: View {
     }
 
     private func goLive() {
-        if recording != nil { return play() }
+        if recording != nil { return play(.backToLive) }
         guard let liveTarget else { return }
         if paused { player?.setPaused(false) }
         player?.seek(to: liveTarget, exact: true)
@@ -948,7 +948,7 @@ struct LivePlayerView: View {
         index = (index + delta + channels.count) % channels.count
         let quick = Date().timeIntervalSince(lastStep) < 0.8
         lastStep = Date()
-        play(after: quick ? 0.35 : 0, opening: .switch)
+        play(.step, after: quick ? 0.35 : 0)
     }
 
     private func toggleControls() {
