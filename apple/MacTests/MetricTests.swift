@@ -14,15 +14,17 @@ final class MetricTests: XCTestCase {
                        ["film_did_not_start", "film_stopped", "live_did_not_start", "live_stopped"])
     }
 
-    private func start(_ recorder: inout Metric.Recorder, prepared: Bool, resumes: Bool, seconds: Double = 0.5) -> Metric.Sample? {
-        recorder.sample(.filmStarted(prepared: prepared, resumes: resumes, picture: .software, seconds: seconds), network: .wifi)
+    private let phone = Metric.Recorder(platform: .iphone)
+
+    private func start(firstTap: Bool = false, prepared: Bool, resumes: Bool, seconds: Double = 0.5) -> Metric.Sample? {
+        phone.sample(.filmStarted(firstTap: firstTap, prepared: prepared, resumes: resumes, picture: .software, seconds: seconds),
+                     network: .wifi)
     }
 
-    func testTheFirstFilmAfterLaunchIsTheFirstTapWhateverElseItIs() {
+    func testTheFirstTapAfterLaunchIsItsOwnNameWhateverElseItIs() {
         for prepared in [false, true] {
             for resumes in [false, true] {
-                var recorder = Metric.Recorder(platform: .iphone)
-                let first = start(&recorder, prepared: prepared, resumes: resumes)
+                let first = start(firstTap: true, prepared: prepared, resumes: resumes)
                 XCTAssertEqual(first?.name, .filmStartFirstTap)
                 XCTAssertEqual(first?.states[.prepared], prepared ? "yes" : "no")
                 XCTAssertEqual(first?.states[.resumed], resumes ? "yes" : "no")
@@ -31,27 +33,25 @@ final class MetricTests: XCTestCase {
     }
 
     func testEveryLaterStartLandsUnderExactlyOneName() {
-        var recorder = Metric.Recorder(platform: .iphone)
-        _ = start(&recorder, prepared: false, resumes: false)
-        XCTAssertEqual(start(&recorder, prepared: true, resumes: true)?.name, .filmStartPrepared)
-        XCTAssertEqual(start(&recorder, prepared: true, resumes: false)?.name, .filmStartPrepared)
-        XCTAssertEqual(start(&recorder, prepared: false, resumes: true)?.name, .filmStartResume)
-        XCTAssertEqual(start(&recorder, prepared: false, resumes: false)?.name, .filmStartFromBeginning)
+        XCTAssertEqual(start(prepared: true, resumes: true)?.name, .filmStartPrepared)
+        XCTAssertEqual(start(prepared: true, resumes: false)?.name, .filmStartPrepared)
+        XCTAssertEqual(start(prepared: false, resumes: true)?.name, .filmStartResume)
+        XCTAssertEqual(start(prepared: false, resumes: false)?.name, .filmStartFromBeginning)
     }
 
     func testAStartSaysWhereItRanAndWhetherItsLoadingShowed() {
-        var recorder = Metric.Recorder(platform: .appletv)
-        let quick = recorder.sample(.filmStarted(prepared: true, resumes: false, picture: .gpu,
+        let recorder = Metric.Recorder(platform: .appletv)
+        let quick = recorder.sample(.filmStarted(firstTap: true, prepared: true, resumes: false, picture: .gpu,
                                                  seconds: LoadProgress.ringAfter - 0.01), network: .phone)
         XCTAssertEqual(quick, Metric.Sample(name: .filmStartFirstTap, seconds: LoadProgress.ringAfter - 0.01, states: [
             .platform: "appletv", .network: "phone", .picture: "gpu", .prepared: "yes", .resumed: "no", .loadingShown: "no",
         ]))
-        let slow = start(&recorder, prepared: false, resumes: false, seconds: LoadProgress.ringAfter)
+        let slow = start(prepared: false, resumes: false, seconds: LoadProgress.ringAfter)
         XCTAssertEqual(slow?.states[.loadingShown], "yes")
     }
 
     func testOnlyTheNamedJumpsAreTimed() {
-        var recorder = Metric.Recorder(platform: .iphone)
+        let recorder = Metric.Recorder(platform: .iphone)
         func jump(_ by: Double, _ seconds: Double = 0.4) -> Metric.Sample? {
             recorder.sample(.filmJumped(by: by, picture: .software, seconds: seconds), network: .wifi)
         }
@@ -66,7 +66,7 @@ final class MetricTests: XCTestCase {
     }
 
     func testPictureInPictureGapsAndLiveStarts() {
-        var recorder = Metric.Recorder(platform: .iphone)
+        let recorder = Metric.Recorder(platform: .iphone)
         let gap = recorder.sample(.pipGap(.return, seconds: 0.2), network: .wifi)
         XCTAssertEqual(gap?.name, .pipReturnGap)
         XCTAssertEqual(gap?.states[.picture], "software")
@@ -80,9 +80,9 @@ final class MetricTests: XCTestCase {
     }
 
     func testEverySampleGoesOutWhole() {
-        var recorder = Metric.Recorder(platform: .ipad)
+        let recorder = Metric.Recorder(platform: .ipad)
         let readings: [Metric.Reading] = [
-            .filmStarted(prepared: false, resumes: true, picture: .software, seconds: 2), .filmJumped(by: -10, picture: .gpu, seconds: 4),
+            .filmStarted(firstTap: false, prepared: false, resumes: true, picture: .software, seconds: 2), .filmJumped(by: -10, picture: .gpu, seconds: 4),
             .pipGap(.start, seconds: 0.1), .liveOpened(.switch, seconds: 0.5),
         ]
         for reading in readings {
@@ -107,6 +107,15 @@ final class MetricTests: XCTestCase {
         XCTAssertEqual(Problem.filmStopped(.reset).kind, .filmStopped)
         XCTAssertEqual(Problem.filmDidNotStart(.no_frame).reason, .no_frame)
         XCTAssertEqual(Problem.liveStopped(.timeout).kind, .liveStopped)
+    }
+
+    func testAProblemsReasonWordNeverSpellsAnAddressScheme() {
+        XCTAssertEqual(Problem.liveDidNotStart(.http_404).reasonWord, "status_404")
+        XCTAssertEqual(Problem.filmStopped(.http_5xx).reasonWord, "status_5xx")
+        XCTAssertEqual(Problem.filmStopped(.reset).reasonWord, "reset")
+        for reason in StreamFailure.allCases {
+            XCTAssertFalse(Problem.liveStopped(reason).reasonWord.contains("http"))
+        }
     }
 
     func testAFrameGapIsTheLongestWaitBetweenFrames() {
