@@ -283,8 +283,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     #if DEBUG
     private func noteIcon() {
         guard let film, film.controller.isPictureInPictureActive else { return }
-        let icon: AnyClass? = NSClassFromString("AVPictureInPictureIndicatorLayer")
-        let icons = film.frames.layer.sublayers?.filter { layer in icon.map { layer.isKind(of: $0) } ?? false } ?? []
+        let icons = Self.icons(on: film.frames.layer)
         PictureInPictureProbe.shared.iconOnOpen = icons.isEmpty ? "none" : icons.allSatisfy(\.isHidden) ? "hidden" : "shown"
     }
 
@@ -307,9 +306,20 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         }
     }
 
+    /// AVKit draws its "playing in Picture in Picture" icon in this sublayer of the film's layer while the window is up,
+    /// and offers no public way to turn it off. Should a later iOS rename the class, the icon shows again.
+    private static func icons(on layer: CALayer) -> [CALayer] {
+        guard let icon = NSClassFromString("AVPictureInPictureIndicatorLayer") else { return [] }
+        return layer.sublayers?.filter { $0.isKind(of: icon) } ?? []
+    }
+
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
-            guard controller === film?.controller else { return }
+            guard let film, controller === film.controller else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            Self.icons(on: film.frames.layer).forEach { $0.isHidden = true }
+            CATransaction.commit()
             #if DEBUG
             startMs = Int(Date().timeIntervalSince(askedAt) * 1000)
             #endif
