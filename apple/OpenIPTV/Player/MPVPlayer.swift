@@ -56,9 +56,9 @@ final class MPVPlayer: @unchecked Sendable {
         case frames
         #endif
 
-        static var film: Picture {
+        static func film(_ surface: FilmSurface) -> Picture {
             #if os(iOS)
-            .frames
+            surface == .frames ? .frames : .gpu
             #else
             .gpu
             #endif
