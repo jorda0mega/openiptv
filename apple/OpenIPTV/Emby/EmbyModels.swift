@@ -337,6 +337,7 @@ struct EmbyPlayback: Hashable, Identifiable {
     /// the copy heard in a language picked.
     var copyIds: [String] = []
     var copyKind: String?
+    var surface = FilmSurface.frames
     /// The keys its track picks are kept under: every copy's show or film.
     var trackKeys: [String] = []
 
