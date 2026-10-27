@@ -21,12 +21,8 @@ enum Redaction {
 
         static func after(_ word: Substring, _ now: Next) -> Next {
             if let key = word.wholeMatch(of: keyWord) {
-                switch (key.output.1.isEmpty, key.output.2.isEmpty) {
-                case (true, true): return .separator
-                case (false, true): return .value
-                case (false, false): return .joined
-                case (true, false): return .word
-                }
+                guard let value = key.output.1 else { return .separator }
+                return value.isEmpty ? .value : .joined
             }
             return now == .separator && (word == "=" || word == ":") ? .value : .word
         }
@@ -47,7 +43,7 @@ enum Redaction {
     }
 
     private static let quoted = #/"[^"]*"|“[^”]*”|‘[^’]*’/#
-    private static let singleQuoted = #/(^|\s)'.*'/#
+    private static let singleQuoted = #/(?s)(^|\s)'.*'/#
 
     private static let addressShapes: [Regex<Substring>] = [
         #/:\/\/|^\/\/|(?i:www\.)/#,
@@ -62,5 +58,5 @@ enum Redaction {
 
     private static let longKey = #/(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]{24,}/#
 
-    private static let keyWord = #/(?i)(?:api_?key|x-emby-token|x-emby-authorization|access_?token|token|password|passwd|pass|username|user|login|auth|authorization|key)([:=]?)(\S*)/#
+    private static let keyWord = #/(?i)(?:api_?key|x-emby-token|x-emby-authorization|access_?token|token|password|passwd|pass|username|user|login|auth|authorization|key)(?:[:=](\S*))?/#
 }

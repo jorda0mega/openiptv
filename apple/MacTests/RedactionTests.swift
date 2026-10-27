@@ -50,6 +50,7 @@ final class RedactionTests: XCTestCase {
         assertNothingOf(["Long Film"], in: "title \"The Long Film\" missing")
         assertNothingOf(["Long Film"], in: "Fatal error: Duplicate values for key: 'The Long Film'")
         assertNothingOf(["Lost Film"], in: "for key: 'A Director's Lost Film' here")
+        assertNothingOf(["Long", "Film"], in: "for key: 'The Long\nFilm' here")
         XCTAssertEqual(Redaction.clean("Couldn't play the film's sound"), "Couldn't play the film's sound")
     }
 
@@ -59,6 +60,10 @@ final class RedactionTests: XCTestCase {
         assertNothingOf(["hunter2x"], in: "user : hunter2x refused")
         XCTAssertEqual(Redaction.clean("the user cancelled"), "the user cancelled")
         assertNothingOf(["tester", "hunter2x"], in: "user:tester pass=hunter2x refused")
+        assertNothingOf(["hunter2x"], in: "authorization: hunter2x")
+        assertNothingOf(["hunter2x"], in: "Authorization hunter2x".replacingOccurrences(of: " ", with: ":"))
+        assertNothingOf(["hunter2x"], in: "authorization = hunter2x")
+        XCTAssertEqual(Redaction.clean("userInfo keyboard authored"), "userInfo keyboard authored")
     }
 
     func testCrashWordsStayReadable() {
