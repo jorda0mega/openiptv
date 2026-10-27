@@ -17,11 +17,12 @@ struct SwitchGap {
     private(set) var seeks = 0
     private(set) var restarts = 0
     private var samples: [Sample] = []
-    private var frames: [Double] = []
+    private var frames: Metric.FrameGap
 
     init(_ kind: Kind, at began: Double) {
         self.kind = kind
         self.began = began
+        frames = Metric.FrameGap(began: began)
     }
 
     mutating func seeked() { seeks += 1 }
@@ -31,7 +32,7 @@ struct SwitchGap {
         samples.append(Sample(wall: wall, time: time, audio: audio, paused: paused, drops: drops))
     }
 
-    mutating func frame(at wall: Double) { frames.append(wall) }
+    mutating func frame(at wall: Double) { frames.frame(at: wall) }
 
     func readout(until end: Double) -> String {
         "\(kind.rawValue) seeks=\(seeks) restarts=\(restarts) paused=\(ms(pausedFor)) drops=\(dropped) time=\(stall(\.time)) "
@@ -74,12 +75,7 @@ struct SwitchGap {
     }
 
     private func longestWait(until end: Double) -> Double {
-        var last = began, longest = 0.0
-        for frame in frames.sorted() where frame >= began {
-            longest = max(longest, frame - last)
-            last = frame
-        }
-        return max(longest, end - last)
+        frames.longest(until: end) ?? 0
     }
 
     private func ms(_ seconds: Double) -> Int { Int((seconds * 1000).rounded()) }

@@ -313,6 +313,7 @@ struct EmbyPlayback: Hashable, Identifiable {
     var resolvedIn: Double = 0
     /// When the user asked for it, to time the whole start.
     var requestedAt = Date()
+    var firstTapSinceLaunch = false
     /// Bitrate of the original file (bits/s), when the server knows it.
     var bitrate: Int?
     /// The show an episode belongs to.

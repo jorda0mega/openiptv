@@ -489,11 +489,14 @@ final class AppModel {
 
     func playback(itemId: String, kind: String? = nil, title: String? = nil) async throws -> EmbyPlayback {
         var started = Date()
+        let firstTap = !filmTapped
+        filmTapped = true
         // Just closed here, and kept: no need to ask the server anything.
         if let warm, warm.parked, warm.key == itemId {
             var playback = warm.playback
             playback.resolvedIn = 0
             playback.requestedAt = started
+            playback.firstTapSinceLaunch = firstTap
             return playback
         }
         let key = planKey(itemId, kind: kind)
@@ -533,6 +536,7 @@ final class AppModel {
         #endif
         playback.resolvedIn = Date().timeIntervalSince(started)
         playback.requestedAt = started
+        playback.firstTapSinceLaunch = firstTap
         return playback
     }
 
@@ -1155,6 +1159,7 @@ final class AppModel {
     // MARK: Warm start
 
     private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback, parked: Bool)?
+    @ObservationIgnored private var filmTapped = false
     private var warmExpiry: Task<Void, Never>?
 
     /// The preview stills (BIF) of the last two titles got ready ahead of a

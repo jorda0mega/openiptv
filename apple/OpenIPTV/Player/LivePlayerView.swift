@@ -66,6 +66,9 @@ struct LivePlayerView: View {
     /// feed that never starts isn't tried first next time).
     @State private var pendingPick: (choice: AppModel.WatchChoice, league: String)?
     @State private var startTrack = LoadTrack(began: Date())
+    @State private var opening: Metric.LiveOpen?
+    @State private var pictured = false
+    @State private var lastFailure: StreamFailure?
     #if os(tvOS)
     @State private var loadFocus = LoadProgress.Button.tryAgain
     #endif
@@ -564,7 +567,7 @@ struct LivePlayerView: View {
         player.sayLiveConfig()
         NetworkStatus.shared.sayLivePath()
         #endif
-        play(copy: startCopy)
+        play(copy: startCopy, opening: .start)
         if let startCopy, let choice = choices.first(where: { $0.id == startCopy.id }), let league = model.event(of: channel)?.league {
             pendingPick = (choice, league)
         }
@@ -572,11 +575,12 @@ struct LivePlayerView: View {
 
     /// Live, after `delay` seconds (zapping quickly). A game: on the
     /// channel that comes first in Watch On, unless `copy` says which.
-    private func play(after delay: Double = 0, copy: LiveChannel? = nil) {
+    private func play(after delay: Double = 0, copy: LiveChannel? = nil, opening: Metric.LiveOpen? = nil) {
         #if DEBUG
         perf.began()
         #endif
         resetScreen()
+        self.opening = opening
         recording = nil
         pendingPick = nil
         choices = model.watchChoices(for: channel)
@@ -588,6 +592,7 @@ struct LivePlayerView: View {
     }
 
     private func send(_ input: LiveSession<LiveChannel>.Input) {
+        if let failure = input.failure { lastFailure = failure }
         for action in session.handle(input) { run(action) }
     }
 
@@ -600,7 +605,11 @@ struct LivePlayerView: View {
             startTrack.asked(at: Date())
             loadRecording(attempt, from: resume ? position : nil)
         case .stop:
-            if session.failure != nil { startTrack.failed(at: Date()) }
+            if session.failure != nil {
+                startTrack.failed(at: Date())
+                let reason = lastFailure ?? .no_frame
+                Telemetry.report(pictured ? .liveStopped(reason) : .liveDidNotStart(reason))
+            }
             stopStream()
         case let .deadline(attempt, limit): giveUp(attempt, after: limit)
         case .cancelDeadline: giveUpTask?.cancel()
@@ -781,6 +790,8 @@ struct LivePlayerView: View {
         timing = "Starting…"
         buffering = false
         startTrack = LoadTrack(began: Date())
+        pictured = false
+        lastFailure = nil
         #if os(tvOS)
         loadFocus = .tryAgain
         #endif
@@ -788,6 +799,9 @@ struct LivePlayerView: View {
 
     private func pictureShown() {
         buffering = false
+        if let opening { Telemetry.note(.liveOpened(opening, seconds: Date().timeIntervalSince(startTrack.began))) }
+        opening = nil
+        pictured = true
         startTrack.pictured(at: Date())
         ScreenAwake.set(awakeID, playing: !paused)
         #if DEBUG
@@ -935,7 +949,7 @@ struct LivePlayerView: View {
         index = (index + delta + channels.count) % channels.count
         let quick = Date().timeIntervalSince(lastStep) < 0.8
         lastStep = Date()
-        play(after: quick ? 0.35 : 0)
+        play(after: quick ? 0.35 : 0, opening: .switch)
     }
 
     private func toggleControls() {
