@@ -362,6 +362,13 @@ final class PlayerLookTests: XCTestCase {
         return out
     }
 
+    /// Points sampled inside `area` of the screen whose three colour
+    /// channels pass `test` (green is the middle one).
+    private func points(in area: CGRect, where test: (UInt8, UInt8, UInt8) -> Bool) -> Int {
+        let channels = samples(in: area)
+        return stride(from: 0, to: channels.count - 2, by: 3).filter { test(channels[$0], channels[$0 + 1], channels[$0 + 2]) }.count
+    }
+
     /// The brightest colour channel inside `area` of the screen (0-255).
     private func brightestPixel(in area: CGRect) -> UInt8 {
         guard let image = XCUIScreen.main.screenshot().image.cgImage,
@@ -472,9 +479,16 @@ final class PlayerLookTests: XCTestCase {
     /// Subtitles on the picture in portrait, at the picture's scale, as in
     /// the Apple TV app. Regression: sized by the (tall) window, they were
     /// huge and drawn under the picture, off the bottom of the screen.
-    /// Needs the multi-track test server as for testPickedSubtitlesStay.
+    /// Regression: picked and playing, none was drawn at all. The picture
+    /// stays opaque under them, so nothing behind it shows through (red
+    /// here) in the app or the Picture in Picture window. Needs the
+    /// multi-track test server as for testPickedSubtitlesStay.
     func testSubtitlesOnPictureInPortrait() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MULTI_TRACK"] != nil, "needs the multi-track test file")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        // From the start: the film's one line begins at 1 s, and a resumed film reads no line begun long before.
+        configure(server, ["reset": "1"])
+        app.launchEnvironment["OPENREEL_DEBUG_BEHIND_PICTURE"] = "red"
         openFilm(["-forgetTrackChoices", "YES"])
         app.tap()
         usleep(600_000)
@@ -494,10 +508,21 @@ final class PlayerLookTests: XCTestCase {
         sleep(7)
         shot("subtitles in portrait")
         XCTAssertFalse(app.buttons["Close player"].exists, "the controls are still up")
+        XCTAssertFalse(app.staticTexts["debug-subtext"].firstMatch.label.isEmpty, "no subtitle line due now")
         let screen = app.frame
         let pictureBottom = screen.midY + screen.width * 9 / 32
+        let white = { (a: UInt8, b: UInt8, c: UInt8) in min(a, b, c) > 200 }
         let below = CGRect(x: 0, y: pictureBottom + 8, width: screen.width, height: screen.maxY - pictureBottom - 8)
-        XCTAssertLessThan(brightestPixel(in: below), 60, "subtitles drawn under the picture")
+        XCTAssertEqual(points(in: below, where: white), 0, "subtitles drawn under the picture")
+        XCTAssertGreaterThan(points(in: below) { a, g, c in max(a, c) > 200 && g < 60 }, 0, "no red behind the picture")
+        // The bottom eighth of the picture, where the test film is never
+        // near white, and magenta only for a moment as its moving line
+        // passes; its blue bar under the second word.
+        let band = screen.width * 9 / 128
+        let lowest = CGRect(x: screen.width * 0.15, y: pictureBottom - band, width: screen.width * 0.7, height: band)
+        XCTAssertGreaterThan(points(in: lowest, where: white), 5, "no subtitle drawn on the picture")
+        let blue = CGRect(x: screen.width * 0.52, y: pictureBottom - band, width: screen.width * 0.13, height: band)
+        XCTAssertLessThan(points(in: blue) { a, g, c in a > 150 && g < 100 && c > 150 }, 20, "red behind the picture shows through under the subtitle")
     }
 
     /// Of two English subtitle tracks, the one picked (SDH) comes back,
