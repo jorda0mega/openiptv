@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import json
 import math
+import re
 import threading
 import os
 import struct
@@ -29,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
+import sentry_capture
 import slow_link
 from slow_link import Conversion, Link, ShapedWriter, opens_file
 
@@ -149,6 +151,8 @@ XTREAM_REQUESTS = []
 # the provider takes it beside u/p, and the simulator's log and the API
 # addresses are searched for it. Never printed or sent back.
 FAKE_LOGIN = {}
+# The app's Sentry envelopes, (time, unpacked bytes): GET /mock/sentry_seen?since= counts them.
+SENTRY_ENVELOPES = []
 IPTV_ADDRESSES = []
 LIVE_REQUESTS = []
 LIVE_HELD = {}
@@ -432,6 +436,7 @@ def xmltv_time(ts):
     return datetime.fromtimestamp(ts, PANEL_TZ).strftime("%Y%m%d%H%M%S +0100")
 
 
+SERIES_NAMES = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
 GUIDE_TITLES = ["The Simpsons", "Friends", "SportsCenter", "World News Tonight", "The Office", "Seinfeld",
                 "NFL Live", "Law & Order: SVU", "Jeopardy!", "Wheel of Fortune", "Family Guy", "Bob's Burgers",
                 "Chopped", "Diners, Drive-Ins and Dives", "Property Brothers", "House Hunters", "Paw Patrol",
@@ -702,6 +707,19 @@ class Handler(BaseHTTPRequestHandler):
         KEY_CHECKS.append((time.time(), kind, "api_key" in q, headed, player))
         return headed
 
+    def sentry_leaks(self):
+        port = self.server.server_port
+        titles = {name.rstrip(".*") for _, name, *_ in KNOWN_TITLES} | set(GUIDE_TITLES) | set(SERIES_NAMES)
+        words = {"address": rb"127\.0\.0\.1", "localhost": rb"(?i)localhost", "http": rb"(?i)http",
+                 "port": rb":%d(?!\d)|(?<![\d.])%d(?![\d.])" % (port, port), "token": re.escape(TOKEN.encode()),
+                 "user": rb"\btester\b", "server": rb"\bMock\b", "mac_paths": rb"/Users/|CoreSimulator",
+                 "titles": rb"\b(?:" + b"|".join(re.escape(t.encode()) for t in sorted(titles, key=len, reverse=True))
+                           + rb")\b|\b(?:Movie|Episode|Channel|Case|Season|Library Title) \d+\b"}
+        if FAKE_LOGIN:
+            words["username"] = re.escape(FAKE_LOGIN["username"].encode())
+            words["password"] = re.escape(FAKE_LOGIN["password"].encode())
+        return {name: re.compile(pattern) for name, pattern in words.items()}
+
     def log_message(self, *args):
         pass
 
@@ -729,6 +747,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
+        if sentry_capture.ENVELOPE.match(urlparse(self.path).path):
+            body = sentry_capture.unpacked(self.rfile.read(length), self.headers.get("Content-Encoding", ""))
+            SENTRY_ENVELOPES.append((time.time(), body))
+            return self.send({})
         raw = self.rfile.read(length).decode()
         # Emby accepts both; its own web client sends a form.
         if self.headers.get("Content-Type", "").startswith("application/x-www-form-urlencoded"):
@@ -859,6 +881,11 @@ class Handler(BaseHTTPRequestHandler):
                               "log_username": found(log, "username"), "log_password": found(log, "password"),
                               "requests": len(addresses), "address_username": sum(found(a, "username") for a in addresses),
                               "address_password": sum(found(a, "password") for a in addresses)})
+        if path == "/mock/sentry_seen":
+            since = float(q.get("since", "0"))
+            envelopes = [body for t, body in SENTRY_ENVELOPES if t >= since]
+            return self.send(sentry_capture.seen(envelopes, self.sentry_leaks(), q.get("metrics", "").split(","),
+                                                 q.get("problems", "").split(",")))
         if path == "/mock/mark":
             return self.send({"t": time.time()})
         if path == "/mock/video_requests":
@@ -1375,7 +1402,7 @@ class Handler(BaseHTTPRequestHandler):
                     item["People"] = [{"Name": n, "Type": t, "Id": "p_" + n.replace(" ", "_")} for n, t in CAST.get(item_id, [])]
                 return self.send(item)
             if item_id.startswith("s"):
-                names = ["Forensic Files", "Forensic Files II", "Spider-Man", "Grey's Anatomy", "The Office"]
+                names = SERIES_NAMES
                 n = int(item_id[1:]) if item_id[1:].isdigit() and int(item_id[1:]) < len(names) else 1
                 return self.send({"Id": item_id, "Name": names[n], "Type": "Series", "ProductionYear": 2000 + n,
                                   "ProviderIds": {"Imdb": SHOW_IMDB.get(names[n], "")},
