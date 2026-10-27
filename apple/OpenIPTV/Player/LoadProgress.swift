@@ -258,12 +258,13 @@ struct LoadTrack: Equatable {
         jumpAskedAt = nil
     }
 
-    /// The player on its way to a jump, or landed. While choosing where to
+    /// The player on its way to a jump, or done seeking (landed only once
+    /// the picture is back: `landed()`). While choosing where to
     /// jump its previews don't wait; a jump still on its way once the
     /// choice ends does, from then.
     mutating func seeking(_ on: Bool, choosing: Bool, at now: Date) {
         playerSeeking = on
-        if !on { landed() } else if !choosing { jumping(at: now) }
+        if on, !choosing { jumping(at: now) }
     }
 
     mutating func choosingEnded(at now: Date) {

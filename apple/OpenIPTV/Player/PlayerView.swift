@@ -1396,7 +1396,7 @@ struct MoviePlayerView: View {
     /// and tracks aren't any one load's.
     private func handle(_ event: MPVPlayer.Event, _ loadAttempt: Int) {
         switch event {
-        case .paused, .seeked, .seeking, .previewShown, .tracksChanged: break
+        case .paused, .seeked, .seeking, .restarted, .previewShown, .tracksChanged: break
         default: guard track.isCurrent(loadAttempt) else { return }
         }
         switch event {
@@ -1458,6 +1458,8 @@ struct MoviePlayerView: View {
             // A jump that doesn't land (the server stopped answering) waits
             // like a stall; choosing where to jump doesn't.
             track.seeking(on && started, choosing: scrubbing != nil, at: Date())
+        case .restarted:
+            track.landed()
         case let .seeked(seconds):
             jumpUntil = nil
             if prefs.performanceStats { showTiming(String(format: "Jumped in %.1f s", seconds), for: 3) }

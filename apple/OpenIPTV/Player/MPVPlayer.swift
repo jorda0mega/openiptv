@@ -37,8 +37,11 @@ final class MPVPlayer: @unchecked Sendable {
         case network(buffer: Double, bytesPerSecond: Double)
         /// A jump landed and playback carried on; seconds since it was asked.
         case seeked(Double)
-        /// The player is on its way to a jump (true), or has landed (false).
+        /// The player is on its way to a jump (true), or done seeking (false,
+        /// also when the jump's read ended with nothing).
         case seeking(Bool)
+        /// The picture back after a jump or a preview.
+        case restarted
         /// A preview while choosing where to jump is on screen (its target,
         /// in the player's seconds).
         case previewShown(Double)
@@ -1592,6 +1595,7 @@ final class MPVPlayer: @unchecked Sendable {
                 emit(.started(CFAbsoluteTimeGetCurrent() - loadStarted), attempt: attempt)
                 return
             }
+            emit(.restarted)
             if followStarted != nil {
                 followStarted = nil
                 followShown = followTarget
