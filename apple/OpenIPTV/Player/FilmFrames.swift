@@ -25,6 +25,11 @@ final class FilmFrames: @unchecked Sendable {
     private var gaps = Metric.FrameGapWatch()
     #if DEBUG
     var onFrame: (@Sendable (Double) -> Void)?
+    /// UI tests (perf/subtitle_look.py): the last sampled frame, "drawn 1920x1080 shown 2096x1179 color pq peak 255",
+    /// its peak the brightest channel value in its bottom 30%, where subtitles go.
+    var look: String { lock.withLock { lastLook } }
+    private var lastLook = ""
+    private var drawnFrames = 0
     #endif
 
 
@@ -140,7 +145,33 @@ final class FilmFrames: @unchecked Sendable {
         guard drawn else { return }
         tag(buffer, state.inputs.color)
         enqueue(buffer)
+        #if DEBUG
+        sample(buffer, plan: plan, inputs: state.inputs)
+        #endif
     }
+
+    #if DEBUG
+    private func sample(_ buffer: CVPixelBuffer, plan: FramePlan, inputs: FrameInputs) {
+        drawnFrames += 1
+        guard drawnFrames % 24 == 1 else { return }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return }
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer), rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+        var peak: UInt8 = 0
+        for y in stride(from: height * 7 / 10, to: height, by: 2) {
+            for x in stride(from: 0, to: width, by: 2) {
+                let pixel = base + y * rowBytes + x * 4
+                peak = max(peak, pixel[0], pixel[1], pixel[2])
+            }
+        }
+        let box = inputs.window ?? inputs.screen
+        let shown = box.map { min(Double($0.width), Double($0.height) * plan.size.aspect) } ?? Double(plan.size.width)
+        let text = String(format: "drawn %dx%d shown %.0fx%.0f color %@ peak %d", width, height, shown, shown / plan.size.aspect,
+                          "\(inputs.color)", Int(peak))
+        lock.withLock { lastLook = text }
+    }
+    #endif
 
     private func buffer(_ size: PixelSize) -> CVPixelBuffer? {
         if size != pooled {

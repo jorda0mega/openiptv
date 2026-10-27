@@ -232,6 +232,9 @@ final class MPVPlayer: @unchecked Sendable {
     var streamStartTime: Double { stateLock.withLock { streamStart } }
     private var serverBytesAtSeek: Int64 = 0
     var bufferingReadout: String { stateLock.withLock { bufferingLog.readout } }
+    #if os(iOS)
+    var framesLook: String { frames?.look ?? "" }
+    #endif
     private var awaitingSubtitleLine: (n: Int, since: CFAbsoluteTime)?
     private var stalledSince: CFAbsoluteTime?
     #endif
