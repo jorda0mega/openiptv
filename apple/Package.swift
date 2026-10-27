@@ -71,7 +71,7 @@ let package = Package(
                 "Search/TMDbPopularity.swift",
                 "Telemetry/Measurement.swift",
                 "Telemetry/Outbound.swift",
-                "Telemetry/Scrubber.swift",
+                "Telemetry/Redaction.swift",
             ]
         ),
         .testTarget(name: "MacTests", dependencies: ["OpenIPTV"], path: "MacTests"),

@@ -74,7 +74,7 @@ final class OutboundTests: XCTestCase {
 
     func testAContextStringHoldingAnAddressIsCleaned() {
         let kept = Outbound.contexts(["device": ["model": "http://203.0.113.9/x"]])
-        XCTAssertEqual(kept["device"]?["model"] as? String, Scrubber.removed)
+        XCTAssertEqual(kept["device"]?["model"] as? String, Redaction.removed)
     }
 
     func testTheLastLockFindsAnAddressAnywhereInASerializedEvent() {

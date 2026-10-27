@@ -1,13 +1,13 @@
 import XCTest
 @testable import OpenIPTV
 
-final class ScrubberTests: XCTestCase {
+final class RedactionTests: XCTestCase {
     private let user = "lu5f0c2e9a17b3d4c8"
     private let password = "lp9e8d7c6b5a4f3e2d"
     private let token = "tk0123456789abcdef0123456789abcd"
 
     private func assertNothingOf(_ secrets: [String], in text: String, line: UInt = #line) {
-        let cleaned = Scrubber.clean(text)
+        let cleaned = Redaction.clean(text)
         for secret in secrets {
             XCTAssertFalse(cleaned.localizedCaseInsensitiveContains(secret), "kept \(secrets.firstIndex(of: secret) ?? -1)", line: line)
         }
@@ -54,12 +54,12 @@ final class ScrubberTests: XCTestCase {
         for text in ["Fatal error: Index out of range", "EXC_BAD_ACCESS", "KERN_INVALID_ADDRESS at 0x0000000000000010",
                      "App hanging for at least 2000 ms.", "NSInvalidArgumentException", "com.apple.main-thread",
                      "openiptv.film-frames", "version 0.2.0", "SIGABRT"] {
-            XCTAssertEqual(Scrubber.clean(text), text)
+            XCTAssertEqual(Redaction.clean(text), text)
         }
     }
 
     func testASourcePathGoesAndTheReasonStays() {
-        XCTAssertEqual(Scrubber.clean("Swift/ContiguousArrayBuffer.swift:600: Fatal error: Index out of range"),
+        XCTAssertEqual(Redaction.clean("Swift/ContiguousArrayBuffer.swift:600: Fatal error: Index out of range"),
                        "[removed] Fatal error: Index out of range")
     }
 
@@ -67,27 +67,27 @@ final class ScrubberTests: XCTestCase {
         let words = Problem.Kind.allCases.map(\.rawValue) + StreamFailure.allCases.map(\.rawValue)
             + Metric.Key.allCases.flatMap { [$0.rawValue] + $0.values }
         for word in words {
-            XCTAssertEqual(Scrubber.clean(word), word)
+            XCTAssertEqual(Redaction.clean(word), word)
         }
     }
 
     func testLongTextIsCut() {
-        XCTAssertLessThanOrEqual(Scrubber.clean(String(repeating: "word ", count: 200)).count, Scrubber.longest)
+        XCTAssertLessThanOrEqual(Redaction.clean(String(repeating: "word ", count: 200)).count, Redaction.longest)
     }
 
     func testAnImagePathKeepsOnlyTheBinaryName() {
-        XCTAssertEqual(Scrubber.fileName("/private/var/containers/Bundle/Application/1F2E3D4C-0000-4000-8000-000000000001/Openreel.app/OpenIPTV"),
+        XCTAssertEqual(Redaction.fileName("/private/var/containers/Bundle/Application/1F2E3D4C-0000-4000-8000-000000000001/Openreel.app/OpenIPTV"),
                        "OpenIPTV")
-        XCTAssertEqual(Scrubber.fileName("/usr/lib/libobjc.A.dylib"), "libobjc.A.dylib")
-        XCTAssertEqual(Scrubber.fileName("/Users/someone/Library/Developer/CoreSimulator/Devices/X/data/Containers/Bundle/OpenIPTV"),
+        XCTAssertEqual(Redaction.fileName("/usr/lib/libobjc.A.dylib"), "libobjc.A.dylib")
+        XCTAssertEqual(Redaction.fileName("/Users/someone/Library/Developer/CoreSimulator/Devices/X/data/Containers/Bundle/OpenIPTV"),
                        "OpenIPTV")
-        XCTAssertEqual(Scrubber.fileName("OpenIPTV"), "OpenIPTV")
+        XCTAssertEqual(Redaction.fileName("OpenIPTV"), "OpenIPTV")
     }
 
     func testAFunctionNameIsKeptUnlessItHoldsAnAddress() {
-        XCTAssertFalse(Scrubber.holdsAddress("-[NSObject(NSObject) doesNotRecognizeSelector:]"))
-        XCTAssertFalse(Scrubber.holdsAddress("objc_msgSend"))
-        XCTAssertFalse(Scrubber.holdsAddress("$s8OpenIPTV10PlayerViewV6handleyyAA9MPVPlayerC5EventO_SitF"))
-        XCTAssertTrue(Scrubber.holdsAddress("http://203.0.113.9/live"))
+        XCTAssertFalse(Redaction.holdsAddress("-[NSObject(NSObject) doesNotRecognizeSelector:]"))
+        XCTAssertFalse(Redaction.holdsAddress("objc_msgSend"))
+        XCTAssertFalse(Redaction.holdsAddress("$s8OpenIPTV10PlayerViewV6handleyyAA9MPVPlayerC5EventO_SitF"))
+        XCTAssertTrue(Redaction.holdsAddress("http://203.0.113.9/live"))
     }
 }
