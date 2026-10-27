@@ -1,0 +1,897 @@
+{
+ "about": "Best recorded value per metric, target (real Emby or mock:<profile>), link and platform. Lower is better for every metric. Rebuilt by perf/perf.py best; extended by perf/eval.sh.",
+ "metrics": {
+  "film.start.first_tap": {
+   "unit": "s",
+   "best": [
+    {
+     "target": "mock:extreme",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 2,
+     "value": 27.3,
+     "commit": "c50219f",
+     "landed_as": "0d57cd4",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "fsr-plan-tools/b6-extreme-final.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 5,
+     "value": 4.4,
+     "commit": "c335dd8",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/base-real-busy.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 1,
+     "value": 6.8,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/ship/busy.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 19,
+     "value": 1.4,
+     "commit": "7d71925",
+     "landed_as": "8af67dc",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "fsr-plan-tools/b1-real-quiet-efg.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 4,
+     "value": 1.3,
+     "commit": "f6973c2",
+     "landed_as": "f6973c2",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/recheck2/quiet-tv.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "phone",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 3.7,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 9,
+     "value": 10.0,
+     "commit": "9216729",
+     "landed_as": "bdfe8e5",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "fsr-plan-tools/b1-worst-efg.txt"
+    },
+    {
+     "target": "real",
+     "link": "far",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 2,
+     "value": 12.1,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 3,
+     "value": 8.0,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "verdict-real-1026-1246/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 1,
+     "value": 15.1,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "verdict-real-tv-1026-1255/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "worst",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 43.7,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    }
+   ]
+  },
+  "film.start.launch_tap": {
+   "unit": "s",
+   "best": [
+    {
+     "target": "mock:extreme",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 114.7,
+     "commit": "545663b",
+     "landed_as": "2989ab3",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-extreme-runs/extreme.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 5,
+     "value": 0.6,
+     "commit": "7e89e3c",
+     "landed_as": "15945fa",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/new-real-busy.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 1,
+     "value": 9.1,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/ship/busy.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 8,
+     "value": 0.6,
+     "commit": "10706fd",
+     "landed_as": "c4ee7a1",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "fsr-plan-tools/cal-quiet-1.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 4,
+     "value": 0.2,
+     "commit": "0191765",
+     "landed_as": "9dfe06d",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/val-real-quiet.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "phone",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 3.5,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 5,
+     "value": 12.4,
+     "commit": "7e89e3c",
+     "landed_as": "15945fa",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/new-worst.txt"
+    },
+    {
+     "target": "real",
+     "link": "far",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 2,
+     "value": 9.7,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 3,
+     "value": 6.2,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 1,
+     "value": 9.2,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "verdict-real-tv-1026-1255/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "worst",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 26.4,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    }
+   ]
+  },
+  "film.start.prepared": {
+   "unit": "s",
+   "best": [
+    {
+     "target": "mock:extreme",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 111.8,
+     "commit": "545663b",
+     "landed_as": "2989ab3",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-extreme-runs/extreme.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 5,
+     "value": 4.4,
+     "commit": "7e89e3c",
+     "landed_as": "15945fa",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/new-real-busy.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 1,
+     "value": 5.0,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/ship/busy.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 19,
+     "value": 0.3,
+     "commit": "9216729",
+     "landed_as": "bdfe8e5",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "fsr-plan-tools/b2-real-quiet-efg.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 4,
+     "value": 1.1,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "phone",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 2.6,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 9,
+     "value": 7.6,
+     "commit": "7e89e3c",
+     "landed_as": "15945fa",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/new-worst.txt"
+    },
+    {
+     "target": "real",
+     "link": "far",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 14.9,
+     "commit": "c335dd8",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-1913/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 2,
+     "value": 16.4,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "verdict-real-1026-1246/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "s",
+     "samples": 1,
+     "value": 13.6,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "verdict-real-tv-1026-1255/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "worst",
+     "platform": "ios",
+     "unit": "s",
+     "samples": 1,
+     "value": 56.8,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    }
+   ]
+  },
+  "film.start.resume_other": {
+   "unit": "s",
+   "best": []
+  },
+  "film.jump.forward_10s": {
+   "unit": "ms",
+   "best": []
+  },
+  "film.jump.back_10s": {
+   "unit": "ms",
+   "best": []
+  },
+  "film.jump.forward_5min": {
+   "unit": "ms",
+   "best": [
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 5,
+     "value": 1069.0,
+     "commit": "7e89e3c",
+     "landed_as": "15945fa",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/new-real-busy.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "ms",
+     "samples": 1,
+     "value": 6581.0,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/ship/busy.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 8,
+     "value": 53.0,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "ms",
+     "samples": 4,
+     "value": 53.0,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "phone",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 1,
+     "value": 4519.0,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 5,
+     "value": 4737.0,
+     "commit": "c335dd8",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/base-worst.txt"
+    },
+    {
+     "target": "real",
+     "link": "far",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 2,
+     "value": 1857.0,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 3,
+     "value": 38.0,
+     "commit": "c335dd8",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-1913/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "ms",
+     "samples": 1,
+     "value": 50.0,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "verdict-real-tv-1026-1255/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "worst",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 1,
+     "value": 1624.0,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    }
+   ]
+  },
+  "film.jump.loading_shown": {
+   "unit": "count",
+   "best": []
+  },
+  "film.play.pauses_120s": {
+   "unit": "count",
+   "best": [
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "ios",
+     "unit": "count",
+     "samples": 5,
+     "value": 0.0,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "filmbuf/ab/base-real-busy-r2.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "count",
+     "samples": 1,
+     "value": 1.0,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/ship/busy.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "ios",
+     "unit": "count",
+     "samples": 8,
+     "value": 0.0,
+     "commit": "f6973c2",
+     "landed_as": "f6973c2",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/recheck/quiet.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "count",
+     "samples": 4,
+     "value": 0.0,
+     "commit": "f6973c2",
+     "landed_as": "f6973c2",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/recheck2/quiet-tv.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "phone",
+     "platform": "ios",
+     "unit": "count",
+     "samples": 1,
+     "value": 3.0,
+     "commit": "54c4876",
+     "landed_as": "9c77b5b",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "fsr-tv/open-real-quiet.txt"
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "count",
+     "samples": 5,
+     "value": 3.0,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "filmbuf/ab/base-worst-r2.txt"
+    },
+    {
+     "target": "real",
+     "link": "far",
+     "platform": "ios",
+     "unit": "count",
+     "samples": 2,
+     "value": 4.0,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "ios",
+     "unit": "count",
+     "samples": 3,
+     "value": 0.0,
+     "commit": "c335dd8",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-1913/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "count",
+     "samples": 1,
+     "value": 0.0,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "verdict-real-tv-1026-1255/run.txt"
+    },
+    {
+     "target": "real",
+     "link": "worst",
+     "platform": "ios",
+     "unit": "count",
+     "samples": 1,
+     "value": 20.0,
+     "commit": "4203684",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-25",
+     "source": "baseline-real-1025-2106/run.txt"
+    }
+   ]
+  },
+  "film.subtitles.first_line": {
+   "unit": "ms",
+   "best": [
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 5,
+     "value": 1.0,
+     "commit": "7e89e3c",
+     "landed_as": "15945fa",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/new-real-busy.txt"
+    },
+    {
+     "target": "mock:real-busy",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "ms",
+     "samples": 1,
+     "value": 37.0,
+     "commit": "3abe757",
+     "landed_as": "451f5b3",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/ship/busy.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 8,
+     "value": 0.0,
+     "commit": "9216729",
+     "landed_as": "bdfe8e5",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "fsr-plan-tools/b2-link-efg.txt"
+    },
+    {
+     "target": "mock:real-quiet",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "ms",
+     "samples": 4,
+     "value": 0.0,
+     "commit": "f6973c2",
+     "landed_as": "f6973c2",
+     "testflight": "202610261439",
+     "date": "2026-10-26",
+     "source": "filmbuf/recheck2/quiet-tv.txt"
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "samples": 5,
+     "value": 18.0,
+     "commit": "c335dd8",
+     "landed_as": "661ecba",
+     "testflight": "202610261439",
+     "date": "2026-10-23",
+     "source": "filmbuf/ab/base-worst.txt"
+    }
+   ]
+  },
+  "film.subtitles.peak_sdr": {
+   "unit": "ratio",
+   "best": []
+  },
+  "film.subtitles.peak_hdr": {
+   "unit": "ratio",
+   "best": []
+  },
+  "film.subtitles.scale": {
+   "unit": "ratio",
+   "best": []
+  },
+  "pip.start.picture_gap": {
+   "unit": "ms",
+   "best": [
+    {
+     "target": "mock:none",
+     "link": "none",
+     "platform": "ipad",
+     "unit": "ms",
+     "samples": 13,
+     "value": 40.0,
+     "commit": "09afc6f",
+     "landed_as": "09afc6f",
+     "testflight": "202610271425",
+     "date": "2026-10-27",
+     "source": "subs-fix-runs/run-pip.out"
+    }
+   ]
+  },
+  "pip.start.sound_gap": {
+   "unit": "ms",
+   "best": [
+    {
+     "target": "mock:none",
+     "link": "none",
+     "platform": "ipad",
+     "unit": "ms",
+     "samples": 13,
+     "value": 0.0,
+     "commit": "09afc6f",
+     "landed_as": "09afc6f",
+     "testflight": "202610271425",
+     "date": "2026-10-27",
+     "source": "subs-fix-runs/run-pip.out"
+    }
+   ]
+  },
+  "pip.return.picture_gap": {
+   "unit": "ms",
+   "best": [
+    {
+     "target": "mock:none",
+     "link": "none",
+     "platform": "ipad",
+     "unit": "ms",
+     "samples": 13,
+     "value": 40.0,
+     "commit": "09afc6f",
+     "landed_as": "09afc6f",
+     "testflight": "202610271425",
+     "date": "2026-10-27",
+     "source": "subs-fix-runs/run-pip2.out"
+    }
+   ]
+  },
+  "pip.return.sound_gap": {
+   "unit": "ms",
+   "best": [
+    {
+     "target": "mock:none",
+     "link": "none",
+     "platform": "ipad",
+     "unit": "ms",
+     "samples": 13,
+     "value": 0.0,
+     "commit": "09afc6f",
+     "landed_as": "09afc6f",
+     "testflight": "202610271425",
+     "date": "2026-10-27",
+     "source": "subs-fix-runs/run-pip.out"
+    }
+   ]
+  },
+  "live.start": {
+   "unit": "ms",
+   "best": []
+  },
+  "live.switch": {
+   "unit": "ms",
+   "best": []
+  }
+ }
+}
