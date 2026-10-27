@@ -1,4 +1,5 @@
 #if os(iOS)
+import Accelerate
 import AVFoundation
 import Libmpv
 import UIKit
@@ -152,9 +153,10 @@ final class FilmFrames: @unchecked Sendable {
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return false }
         var dims: [Int32] = [Int32(size.width), Int32(size.height)]
         var stride = CVPixelBufferGetBytesPerRow(buffer)
-        let pixels = strdup("bgra")
+        // No alpha: libmpv draws subtitles on a frame with alpha only through zimg, which MPVKit leaves out.
+        let pixels = strdup("bgr0")
         defer { free(pixels) }
-        return dims.withUnsafeMutableBufferPointer { dims in
+        let drawn = dims.withUnsafeMutableBufferPointer { dims in
             withUnsafeMutablePointer(to: &stride) { stride in
                 var params = [mpv_render_param(type: MPV_RENDER_PARAM_SW_SIZE, data: UnsafeMutableRawPointer(dims.baseAddress)),
                               mpv_render_param(type: MPV_RENDER_PARAM_SW_FORMAT, data: UnsafeMutableRawPointer(pixels)),
@@ -164,6 +166,11 @@ final class FilmFrames: @unchecked Sendable {
                 return mpv_render_context_render(context, &params) >= 0
             }
         }
+        guard drawn else { return false }
+        // libmpv leaves the fourth byte 0 under subtitles, and the layer reads it as alpha.
+        var image = vImage_Buffer(data: base, height: vImagePixelCount(size.height), width: vImagePixelCount(size.width), rowBytes: stride)
+        vImageOverwriteChannelsWithScalar_ARGB8888(255, &image, &image, 0x1, vImage_Flags(kvImageNoFlags))
+        return true
     }
 
     private func skip(_ context: OpaquePointer) {
