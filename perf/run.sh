@@ -4,5 +4,5 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 copy=/tmp/openiptv/perf-copy-$(basename $(dirname $HERE))-$(date +%H%M%S)
-mkdir -p $copy && cp $HERE/*.sh $HERE/*.py $HERE/../apple/UITests-iOS/{JumpTimingTests,StartTimingTests,SubtitleLookTests}.swift $copy/
+mkdir -p $copy && cp $HERE/*.sh $HERE/*.py $HERE/../apple/UITests-iOS/{TimingCase,JumpTimingTests,StartTimingTests,SubtitleLookTests}.swift $copy/
 REPO=$(dirname $HERE) TESTS=$copy exec zsh $copy/$1 "${@:2}"

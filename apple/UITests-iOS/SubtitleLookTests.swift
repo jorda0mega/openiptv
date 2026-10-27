@@ -5,35 +5,11 @@ import XCTest
 /// (LOOK_SHOTS, a folder on the Mac) and the player's frame readout
 /// (debug-frame-look, where the build has it). Test server only
 /// (TEST_RUNNER_DEBUG_EMBY), with one of perf/make_look_films.sh's films.
-final class SubtitleLookTests: XCTestCase {
-    let app = XCUIApplication()
-
-    override func setUp() {
-        super.setUp()
-        continueAfterFailure = true
-        if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
-            app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
-        }
-        XCUIDevice.shared.orientation = .portrait
-    }
-
+final class SubtitleLookTests: TimingCase {
     func testSubtitleLook() throws {
         let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LOOK_SHOTS"] ?? "/tmp/openiptv/subtitle-look")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        app.launchArguments = ["-debugSearch", "animals", "-forgetTrackChoices", "YES"]
-        app.launch()
-        sleep(4)
-        app.tabBars.buttons["Search"].firstMatch.tap()
-        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals' AND NOT label BEGINSWITH 'Animals.'")).firstMatch
-        XCTAssertTrue(result.waitForExistence(timeout: 20), "no search result")
-        result.tap()
-        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
-        if !play.waitForExistence(timeout: 10), result.exists { result.tap() }
-        XCTAssertTrue(play.waitForExistence(timeout: 10), "no play button")
-        play.tap()
-        let start = app.staticTexts["debug-start"].firstMatch
-        let tapped = Date()
-        while Date().timeIntervalSince(tapped) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4 { sleep(1) }
+        guard openFilm(["-forgetTrackChoices", "YES"]) != nil else { return XCTFail("no first frame in 180 s") }
         sleep(3)
 
         let menu = app.buttons["Audio and Subtitles"].firstMatch, off = app.buttons["Off"].firstMatch

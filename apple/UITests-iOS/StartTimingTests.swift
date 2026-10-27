@@ -6,22 +6,11 @@ import XCTest
 /// tap as soon as the card shows, a card tapped once its plan and start are
 /// fetched ahead (at most 30 s), and another card after the first played and
 /// closed. The install's first launch comes first, timed on its own. Each
-/// start prints a METRIC line and a START line with the app's parts. Test
-/// server only (TEST_RUNNER_DEBUG_EMBY), Continue Watching with two cards.
-final class StartTimingTests: XCTestCase {
-    let app = XCUIApplication()
-
-    override func setUp() {
-        super.setUp()
-        continueAfterFailure = true
-        if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
-            app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
-        }
-        XCUIDevice.shared.orientation = .portrait
-    }
-
+/// start prints a METRIC line and a START line with the app's parts.
+/// Continue Watching needs two cards.
+final class StartTimingTests: TimingCase {
     func testStarts() throws {
-        let shipped = ["-forgetTrackChoices", "YES"]
+        let shipped = launchBase + ["-forgetTrackChoices", "YES"]
         app.launchArguments = shipped
         app.launch()
         let first = try firstCard()

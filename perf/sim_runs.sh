@@ -46,10 +46,12 @@ for commit in "$@"; do
   dir=$OUT/${TEST%%/*}-$PROFILE${TAG:+-$TAG}/$commit; mkdir -p $dir
   echo "== $commit ${TEST%%/*} $PROFILE $(date +%H:%M), $(free_mb) MB free"
   git -C $WT checkout -q --detach -f $commit && git -C $WT clean -qfd apple/UITests-iOS
-  cp ${TESTS:-$REPO/apple/UITests-iOS}/{JumpTimingTests,StartTimingTests,SubtitleLookTests}.swift $WT/apple/UITests-iOS/
+  cp ${TESTS:-$REPO/apple/UITests-iOS}/{TimingCase,JumpTimingTests,StartTimingTests,SubtitleLookTests}.swift $WT/apple/UITests-iOS/
   [ -e $WT/apple/Vendor ] || ln -s $VENDOR $WT/apple/Vendor
   (cd $WT/apple && xcodegen generate --spec project.yml --quiet) || { echo "xcodegen failed: $commit skipped"; continue; }
-  [ $(free_mb) -ge 3500 ] || { echo "$(free_mb) MB free, a build needs 3500: stopped"; exit 1; }
+  # A build needs 3500 MB free: wait for other runs to give it back, an hour at most.
+  for _ in {1..60}; do [ $(free_mb) -ge 3500 ] && break; echo "$(date +%H:%M) $(free_mb) MB free, a build needs 3500: waiting 60 s"; sleep 60; done
+  [ $(free_mb) -ge 3500 ] || { echo "$(free_mb) MB free after an hour: stopped"; exit 1; }
   take /tmp/openiptv/build.lock
   xcodebuild build-for-testing -project $WT/apple/OpenIPTV.xcodeproj -scheme OpenIPTV -destination "id=$SIM" \
     -derivedDataPath $DD -quiet > $dir/build.log 2>&1 &

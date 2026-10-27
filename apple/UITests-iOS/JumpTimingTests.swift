@@ -1,43 +1,16 @@
 import XCTest
 
-/// iPhone: the ±10 s buttons as a viewer taps them, ten times each way.
-/// Each tap prints a JUMP line: when it was tapped (the Mac's clock), the
-/// player's own seek time and MB from the server, and whether a loading
-/// view showed. perf/jumps.py times each tap to the next moving frame from
-/// the screen recording perf/jump_runs.sh makes while JUMPS BEGIN is up.
-/// Test server only (TEST_RUNNER_DEBUG_EMBY), with perf/make_jump_film.sh's film.
-final class JumpTimingTests: XCTestCase {
-    let app = XCUIApplication()
-
-    override func setUp() {
-        super.setUp()
-        continueAfterFailure = true
-        if let account = ProcessInfo.processInfo.environment["DEBUG_EMBY"] {
-            app.launchEnvironment["OPENREEL_DEBUG_EMBY"] = account
-        }
-        if let options = ProcessInfo.processInfo.environment["MPV_EXTRA"] {
-            app.launchEnvironment["OPENREEL_DEBUG_MPV"] = options
-        }
-        XCUIDevice.shared.orientation = .portrait
-    }
-
+/// iPhone: the ±10 s buttons as a viewer taps them, ten times each way,
+/// then one jump of 5 minutes in a launch of its own. Each tap prints a
+/// JUMP line: when it was tapped (the Mac's clock), the player's own seek
+/// time and MB from the server, and whether a loading view showed.
+/// perf/jumps.py times each tap to the next moving frame from the app's log
+/// and the screen recording perf/sim_runs.sh makes while JUMPS BEGIN is up
+/// (on the test server, with perf/make_jump_film.sh's film).
+final class JumpTimingTests: TimingCase {
     func testTenSecondJumps() throws {
-        app.launchArguments = ["-debugSearch", "animals"]
-        app.launch()
-        sleep(4)
-        app.tabBars.buttons["Search"].firstMatch.tap()
-        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Animals' AND NOT label BEGINSWITH 'Animals.'")).firstMatch
-        XCTAssertTrue(result.waitForExistence(timeout: 20), "no search result")
-        result.tap()
-        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Continue'")).firstMatch
-        if !play.waitForExistence(timeout: 10), result.exists { result.tap() }
-        XCTAssertTrue(play.waitForExistence(timeout: 10), "no play button")
-        play.tap()
-        let tapped = Date()
-        let start = app.staticTexts["debug-start"].firstMatch
-        while Date().timeIntervalSince(tapped) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4 { sleep(1) }
-        guard start.exists, start.label.split(separator: " ").count == 4 else { return XCTFail("no first frame in 180 s") }
-        print(String(format: "JUMP start %.1f s after the tap", Date().timeIntervalSince(tapped)))
+        guard let started = openFilm() else { return XCTFail("no first frame in 180 s") }
+        print(String(format: "JUMP start %.1f s after the tap", started))
         sleep(20)
 
         print("JUMPS BEGIN")
@@ -60,6 +33,21 @@ final class JumpTimingTests: XCTestCase {
         }
         print("JUMPS END")
         sleep(2)
+        app.terminate()
+
+        // The player's own jump of 5 minutes (then back 30 s), 20 s after it starts.
+        app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = "20"
+        defer { app.launchEnvironment["OPENREEL_DEBUG_JUMPS_AFTER"] = nil }
+        guard openFilm() != nil else { return XCTFail("no first frame in 180 s, second launch") }
+        let began = Date()
+        while Date().timeIntervalSince(began) < 90, jumps().isEmpty { sleep(1) }
+        if let first = jumps().first, let ms = Double(first.split(separator: " ").first ?? "") {
+            print(String(format: "METRIC film.jump.forward_5min %.0f ms", ms))
+            print("JUMP +5min seek=\(first.replacingOccurrences(of: " ", with: "_"))")
+        } else {
+            print("JUMP +5min: none in 90 s")
+        }
+        app.terminate()
     }
 
     /// The controls fresh on screen: hidden first if up (they hide 3 s after showing).
