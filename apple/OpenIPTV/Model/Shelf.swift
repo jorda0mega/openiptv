@@ -489,6 +489,11 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         stopIfUnwanted(job, key)
     }
 
+    /// What's kept, and failures, go; fetches under way finish for whoever waits on them, asked as they were just now.
+    func forgetKept() {
+        for (key, entry) in entries where entry.job == nil { entries[key] = nil }
+    }
+
     func forgetAll() {
         for case let job? in entries.values.map(\.job) { stop(job) }
         entries = [:]
