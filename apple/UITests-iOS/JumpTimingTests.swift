@@ -46,6 +46,7 @@ final class JumpTimingTests: TimingCase {
             print("JUMP +5min seek=\(first.replacingOccurrences(of: " ", with: "_"))")
         } else {
             print("JUMP +5min: none in 90 s")
+            sayWhyNoStart()
         }
         app.terminate()
     }
@@ -65,15 +66,18 @@ final class JumpTimingTests: TimingCase {
     }
 
     private func playerState() -> (seconds: Double, playing: Bool)? {
-        let parts = app.staticTexts["debug-position"].firstMatch.label.split(separator: " ")
+        let readout = app.staticTexts["debug-position"].firstMatch
+        guard readout.exists else { return nil }
+        let parts = readout.label.split(separator: " ")
         guard parts.count == 2, let seconds = Double(parts[0]) else { return nil }
         return (seconds, parts[1] == "playing")
     }
 
     /// The player's seeks so far: "412 ms 0.3 MB" each, from the seek to libmpv's restart.
     private func jumps() -> [String] {
-        let readout = app.staticTexts["debug-buffering"].firstMatch.label
-        guard let field = readout.components(separatedBy: " | ").first(where: { $0.hasPrefix("jumps: ") }) else { return [] }
+        let readout = app.staticTexts["debug-buffering"].firstMatch
+        guard readout.exists, let field = readout.label.components(separatedBy: " | ").first(where: { $0.hasPrefix("jumps: ") })
+        else { return [] }
         return field.dropFirst(7).components(separatedBy: ", ")
     }
 }
