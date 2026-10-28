@@ -479,7 +479,8 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     func hold(_ key: Key, for interest: Interest) async -> Value? {
         while true {
             if let value = await warm(key, for: interest) { return value }
-            guard !Task.isCancelled, policy.lane.refuses(interest), (try? await policy.lane.untilAllowed(interest)) != nil else { return nil }
+            guard !Task.isCancelled, policy.lane.refuses(interest) else { return nil }
+            guard (try? await policy.lane.untilAllowed(interest)) != nil else { return nil }
         }
     }
 
