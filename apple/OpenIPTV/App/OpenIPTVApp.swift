@@ -173,7 +173,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await model.prepareLibrary(checkingChanges: true) }
-            if !model.rows.isEmpty { Task { await model.refreshContinueWatching(returning: true) } }
+            if !model.account.rows.isEmpty { Task { await model.refreshContinueWatching(returning: true) } }
             Task { await model.refreshMyList() }
             model.prepareRotation()
         }

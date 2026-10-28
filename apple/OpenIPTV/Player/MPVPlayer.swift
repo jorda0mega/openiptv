@@ -21,7 +21,7 @@ final class MPVMetalLayer: CAMetalLayer {
 /// libmpv: plays MPEG-TS live streams (which AVPlayer can't) and any file
 /// Emby has, rendered with Vulkan-on-Metal and decoded by VideoToolbox. One
 /// instance is reused across channel changes so zapping only swaps streams.
-final class MPVPlayer: @unchecked Sendable {
+final class MPVPlayer: KeptPlayer, @unchecked Sendable {
     enum Event {
         case opening
         /// The stream is open (its first data read): its picture is next.

@@ -23,7 +23,7 @@ struct ShowView: View {
 
     /// The page as last seen (or fetched ahead), complete from the first
     /// frame; brought up to date in the background.
-    private var data: AppModel.ShowData? { model.showState(route.id).value }
+    private var data: ShowData? { model.account.showState(route.id).value }
     @State private var error: String?
     @State private var scrolledToUpNext = false
     /// The viewer has scrolled the page: it's never moved for them after.
@@ -187,8 +187,8 @@ struct ShowView: View {
         .preparesAhead(mainTarget, at: .page)
         .task {
             // Draw what's already here at once, then refresh behind it.
-            if pin == nil { pin = model.pin(route.id) }
-            _ = model.cachedShow(route.id)
+            if pin == nil { pin = model.account.pin(route.id) }
+            _ = model.account.cachedShow(route.id)
             if await model.loadShow(route.id) == nil, data == nil {
                 error = "Couldn't load this show."
             }
@@ -200,8 +200,8 @@ struct ShowView: View {
     @ViewBuilder private var header: some View {
         let show = data?.show
         VStack(alignment: .leading, spacing: 14) {
-            TitleHero(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
-                      logo: show.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
+            TitleHero(backdrop: show.flatMap { model.account.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
+                      logo: show.flatMap { model.account.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                       title: route.title, line: showLine, height: 0.95) {
                 HStack(alignment: .top, spacing: 12) {
                     PlayCapsule(label: mainLabel,
@@ -283,7 +283,7 @@ struct ShowView: View {
     private static func shortSeasonName(_ number: Int) -> String { number == 0 ? "Specials" : "S\(number)" }
 
     private func card(_ episode: EmbyItem) -> Card? {
-        model.emby?.card(for: episode, landscape: true, width: thumbWidth)
+        model.account.emby?.card(for: episode, landscape: true, width: thumbWidth)
     }
 
     private func playMain() {

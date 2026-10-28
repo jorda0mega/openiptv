@@ -39,7 +39,7 @@ struct PersonView: View {
         ZStack {
             Circle().fill(Color(white: 0.16))
             Text(initials).font(.title.weight(.semibold)).foregroundStyle(.secondary)
-            if let url = model.emby?.personImageURL(person, width: 400) {
+            if let url = model.account.emby?.personImageURL(person, width: 400) {
                 CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: "")
             }
         }
@@ -141,7 +141,7 @@ struct PersonView: View {
 
     /// Their films and shows in the library, newest first.
     private func load() async {
-        guard cards == nil, let emby = model.emby, let id = person.id else {
+        guard cards == nil, let emby = model.account.emby, let id = person.id else {
             if cards == nil { cards = [] }
             return
         }

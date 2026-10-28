@@ -51,7 +51,7 @@ struct TVHomeView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 56) {
-                    let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
+                    let heroes = model.account.spotlight.isEmpty ? (model.account.featured.map { [$0] } ?? []) : model.account.spotlight
                     // The first hero fades in over its placeholder.
                     ZStack(alignment: .top) {
                         if !heroes.isEmpty {
@@ -68,7 +68,7 @@ struct TVHomeView: View {
                         }
                     }
                     .animation(.easeOut(duration: 0.25), value: heroes.isEmpty)
-                    let rows = model.rows.filter { !prefs.hiddenRows.contains($0.title) }
+                    let rows = model.account.rows.filter { !prefs.hiddenRows.contains($0.title) }
                     if !rows.contains(where: { $0.title == "Continue Watching" }) { myListRow }
                     ForEach(rows) { row in
                         if row.title == "Continue Watching" {
@@ -78,7 +78,7 @@ struct TVHomeView: View {
                             TVPosterRow(title: row.title, cards: row.cards, captions: .focused) { open($0) }
                         }
                     }
-                    if model.rows.isEmpty, model.featured == nil, !model.homePending {
+                    if model.account.rows.isEmpty, model.account.featured == nil, !model.homePending {
                         emptyState.frame(maxWidth: .infinity).padding(.top, 200)
                     }
                 }
@@ -104,7 +104,7 @@ struct TVHomeView: View {
         if model.sources.emby == nil {
             ContentUnavailableView("No Emby server", systemImage: "film.stack",
                                    description: Text("Add your Emby server in Settings to see your movies and shows here."))
-        } else if let error = model.homeError {
+        } else if let error = model.account.homeError {
             ContentUnavailableView("Couldn't load Emby", systemImage: "exclamationmark.triangle", description: Text(error))
         } else {
             ProgressView()
@@ -114,8 +114,8 @@ struct TVHomeView: View {
     /// A title's page.
     /// My List, as in the TV app: what you put there with "+", newest first.
     @ViewBuilder private var myListRow: some View {
-        if !model.myList.isEmpty {
-            TVPosterRow(title: "My List", cards: model.myList, captions: .focused) { open($0) }
+        if !model.account.myList.isEmpty {
+            TVPosterRow(title: "My List", cards: model.account.myList, captions: .focused) { open($0) }
         }
     }
 

@@ -76,8 +76,8 @@ struct TVMovieView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 50) {
-                TVTitleHeader(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth)?.absoluteString },
-                              logo: item.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth)?.absoluteString },
+                TVTitleHeader(backdrop: item.flatMap { model.account.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth)?.absoluteString },
+                              logo: item.flatMap { model.account.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth)?.absoluteString },
                               title: route.title, details: titleDetails(item, model: model, kind: "Movie"),
                               overview: item?.overview) {
                     Button(action: play) {
@@ -127,17 +127,17 @@ struct TVMovieView: View {
 
     /// The page as last seen (or fetched ahead when it was focused),
     /// complete from the first frame; brought up to date in the background.
-    private var item: EmbyItem? { model.movieState(route.id).value?.item }
+    private var item: EmbyItem? { model.account.movieState(route.id).value?.item }
 
     private var similar: [Card] {
-        guard let emby = model.emby, let data = model.movieState(route.id).value else { return [] }
+        guard let emby = model.account.emby, let data = model.account.movieState(route.id).value else { return [] }
         return data.similar.filter { $0.userData?.played != true }
             .map { emby.card($0, context: .poster, shape: .portrait, width: 480) }
     }
 
     private func load() async {
-        if pin == nil { pin = model.pin(route.id) }
-        _ = model.cachedMovie(route.id)
+        if pin == nil { pin = model.account.pin(route.id) }
+        _ = model.account.cachedMovie(route.id)
         _ = await model.loadMovie(route.id)
     }
 
@@ -189,10 +189,10 @@ struct TVShowView: View {
 
     /// The page as last seen (or fetched ahead when it was focused),
     /// complete from the first frame; brought up to date in the background.
-    private var data: AppModel.ShowData? { model.showState(route.id).value }
+    private var data: ShowData? { model.account.showState(route.id).value }
 
     private var similar: [Card] {
-        guard let emby = model.emby else { return [] }
+        guard let emby = model.account.emby else { return [] }
         return (data?.similar ?? []).filter { $0.userData?.played != true }
             .map { emby.card($0, context: .poster, shape: .portrait, width: 480) }
     }
@@ -202,8 +202,8 @@ struct TVShowView: View {
         let shownSeason = shownSeason
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
-                TVTitleHeader(backdrop: show.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth)?.absoluteString },
-                              logo: show.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth)?.absoluteString },
+                TVTitleHeader(backdrop: show.flatMap { model.account.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth)?.absoluteString },
+                              logo: show.flatMap { model.account.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth)?.absoluteString },
                               title: route.title, details: titleDetails(show, model: model, kind: "Series"),
                               overview: show?.overview) {
                     Button { playMain() } label: {
@@ -239,7 +239,7 @@ struct TVShowView: View {
                             ScrollView(.horizontal) {
                                 LazyHStack(alignment: .top, spacing: 40) {
                                     ForEach(episodes, id: \.id) { episode in
-                                        TVEpisodeCard(episode: episode, card: model.emby?.card(for: episode, landscape: true, width: 960),
+                                        TVEpisodeCard(episode: episode, card: model.account.emby?.card(for: episode, landscape: true, width: 960),
                                                       upNext: episode.id == upNext?.id) {
                                             play(episode.id, kind: "Episode")
                                         }
@@ -297,8 +297,8 @@ struct TVShowView: View {
     }
 
     private func load() async {
-        if pin == nil { pin = model.pin(route.id) }
-        _ = model.cachedShow(route.id)
+        if pin == nil { pin = model.account.pin(route.id) }
+        _ = model.account.cachedShow(route.id)
         _ = await model.loadShow(route.id)
     }
 
@@ -382,7 +382,7 @@ private struct TVCastRow: View {
                                 ZStack {
                                     Circle().fill(.quaternary)
                                     Text(initials(person.name)).font(.title2.weight(.semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
-                                    if let url = model.emby?.personImageURL(person, width: 360) {
+                                    if let url = model.account.emby?.personImageURL(person, width: 360) {
                                         CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: "")
                                             .clipShape(.circle)
                                     }

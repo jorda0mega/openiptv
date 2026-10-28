@@ -43,7 +43,7 @@ struct HomeView: View {
                         }
                     }
                     .animation(.easeOut(duration: 0.25), value: heroes.isEmpty)
-                    if visibleRows.isEmpty, model.featured == nil, !model.homePending { emptyState }
+                    if visibleRows.isEmpty, model.account.featured == nil, !model.homePending { emptyState }
                     if !visibleRows.contains(where: { $0.title == "Continue Watching" }) { myListRow }
                     ForEach(visibleRows) { row in
                         if row.title == "Continue Watching" {
@@ -87,7 +87,7 @@ struct HomeView: View {
             .navigationDestination(for: ShowRoute.self) { ShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { MovieView(route: $0, playing: $playing) }
             .navigationDestination(for: RowRoute.self) { RowPage(route: $0, open: { open($0) }, play: { play($0) }) }
-            .task(id: model.rows.first?.cards.first?.id) { prefetchFirstShows() }
+            .task(id: model.account.rows.first?.cards.first?.id) { prefetchFirstShows() }
             .onAppear { prefetchFirstShows() }
         }
         // On the stack, not its first page: coming back from a title's page
@@ -114,14 +114,14 @@ struct HomeView: View {
     /// My List, as in the Apple TV app and Netflix: what you put there with
     /// "+", newest first.
     @ViewBuilder private var myListRow: some View {
-        if !model.myList.isEmpty {
-            PosterRow(title: "My List", cards: model.myList, open: { open($0) }, play: { play($0) },
-                      openRow: { path.append(RowRoute(title: "My List", cards: model.myList)) })
+        if !model.account.myList.isEmpty {
+            PosterRow(title: "My List", cards: model.account.myList, open: { open($0) }, play: { play($0) },
+                      openRow: { path.append(RowRoute(title: "My List", cards: model.account.myList)) })
         }
     }
 
     private var visibleRows: [HomeRow] {
-        model.rows.filter { !prefs.hiddenRows.contains($0.title) }
+        model.account.rows.filter { !prefs.hiddenRows.contains($0.title) }
     }
 
     private var pixelWidth: Int { Int(Layout.posterWidth * displayScale) }
@@ -135,7 +135,7 @@ struct HomeView: View {
             } actions: {
                 Button("Add Emby server") { addingEmby = true }.buttonStyle(.glassProminent)
             }
-        } else if let error = model.homeError {
+        } else if let error = model.account.homeError {
             // Asked again from here, as Netflix's error does (with no pull
             // to refresh, the one way back short of leaving Home).
             ContentUnavailableView {
@@ -146,7 +146,7 @@ struct HomeView: View {
                 Button("Try Again") { Task { await model.tryHomeAgain() } }
                 .buttonStyle(.glassProminent)
             }
-        } else if model.rows.isEmpty {
+        } else if model.account.rows.isEmpty {
             ProgressView().frame(maxWidth: .infinity).padding(.top, 80)
         } else {
             ContentUnavailableView("All rows are hidden", systemImage: "eye.slash", description: Text("Turn rows back on in Settings."))
@@ -154,8 +154,8 @@ struct HomeView: View {
     }
 
     private func prefetchFirstShows() {
-        let resuming = model.rows.first { $0.title == "Continue Watching" }?.cards ?? []
-        let below = model.rows.filter { $0.title != "Continue Watching" }.prefix(1).flatMap { $0.cards.prefix(3) }
+        let resuming = model.account.rows.first { $0.title == "Continue Watching" }?.cards ?? []
+        let below = model.account.rows.filter { $0.title != "Continue Watching" }.prefix(1).flatMap { $0.cards.prefix(3) }
         model.prefetchShows((resuming + below).filter { $0.kind == "Series" }.map(\.id))
     }
 
@@ -168,7 +168,7 @@ struct HomeView: View {
         }
     }
 
-    private var heroes: [Featured] { model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight }
+    private var heroes: [Featured] { model.account.spotlight.isEmpty ? (model.account.featured.map { [$0] } ?? []) : model.account.spotlight }
 
     /// Straight to the player: the episode being resumed, or the title.
     private func play(_ card: Card, grows: Bool = false) {

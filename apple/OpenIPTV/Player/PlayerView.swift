@@ -553,7 +553,7 @@ struct MoviePlayerView: View {
                        menu: menu,
                        episodes: seasonEpisodes.count > 1 ? seasonEpisodes.map { episode in
                            TVPlayerEpisode(id: episode.id, title: episodeTitle(episode), line: episodeStatus(episode),
-                                           images: model.emby?.card(for: episode, landscape: true, width: 320).images ?? [])
+                                           images: model.account.emby?.card(for: episode, landscape: true, width: 320).images ?? [])
                        } : [])
         #else
         // A film shows its title alone, as in the Apple TV app; an episode
@@ -616,7 +616,7 @@ struct MoviePlayerView: View {
     /// Home's Continue Watching, but this title.
     private var otherTitles: [Card] {
         guard switchTo != nil else { return [] }
-        let row = model.rows.first { $0.title == "Continue Watching" }?.cards ?? []
+        let row = model.account.rows.first { $0.title == "Continue Watching" }?.cards ?? []
         return row.filter { $0.id != playback.itemId && $0.episodeId != playback.itemId && $0.id != playback.seriesId }
     }
 
@@ -689,7 +689,7 @@ struct MoviePlayerView: View {
             let code = [episode.parentIndexNumber.map { "S\($0)" }, episode.indexNumber.map { "E\($0)" }]
                 .compactMap(\.self).joined(separator: ", ")
             return PlayerCard(id: episode.id, title: episodeTitle(episode), subtitle: episodeStatus(episode),
-                              images: model.emby?.card(for: episode, landscape: true, width: 180).images ?? [],
+                              images: model.account.emby?.card(for: episode, landscape: true, width: 180).images ?? [],
                               line: [code, episodeLength(episode)].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · ")) {
                 if playing { toggleEpisodes() } else { playEpisode(episode) }
             }
@@ -887,7 +887,7 @@ struct MoviePlayerView: View {
                 let opened = Date()
                 #endif
                 guard hidden.hasStarted else {
-                    model.coolDown()
+                    model.account.coolDown()
                     return note("Couldn't play it in \(Self.languageName(language))")
                 }
                 // Its picture is ready: over at the moment it's ready from.
@@ -1138,7 +1138,7 @@ struct MoviePlayerView: View {
         } else {
             // A player warmed up for something else would only compete for
             // the connection.
-            model.coolDown()
+            model.account.coolDown()
             if case .still = held { loading.send(.stillGone, at: Date()) }
             let player = makePlayer(prefs: prefs, picture: .film(playback.surface))
             player.onEvent = { event, attempt in handle(event, attempt) }
@@ -2088,8 +2088,8 @@ struct MoviePlayerView: View {
     /// show as saved, else fetched).
     private func loadSeason() async {
         guard let series = playback.seriesId else { return }
-        let data: AppModel.ShowData?
-        if let saved = model.cachedShow(series), saved.episodes.contains(where: { $0.id == playback.itemId }) {
+        let data: ShowData?
+        if let saved = model.account.cachedShow(series), saved.episodes.contains(where: { $0.id == playback.itemId }) {
             data = saved
         } else {
             data = await model.loadShow(series)
