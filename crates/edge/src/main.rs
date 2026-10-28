@@ -98,7 +98,7 @@ async fn live_login(http: &reqwest::Client) -> Result<LiveTv, String> {
 async fn main() {
     let http = http::client();
     let device = Device {
-        client: "Openreel Web".into(),
+        client: "Zapline Web".into(),
         name: "openiptv-edge".into(),
         id: "openiptv-edge".into(),
         version: env!("CARGO_PKG_VERSION").into(),

@@ -62,7 +62,7 @@ struct EmbyClient {
     static func connectLogin(email: String, password: String) async throws -> EmbyConnectSession {
         var request = URLRequest(url: URL(string: "https://connect.emby.media/service/user/authenticate")!)
         request.httpMethod = "POST"
-        request.setValue("Openreel/\(HTTP.appVersion)", forHTTPHeaderField: "X-Application")
+        request.setValue("Zapline/\(HTTP.appVersion)", forHTTPHeaderField: "X-Application")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = form(["nameOrEmail": email, "rawpw": password])
@@ -73,7 +73,7 @@ struct EmbyClient {
         }
         let auth = try JSONDecoder().decode(Auth.self, from: try await HTTP.data(request))
         var list = URLRequest(url: URL(string: "https://connect.emby.media/service/servers?userId=\(auth.User.Id)")!)
-        list.setValue("Openreel/\(HTTP.appVersion)", forHTTPHeaderField: "X-Application")
+        list.setValue("Zapline/\(HTTP.appVersion)", forHTTPHeaderField: "X-Application")
         list.setValue(auth.AccessToken, forHTTPHeaderField: "X-Connect-UserToken")
         list.setValue("application/json", forHTTPHeaderField: "Accept")
         let servers = JSONDecoder().lenientList(EmbyConnectServer.self, from: try await HTTP.data(list))
@@ -1415,7 +1415,7 @@ struct EmbyClient {
         #else
         let device = "Mac"
         #endif
-        var value = "Emby UserId=\"\(userId ?? "")\", Client=\"Openreel\", Device=\"\(device)\", DeviceId=\"\(deviceId)\", Version=\"\(HTTP.appVersion)\""
+        var value = "Emby UserId=\"\(userId ?? "")\", Client=\"Zapline\", Device=\"\(device)\", DeviceId=\"\(deviceId)\", Version=\"\(HTTP.appVersion)\""
         if let token { value += ", Token=\"\(token)\"" }
         return value
     }

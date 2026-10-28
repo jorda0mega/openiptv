@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.request
 
-HEADERS = {"X-Emby-Token": "tok", "User-Agent": "Openreel/check"}
+HEADERS = {"X-Emby-Token": "tok", "User-Agent": "Zapline/check"}
 GAP = 0.4
 
 

@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Openreel</string>
+	<string>Zapline</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -28,9 +28,9 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Openreel connects to Emby servers and IPTV sources on your local network.</string>
+	<string>Zapline connects to Emby servers and IPTV sources on your local network.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Openreel uses your approximate location once to show your local channels. It stays on this device.</string>
+	<string>Zapline uses your approximate location once to show your local channels. It stays on this device.</string>
 	<key>SentryDSN</key>
 	<string>$(SENTRY_DSN)</string>
 	<key>UIBackgroundModes</key>

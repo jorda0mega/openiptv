@@ -419,7 +419,7 @@ enum LiveProbe {
             pair = (String(parts[0]), String(parts[1]), delays.sorted())
         }
         guard let login = await login(env) else { say("PROBE config no_login"); return 1 }
-        agents = [.mpv: mpvAgent ?? libmpvAgent, .app: "Openreel/\(appVersion)"]
+        agents = [.mpv: mpvAgent ?? libmpvAgent, .app: "Zapline/\(appVersion)"]
         say("PROBE start login=\(value("OPENIPTV_SMOKE_FEED") == nil ? "env" : "holder") mpv_ua=\(mpvAgent == nil ? "vendored" : "given")"
             + " seconds=\(fixed(seconds, 1)) gap=\(fixed(gap, 1)) rounds=\(rounds) round_gap=\(fixed(roundGap, 1))"
             + " pause_every=\(pauseEvery) pause_seconds=\(fixed(pauseSeconds, 1))")

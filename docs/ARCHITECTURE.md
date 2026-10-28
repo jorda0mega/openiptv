@@ -1,4 +1,4 @@
-# Openreel architecture
+# Zapline architecture
 
 One app for an existing **Emby** library and **IPTV** subscriptions, on
 iPhone, iPad and Apple TV, plus a self-hosted web version. Priority order:

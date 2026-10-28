@@ -21,7 +21,7 @@ struct AreaPicker: View {
                 .disabled(locating)
             } footer: {
                 Text(locateFailed
-                     ? "Couldn't tell where you are (location may be off for Openreel in Settings). Pick your state below."
+                     ? "Couldn't tell where you are (location may be off for Zapline in Settings). Pick your state below."
                      : "Asks for your approximate location once. It's only used to pick your local channels and stays on this iPhone.")
             }
             #endif

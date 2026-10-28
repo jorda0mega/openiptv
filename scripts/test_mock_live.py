@@ -254,13 +254,13 @@ class LiveSwitches(unittest.TestCase):
 
     def test_live_requests_list_each_request_with_its_agent_as_a_word(self):
         since = self.mock.get("/mock/mark")["t"]
-        for agent in ("libmpv", "Lavf/61.7.100", "Openreel/0.2.0", "a-private-agent-9f3"):
+        for agent in ("libmpv", "Lavf/61.7.100", "Zapline/0.2.0", "a-private-agent-9f3"):
             self.open("/live/u/p/2001.ts", agent=agent)
         self.mock.set(live_status=404)
         self.open("/live/u/p/2002.m3u8")
         items = self.mock.get(f"/mock/live_requests?since={since}")["items"]
         self.assertEqual([(i["id"], i["ext"], i["status"], i["ua"]) for i in items],
-                         [("2001", "ts", 200, "mpv"), ("2001", "ts", 200, "lavf"), ("2001", "ts", 200, "openreel"),
+                         [("2001", "ts", 200, "mpv"), ("2001", "ts", 200, "lavf"), ("2001", "ts", 200, "zapline"),
                           ("2001", "ts", 200, "other"), ("2002", "m3u8", 404, "mpv")])
         self.assertNotIn("private-agent", json.dumps(items))
         later = self.mock.get(f"/mock/live_requests?since={time.time()}")["items"]

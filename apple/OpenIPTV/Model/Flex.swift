@@ -124,7 +124,7 @@ enum HTTP {
         config.httpCookieAcceptPolicy = .never
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.httpAdditionalHeaders = ["User-Agent": "Openreel/\(appVersion)"]
+        config.httpAdditionalHeaders = ["User-Agent": "Zapline/\(appVersion)"]
         config.httpMaximumConnectionsPerHost = connections
         #if DEBUG
         throughDebugProxy(config)

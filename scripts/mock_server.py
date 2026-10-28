@@ -336,8 +336,8 @@ def simulator_log(since):
 
 def user_agent_word(header):
     agent = (header or "").lower()
-    if agent.startswith("openreel"):
-        return "openreel"
+    if agent.startswith("zapline"):
+        return "zapline"
     if "mpv" in agent:
         return "mpv"
     if agent.startswith("lavf"):
@@ -704,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
     def key_check(self, kind, q):
         headed = self.headers.get("X-Emby-Token") == TOKEN
         # The app's own requests name it; the player's (ffmpeg's) don't.
-        player = not self.headers.get("User-Agent", "").startswith("Openreel/")
+        player = not self.headers.get("User-Agent", "").startswith("Zapline/")
         KEY_CHECKS.append((time.time(), kind, "api_key" in q, headed, player))
         return headed
 

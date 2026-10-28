@@ -461,7 +461,7 @@ mod tests {
 
     fn device() -> Device {
         Device {
-            client: "Openreel".into(),
+            client: "Zapline".into(),
             name: "Test".into(),
             id: "dev-1".into(),
             version: "0.1.0".into(),

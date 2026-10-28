@@ -129,7 +129,7 @@ targets:
     info:
       path: OpenIPTV/Info.plist
       properties:
-        CFBundleDisplayName: Openreel
+        CFBundleDisplayName: Zapline
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         SentryDSN: $(SENTRY_DSN)
@@ -149,8 +149,8 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: Openreel connects to Emby servers and IPTV sources on your local network.
-        NSLocationWhenInUseUsageDescription: Openreel uses your approximate location once to show your local channels. It stays on this device.
+        NSLocalNetworkUsageDescription: Zapline connects to Emby servers and IPTV sources on your local network.
+        NSLocationWhenInUseUsageDescription: Zapline uses your approximate location once to show your local channels. It stays on this device.
         # Dark everywhere, including UIKit-backed fields in sheets.
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
@@ -174,7 +174,7 @@ targets:
     info:
       path: OpenIPTV-tvOS/Info.plist
       properties:
-        CFBundleDisplayName: Openreel
+        CFBundleDisplayName: Zapline
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         SentryDSN: $(SENTRY_DSN)
@@ -183,8 +183,8 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: Openreel connects to Emby servers and IPTV sources on your local network.
-        NSLocationWhenInUseUsageDescription: Openreel uses your approximate location once to show your local channels. It stays on this device.
+        NSLocalNetworkUsageDescription: Zapline connects to Emby servers and IPTV sources on your local network.
+        NSLocationWhenInUseUsageDescription: Zapline uses your approximate location once to show your local channels. It stays on this device.
         # Dark everywhere, including UIKit-backed fields in sheets.
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
