@@ -459,22 +459,6 @@
      "date": "2026-10-27",
      "source": "perf-evals/mock-1027-2117/JumpTimingTests-ios-worst/3691de8/metrics.txt",
      "between_runs": 5.0
-    },
-    {
-     "target": "mock:worst",
-     "link": "none",
-     "platform": "tvos",
-     "unit": "ms",
-     "runs": 1,
-     "value": 10271.0,
-     "samples": 4,
-     "spread": 1063.0,
-     "commit": "3691de8",
-     "landed_as": "3691de8",
-     "testflight": null,
-     "date": "2026-10-27",
-     "source": "perf-evals/mock-1027-2117/JumpTimingTests-tvos-worst/3691de8/metrics.txt",
-     "between_runs": 0.0
     }
    ]
   },
@@ -942,22 +926,6 @@
      "date": "2026-10-27",
      "source": "perf-runs/JumpTimingTests-worst/09afc6f/metrics.txt",
      "between_runs": 2.0
-    },
-    {
-     "target": "mock:worst",
-     "link": "none",
-     "platform": "tvos",
-     "unit": "count",
-     "runs": 1,
-     "value": 18.0,
-     "samples": 1,
-     "spread": 0.0,
-     "commit": "3691de8",
-     "landed_as": "3691de8",
-     "testflight": null,
-     "date": "2026-10-27",
-     "source": "perf-evals/mock-1027-2117/JumpTimingTests-tvos-worst/3691de8/metrics.txt",
-     "between_runs": 0.0
     }
    ]
   },
