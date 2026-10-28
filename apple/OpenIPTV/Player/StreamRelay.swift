@@ -1003,17 +1003,19 @@ extension FileStart: CustomStringConvertible, CustomDebugStringConvertible, Cust
 
 extension Lane {
     /// UI tests: `-lowDisk YES` reads the disk as half what a card's fetch
-    /// ahead needs, as on a Mac under 2 GB free.
+    /// ahead needs, as on a Mac under 2 GB free; `-roomyDisk YES` as twice
+    /// what it needs, for timings that measure the app, not the Mac's disk
+    /// (a simulator reads the Mac's).
     static let fileStarts = Lane(.bytes, atOnce: 2) { Conditions.current().forFetchAhead }
 }
 
 extension Conditions {
     var forFetchAhead: Conditions {
         #if DEBUG
-        guard UserDefaults.standard.bool(forKey: "lowDisk") else { return self }
-        var low = self
-        low.freeDisk.bytes = min(freeDisk.bytes, freeDisk.neededAhead / 2)
-        return low
+        var read = self
+        if UserDefaults.standard.bool(forKey: "lowDisk") { read.freeDisk.bytes = min(freeDisk.bytes, freeDisk.neededAhead / 2) }
+        if UserDefaults.standard.bool(forKey: "roomyDisk") { read.freeDisk.bytes = max(freeDisk.bytes, freeDisk.neededAhead * 2) }
+        return read
         #else
         return self
         #endif
