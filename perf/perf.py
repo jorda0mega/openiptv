@@ -6,6 +6,7 @@ and nowhere else.
     perf.py names                       every metric name and unit
     perf.py parse FILE...               runner output to JSON lines, one sample each
     perf.py best [--keep-current]       rebuild best.json from SOURCES (the recorded runs)
+    perf.py samples FOLDER COMMIT TARGET PLATFORM  one perf/sim_runs.sh run's samples.jsonl
     perf.py live LOG.ndjson              the app's live opens as METRIC lines (live.start, then live.switch)
     perf.py compare SAMPLES.jsonl...     a table against best.json: better, same or REGRESSION (PLATFORMS)
 
@@ -274,6 +275,20 @@ def main(argv):
             f.write("\n")
         print(f"{len(samples)} samples, {len(samples) - skipped} from code on main, "
               f"{sum(len(v) for v in table.values())} best entries over {len(table)} of {len(known)} metrics")
+    elif argv[:1] == ["samples"]:
+        # One run's folder (perf/sim_runs.sh): its METRIC and PIP gap lines, from the test's log and the readers'
+        # outputs, as samples.jsonl for that commit, target and platform.
+        folder, commit, target, platform = argv[1:5]
+        lines = []
+        for name in ("test.log", "jumps.txt", "look.txt", "live.txt"):
+            path = os.path.join(folder, name)
+            if os.path.exists(path):
+                lines += [line for line in open(path, errors="replace") if line.startswith(("METRIC ", "PIP gap start"))]
+        with open(os.path.join(folder, "metrics.txt"), "w") as f:
+            f.writelines(lines)
+        with open(os.path.join(folder, "samples.jsonl"), "w") as f:
+            for s in parse(os.path.join(folder, "metrics.txt"), commit=commit, platform=platform, target=target):
+                f.write(json.dumps(s) + "\n")
     elif argv[:1] == ["live"]:
         # The app's "PERF live open ... tap=<ms>" lines with a frame, in order: the first opens the channel, each
         # next one is a switch.

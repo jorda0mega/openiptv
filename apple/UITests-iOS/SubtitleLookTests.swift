@@ -13,12 +13,16 @@ final class SubtitleLookTests: TimingCase {
         sleep(3)
 
         let menu = app.buttons["Audio and Subtitles"].firstMatch, off = app.buttons["Off"].firstMatch
-        for _ in 0..<3 where !off.exists {
+        for _ in 0..<5 where !off.exists {
             if !menu.isHittable {
                 app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
                 _ = menu.waitForExistence(timeout: 2)
             }
-            if menu.isHittable { menu.tap() }
+            // By its place: the controls can hide between finding the button and tapping it.
+            if menu.isHittable {
+                let frame = menu.frame
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            }
             _ = off.waitForExistence(timeout: 3)
         }
         let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).allElementsBoundByIndex

@@ -133,8 +133,14 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
         # Where the new picture should be in the recording: the tap (or the seek) on the recorder's clock, as
         # far off as the last pair was, plus libmpv's restart; the nearest picture jump that way within 3 s.
         expected = (seek[0] if seek else j["tap"]) - started + drift + (j["restart"] or 0) / 1000
-        near = [v for v in queue if (v["by"] > 0) == (j["sign"] == "+") and abs(v["at"] - expected) < 3]
+        # A picture jump of about 10 s that way (more when the new place played on under a loading view).
+        def fits(v):
+            return (v["by"] > 0) == (j["sign"] == "+") and 7 <= abs(v["by"]) <= 14 + (j["restart"] or 0) / 1000
+        near = [v for v in queue if fits(v) and abs(v["at"] - expected) < 3]
         pair = min(near, key=lambda v: abs(v["at"] - expected), default=None)
+        if pair is None:
+            # The recorder's clock slipped further: the next picture jump that way, in order, within 8 s.
+            pair = next((v for v in queue if fits(v) and abs(v["at"] - expected) < 8), None)
         if pair:
             queue = queue[queue.index(pair) + 1:]
         # From the seek at the earliest: a picture already stopped by a stall before the tap isn't the jump's

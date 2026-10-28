@@ -13,9 +13,12 @@ mean width in screen pixels of the rise from 25% to 75% across each strong
 edge: about 1 is sharp, 2 or more is soft). --metric adds METRIC lines.
 """
 
+import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 
 SDR_WHITE = 203.0
 
@@ -42,12 +45,16 @@ def peak_ratio(color, peak):
 
 
 def gray(path):
-    size = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", path],
-                          capture_output=True, text=True, check=True).stdout.strip().split(",")
-    w, h = int(size[0]), int(size[1])
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "rawvideo", "-pix_fmt", "gray", "-"],
-                         capture_output=True, check=True).stdout
-    return w, h, raw
+    """The screenshot as grey bytes, as ffmpeg decodes it: it turns a sideways shot by the PNG's orientation,
+    so the size comes from a decoded copy, not from the file's header."""
+    with tempfile.TemporaryDirectory() as folder:
+        bmp = os.path.join(folder, "shot.bmp")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-frames:v", "1", bmp], check=True)
+        size = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "json", bmp],
+                                         capture_output=True, text=True, check=True).stdout)["streams"][0]
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", bmp, "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                             capture_output=True, check=True).stdout
+    return size["width"], size["height"], raw
 
 
 def edges(path):

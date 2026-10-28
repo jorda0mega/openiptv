@@ -125,12 +125,7 @@ for commit in "$@"; do
   grep -q "^LOOK " $dir/test.log && python3 -I $HERE/subtitle_look.py $dir/test.log --metric > $dir/look.txt 2>&1 && grep -v "^METRIC" $dir/look.txt
   grep -q "^LIVE " $dir/test.log && python3 -I $HERE/perf.py live $dir/perf-log.ndjson > $dir/live.txt 2>&1
   grep -hE "^(START|JUMP start)" $dir/test.log | sed -E 's/ \| .*//'
-  cat $dir/test.log $dir/jumps.txt $dir/look.txt $dir/live.txt 2>/dev/null | grep -E "^METRIC " > $dir/metrics.txt
-  grep -q "^PIP gap start" $dir/test.log && grep -h "^PIP gap start" $dir/test.log >> $dir/metrics.txt
-  python3 -I $HERE/perf.py parse $dir/metrics.txt | python3 -I -c "
-import json, sys
-for line in sys.stdin:
-    s = json.loads(line); s.update(commit='$commit', target='$TARGET_NAME', platform='$PLATFORM'); print(json.dumps(s))" > $dir/samples.jsonl
+  python3 -I $HERE/perf.py samples $dir $commit $TARGET_NAME $PLATFORM
   echo "$(grep -c . $dir/samples.jsonl) samples"
 done
 echo "== done $(date +%H:%M)"
