@@ -409,6 +409,17 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(fetched, true, "not fetched ahead without -lowDisk")
     }
 
+    func testRoomyDiskFetchesAStartAheadOnAMacWithUnderTwoGigabytes() async {
+        var full = conditions(playing: false)
+        full.freeDisk.bytes = 1_500_000_000
+        let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2) { [full] in full.forFetchAhead }) { _ in true }
+        let start = FileStart(film()), interest = Interest(at: .continueWatching, .likely)
+        UserDefaults.standard.set(true, forKey: "roomyDisk")
+        defer { UserDefaults.standard.removeObject(forKey: "roomyDisk") }
+        let fetched = await shelf.warm(start, for: interest)
+        XCTAssertEqual(fetched, true, "not fetched ahead with -roomyDisk YES and 1.5 GB free")
+    }
+
     func testAStartRefusedForWantOfRoomIsFetchedOnceThereIsRoomWhileItsCardIsHeld() async {
         let room = Locked(Int64(1_900_000_000)), base = conditions(playing: false)
         let lane = Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) {
