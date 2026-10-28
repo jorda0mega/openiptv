@@ -387,6 +387,76 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(fetched, true, "not fetched ahead without -lowDisk")
     }
 
+    func testAStartRefusedForWantOfRoomIsFetchedOnceThereIsRoomWhileItsCardIsHeld() async throws {
+        let room = Locked(Int64(1_900_000_000)), base = conditions(playing: false)
+        let lane = Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) {
+            var device = base
+            device.freeDisk.bytes = room.value
+            return device
+        }
+        let shelf = FileStarts.shelf(lane: lane) { _ in true }
+        let start = FileStart(film()), interest = Interest(at: .continueWatching, .likely)
+        let held = Task { await shelf.hold(start, for: interest) }
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(shelf.debugState(start, at: .continueWatching, .likely), "not asked, not allowed now: disk 1.9 GB, needs 2.0 GB")
+        room.mutate { $0 = 10_000_000_000 }
+        let fetched = await held.value
+        XCTAssertEqual(fetched, true, "a card's start refused for want of room wasn't fetched once there was room, the card still held")
+    }
+
+    func testAStartRefusedIsLetGoWithItsCard() async throws {
+        var full = conditions(playing: false)
+        full.freeDisk.bytes = 1_000_000_000
+        let asked = Locked(0)
+        let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) { [full] in full }) { _ in
+            asked.mutate { $0 += 1 }
+            return true
+        }
+        let held = Task { await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely)) }
+        try await Task.sleep(for: .milliseconds(80))
+        held.cancel()
+        let fetched = await held.value
+        XCTAssertNil(fetched)
+        XCTAssertEqual(asked.value, 0, "a start was fetched for a card that went")
+    }
+
+    func testAStartThatFailsWhileAllowedIsNotAskedAgainAndAgain() async {
+        let asked = Locked(0), open = conditions(playing: false)
+        let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) { open }) { _ in
+            asked.mutate { $0 += 1 }
+            return false
+        }
+        let fetched = await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely))
+        XCTAssertNil(fetched)
+        XCTAssertEqual(asked.value, 1)
+    }
+
+    func testContinueWatchingsFirstCardsHeldFromLaunchGetReadyAndAreLetGoWhenTheyChange() async {
+        let started = Locked<[String]>([]), stopped = Locked<[String]>([])
+        let ahead = Ahead(Ahead.Work(page: { _, _ in }, plan: { target, _ in
+            guard case let .playable(id, _) = target else { return nil }
+            return EmbyPlayback(itemId: id, title: id, subtitle: nil, url: URL(string: "http://server/Videos/\(id)/stream")!,
+                                durationSeconds: 7200)
+        }, fileStart: { plan, _ in
+            started.mutate { $0.append(plan.itemId) }
+            do { try await Task.sleep(for: .seconds(3600)) } catch { stopped.mutate { $0.append(plan.itemId) } }
+        }, connection: { _, _ in }, subtitle: { _, _ in }, previews: { _, _ in }), platform: .phone, sleep: { _ in })
+        func movies(_ ids: String...) -> [Target] { ids.map { .playable(id: $0, kind: "Movie") } }
+        ahead.hold(only: movies("m1", "m2"), at: .homeForecast)
+        await settle()
+        XCTAssertEqual(started.value.sorted(), ["m1", "m2"], "Continue Watching's first two cards weren't fetched ahead from launch")
+        ahead.hold(only: movies("m2", "m1"), at: .homeForecast)
+        await settle()
+        XCTAssertEqual(started.value.count, 2, "the same cards in another order were fetched again")
+        ahead.hold(only: movies("m2", "m3"), at: .homeForecast)
+        await settle()
+        XCTAssertEqual(stopped.value, ["m1"], "a card no longer among the first two went on fetching, or one still there stopped")
+        XCTAssertEqual(started.value.sorted(), ["m1", "m2", "m3"])
+        ahead.hold(only: [], at: .homeForecast)
+        await settle()
+        XCTAssertEqual(stopped.value.sorted(), ["m1", "m2", "m3"], "cards went on fetching ahead with none to hold (a film playing, signed out)")
+    }
+
     private final class Pings: @unchecked Sendable {
         private let lock = NSLock()
         private var made = 0
@@ -413,11 +483,24 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(pings.count, 3, "used again after the card went")
     }
 
-    func testNoConnectionIsKeptOpenWhileSomethingPlays() async {
-        let pings = Pings(), playing = conditions(playing: true)
-        await Connections.keepWarm(FileStart(film()), for: Interest(at: .continueWatching, .likely), lane: Lane(.light, atOnce: 1) { playing },
-                                   every: .seconds(10), sleep: Screen(stays: .seconds(60)).sleep, ping: pings.ping)
-        XCTAssertEqual(pings.count, 0)
+    func testNoConnectionIsKeptOpenWhileSomethingPlaysAndItIsOnceNothingDoesWhileTheCardStays() async throws {
+        let pings = Pings(), playing = Locked(true), base = conditions(playing: false)
+        let lane = Lane(.connection, atOnce: 1, recheckEvery: .milliseconds(10)) {
+            var device = base
+            device.playing = playing.value
+            return device
+        }
+        let warm = Task {
+            await Connections.keepWarm(FileStart(film()), for: Interest(at: .continueWatching, .likely), lane: lane,
+                                       every: .seconds(10), sleep: Screen(stays: .seconds(5)).sleep, ping: pings.ping)
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(pings.count, 0, "the connection was used while something played")
+        playing.mutate { $0 = false }
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(pings.count, 1, "the connection wasn't opened once nothing played, with the card still there")
+        warm.cancel()
+        await warm.value
     }
 
     private func pings(over device: Conditions, at place: Place = .continueWatching) async -> Int {
