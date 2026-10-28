@@ -120,22 +120,22 @@ final class PhoneHomeStabilityTests: XCTestCase {
     }
 
     func testFailedHomeRecoversByItself() throws {
-        let server = try launchWithHomeFailing()
+        let server = try launchWhileTheServerFails()
         defer { configure(server, ["reset": "1"]) }
-        sleep(4)
         shot("home error while the server fails")
-        configure(server, ["reset": "1"])
+        configure(server, ["emby_status": "0"])
         let recovered = secondsUntilContinueWatching(since: Date(), within: 40, "server back")
         shot("home after the server is back")
         let seconds = try XCTUnwrap(recovered, "Home stayed on its error after the server was back")
         XCTAssertLessThan(seconds, 10, "Continue Watching came \(seconds) s after the server was back")
+        XCTAssertTrue(app.buttons["row-My List"].firstMatch.waitForExistence(timeout: 5), "My List didn't come back with Home")
     }
 
     func testFailedHomeRecoversAtOnceWhenTheAppIsBack() throws {
-        let server = try launchWithHomeFailing()
+        let server = try launchWhileTheServerFails()
         defer { configure(server, ["reset": "1"]) }
         sleep(9)
-        configure(server, ["reset": "1"])
+        configure(server, ["emby_status": "0"])
         XCUIDevice.shared.press(.home)
         sleep(2)
         app.activate()
@@ -145,10 +145,11 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertLessThan(seconds, 5, "Continue Watching came \(seconds) s after the app came back")
     }
 
-    private func launchWithHomeFailing() throws -> URL {
+    private func launchWhileTheServerFails() throws -> URL {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
-        configure(server, ["home_status": "502"])
+        favorite(server, "a4")
+        configure(server, ["emby_status": "502"])
         app.launchEnvironment["OPENREEL_DEBUG_NO_SAVED_HOME"] = "1"
         app.launch()
         XCTAssertTrue(app.staticTexts["Couldn't load Emby"].waitForExistence(timeout: 30), "Home didn't show its error while the server failed")

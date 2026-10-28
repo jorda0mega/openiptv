@@ -151,13 +151,7 @@ struct HomeView: View {
             } description: {
                 Text(error)
             } actions: {
-                Button("Try Again") {
-                    Task {
-                        async let home: Void = model.refreshHome(cardWidth: pixelWidth)
-                        async let list: Void = model.refreshMyList()
-                        _ = await (home, list)
-                    }
-                }
+                Button("Try Again") { Task { await model.tryHomeAgain() } }
                 .buttonStyle(.glassProminent)
             }
         } else if model.rows.isEmpty {

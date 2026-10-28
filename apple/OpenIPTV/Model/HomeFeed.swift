@@ -249,7 +249,7 @@ enum HomeFeed {
 
 @MainActor
 final class HomeRetry {
-    static let waits: [Duration] = [.seconds(2), .seconds(5), .seconds(15), .seconds(30)]
+    private static let waits: [Duration] = [.seconds(2), .seconds(5), .seconds(15), .seconds(30)]
     private let sleep: @Sendable (Duration) async throws -> Void
     private let attempt: @MainActor () async -> Void
     private var failures = 0
@@ -262,6 +262,7 @@ final class HomeRetry {
     }
 
     func askAgainLater() {
+        guard waiting == nil else { return }
         failures += 1
         ask(after: Self.waits[min(failures, Self.waits.count) - 1])
     }

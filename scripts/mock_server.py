@@ -43,8 +43,8 @@ CONNECTIONS = set()
 # /mock/set?reset=1): "latency" (seconds per request), "home_delay" (seconds
 # for Continue Watching), "fail=persons" (a person's titles fail),
 # "resume_episode" (the episode a show's Continue Watching card is on),
-# "home_status" ("502": Continue Watching's request answers with that HTTP
-# status, a proxy in front of a server that's down; 0 or unset: as normal),
+# "emby_status" ("502": every Emby request answers with that HTTP status, a
+# proxy in front of a server that's down; 0 or unset: as normal),
 # "video_delay" (seconds before each video response), "hls_delay" (seconds
 # before a converted stream's playlist: a server starting a conversion),
 # "video_fail" (every video request answered 503: the connection lost),
@@ -1364,6 +1364,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.link.rate = math.inf
 
     def emby(self, path, q):
+        status = int(CONTROL.get("emby_status", 0))
+        if status:
+            return self.send({"error": "bad gateway"}, status=status)
         if path == "/System/Info/Public":
             return self.send({"ServerName": "Mock Emby", "Version": "4.10.1.0", "Id": "srv"})
         # Like Emby: the token can come as a header or as ?api_key= (players).
@@ -1670,9 +1673,6 @@ class Handler(BaseHTTPRequestHandler):
             # Like a real server: home takes a moment, and progress moves
             # between refreshes.
             print(f"{time.time():.2f} home requested", flush=True)
-            status = int(CONTROL.get("home_status", 0))
-            if status:
-                return self.send({"error": "bad gateway"}, status=status)
             time.sleep(float(CONTROL.get("home_delay", os.environ.get("OPENIPTV_MOCK_HOME_DELAY", "0"))))
             progress = 5 + int(time.time()) % 90
             items = [ep(2, current), twin, movie(5) | {"UserData": {"PlayedPercentage": progress}}, ep(1, 4), ep(1, 2)]

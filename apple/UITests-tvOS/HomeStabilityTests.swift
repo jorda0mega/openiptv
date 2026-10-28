@@ -88,11 +88,10 @@ final class HomeStabilityTests: XCTestCase {
     }
 
     func testFailedHomeRecoversByItself() throws {
-        let server = try launchWithHomeFailing()
+        let server = try launchWhileTheServerFails()
         defer { configure(server, ["reset": "1"]) }
-        wait(seconds: 4)
         shot("home error while the server fails")
-        configure(server, ["reset": "1"])
+        configure(server, ["emby_status": "0"])
         let recovered = secondsUntilContinueWatching(since: Date(), within: 40, "server back")
         shot("home after the server is back")
         let seconds = try XCTUnwrap(recovered, "Home stayed on its error after the server was back")
@@ -100,10 +99,10 @@ final class HomeStabilityTests: XCTestCase {
     }
 
     func testFailedHomeRecoversAtOnceWhenTheAppIsBack() throws {
-        let server = try launchWithHomeFailing()
+        let server = try launchWhileTheServerFails()
         defer { configure(server, ["reset": "1"]) }
         wait(seconds: 9)
-        configure(server, ["reset": "1"])
+        configure(server, ["emby_status": "0"])
         remote.press(.home)
         wait(seconds: 2)
         app.activate()
@@ -115,10 +114,10 @@ final class HomeStabilityTests: XCTestCase {
 
     // MARK: Helpers
 
-    private func launchWithHomeFailing() throws -> URL {
+    private func launchWhileTheServerFails() throws -> URL {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
-        configure(server, ["home_status": "502"])
+        configure(server, ["emby_status": "502"])
         app.launchEnvironment["OPENREEL_DEBUG_NO_SAVED_HOME"] = "1"
         app.launchArguments = ["-tvTab", "home"]
         app.launch()
