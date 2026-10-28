@@ -138,7 +138,7 @@ final class FilmFrames: @unchecked Sendable {
         let drawn = render(context, into: buffer, size: plan.size)
         CVPixelBufferUnlockBaseAddress(buffer, [])
         guard drawn else { return }
-        tag(buffer, state.inputs.color)
+        state.inputs.color.tag(buffer)
         enqueue(buffer)
     }
 
@@ -191,16 +191,6 @@ final class FilmFrames: @unchecked Sendable {
                           mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)]
             _ = mpv_render_context_render(context, &params)
         }
-    }
-
-    private func tag(_ buffer: CVPixelBuffer, _ color: FrameColor) {
-        let (primaries, transfer): (CFString, CFString) = switch color {
-        case .bt709: (kCVImageBufferColorPrimaries_ITU_R_709_2, kCVImageBufferTransferFunction_ITU_R_709_2)
-        case .pq: (kCVImageBufferColorPrimaries_ITU_R_2020, kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ)
-        case .hlg: (kCVImageBufferColorPrimaries_ITU_R_2020, kCVImageBufferTransferFunction_ITU_R_2100_HLG)
-        }
-        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, primaries, .shouldPropagate)
-        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, transfer, .shouldPropagate)
     }
 
     private func enqueue(_ buffer: CVPixelBuffer) {

@@ -1,3 +1,4 @@
+import CoreVideo
 import Foundation
 
 struct PixelSize: Equatable, Sendable {
@@ -74,5 +75,15 @@ enum FrameColor: Equatable, Sendable {
         case "hlg": self = .hlg
         default: self = .bt709
         }
+    }
+
+    func tag(_ buffer: CVPixelBuffer) {
+        let (primaries, transfer): (CFString, CFString) = switch self {
+        case .bt709: (kCVImageBufferColorPrimaries_ITU_R_709_2, kCVImageBufferTransferFunction_ITU_R_709_2)
+        case .pq: (kCVImageBufferColorPrimaries_ITU_R_2020, kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ)
+        case .hlg: (kCVImageBufferColorPrimaries_ITU_R_2020, kCVImageBufferTransferFunction_ITU_R_2100_HLG)
+        }
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, primaries, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, transfer, .shouldPropagate)
     }
 }
