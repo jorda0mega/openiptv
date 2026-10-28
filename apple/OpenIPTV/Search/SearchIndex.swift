@@ -360,7 +360,11 @@ final class LibraryIndex {
     private(set) var corpus = SearchCorpus<LibraryEntry>(name: \.name)
     /// Every copy's id → all copies of that title (only titles with more
     /// than one), the one listed first.
-    private(set) var versions: [String: [String]] = [:]
+    private(set) var versions: [String: [String]] = [:] {
+        didSet { if versions != oldValue { versionsChanged?() } }
+    }
+    /// What plans are asked for changed: a title's other copies were found, or went.
+    @ObservationIgnored var versionsChanged: (@MainActor () -> Void)?
     /// The titles on the server most in demand right now, most first.
     private(set) var trending: [LibraryEntry] = []
     /// This year's and last year's titles that IMDb voters rate well, most

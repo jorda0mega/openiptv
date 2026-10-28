@@ -308,7 +308,11 @@ enum PlaybackActivity {
 
     static var isPlaying: Bool { lock.withLock { count > 0 } }
     static func began() { lock.withLock { count += 1 } }
-    static func ended() { lock.withLock { count = max(0, count - 1) } }
+    /// The lanes hear of it: a fetch ahead refused while it played goes now.
+    static func ended() {
+        lock.withLock { count = max(0, count - 1) }
+        Task { @MainActor in Lane.conditionsChangedEverywhere() }
+    }
 }
 
 #if canImport(UIKit)

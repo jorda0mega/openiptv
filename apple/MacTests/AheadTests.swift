@@ -495,7 +495,8 @@ final class AheadTests: XCTestCase {
         }, fileStart: { plan, _ in started.mutate { $0.append(plan.itemId) } }, connection: { _, _ in }, subtitle: { _, _ in },
         previews: { _, _ in }), platform: .phone, sleep: { _ in })
         ahead.hold(only: [card], at: .homeForecast)
-        await settle()
+        let ended = await eventually { ahead.trail["homeForecast ended"] == 1 }
+        XCTAssertTrue(ended)
         XCTAssertEqual(started.value, [])
         ahead.hold(only: [card], at: .homeForecast)
         let held = await eventually { started.value == ["m5"] }

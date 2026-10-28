@@ -370,7 +370,7 @@ final class ShelfTests: XCTestCase {
 
     func testComingBackForgetsWhatWasKeptOrAskedBeforeAndLetsWhatWasAskedSinceFinish() async throws {
         let gate = Fetches(held: true), count = Locked(0), clock = Locked(start)
-        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(600)), now: { clock.value }) { key in
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(7200)), now: { clock.value }) { key in
             if key != "kept" { _ = try await gate.fetch(key) }
             count.mutate { $0 += 1 }
             return count.value
@@ -390,7 +390,23 @@ final class ShelfTests: XCTestCase {
         XCTAssertNil(stale, "a plan asked before the app went away was kept, with its resume point from then")
         XCTAssertNotNil(fresh, "a plan asked as the app came back was stopped, and its card got nothing more")
         let kept = try await shelf.value(for: "kept")
-        XCTAssertEqual(kept, count.value, "a plan kept from before the app went away was played, not asked again")
+        XCTAssertEqual(kept, 3, "a plan kept from before the app went away was played, not asked again")
+    }
+
+    func testAHoldWhoseFetchWasForgottenAsOutOfDateAsksAgain() async throws {
+        let gate = Fetches(held: true), clock = Locked(start)
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(600)), now: { clock.value }) { key in
+            try await gate.fetch(key)
+        }
+        let held = Task { await shelf.hold("plan", for: Interest(at: .episodeRow, .likely)) }
+        var started = gate.started.makeAsyncIterator()
+        _ = await started.next()
+        clock.mutate { $0 += 60 }
+        shelf.forget(askedBefore: clock.value)
+        _ = await started.next()
+        gate.letThrough()
+        let value = await held.value
+        XCTAssertEqual(value, 2, "a card on screen whose plan was forgotten on coming back got nothing more")
     }
 
     func testAnInterestIsNeverTakenForAnEarlierOne() {

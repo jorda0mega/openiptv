@@ -160,7 +160,7 @@ final class Lane {
     /// How often a refused interest looks again besides each change the lane hears of (the network, the card rested on):
     /// room on the disk, heat and power change without a word.
     private let recheckEvery: Duration
-    private var refused: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private var refused: [UUID: (look: CheckedContinuation<Void, Never>, timer: Task<Void, Never>)] = [:]
     private var tokens: Int
     private var refilledAt = ContinuousClock.now
     private var refill: Task<Void, Never>?
@@ -226,14 +226,13 @@ final class Lane {
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { look in
-                refused[id] = look
-                Task { [weak self, recheckEvery] in
-                    try? await Task.sleep(for: recheckEvery)
-                    self?.refused.removeValue(forKey: id)?.resume()
-                }
+                refused[id] = (look, Task { [weak self, recheckEvery] in
+                    guard (try? await Task.sleep(for: recheckEvery)) != nil else { return }
+                    self?.refused.removeValue(forKey: id)?.look.resume()
+                })
             }
         } onCancel: {
-            Task { @MainActor in self.refused.removeValue(forKey: id)?.resume() }
+            Task { @MainActor in self.endLook(id) }
         }
     }
 
@@ -276,9 +275,13 @@ final class Lane {
             }
         }
         admit()
-        let looks = refused.values
-        refused = [:]
-        looks.forEach { $0.resume() }
+        refused.keys.forEach(endLook)
+    }
+
+    private func endLook(_ id: UUID) {
+        guard let waiting = refused.removeValue(forKey: id) else { return }
+        waiting.timer.cancel()
+        waiting.look.resume()
     }
 
     #if DEBUG
@@ -414,6 +417,8 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     private var entries: [Key: Entry] = [:]
+    /// Times `forget(askedBefore:)` ran: a hold whose fetch it stopped asks again.
+    private var forgotten = 0
     #if DEBUG
     private(set) var fetched = 0
     /// Fetches that failed, the last one's kind (an error's type and code, never its words), and those stopped.
@@ -504,10 +509,14 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     /// `warm`, and while the device's conditions refuse it, warmed again once they allow it, till the interest goes.
     /// Regression: a card's start refused once (2 GB free for a moment) was never fetched while it stayed on screen.
+    /// Asked again too when what it waited on was forgotten as out of date (`forget(askedBefore:)`).
     func hold(_ key: Key, for interest: Interest) async -> Value? {
         while true {
+            let forgetting = forgotten
             if let value = await warm(key, for: interest) { return value }
-            guard !Task.isCancelled, policy.lane.refuses(interest) else { return nil }
+            guard !Task.isCancelled else { return nil }
+            if forgotten != forgetting { continue }
+            guard policy.lane.refuses(interest) else { return nil }
             guard (try? await policy.lane.untilAllowed(interest)) != nil else { return nil }
         }
     }
@@ -520,6 +529,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     /// What's kept, failures, and fetches asked before `date` go; fetches asked since finish for whoever waits on them.
     func forget(askedBefore date: Date) {
+        forgotten += 1
         for (key, entry) in entries {
             if let job = entry.job {
                 guard job.began < date else { continue }
