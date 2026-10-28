@@ -11,6 +11,8 @@
 #   JumpTimingTests on the test server: the screen is recorded while JUMPS BEGIN is up, decoded to
 #   series.json and deleted (KEEP=1 keeps it), and perf/jumps.py times each tap with the app's log.
 #   MPV_LOG=1: libmpv's debug log (a diagnostic run, not a timed one). TEST_RUNNER_* reach the test.
+#   Each lock is held only for its step (build.lock for the build, sim.lock for the simulator), and both stay
+#   free for GAP s before each commit's part.
 # Run it through perf/run.sh, from a copy: zsh reads a script as it goes, so an edit mid-run breaks it.
 set -u
 TEST=$1; shift
@@ -54,6 +56,8 @@ trap cleanup EXIT INT TERM HUP
 [ -d $WT ] || git -C $REPO worktree add --detach $WT HEAD -q
 
 for commit in "$@"; do
+  # Both locks free for GAP s (60 unless set) before each part, so a helper waiting on them gets its turn.
+  sleep ${GAP:-60}
   dir=$OUT/${TEST%%/*}-$PLATFORM-${TARGET_NAME#mock:}${TAG:+-$TAG}/$commit; mkdir -p $dir
   echo "== $commit ${TEST%%/*} $PLATFORM $TARGET_NAME $(date +%H:%M), $(free_mb) MB free"
   git -C $WT checkout -q --detach -f $commit && git -C $WT clean -qfd apple/$TESTDIR
