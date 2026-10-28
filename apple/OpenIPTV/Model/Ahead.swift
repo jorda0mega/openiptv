@@ -155,6 +155,9 @@ final class Ahead {
     private(set) var held = 0
     /// Holds whose plan came back empty, so nothing else of theirs was fetched.
     private(set) var planless = 0
+    /// What each place's holds reached, counted: "continueWatching began 2, likely 1, planned 1, ended 1".
+    private(set) var trail: [String: Int] = [:]
+    private func note(_ place: Place, _ event: String) { trail["\(place) \(event)", default: 0] += 1 }
     #endif
     let showing = Showing()
     private let platform: Platform
@@ -183,12 +186,17 @@ final class Ahead {
     func holding(_ target: Target, at place: Place) async {
         #if DEBUG
         held += 1
+        note(place, "began")
+        defer { note(place, "ended") }
         #endif
         await withTaskGroup(of: Void.self) { group in
             var waited = Duration.zero
             var started: Set<Need> = []
             for step in place.ladder(on: platform) {
                 guard (try? await sleep(step.after - waited)) != nil, !Task.isCancelled else { return }
+                #if DEBUG
+                note(place, "\(step.likelihood)")
+                #endif
                 waited = step.after
                 if place.isRestedOn(at: step.likelihood, on: platform), restsOnOneCard() {
                     guard await showing.untilMostShown(target, at: place) else { return }
@@ -208,9 +216,13 @@ final class Ahead {
             guard let plan = await work.plan(target, interest) else {
                 #if DEBUG
                 planless += 1
+                note(interest.place, Task.isCancelled ? "no plan, ended" : "no plan")
                 #endif
                 return
             }
+            #if DEBUG
+            note(interest.place, "planned")
+            #endif
             for need in playing { group.addTask { await self.prepare(need, of: plan, interest) } }
         }
     }
