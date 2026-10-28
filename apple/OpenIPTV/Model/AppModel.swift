@@ -980,24 +980,7 @@ final class AppModel {
     /// TV app does), a film gone. A title that wasn't in the row joins it.
     /// What was stopped on this device in the last two minutes: a server
     /// answer that hasn't caught up yet doesn't undo it.
-    @ObservationIgnored private var recentStops: [String: RecentStop] = [:]
-
-    private struct RecentStop {
-        enum Outcome {
-            /// The card Continue Watching showed for it.
-            case card(Card)
-            /// Finished with nothing next: no card.
-            case gone
-            /// Partway, but no card could be made here (nothing about it
-            /// saved): the server's card stays, with this progress.
-            case progress(Double?)
-        }
-
-        let at: Date
-        let outcome: Outcome
-        /// Its show, whose card it replaces whichever episode that had.
-        let seriesId: String?
-    }
+    @ObservationIgnored private var recentStops: [String: ContinueStop] = [:]
 
     /// The server's Continue Watching, with this device's stops of the last
     /// two minutes over anything older it still says: each one's card in
@@ -1006,33 +989,7 @@ final class AppModel {
     private func reconciled(_ row: HomeRow?) -> HomeRow? {
         recentStops = recentStops.filter { Date().timeIntervalSince($0.value.at) < 120 }
         guard !recentStops.isEmpty else { return row }
-        var cards = row?.cards ?? []
-        for (itemId, stop) in recentStops.sorted(by: { $0.value.at < $1.value.at }) {
-            func isIt(_ card: Card) -> Bool {
-                card.id == itemId || card.episodeId == itemId
-                    || stop.seriesId.map { card.id == $0 || card.seriesId == $0 } ?? false
-            }
-            // Its card as it stands, else as the server sent it (an older
-            // stop of the same show may have taken it out already); this
-            // very episode or film before any card of its show.
-            func exact(_ card: Card) -> Bool { card.id == itemId || card.episodeId == itemId }
-            let candidates = cards + (row?.cards ?? [])
-            let theirs = candidates.first(where: exact) ?? candidates.first(where: isIt)
-            cards.removeAll(where: isIt)
-            switch stop.outcome {
-            case let .card(card):
-                cards.insert(card, at: 0)
-            case .gone:
-                break
-            case let .progress(progress):
-                // The server's own card, in front with where it got to.
-                guard let old = theirs else { break }
-                // The new progress only on a card for this very title.
-                cards.insert(Card(id: old.id, kind: old.kind, title: old.title, subtitle: old.subtitle, images: old.images,
-                                  progress: exact(old) ? (progress ?? old.progress) : old.progress, playable: old.playable,
-                                  episodeId: old.episodeId, seriesId: old.seriesId), at: 0)
-            }
-        }
+        let cards = ContinueStop.applied(recentStops.values, toServer: row?.cards ?? [])
         guard !cards.isEmpty else { return nil }
         let shape = Artwork.Shape.landscape
         return HomeRow(title: "Continue Watching", shape: row?.shape ?? shape.rawValue, aspect: row?.aspect ?? shape.aspect, cards: cards)
@@ -1130,10 +1087,11 @@ final class AppModel {
                         progress: progress, playable: old.playable, episodeId: old.episodeId, seriesId: old.seriesId)
         }
         if let lead { cards.insert(lead, at: 0) }
-        let outcome: RecentStop.Outcome = if let lead { .card(lead) } else if finished { .gone } else {
+        let outcome: ContinueStop.Outcome = if let lead { .card(lead) } else if finished { .gone } else {
             .progress(duration > 0 ? seconds / duration * 100 : nil)
         }
-        recentStops[playback.itemId] = RecentStop(at: Date(), outcome: outcome, seriesId: playback.seriesId)
+        recentStops[playback.itemId] = ContinueStop(itemId: playback.itemId, at: Date(), outcome: outcome, seriesId: playback.seriesId,
+                                                    seriesName: playback.seriesName)
         let shape = Artwork.Shape.landscape
         let row = cards.isEmpty ? nil : HomeRow(title: Self.continueTitle, shape: index.map { rows[$0].shape } ?? shape.rawValue,
                                                 aspect: index.map { rows[$0].aspect } ?? shape.aspect, cards: cards)

@@ -316,8 +316,9 @@ struct EmbyPlayback: Hashable, Identifiable {
     var tap: Metric.FilmTap?
     /// Bitrate of the original file (bits/s), when the server knows it.
     var bitrate: Int?
-    /// The show an episode belongs to.
+    /// The show an episode belongs to, and its name.
     var seriesId: String?
+    var seriesName: String?
     /// The story, for the player's Info panel.
     var overview: String?
     /// A still from it (an episode's own, a film's backdrop), for the

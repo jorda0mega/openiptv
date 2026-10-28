@@ -1086,6 +1086,7 @@ struct EmbyClient {
         playback.surface = FilmSurface(videoSubType: source?.MediaStreams?.first { $0.Type == "Video" }?.ExtendedVideoSubType)
         playback.listed = source != nil
         playback.seriesId = item.seriesId
+        playback.seriesName = item.seriesName
         playback.overview = item.overview
         playback.intro = item.intro
         playback.stills = Artwork.candidates(item, context: item.kind == "Episode" ? .still : .backdrop).prefix(3).map {

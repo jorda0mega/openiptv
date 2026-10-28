@@ -352,6 +352,47 @@ final class PhoneHomeStabilityTests: XCTestCase {
         shot("continue watching after return")
     }
 
+    /// Regression: pressing Dragon Ball Z's card played the episode from
+    /// the show's other copy (another library); back on Home, the show had
+    /// a card for each copy. The next launch opens on that one card too.
+    func testPlayingTheShowsOtherCopyLeavesOneCard() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["show_copy": "1", "episode_resume": "60"])
+        defer { configure(server, ["reset": "1"]) }
+        // A library read afresh, with the copy in it; the start asked at the
+        // tap, once the library knows the copy.
+        app.launchArguments += ["-cacheFolder", "show-copy-\(UUID())", "-noPrepareAhead", "YES"]
+        app.launch()
+        let original = app.buttons["continue-s1"].firstMatch
+        XCTAssertTrue(original.waitForExistence(timeout: 20), "the show isn't in Continue Watching")
+        sleep(15)
+        let hero = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        hero.press(forDuration: 0.1, thenDragTo: hero.withOffset(CGVector(dx: 0, dy: -300)))
+        sleep(1)
+        original.tap()
+        let playing = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(playing.waitForExistence(timeout: 20), "the player didn't open")
+        sleep(5)
+        XCTAssertEqual(playing.label, "ce203", "the card didn't play the show's other copy")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        let close = app.buttons["Close player"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 3), "no Close player")
+        close.tap()
+        let copy = app.buttons["continue-cs1"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 10), "the episode just watched has no card")
+        sleep(3)
+        shot("one card after the other copy")
+        XCTAssertFalse(original.exists, "the show has a card for each copy")
+
+        app.terminate()
+        configure(server, ["home_delay": "30"])
+        app.launch()
+        XCTAssertTrue(copy.waitForExistence(timeout: 10), "the next launch doesn't open on the episode just watched")
+        shot("saved home after the other copy")
+        XCTAssertFalse(original.exists, "the next launch opens on the card from before the stop")
+    }
+
     func testFilmAddedElsewhereShowsAfterReturn() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
