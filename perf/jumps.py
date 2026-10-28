@@ -185,8 +185,9 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
         restarts = [j["restart"] for j in mine if j["restart"] is not None]
         if v:
             print(f"{sign}10: {len(v)} of {len(mine)} timed, tap to new picture p50 {pct(v, 50):.0f} ms, p95 {pct(v, 95):.0f} ms, "
-                  f"max {max(v):.0f} ms | libmpv restart p50 {pct(restarts, 50)} ms, max {max(restarts)} ms | "
-                  f"read from the server {sum(1 for j in mine if (j['mb'] or 0) > 0)} | loading view {sum(1 for j in mine if j['loading'])} | "
+                  f"max {max(v):.0f} ms | libmpv restart "
+                  + (f"p50 {pct(restarts, 50)} ms, max {max(restarts)} ms | " if restarts else "not in this build's readout | ")
+                  + f"read from the server {sum(1 for j in mine if (j['mb'] or 0) > 0)} | loading view {sum(1 for j in mine if j['loading'])} | "
                   f"downloaded ahead at the tap p50 {pct([j['ahead'] for j in mine if j['ahead'] is not None] or [0], 50):.0f} s, "
                   f"target downloaded {sum(1 for j in mine if j['cached'])} of {sum(1 for j in mine if j['cached'] is not None)}")
             if metric:
