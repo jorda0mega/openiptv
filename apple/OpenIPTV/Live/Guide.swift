@@ -23,6 +23,8 @@ actor GuideStore {
     }
     /// Which `programmes` a search index built in the background is for.
     private var generation = 0
+    /// Moves on when the guide is forgotten: a download under way then keeps nothing.
+    private var forgotten = 0
     private var fetchedAt: Date?
     /// Every programme with its title folded for matching, in start order
     /// (built on the first search after the guide changes).
@@ -67,6 +69,7 @@ actor GuideStore {
     func refresh(from requests: [URLRequest], keep: Set<String>, hoursAhead: Int64 = 24) async {
         guard !requests.isEmpty, state != .loading else { return }
         state = .loading
+        let asked = forgotten
         let now = Int64(Date().timeIntervalSince1970)
         var merged: [String: [Programme]] = [:]
         var lastError: String?
@@ -78,6 +81,7 @@ actor GuideStore {
                 lastError = SourceError.wrap(error).localizedDescription
             }
         }
+        guard forgotten == asked else { return }
         guard !merged.isEmpty else {
             state = .failed(lastError ?? "The guide had no programmes for your channels.")
             return
@@ -88,6 +92,7 @@ actor GuideStore {
             for key in sorted.keys { sorted[key]?.sort { ($0.start, $0.stop) < ($1.start, $1.stop) } }
             return sorted
         }.value
+        guard forgotten == asked else { return }
         programmes = merged
         let at = Date()
         fetchedAt = at
@@ -180,6 +185,7 @@ actor GuideStore {
     }
 
     func clear() {
+        forgotten += 1
         programmes = [:]
         fetchedAt = nil
         state = .idle

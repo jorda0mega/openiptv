@@ -29,6 +29,8 @@ final class AppModel {
     private(set) var account = AccountScope(client: nil)
     @ObservationIgnored private var session = AccountSession(signedIn: false)
     private var lastCardWidth = 360
+    /// The card width My List was last loaded at (iPhone, iPad, Apple TV).
+    @ObservationIgnored private var myListWidth: Int?
 
     // MARK: Live TV
 
@@ -164,7 +166,7 @@ final class AppModel {
     private func scope(for account: EmbyAccount?, readsSaved: Bool = true) -> AccountScope {
         AccountScope(client: account.map { EmbyClient(account: $0, deviceId: sources.deviceId) }, readsSaved: readsSaved,
                      askPlan: { [weak self] emby, key in
-                         let shows: @Sendable (String) -> [String] = await self?.showCopies ?? { [$0] }
+                         let shows = await self?.showCopies ?? { @Sendable id in [id] }
                          #if DEBUG
                          let clock = PlanClock(copies: key.versions)
                          await self?.notePlanClock(clock, for: key)
@@ -1281,7 +1283,8 @@ final class AppModel {
 
     func prepareLibrary(checkingChanges: Bool = false) async {
         let scope = account
-        if let emby = scope.emby { await syncLibrary(emby, in: scope, urgent: checkingChanges) }
+        guard let emby = scope.emby else { return }
+        await scope.attach { await self.syncLibrary(emby, in: scope, urgent: checkingChanges) }
     }
 
     private func syncLibrary(_ emby: EmbyClient, in scope: AccountScope, urgent: Bool = false) async {
@@ -1459,6 +1462,7 @@ final class AppModel {
         case let .wipe(wipe):
             sources.setEmby(nil)
             AccountScope.removeSaved()
+            Self.forgetMyListOrder()
             account = scope(for: nil, readsSaved: false)
             holdContinueWatchingAgain()
             if wipe == .everything {
@@ -1472,7 +1476,9 @@ final class AppModel {
             account = scope(for: signedIn)
             holdContinueWatchingAgain()
         case .loadHome:
+            async let list: Void = refreshMyList()
             await loadHome(cardWidth: lastCardWidth, full: true, show: true)
+            await list
         }
     }
 
@@ -1524,6 +1530,7 @@ final class AppModel {
     /// Forget everything: no subscription's lineup, check, session or
     /// guide state is left in memory.
     private func forgetLiveTV() async {
+        liveUpdate?.cancel()
         await applyLineup(categories: [], channels: [])
         selectedCategory = nil
         clearNowNext()
@@ -1688,6 +1695,7 @@ final class AppModel {
         }
         guard results.values.contains(where: { (try? $0.get()) != nil }) else { return }
         await applyLineup(categories: cats, channels: channels)
+        guard !Task.isCancelled else { return }
         await Self.saveLineup(sources: iptv.map(\.id), categories: cats, channels: channels, answered: liveChecks.compactMapValues(\.answeredAt))
 
         let keep = Set(channels.compactMap(\.epgId))
@@ -1769,6 +1777,7 @@ final class AppModel {
         let built = await Task.detached(priority: .userInitiated) {
             Lineup(categories: allCategories, channels: allListed, prefixes: prefixes, home: home)
         }.value
+        guard !Task.isCancelled else { return }
         liveLibrary = built.library
         categories = built.categories
         allChannels = built.channels
@@ -2493,15 +2502,21 @@ extension AppModel {
     private nonisolated static let noPreconnect = false
     #endif
 
+    /// When each title was put on My List here, and the titles seen: an
+    /// account's own, gone with it (its record on the server keeps them).
+    fileprivate static func forgetMyListOrder() {
+        UserDefaults.standard.removeObject(forKey: myListOrderKey)
+        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix(myListSeenKey) {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
     #if DEBUG
     /// UI tests: `-forgetMyListOrder YES` at launch starts with no order
     /// kept (when each title was added, the titles seen).
     static func forgetMyListOrderForTesting() {
         guard UserDefaults.standard.bool(forKey: "forgetMyListOrder") else { return }
-        UserDefaults.standard.removeObject(forKey: myListOrderKey)
-        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix(myListSeenKey) {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
+        forgetMyListOrder()
     }
     #endif
 
@@ -2516,11 +2531,13 @@ extension AppModel {
     /// server's order for titles no device dated.)
     func loadMyList(cardWidth: Int) async {
         let scope = account
-        scope.myListWidth = cardWidth
+        myListWidth = cardWidth
         guard let emby = scope.emby else { return }
+        let seenKey = myListSeenKey
         async let shared = emby.myListDates()
         guard let found = try? await emby.favorites() else { return }
         let record = await shared
+        guard scope.isOpen else { return }
         var added = myListAdded
         for (id, date) in record ?? [:] where (added[id] ?? 0) < date { added[id] = date }
         // A second shared by several titles is nobody's pick: a device
@@ -2531,12 +2548,12 @@ extension AppModel {
         let stamps = Dictionary(grouping: added.values, by: { $0.rounded(.down) })
         added = added.filter { (stamps[$0.value.rounded(.down)]?.count ?? 0) < Self.massStamp }
         let defaults = UserDefaults.standard
-        if let seen = defaults.stringArray(forKey: myListSeenKey).map(Set.init) {
+        if let seen = defaults.stringArray(forKey: seenKey).map(Set.init) {
             let now = Date().timeIntervalSince1970
             for item in found where !seen.contains(item.id) && added[item.id] == nil { added[item.id] = now }
         }
         if added != myListAdded { myListAdded = added }
-        defaults.set(found.map(\.id), forKey: myListSeenKey)
+        defaults.set(found.map(\.id), forKey: seenKey)
         // The record kept to what's on the list, with what this device knows.
         if let record {
             let onList = Set(found.map(\.id))
@@ -2572,8 +2589,8 @@ extension AppModel {
     /// My List read again (back in the app: something may have been put on
     /// it on another device meanwhile).
     func refreshMyList() async {
-        guard let width = account.myListWidth else { return }
-        await loadMyList(cardWidth: width)
+        guard let myListWidth else { return }
+        await loadMyList(cardWidth: myListWidth)
     }
 
     /// Whether a title is on My List, in any copy (what the server said of

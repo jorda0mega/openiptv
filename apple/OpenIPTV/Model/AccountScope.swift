@@ -215,8 +215,6 @@ final class AccountScope {
     /// one card): the ids on the server's list, by each key the title is
     /// known by.
     @ObservationIgnored var myListCopies: [String: Set<String>] = [:]
-    /// The card width My List was last loaded at (iPhone, iPad, Apple TV).
-    @ObservationIgnored var myListWidth: Int?
 
     // MARK: Title pages
 
