@@ -79,17 +79,32 @@ final class JumpTimingTests: XCTestCase {
         remote.press(.select)
         let pressed = Date()
         let start = app.staticTexts["debug-start"].firstMatch, failed = app.staticTexts["debug-start-error"].firstMatch
+        var cause = "none"
         while Date().timeIntervalSince(pressed) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4,
-              !(failed.exists && !failed.label.isEmpty) { sleep(1) }
+              !(failed.exists && !failed.label.isEmpty) {
+            cause = slowCause() ?? cause
+            sleep(1)
+        }
         guard start.exists, start.label.split(separator: " ").count == 4 else {
             // What the app shows instead: its own message (fixed words) and whether the loading view is up.
             let message = failed.exists && !failed.label.isEmpty ? String(failed.label.prefix(80)).replacingOccurrences(of: "://", with: " ") : "none"
             let loading = app.descendants(matching: .any)["load-progress"].firstMatch.exists
-            print(String(format: "START none after %.0f s: ", Date().timeIntervalSince(pressed))
+            print(String(format: "START none after %.0f s, slow line seen: %@: ", Date().timeIntervalSince(pressed), cause)
                   + "player \(app.staticTexts["debug-item"].firstMatch.exists ? "open" : "not open") | error \(message) | loading \(loading ? "shown" : "none")")
             return nil
         }
         return Date().timeIntervalSince(pressed)
+    }
+
+    /// The loading view's slow line, as one of its fixed phrases (its other words can name the film).
+    private func slowCause() -> String? {
+        let view = app.descendants(matching: .any)["load-progress"].firstMatch
+        guard view.exists else { return nil }
+        let words = view.label + " " + view.descendants(matching: .staticText).allElementsBoundByIndex.map(\.label).joined(separator: " ")
+        for phrase in ["slow to answer", "slow to send the film", "connection is slow", "No internet connection"] where words.contains(phrase) {
+            return phrase.replacingOccurrences(of: " ", with: "_")
+        }
+        return nil
     }
 
     private func focused() -> String {

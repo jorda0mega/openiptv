@@ -54,10 +54,14 @@ class TimingCase: XCTestCase {
         }
         let tapped = Date()
         let start = app.staticTexts["debug-start"].firstMatch, failed = app.staticTexts["debug-start-error"].firstMatch
+        var cause = "none"
         while Date().timeIntervalSince(tapped) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4,
-              !(failed.exists && !failed.label.isEmpty) { sleep(1) }
+              !(failed.exists && !failed.label.isEmpty) {
+            cause = slowCause() ?? cause
+            sleep(1)
+        }
         guard start.exists, start.label.split(separator: " ").count == 4 else {
-            print(String(format: "START none after %.0f s", Date().timeIntervalSince(tapped)))
+            print(String(format: "START none after %.0f s, slow line seen: %@", Date().timeIntervalSince(tapped), cause))
             sayWhyNoStart()
             return nil
         }
@@ -70,6 +74,17 @@ class TimingCase: XCTestCase {
         let words = readout.exists ? readout.label.split(separator: " ") : []
         func count(_ name: String) -> Int { words.firstIndex(of: Substring(name)).flatMap { Int(words[$0 + 1]) } ?? 0 }
         return count("plans") > 0 && count("starts") > 0
+    }
+
+    /// The loading view's slow line, as one of its fixed phrases (its other words can name the film).
+    func slowCause() -> String? {
+        let view = app.descendants(matching: .any)["load-progress"].firstMatch
+        guard view.exists else { return nil }
+        let words = view.label + " " + view.descendants(matching: .staticText).allElementsBoundByIndex.map(\.label).joined(separator: " ")
+        for phrase in ["slow to answer", "slow to send the film", "connection is slow", "No internet connection"] where words.contains(phrase) {
+            return phrase.replacingOccurrences(of: " ", with: "_")
+        }
+        return nil
     }
 
     /// No first frame: what the app shows and says instead (words and counts only).

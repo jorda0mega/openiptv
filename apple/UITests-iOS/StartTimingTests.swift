@@ -80,12 +80,17 @@ final class StartTimingTests: TimingCase {
     private func start() -> (seconds: Double?, parts: String) {
         let readout = app.staticTexts["debug-start"].firstMatch, failed = app.staticTexts["debug-start-error"].firstMatch
         let tapped = Date()
-        var words: [Substring] = []
+        var words: [Substring] = [], cause = "none", looked = Date.distantPast
         while Date().timeIntervalSince(tapped) < 120, words.count < 4, !(failed.exists && !failed.label.isEmpty) {
             usleep(250_000)
             words = readout.exists ? readout.label.split(separator: " ") : []
+            // The slow line from 8 s on, looked for once a second.
+            if Date().timeIntervalSince(tapped) > 7, Date().timeIntervalSince(looked) > 1 {
+                looked = Date()
+                cause = slowCause() ?? cause
+            }
         }
-        if words.count < 4 { print(String(format: "START none after %.0f s", Date().timeIntervalSince(tapped))) }
+        if words.count < 4 { print(String(format: "START none after %.0f s, slow line seen: %@", Date().timeIntervalSince(tapped), cause)) }
         let parts = app.staticTexts["debug-start-parts"].firstMatch
         return (words.count == 4 ? Double(words[1]) : nil, parts.exists ? parts.label : "no parts")
     }
