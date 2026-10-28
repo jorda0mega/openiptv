@@ -228,7 +228,6 @@ struct RootView: View {
         // Pick up library changes whenever the app comes back.
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            model.forgetPlaybackPlans()
             Task { await model.prepareLibrary(checkingChanges: true) }
             if !model.rows.isEmpty { Task { await model.refreshContinueWatching(returning: true) } }
             Task { await model.refreshMyList() }

@@ -368,23 +368,29 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(again, 2)
     }
 
-    func testForgettingWhatIsKeptLetsAFetchUnderWayFinishForItsCard() async throws {
-        let gate = Fetches(held: true), count = Locked(0)
-        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60))) { key in
-            if key == "asked" { _ = try await gate.fetch(key) }
+    func testComingBackForgetsWhatWasKeptOrAskedBeforeAndLetsWhatWasAskedSinceFinish() async throws {
+        let gate = Fetches(held: true), count = Locked(0), clock = Locked(start)
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(600)), now: { clock.value }) { key in
+            if key != "kept" { _ = try await gate.fetch(key) }
             count.mutate { $0 += 1 }
             return count.value
         }
         _ = try await shelf.value(for: "kept")
-        let warming = Task { await shelf.warm("asked", for: Interest(at: .homeForecast, .likely)) }
+        let before = Task { await shelf.warm("before", for: Interest(at: .homeForecast, .likely)) }
         var started = gate.started.makeAsyncIterator()
         _ = await started.next()
-        shelf.forgetKept()
+        clock.mutate { $0 += 60 }
+        let away = clock.value
+        clock.mutate { $0 += 3600 }
+        let since = Task { await shelf.warm("since", for: Interest(at: .homeForecast, .likely)) }
+        _ = await started.next()
+        shelf.forget(askedBefore: away)
         gate.letThrough()
-        let warmed = await warming.value
-        XCTAssertEqual(warmed, 2, "a plan asked as the app became active was stopped, and its card got nothing more")
+        let stale = await before.value, fresh = await since.value
+        XCTAssertNil(stale, "a plan asked before the app went away was kept, with its resume point from then")
+        XCTAssertNotNil(fresh, "a plan asked as the app came back was stopped, and its card got nothing more")
         let kept = try await shelf.value(for: "kept")
-        XCTAssertEqual(kept, 3, "a plan kept from before the app went away was kept")
+        XCTAssertEqual(kept, count.value, "a plan kept from before the app went away was played, not asked again")
     }
 
     func testAnInterestIsNeverTakenForAnEarlierOne() {

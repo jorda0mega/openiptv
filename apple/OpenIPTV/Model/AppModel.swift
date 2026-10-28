@@ -417,7 +417,14 @@ final class AppModel {
         #endif
     }
 
+    /// Plans asked before the app went away may be out of date, and go: the held cards ask afresh. Only then, not
+    /// at launch nor each time it becomes active: that stopped the plans Home's cards had just asked for, and the
+    /// cards waiting on them got nothing fetched ahead.
     private func cameBack() {
+        if let backgroundedAt {
+            plans.forget(askedBefore: backgroundedAt)
+            holdContinueWatchingAgain()
+        }
         guard let away = backgroundedAt.map({ Date().timeIntervalSince($0) }), away >= Self.longAway else { return }
         homeAwaitsFirstBuild = true
         showStagedHome()
@@ -447,6 +454,7 @@ final class AppModel {
 
     private func openLibrary(_ emby: EmbyClient) async {
         await library.open(emby)
+        holdContinueWatching()
         await library.loadCachedCharts()
     }
 
@@ -1369,14 +1377,28 @@ final class AppModel {
     /// Continue Watching's first two cards, held from launch rather than from when Home shows them, till a film plays:
     /// their plans, starts and connections go before the tap, so a server slow on its first read after a while is slow
     /// before it.
+    /// Held again from the start when what their plans are asked for changes: another copy the library found, another
+    /// account.
     private func holdContinueWatching() {
         let cards = rows.first { $0.title == Self.continueTitle }?.cards ?? []
-        ahead.hold(only: playerShown || Self.noPrepareAhead ? [] : cards.prefix(2).map(\.playTarget), at: .homeForecast)
+        let targets = playerShown || Self.noPrepareAhead ? [] : cards.prefix(2).map(\.playTarget)
+        let keys = Set(targets.map(planKey))
+        if keys != heldPlans { ahead.hold(only: [], at: .homeForecast) }
+        heldPlans = keys
+        ahead.hold(only: targets, at: .homeForecast)
+    }
+
+    @ObservationIgnored private var heldPlans: Set<PlanKey> = []
+
+    /// Every held card asked afresh: their plans were forgotten, or are another account's.
+    private func holdContinueWatchingAgain() {
+        heldPlans = []
+        holdContinueWatching()
     }
 
     @ObservationIgnored private(set) lazy var ahead = Ahead(Ahead.Work(
         page: { [weak self] target, interest in await self?.preparePage(target, interest) },
-        plan: { [weak self] target, interest in await self?.preparePlan(target, interest) },
+        plan: { [weak self] target, interest in await self?.preparePlan(target, interest, held: true) },
         fileStart: { start, interest in
             guard !AppModel.noStreamAhead else { return }
             _ = await FileStarts.shelf.hold(FileStart(start), for: interest)
@@ -1416,10 +1438,12 @@ final class AppModel {
         }
     }
 
-    private func preparePlan(_ target: Target, _ interest: Interest) async -> EmbyPlayback? {
+    /// `held`: for a card's hold, which waits for the device to allow it (prepare's asks go once).
+    private func preparePlan(_ target: Target, _ interest: Interest, held: Bool = false) async -> EmbyPlayback? {
         let account = accountGeneration
-        let plan = await plans.warm(planKey(target), for: interest).map(withLocalResume)
-        return account == accountGeneration ? plan : nil
+        let key = planKey(target)
+        let plan = if held { await plans.hold(key, for: interest) } else { await plans.warm(key, for: interest) }
+        return account == accountGeneration ? plan.map(withLocalResume) : nil
     }
 
     private func planKey(_ target: Target) -> PlanKey {
@@ -1560,13 +1584,6 @@ final class AppModel {
 
     func prepareLibrary(checkingChanges: Bool = false) async {
         if let emby { await syncLibrary(emby, urgent: checkingChanges) }
-    }
-
-    /// Back from the background, plans kept from before may be out of date. Not at launch, and not ones under way:
-    /// stopping those left the cards waiting on them with nothing fetched ahead.
-    func forgetPlaybackPlans() {
-        guard backgroundedAt != nil else { return }
-        plans.forgetKept()
     }
 
     private func syncLibrary(_ emby: EmbyClient, urgent: Bool = false) async {
@@ -1718,6 +1735,7 @@ final class AppModel {
 
     func signedInToEmby(_ account: EmbyAccount) async {
         accountGeneration += 1
+        ahead.hold(only: [], at: .homeForecast)
         StreamRelay.shared.forgetAccount()
         FileStarts.shelf.forgetAll()
         plans.forgetAll()
@@ -1733,6 +1751,7 @@ final class AppModel {
         showLoads = [:]
         movieLoads = [:]
         sources.setEmby(account)
+        holdContinueWatchingAgain()
         // Another account's Home: nothing of the last one waits or counts.
         stagedHome = nil
         shownBuiltAt = nil
@@ -1741,6 +1760,7 @@ final class AppModel {
 
     func signOutOfEmby() async {
         accountGeneration += 1
+        ahead.hold(only: [], at: .homeForecast)
         homeLoad = nil
         homeLoadID = UUID()
         stagedHome = nil
@@ -1787,6 +1807,7 @@ final class AppModel {
     }
 
     func forgetEverything() async {
+        ahead.hold(only: [], at: .homeForecast)
         await emby?.logout()
         sources.forgetEverything()
         await guide.clear()
