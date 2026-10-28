@@ -76,6 +76,44 @@ final class FramePlanTests: XCTestCase {
         XCTAssertEqual(FrameColor.bt709.subtitleWhite, 255, "SDR")
     }
 
+    /// The orders the reviews walked: `drained(c)` is the drawing queue reaching change c's hop, `hop(c)` that hop
+    /// on the player's queue. Notes can come in between.
+    func testSubtitleWhiteNeverRisesOverAFrameStillDrawing() {
+        play([.note(.pq), .note(.bt709), .note(.hlg), .drained(2), .hop(2), .drained(3), .hop(3)])
+        play([.note(.pq), .note(.bt709), .drained(2), .hop(2)])
+        play([.note(.hlg), .note(.bt709), .note(.hlg), .drained(2), .hop(2)])
+        play([.note(.pq), .note(.bt709), .note(.bt709), .drained(2), .hop(2), .drained(3), .hop(3)])
+        play([.note(.pq), .note(.bt709), .drained(2), .note(.hlg), .hop(2), .drained(3), .hop(3)])
+        play([.note(.bt709), .note(.hlg), .note(.pq)])
+    }
+
+    private enum Step { case note(FrameColor), drained(Int), hop(Int) }
+
+    /// After each step, no tag a frame may still be drawing under has a white below mpv's; at the end, mpv holds
+    /// the last tag's white.
+    private func play(_ order: [Step], line: UInt = #line) {
+        var held = HeldSubtitleWhite()
+        var drawing: [(change: Int, color: FrameColor)] = [(0, .bt709)]
+        var raises: [Int: FrameColor] = [:]
+        var notes = 0
+        for step in order {
+            switch step {
+            case .note(let color):
+                notes += 1
+                let next = held.noted(color)
+                drawing.append((notes, color))
+                if let change = next.raise { raises[change] = color }
+            case .drained(let change):
+                drawing.removeAll { $0.change < change }
+            case .hop(let change):
+                if let color = raises[change] { _ = held.drawn(change, color) }
+            }
+            XCTAssertTrue(drawing.allSatisfy { held.white <= $0.color.subtitleWhite },
+                          "white \(held.white) over a frame still drawing at \(step)", line: line)
+        }
+        XCTAssertEqual(held.white, drawing.last?.color.subtitleWhite, "the last tag's white", line: line)
+    }
+
     /// SMPTE ST 2084.
     private func pqNits(_ code: UInt8) -> Double {
         let m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875

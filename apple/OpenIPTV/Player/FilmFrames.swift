@@ -67,6 +67,11 @@ final class FilmFrames: @unchecked Sendable {
     func setInBackground(_ inBackground: Bool) { _ = change { $0.inBackground = inBackground } }
     var isUndrawn: Bool { lock.withLock { inputs.undrawn } }
 
+    /// Runs `work` on `target` once the frames being drawn or due are out.
+    func afterDraws(on target: DispatchQueue, _ work: @escaping @Sendable () -> Void) {
+        queue.async { target.async(execute: work) }
+    }
+
     func syncClock(_ seconds: Double, playing: Bool) {
         guard let clock else { return }
         let was = CMTimebaseGetRate(clock) != 0

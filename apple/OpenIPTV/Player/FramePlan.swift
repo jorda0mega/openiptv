@@ -77,8 +77,16 @@ enum FrameColor: Equatable, Sendable {
         }
     }
 
-    /// Subtitle white as a code value, for mpv's `sub-color`.
-    var subtitleWhite: UInt8 { 255 }
+    /// SDR white as a code value, for mpv's `sub-color`. libmpv blends subtitles onto the frame's code values
+    /// unconverted, and full white is 10,000 nits in PQ and the screen's peak in HLG. Only mpv's default style takes
+    /// it: ASS styles, inline colours and picture subtitles keep their own unless their styling is overridden.
+    var subtitleWhite: UInt8 {
+        switch self {
+        case .bt709: 255
+        case .pq: 148
+        case .hlg: 191
+        }
+    }
 
     var subtitleColor: String { String(format: "#%02X%02X%02X", subtitleWhite, subtitleWhite, subtitleWhite) }
 
@@ -90,5 +98,31 @@ enum FrameColor: Equatable, Sendable {
         }
         CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, primaries, .shouldPropagate)
         CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, transfer, .shouldPropagate)
+    }
+}
+
+/// The subtitle white mpv's `sub-color` holds as a film's colour changes. No frame gets a white above its tag's own:
+/// a dimmer white goes to mpv before the new tag, a brighter one once the frames drawn under older tags are out,
+/// unless a later change came first.
+struct HeldSubtitleWhite: Equatable, Sendable {
+    private(set) var white = FrameColor.bt709.subtitleWhite
+    private var changes = 0
+
+    /// Before the frames take `color`: the colour whose white goes to mpv now, and the change whose raise waits for
+    /// the frames drawn so far.
+    mutating func noted(_ color: FrameColor) -> (now: FrameColor?, raise: Int?) {
+        changes += 1
+        if color.subtitleWhite < white {
+            white = color.subtitleWhite
+            return (color, nil)
+        }
+        return (nil, color.subtitleWhite > white ? changes : nil)
+    }
+
+    /// The frames drawn before `change` are out: the colour whose white goes to mpv, unless a later change came.
+    mutating func drawn(_ change: Int, _ color: FrameColor) -> FrameColor? {
+        guard change == changes, color.subtitleWhite > white else { return nil }
+        white = color.subtitleWhite
+        return color
     }
 }
