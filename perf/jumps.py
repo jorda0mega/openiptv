@@ -67,7 +67,7 @@ def seeks(ndjson):
     """(Mac time, film second, by, seconds downloaded ahead, the read-ahead asked, whether the target was
     downloaded already) of each "PERF cache at <s> by <+n> ranges <a-b,...> ahead <s> readahead <s> ..." line."""
     found = []
-    for line in open(ndjson, errors="replace"):
+    for line in (open(ndjson, errors="replace") if os.path.exists(ndjson) else []):
         try:
             entry = json.loads(line.rstrip(",\n"))
         except ValueError:
