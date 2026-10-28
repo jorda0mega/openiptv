@@ -202,6 +202,10 @@ final class AppModel {
     /// never replaces the page.
     @ObservationIgnored private var homeLoad: Task<Void, Never>?
     @ObservationIgnored private var homeLoadID = UUID()
+    @ObservationIgnored private lazy var homeRetry = HomeRetry { [weak self] in
+        guard let self else { return }
+        await loadHome(cardWidth: lastCardWidth)
+    }
 
     /// Home doesn't change while you look at it, like Netflix's: a Home
     /// built in the background (new titles, the charts, IMDb's catalog, a
@@ -348,6 +352,7 @@ final class AppModel {
             homeBuiltAt = fresh.builtAt
             homeHistory = fresh.history ?? []
             homeError = nil
+            homeRetry.stop()
             // Signed out or into another account meanwhile: not its Home.
             guard account == accountGeneration else { return }
             if show || homeOpening {
@@ -372,6 +377,7 @@ final class AppModel {
             if sync { Task { await syncLibrary(emby) } }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
+            if shownBuiltAt == nil || rows.isEmpty { homeRetry.askAgainLater() }
         }
     }
 
@@ -417,6 +423,9 @@ final class AppModel {
         }
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.cameBack() }
+        }
+        center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.homeRetry.askAgainNow() }
         }
         #endif
     }
