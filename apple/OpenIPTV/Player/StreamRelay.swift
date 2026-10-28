@@ -1054,6 +1054,10 @@ enum Connections {
                 sent = true
                 await ping(file)
             }
+            if !sent, lane.refuses(interest) {
+                guard (try? await lane.untilAllowed(interest)) != nil else { return }
+                continue
+            }
             guard sent, (try? await sleep(every)) != nil else { return }
         }
     }

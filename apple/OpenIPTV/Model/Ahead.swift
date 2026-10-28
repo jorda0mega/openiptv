@@ -160,6 +160,8 @@ final class Ahead {
     private func note(_ place: Place, _ event: String) { trail["\(place) \(event)", default: 0] += 1 }
     #endif
     let showing = Showing()
+    /// Held by the app rather than a view on screen (hold(only:at:)).
+    private var kept: [Target: Task<Void, Never>] = [:]
     private let platform: Platform
     private let sleep: @Sendable (Duration) async throws -> Void
     private let restsOnOneCard: @MainActor () -> Bool
@@ -180,6 +182,17 @@ final class Ahead {
         case (.playable, .glance): [.plan]
         case (.playable, .likely): [.plan, .fileStart, .connection, .subtitleFile]
         case (.playable, .next): [.plan, .fileStart, .connection, .subtitleFile, .subtitleCopy, .previews]
+        }
+    }
+
+    /// These targets held from now on, at `place`, whatever is on screen: new ones begin, ones no longer listed stop.
+    func hold(only targets: [Target], at place: Place) {
+        for (target, task) in kept where !targets.contains(target) {
+            task.cancel()
+            kept[target] = nil
+        }
+        for target in targets where kept[target] == nil {
+            kept[target] = Task { await holding(target, at: place) }
         }
     }
 
