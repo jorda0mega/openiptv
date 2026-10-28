@@ -145,6 +145,35 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertLessThan(seconds, 5, "Continue Watching came \(seconds) s after the app came back")
     }
 
+    func testFailedHomeBackAfterLongAwayIsBuiltOnce() throws {
+        app.launchEnvironment["OPENREEL_DEBUG_LONG_AWAY"] = "8"
+        let server = try launchWhileTheServerFails()
+        defer { configure(server, ["reset": "1"]) }
+        sleep(9)
+        configure(server, ["emby_status": "0", "home_delay": "5"])
+        XCUIDevice.shared.press(.home)
+        sleep(10)
+        app.activate()
+        XCTAssertNotNil(secondsUntilContinueWatching(since: Date(), within: 30, "back after long away"),
+                        "Home stayed on its error after a long time away")
+        sleep(2)
+        let first = continueOrder()
+        sleep(12)
+        shot("home after a long time away")
+        XCTAssertEqual(continueOrder(), first, "Home was built again and replaced while on screen")
+    }
+
+    private func continueOrder() -> [String] {
+        guard let root = try? app.snapshot() else { return [] }
+        var cards: [(x: CGFloat, id: String)] = []
+        func walk(_ element: XCUIElementSnapshot) {
+            if element.elementType == .button, element.identifier.hasPrefix("continue-") { cards.append((element.frame.minX, element.identifier)) }
+            element.children.forEach(walk)
+        }
+        walk(root)
+        return cards.sorted { $0.x < $1.x }.map(\.id)
+    }
+
     private func launchWhileTheServerFails() throws -> URL {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])

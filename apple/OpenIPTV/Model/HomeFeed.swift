@@ -271,6 +271,8 @@ final class HomeRetry {
         if waiting != nil { ask(after: .zero) }
     }
 
+    var failing: Bool { failures > 0 }
+
     func stop() {
         failures = 0
         waiting?.cancel()

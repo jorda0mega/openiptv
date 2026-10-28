@@ -43,7 +43,7 @@ CONNECTIONS = set()
 # /mock/set?reset=1): "latency" (seconds per request), "home_delay" (seconds
 # for Continue Watching), "fail=persons" (a person's titles fail),
 # "resume_episode" (the episode a show's Continue Watching card is on),
-# "emby_status" ("502": every Emby request answers with that HTTP status, a
+# "emby_status" ("502": every Emby GET answers with that HTTP status, a
 # proxy in front of a server that's down; 0 or unset: as normal),
 # "video_delay" (seconds before each video response), "hls_delay" (seconds
 # before a converted stream's playlist: a server starting a conversion),
