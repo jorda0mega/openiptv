@@ -326,8 +326,9 @@ final class AppModel {
             prepare(fresh.featured.map { [$0.card.playTarget] } ?? [], at: .homeForecast)
             if sync { scope.run { await self.syncLibrary(emby, in: scope) } }
         } catch {
+            guard scope.isOpen else { return }
             scope.homeError = SourceError.wrap(error).localizedDescription
-            if scope.isOpen, scope.nothingBuiltShown { scope.homeRetry.askAgainLater() }
+            if scope.nothingBuiltShown { scope.homeRetry.askAgainLater() }
         }
     }
 
@@ -1098,18 +1099,26 @@ final class AppModel {
     @ObservationIgnored private(set) lazy var ahead = Ahead(Ahead.Work(
         page: { [weak self] target, interest in await self?.preparePage(target, interest) },
         plan: { [weak self] target, interest in await self?.preparePlan(target, interest, held: true) },
-        fileStart: { start, interest in
+        fileStart: { [weak self] start, interest in
             guard !AppModel.noStreamAhead else { return }
-            _ = await FileStarts.shelf.hold(FileStart(start), for: interest)
+            await self?.forAccount { _ = await FileStarts.shelf.hold(FileStart(start), for: interest) }
         },
         connection: { [weak self] start, interest in
-            guard !AppModel.noStreamAhead, !AppModel.noPreconnect, let scope = self?.account else { return }
-            await scope.attach { await Connections.keepWarm(FileStart(start), for: interest) }
+            guard !AppModel.noStreamAhead, !AppModel.noPreconnect else { return }
+            await self?.forAccount { await Connections.keepWarm(FileStart(start), for: interest) }
         },
-        subtitle: { subtitle, interest in await ServerSubtitles.warm(subtitle, for: interest) },
+        subtitle: { [weak self] subtitle, interest in await self?.forAccount { await ServerSubtitles.warm(subtitle, for: interest) } },
         previews: { [weak self] plan, interest in
             await Lane.embyFiles.whenAllowed(for: interest) { _ = await self?.previewStills(plan.itemId) }
         }))
+
+    /// Work fetched ahead for the signed-in account: none with no account,
+    /// and it stops when the account closes.
+    private func forAccount(_ job: @escaping @MainActor () async -> Void) async {
+        let scope = account
+        guard scope.emby != nil else { return }
+        await scope.attach(job)
+    }
 
     #if DEBUG
     var aheadCounts: String {
@@ -1288,6 +1297,7 @@ final class AppModel {
     }
 
     private func syncLibrary(_ emby: EmbyClient, in scope: AccountScope, urgent: Bool = false) async {
+        guard scope.isOpen else { return }
         let before = library.trending.prefix(40).map(\.id)
         let hadNotable = !library.notable.isEmpty
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
@@ -1410,7 +1420,7 @@ final class AppModel {
 
     private func enqueueReport(in scope: AccountScope, _ work: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
         let previous = scope.reportChain
-        let task = scope.run {
+        let task = Task {
             await previous?.value
             await work()
         }
@@ -1442,11 +1452,28 @@ final class AppModel {
         await loadLive()
     }
 
+    /// One account change at a time: a sign-out asked during a sign-in
+    /// waits for it to finish.
+    @ObservationIgnored private var accountChange: Task<Void, Never>?
+
     private func send(_ event: AccountSession.Event) async {
-        for effect in session.on(event) { await run(effect) }
+        let previous = accountChange
+        let change = Task {
+            await previous?.value
+            await apply(event)
+        }
+        accountChange = change
+        await change.value
     }
 
-    private func run(_ effect: AccountSession.Effect) async {
+    private func apply(_ event: AccountSession.Event) async {
+        for effect in session.on(event) {
+            if let next = await run(effect) { await apply(next) }
+        }
+    }
+
+    /// The event an effect leads to, if any.
+    private func run(_ effect: AccountSession.Effect) async -> AccountSession.Event? {
         switch effect {
         case .closeScope:
             account.close()
@@ -1457,8 +1484,10 @@ final class AppModel {
             library.clear()
             await ServerSubtitles.forgetAll()
         case .logOut:
+            // Where the last film stopped reaches the server before the account leaves it.
+            await account.reportChain?.value
             await sources.emby.map { EmbyClient(account: $0, deviceId: sources.deviceId) }?.logout()
-            await send(.loggedOut)
+            return .loggedOut
         case let .wipe(wipe):
             sources.setEmby(nil)
             AccountScope.removeSaved()
@@ -1480,6 +1509,7 @@ final class AppModel {
             await loadHome(cardWidth: lastCardWidth, full: true, show: true)
             await list
         }
+        return nil
     }
 
     // MARK: Live TV

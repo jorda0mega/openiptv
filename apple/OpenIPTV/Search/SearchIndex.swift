@@ -480,7 +480,7 @@ final class LibraryIndex {
             corpus = SearchCorpus(name: \.name)
             generation += 1
             catalogChanged()
-            if !Self.freshIndex, let (cache, legacy) = await Self.readCache(), cache.server == server {
+            if !Self.freshIndex, let (cache, legacy) = await Self.readCache(), cache.server == server, self.server == server {
                 pages = cache.pages
                 total = cache.total
                 syncedAt = cache.syncedAt
