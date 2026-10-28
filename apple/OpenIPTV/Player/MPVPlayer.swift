@@ -72,6 +72,8 @@ final class MPVPlayer: @unchecked Sendable {
     let layer = MPVMetalLayer()
     #if os(iOS)
     let frames: FilmFrames?
+    /// On the queue.
+    private var subtitleWhite = HeldSubtitleWhite()
     #endif
     var drawsFrames: Bool {
         #if os(iOS)
@@ -1241,7 +1243,21 @@ final class MPVPlayer: @unchecked Sendable {
             defer { mpv_free(raw) }
             return String(cString: raw)
         }
-        apply(frames.video(PixelSize(width: Int(width), height: Int(height)), color: FrameColor(gamma: gamma)))
+        let color = FrameColor(gamma: gamma)
+        let white = subtitleWhite.noted(color)
+        if let now = white.now { setSubtitleColor(now) }
+        apply(frames.video(PixelSize(width: Int(width), height: Int(height)), color: color))
+        if let change = white.raise {
+            frames.afterDraws(on: queue) { [weak self] in
+                guard let self, let raised = subtitleWhite.drawn(change, color) else { return }
+                setSubtitleColor(raised)
+            }
+        }
+    }
+
+    private func setSubtitleColor(_ color: FrameColor) {
+        guard let mpv else { return }
+        mpv_set_property_string(mpv, "sub-color", color.subtitleColor)
     }
     #endif
 
