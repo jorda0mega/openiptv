@@ -49,7 +49,8 @@ final class Frames: @unchecked Sendable {
 
     func close() {
         queue.sync { mpv_render_context_set_update_callback(context, nil, nil) }
-        mpv_render_context_free(context)
+        // Behind any draw a last callback queued.
+        queue.sync { mpv_render_context_free(context) }
     }
 
     private func drawIfDue() {
@@ -126,7 +127,7 @@ func brightest(film: URL, subtitle: URL?) -> (codec: String, peak: UInt8, white:
         guard let event = mpv_wait_event(mpv, 0.1)?.pointee else { continue }
         switch event.event_id {
         case MPV_EVENT_VIDEO_RECONFIG:
-            // As MPVPlayer.noteFilmSize does.
+            // The white MPVPlayer.noteFilmSize gives this transfer.
             color = FrameColor(gamma: property("video-params/gamma"))
             mpv_set_property_string(mpv, "sub-color", color.subtitleColor)
         case MPV_EVENT_PLAYBACK_RESTART:
