@@ -91,7 +91,9 @@ final class JumpTimingTests: XCTestCase {
         }
         guard start.exists, start.label.split(separator: " ").count == 4 else {
             // What the app shows instead: its own message (fixed words) and whether the loading view is up.
-            let message = failed.exists && !failed.label.isEmpty ? String(failed.label.prefix(80)).replacingOccurrences(of: "://", with: " ") : "none"
+            // On the real feeds only whether there is one: a server's own error text can name its host.
+            let real = ProcessInfo.processInfo.environment["REAL_FEED_CACHE"] == "real"
+            let message = !failed.exists || failed.label.isEmpty ? "none" : real ? "shown" : String(failed.label.prefix(80))
             let loading = app.descendants(matching: .any)["load-progress"].firstMatch.exists
             print(String(format: "START none after %.0f s, slow line seen: %@: ", Date().timeIntervalSince(pressed), cause)
                   + "player \(app.staticTexts["debug-item"].firstMatch.exists ? "open" : "not open") | error \(message) | loading \(loading ? "shown" : "none")")

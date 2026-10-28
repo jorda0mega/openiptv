@@ -6,7 +6,8 @@ Metric.EvalName (EvalMetric.swift, the eval suite's own).
 
     perf.py names                       every metric name and unit
     perf.py parse FILE...               runner output to JSON lines, one sample each
-    perf.py best                        best.json from the recorded runs, keeping each entry they don't beat
+    perf.py best [--branch]             best.json from the recorded runs of code on main (--branch: and HEAD's),
+                                        keeping each entry they don't beat
     perf.py samples FOLDER COMMIT TARGET PLATFORM  one perf/sim_runs.sh run's samples.jsonl
     perf.py live LOG.ndjson              the app's live opens as METRIC lines (live.start, then live.switch)
     perf.py compare SAMPLES.jsonl...     a table against best.json: better, same or REGRESSION (PLATFORMS)
@@ -153,6 +154,11 @@ def git(*args):
     return subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True).stdout.strip()
 
 
+# Code on main counts toward the best table; `perf.py best --branch` also counts this checkout's own commits
+# (HEAD's), for a branch whose app code differs from main only in Debug builds.
+MAIN = ["origin/main"]
+
+
 def landed(commit, cache={}):
     """The main commit `commit`'s change landed as, or None: itself when on main;
     else the nearest of its last 6 commits whose subject main has, with the
@@ -160,12 +166,12 @@ def landed(commit, cache={}):
     if commit in cache:
         return cache[commit]
     found = None
-    if commit and subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", commit, "HEAD"]).returncode == 0:
+    if commit and any(subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", commit, ref]).returncode == 0 for ref in MAIN):
         found = git("rev-parse", "--short", commit)
     elif commit and git("cat-file", "-t", commit) == "commit":
         for ancestor in git("log", "--format=%h", "-6", commit).split():
             subject = git("log", "-1", "--format=%s", ancestor)
-            on_main = git("log", "--format=%h", "-F", f"--grep={subject}", "HEAD").split()
+            on_main = git("log", "--format=%h", "-F", f"--grep={subject}", MAIN[0]).split()
             if on_main:
                 if not git("diff", "--name-only", ancestor, commit, "--", "apple/OpenIPTV", "apple/OpenIPTV-tvOS"):
                     found = on_main[-1]
@@ -229,20 +235,23 @@ def compare(paths, known, platforms):
                     print(f"{platform:8} {metric:28} {0:>3} {'-':>9} {'-':>9} {'-':>9}  {fmt(best['value']) if best else '-':>9} {set_by:<22} not measured")
                     continue
                 p50, p95, top = statistics.median(values), pct(values, 95), max(values)
-                # The spread: this run's interquartile range (half its range under 5 samples) or the best run's own,
-                # whichever is wider, and never under FLOOR. Not the spread between runs: those ran other commits.
+                # The spread: this run's interquartile range (half its range under 5 samples), the best run's own, or
+                # how far reruns of the best's code moved, whichever is widest, and never under FLOOR.
                 own = pct(values, 75) - pct(values, 25) if len(values) >= 5 else (top - min(values)) / 2
-                noise = max(own, best.get("spread", 0) if best else 0, FLOOR[unit])
+                noise = max(own, best.get("spread", 0) if best else 0, (best.get("rerun_spread") or 0) if best else 0, FLOOR[unit])
                 verdict = ("no best yet" if best is None else "better" if p50 < best["value"] - noise
                            else "REGRESSION" if p50 > best["value"] + noise else "same")
+                # A best from one run of its code has no rerun spread to go by: say so beside the verdict.
+                if best and best.get("reruns", 0) < 2 and verdict != "same":
+                    verdict += " (best from 1 run)"
                 print(f"{platform:8} {metric:28} {len(values):>3} {fmt(p50):>9} {fmt(p95):>9} {fmt(top):>9}  "
                       f"{fmt(best['value']) if best else '-':>9} {set_by:<22} {verdict}")
 
 
 def best(samples, known):
     """Per metric, target, link and platform: the run (one source file) with the lowest median, with its
-    build, sample count and spread, and the spread of every run's median (between_runs). A run's median,
-    not its single best sample, so that perf.py compare weighs like against like."""
+    build, sample count and spread, and how many runs its code had (reruns) and how far their medians moved
+    (rerun_spread). A run's median, not its single best sample, so that perf.py compare weighs like against like."""
     runs, skipped = {}, 0
     for s in samples:
         main = None if s["changed"] else landed(s["commit"])
@@ -256,13 +265,15 @@ def best(samples, known):
         median, (first, main) = statistics.median(values), found[0]
         entry = table.setdefault((metric, target, link, platform), dict(runs=0))
         entry["runs"] += 1
-        medians.setdefault((metric, target, link, platform), []).append(median)
+        medians.setdefault((metric, target, link, platform), []).append((main, median))
         if "value" not in entry or median < entry["value"]:
             entry.update(value=median, samples=len(values), spread=round(pct(values, 75) - pct(values, 25), 3),
                          commit=first["commit"], landed_as=main, testflight=first_build(main), date=first["date"], source=source)
     for key, entry in table.items():
-        # How far one run's median moves from the next: the interquartile range of every run's median.
-        entry["between_runs"] = round(pct(medians[key], 75) - pct(medians[key], 25), 3)
+        # How far reruns of the best's own code move: half the range of their medians (none from a single run).
+        same = [m for main, m in medians[key] if main == entry["landed_as"]]
+        entry["reruns"] = len(same)
+        entry["rerun_spread"] = round((max(same) - min(same)) / 2, 3) if len(same) > 1 else None
     out = {}
     for (metric, target, link, platform), entry in sorted(table.items()):
         out.setdefault(metric, []).append(dict(target=target, link=link, platform=platform, unit=known[metric], **entry))
@@ -279,6 +290,8 @@ def main(argv):
             for s in parse(path):
                 print(json.dumps(s))
     elif argv[:1] == ["best"]:
+        if "--branch" in argv:
+            MAIN.append("HEAD")
         samples = recorded()
         table, skipped = best(samples, known)
         unknown = sorted({s["metric"] for s in samples} - set(known))
@@ -310,7 +323,7 @@ def main(argv):
                                     for name, unit in known.items()}),
                       f, indent=1)
             f.write("\n")
-        print(f"{len(samples)} samples, {len(samples) - skipped} from code on main, "
+        print(f"{len(samples)} samples, {len(samples) - skipped} from code counted ({' and '.join(MAIN)}), "
               f"{sum(len(v) for v in table.values())} best entries over {len(table)} of {len(known)} metrics, {kept} kept from before")
     elif argv[:1] == ["samples"]:
         # One run's folder (perf/sim_runs.sh): its METRIC and PIP gap lines, from the test's log and the readers'

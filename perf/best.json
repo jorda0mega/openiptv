@@ -18,7 +18,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-extreme-runs/extreme.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -34,7 +35,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "filmbuf/ab/base-real-busy-r2.txt",
-     "between_runs": 3.5
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -50,7 +52,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -66,7 +69,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/val-real-quiet.txt",
-     "between_runs": 0.2
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -82,7 +86,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/val-real-quiet.txt",
-     "between_runs": 0.3
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -98,7 +103,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -114,7 +120,8 @@
      "testflight": null,
      "date": "2026-10-27",
      "source": "perf-evals/mock-1027-2117/StartTimingTests-ios-worst/3691de8/metrics.txt",
-     "between_runs": 4.6
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -130,7 +137,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 4.6
+     "reruns": 2,
+     "rerun_spread": 2.3
     },
     {
      "target": "real",
@@ -146,7 +154,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1028-0040/StartTimingTests-ios-real/eed753d/metrics.txt",
-     "between_runs": 1.6
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -162,7 +171,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "verdict-real-tv-1026-1255/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -178,7 +188,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -199,7 +210,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-extreme-runs/extreme.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -215,7 +227,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "filmbuf/ab/base-real-busy-r2.txt",
-     "between_runs": 2.3
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -231,7 +244,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -247,7 +261,8 @@
      "testflight": "202610261439",
      "date": "2026-10-23",
      "source": "fsr-plan-tools/b2-real-quiet-efg.txt",
-     "between_runs": 0.4
+     "reruns": 3,
+     "rerun_spread": 1.15
     },
     {
      "target": "mock:real-quiet",
@@ -263,7 +278,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 0.2
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -279,7 +295,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -295,7 +312,8 @@
      "testflight": "202610271425",
      "date": "2026-10-27",
      "source": "perf-runs/StartTimingTests-ios-worst/09afc6f/metrics.txt",
-     "between_runs": 5.6
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -311,7 +329,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-1913/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -327,7 +346,8 @@
      "testflight": null,
      "date": "2026-10-27",
      "source": "perf-evals/real-1027-2312/StartTimingTests-ios-real/1713f9f/metrics.txt",
-     "between_runs": 14.5
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -343,7 +363,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "verdict-real-tv-1026-1255/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -359,7 +380,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -380,7 +402,8 @@
      "testflight": "202610262043",
      "date": "2026-10-27",
      "source": "perf-runs/StartTimingTests-ios-worst/ebfec05/metrics.txt",
-     "between_runs": 0.2
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -396,7 +419,8 @@
      "testflight": null,
      "date": "2026-10-27",
      "source": "perf-evals/real-1027-2312/StartTimingTests-ios-real/1713f9f/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -421,7 +445,8 @@
      "testflight": "202610271425",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet/09afc6f/metrics.txt",
-     "between_runs": 10.5
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet:jump-4k-hdr",
@@ -437,7 +462,8 @@
      "testflight": "202610261846",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
-     "between_runs": 19.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -453,7 +479,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-worst-nofirst/fd226e3/metrics.txt",
-     "between_runs": 1444.5
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -469,7 +496,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1027-2312/JumpTimingTests-ios-real/1713f9f/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -485,7 +513,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1028-0034/JumpTimingTests-tvos-real/eed753d/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -506,7 +535,8 @@
      "testflight": "202610261136",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-card/3744a94/metrics.txt",
-     "between_runs": 14.5
+     "reruns": 2,
+     "rerun_spread": 7.25
     },
     {
      "target": "mock:real-quiet:jump-4k-hdr",
@@ -522,7 +552,8 @@
      "testflight": "202610261846",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
-     "between_runs": 37.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -538,7 +569,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/JumpTimingTests-ios-worst/3691de8/metrics.txt",
-     "between_runs": 16.5
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -554,7 +586,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1027-2312/JumpTimingTests-ios-real/1713f9f/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -570,7 +603,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1028-0034/JumpTimingTests-tvos-real/eed753d/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -591,7 +625,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 691.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -607,7 +642,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -623,7 +659,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 515.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -639,7 +676,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 9.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -655,7 +693,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet:jump-4k-hdr",
@@ -671,7 +710,8 @@
      "testflight": "202610261846",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -687,7 +727,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-worst-nofirst/fd226e3/metrics.txt",
-     "between_runs": 608.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -703,7 +744,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 3474.0
+     "reruns": 2,
+     "rerun_spread": 1737.0
     },
     {
      "target": "real",
@@ -719,7 +761,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-1913/run.txt",
-     "between_runs": 16.0
+     "reruns": 2,
+     "rerun_spread": 8.5
     },
     {
      "target": "real",
@@ -735,7 +778,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "verdict-real-tv-1026-1255/run.txt",
-     "between_runs": 346.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -751,7 +795,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -772,7 +817,8 @@
      "testflight": "202610271425",
      "date": "2026-10-27",
      "source": "pip-return-runs/before-restore3.out",
-     "between_runs": 9.5
+     "reruns": 8,
+     "rerun_spread": 8.0
     }
    ]
   },
@@ -793,7 +839,8 @@
      "testflight": "202610271425",
      "date": "2026-10-27",
      "source": "pip-return-runs/before-restore3.out",
-     "between_runs": 1.5
+     "reruns": 8,
+     "rerun_spread": 1.0
     }
    ]
   },
@@ -814,7 +861,8 @@
      "testflight": null,
      "date": "2026-10-27",
      "source": "perf-evals/mock-1027-2117/LiveTimingTests-ios-worst/3691de8/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -835,7 +883,8 @@
      "testflight": null,
      "date": "2026-10-27",
      "source": "perf-evals/mock-1027-2117/LiveTimingTests-ios-worst/3691de8/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -856,7 +905,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "fsr-plan-tools/b6-extreme-final.txt",
-     "between_runs": 86.7
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -872,7 +922,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 5.1
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -888,7 +939,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -904,7 +956,8 @@
      "testflight": "202610261439",
      "date": "2026-10-23",
      "source": "fsr-plan-tools/b2-real-quiet-efg.txt",
-     "between_runs": 0.4
+     "reruns": 3,
+     "rerun_spread": 0.275
     },
     {
      "target": "mock:real-quiet",
@@ -920,7 +973,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/recheck2/quiet-tv.txt",
-     "between_runs": 0.1
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -936,7 +990,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -952,7 +1007,8 @@
      "testflight": "202610262043",
      "date": "2026-10-27",
      "source": "perf-runs/StartTimingTests-ios-worst/ebfec05/metrics.txt",
-     "between_runs": 9.4
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -968,7 +1024,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 31.9
+     "reruns": 2,
+     "rerun_spread": 15.95
     },
     {
      "target": "real",
@@ -984,7 +1041,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1028-0040/StartTimingTests-ios-real/eed753d/metrics.txt",
-     "between_runs": 11.2
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -1000,7 +1058,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "verdict-real-tv-1026-1255/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -1016,7 +1075,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -1041,7 +1101,8 @@
      "testflight": "202610261136",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-card/3744a94/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 2,
+     "rerun_spread": 0.0
     },
     {
      "target": "mock:real-quiet:jump-4k-hdr",
@@ -1057,7 +1118,8 @@
      "testflight": "202610271425",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/09afc6f/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -1073,7 +1135,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-worst-nofirst/fd226e3/metrics.txt",
-     "between_runs": 2.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -1089,7 +1152,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1027-2312/JumpTimingTests-ios-real/1713f9f/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -1105,7 +1169,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/real-1027-2312/JumpTimingTests-tvos-real/1713f9f/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -1126,7 +1191,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "filmbuf/ab/base-real-busy-r2.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -1142,7 +1208,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -1158,7 +1225,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/recheck/quiet.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -1174,7 +1242,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/recheck2/quiet-tv.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -1190,7 +1259,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "fsr-tv/open-real-quiet.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -1206,7 +1276,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "filmbuf/ab/base-worst-r2.txt",
-     "between_runs": 4.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -1222,7 +1293,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 1.0
+     "reruns": 2,
+     "rerun_spread": 0.5
     },
     {
      "target": "real",
@@ -1238,7 +1310,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-1913/run.txt",
-     "between_runs": 0.0
+     "reruns": 2,
+     "rerun_spread": 0.0
     },
     {
      "target": "real",
@@ -1254,7 +1327,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "verdict-real-tv-1026-1255/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "real",
@@ -1270,7 +1344,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "baseline-real-1025-2106/run.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -1291,7 +1366,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 1148.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-busy",
@@ -1307,7 +1383,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/ship/busy.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:real-quiet",
@@ -1323,7 +1400,8 @@
      "testflight": "202610261439",
      "date": "2026-10-23",
      "source": "fsr-plan-tools/b2-link-efg.txt",
-     "between_runs": 1.0
+     "reruns": 2,
+     "rerun_spread": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -1339,7 +1417,8 @@
      "testflight": "202610261439",
      "date": "2026-10-26",
      "source": "filmbuf/recheck2/quiet-tv.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:worst",
@@ -1355,7 +1434,8 @@
      "testflight": "202610261439",
      "date": "2026-10-25",
      "source": "filmbuf/ab/base-worst-r2.txt",
-     "between_runs": 397.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -1367,7 +1447,7 @@
      "link": "none",
      "platform": "ios",
      "unit": "ratio",
-     "runs": 2,
+     "runs": 1,
      "value": 1.0,
      "samples": 1,
      "spread": 0.0,
@@ -1376,7 +1456,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-sdr720/3691de8/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -1397,7 +1478,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-hdr10/3691de8/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -1418,14 +1500,15 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-hdr10/3691de8/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     },
     {
      "target": "mock:none:sdr-720",
      "link": "none",
      "platform": "ios",
      "unit": "ratio",
-     "runs": 2,
+     "runs": 1,
      "value": 1.83,
      "samples": 1,
      "spread": 0.0,
@@ -1434,7 +1517,8 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-sdr720/3691de8/metrics.txt",
-     "between_runs": 0.0
+     "reruns": 1,
+     "rerun_spread": null
     }
    ]
   },
@@ -1455,7 +1539,8 @@
      "testflight": "202610271425",
      "date": "2026-10-27",
      "source": "subs-fix-runs/run-pip2.out",
-     "between_runs": 2.0
+     "reruns": 8,
+     "rerun_spread": 17.5
     }
    ]
   },
@@ -1476,7 +1561,8 @@
      "testflight": "202610271425",
      "date": "2026-10-27",
      "source": "subs-fix-runs/run-pip.out",
-     "between_runs": 0.0
+     "reruns": 8,
+     "rerun_spread": 1.0
     }
    ]
   }

@@ -143,7 +143,8 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
     queue = list(shown)
     by = {"+": [], "-": []}
     for j in found:
-        seek = next((s for s in logged if s[0] >= j["tap"] - 0.05 and s[2] == (10 if j["sign"] == "+" else -10)), None)
+        # Its own seek, within 3 s of the tap: a tap that made none must not take the next tap's.
+        seek = next((s for s in logged if j["tap"] - 0.05 <= s[0] <= j["tap"] + 3 and s[2] == (10 if j["sign"] == "+" else -10)), None)
         if seek:
             logged.remove(seek)
         j["to_seek"] = seek[0] - j["tap"] if seek else None

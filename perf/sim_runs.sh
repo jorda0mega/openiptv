@@ -26,7 +26,8 @@ SIM=${SIM:-$SIMS[$PLATFORM]}
 # This tree's timing tests, copied into each commit's tree (they read the app only through its readouts).
 TIMING=(TimingCase JumpTimingTests StartTimingTests SubtitleLookTests LiveTimingTests)
 DD=${DD:-/tmp/openiptv/dd-$KIND-$([ -n "${FEED:-}" ] && echo real || echo $NAME)}
-WT=${WT:-/tmp/openiptv/wt-bisect-$NAME}
+# A worktree per platform, as the build folder is: an iPhone run and an Apple TV run may go side by side.
+WT=${WT:-/tmp/openiptv/wt-bisect-$NAME}-$KIND
 OUT=${OUT:-/tmp/openiptv/perf-runs}
 FILM=${FILM:-/tmp/openiptv/jump-media/jump.mkv}
 PROFILE=${PROFILE:-worst}
@@ -38,7 +39,20 @@ TARGET_NAME=$([ -n "${FEED:-}" ] && echo real || echo mock:$PROFILE$([ $film = j
 OWNER="perf-evals $NAME $$"
 VENDOR=$(readlink $REPO/apple/Vendor)
 free_mb() { df -m /tmp | awk 'NR == 2 { print $4 }'; }
-take() { until mkdir "$1" 2>/dev/null; do echo "$(date +%H:%M) $(basename $1) held by $(cat "$1/owner" 2>/dev/null), waiting 60 s"; sleep 60; done; echo "$OWNER" > "$1/owner"; }
+# A lock whose owner ends in the id of a process that is gone (a run stopped hard) is freed; other owners' locks
+# are waited for. The wait is said once, then every 10 minutes.
+take() {
+  local waited=0 owner
+  until mkdir "$1" 2>/dev/null; do
+    owner=$(cat "$1/owner" 2>/dev/null)
+    if [[ ${owner##* } == <-> ]] && ! kill -0 ${owner##* } 2>/dev/null; then
+      echo "$(basename $1) held by a stopped run: freed"; rm -f "$1/owner"; rmdir "$1" 2>/dev/null; continue
+    fi
+    (( waited % 600 == 0 )) && echo "$(date +%H:%M) $(basename $1) held by $owner: waiting"
+    sleep 60; waited=$((waited + 60))
+  done
+  echo "$OWNER" > "$1/owner"
+}
 give() { [ "$(cat "$1/owner" 2>/dev/null)" = "$OWNER" ] && { rm -f "$1/owner"; rmdir "$1"; }; }
 boot120() {
   ( xcrun simctl boot $SIM 2>/dev/null; xcrun simctl bootstatus $SIM -b >/dev/null 2>&1 ) &
@@ -58,7 +72,9 @@ cleanup() {
   [ "$(cat /tmp/openiptv/sim.lock/owner 2>/dev/null)" = "$OWNER" ] && xcrun simctl shutdown $SIM 2>/dev/null
   give /tmp/openiptv/build.lock; give /tmp/openiptv/sim.lock; give $DD.lock
 }
-trap cleanup EXIT INT TERM HUP
+# zsh carries on after a trapped signal: exit, and let EXIT clean up.
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 [ -n "${FEED:-}" ] || [ -f $FILM ] || { echo "no film at $FILM (perf/make_jump_film.sh)"; exit 1; }
 # libmpv's log writes the stream's address: never on the real feeds.
 [ -n "${FEED:-}" ] && [ "${MPV_LOG:-0}" = 1 ] && { echo "MPV_LOG=1 is for the test server only: not run"; exit 1; }
@@ -76,7 +92,7 @@ for commit in "$@"; do
   [ -e $WT/apple/Vendor ] || ln -s $VENDOR $WT/apple/Vendor
   (cd $WT/apple && xcodegen generate --spec project.yml --quiet) || { echo "xcodegen failed: $commit skipped"; continue; }
   # A build needs 3500 MB free: wait for other runs to give it back, an hour at most.
-  for _ in {1..60}; do [ $(free_mb) -ge 3500 ] && break; echo "$(date +%H:%M) $(free_mb) MB free, a build needs 3500: waiting 60 s"; sleep 60; done
+  for k in {1..60}; do [ $(free_mb) -ge 3500 ] && break; (( k % 10 == 1 )) && echo "$(date +%H:%M) $(free_mb) MB free, a build needs 3500: waiting"; sleep 60; done
   [ $(free_mb) -ge 3500 ] || { echo "$(free_mb) MB free after an hour: stopped"; exit 1; }
   take /tmp/openiptv/build.lock
   xcodebuild build-for-testing -project $WT/apple/OpenIPTV.xcodeproj -scheme $SCHEME -destination "id=$SIM" \

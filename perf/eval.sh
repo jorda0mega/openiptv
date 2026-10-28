@@ -20,12 +20,14 @@ mkdir -p $OUT
 ONLY=${ONLY:-starts jumps look live pip}
 PLATFORMS=${PLATFORMS:-ios tvos ipad}
 wants() { [[ " $ONLY " == *" $1 "* && " $PLATFORMS " == *" $2 "* ]]; }
-run() { OUT=$OUT zsh $HERE/run.sh sim_runs.sh "$@" $commit 2>&1 | grep -vE "waiting 60 s$"; }
+# Every printed line is kept in out.txt too: the url-like count at the end reads all of it.
+run() { OUT=$OUT zsh $HERE/run.sh sim_runs.sh "$@" $commit 2>&1 | tee -a $OUT/out.txt; }
 media=/tmp/openiptv/subs-look-media
 if [ $mode = real ]; then
   export FEED=${FEED:-http://127.0.0.1:8799}
   # A worktree of its own: a test server bisect may be using the shared one.
   export WT=/tmp/openiptv/wt-real-$(basename $REPO)
+  # The real runs build into their own folders, which no helper builds into.
   curl -sf -o /dev/null $FEED/emby 2>/dev/null || { echo "the logins helper isn't running"; exit 1; }
   echo "== real feeds, commit $commit, $(date '+%a %H:%M')"
   wants starts ios && PLATFORM=ios LIMIT=2400 run StartTimingTests/testStarts
@@ -53,5 +55,5 @@ echo "== against perf/best.json"
 setopt null_glob
 samples=($OUT/*/*/samples.jsonl)
 [ ${#samples} -gt 0 ] && PLATFORMS="$PLATFORMS" python3 -I $HERE/perf.py compare $samples | tee $OUT/table.txt || echo "no samples" | tee $OUT/table.txt
-echo "lines $(cat $OUT/table.txt | wc -l | tr -d ' '), url-like $(cat $OUT/*/*/jumps.txt(N) $OUT/table.txt 2>/dev/null | grep -cE '://|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.(com|net|org|tv|me|io)\b')"
+echo "lines $(cat $OUT/out.txt $OUT/table.txt 2>/dev/null | wc -l | tr -d ' '), url-like $(cat $OUT/out.txt $OUT/table.txt 2>/dev/null | grep -cE '://|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.(com|net|org|tv|me|io)\b')"
 echo "== eval done $(date '+%H:%M'), results in $OUT"

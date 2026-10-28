@@ -151,7 +151,11 @@ final class FilmFrames: @unchecked Sendable {
     }
 
     #if DEBUG
+    /// -debugFrameLook YES (the subtitle look test): the timed runs don't pay for the scan.
+    private static let samples = UserDefaults.standard.bool(forKey: "debugFrameLook")
+
     private func sample(_ buffer: CVPixelBuffer, plan: FramePlan, inputs: FrameInputs) {
+        guard Self.samples else { return }
         drawnFrames += 1
         guard drawnFrames % 24 == 1 else { return }
         CVPixelBufferLockBaseAddress(buffer, .readOnly)

@@ -9,7 +9,7 @@ final class SubtitleLookTests: TimingCase {
     func testSubtitleLook() throws {
         let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LOOK_SHOTS"] ?? "/tmp/openiptv/subtitle-look")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        guard openFilm(["-forgetTrackChoices", "YES"]) != nil else { return XCTFail("no first frame in 180 s") }
+        guard openFilm(["-forgetTrackChoices", "YES", "-debugFrameLook", "YES"]) != nil else { return XCTFail("no first frame in 180 s") }
         sleep(3)
 
         let menu = app.buttons["Audio and Subtitles"].firstMatch, off = app.buttons["Off"].firstMatch

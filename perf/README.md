@@ -23,7 +23,7 @@ FEED=http://127.0.0.1:8799 zsh perf/eval.sh real
 
 The logins stay in the helper. The app reports nothing to the server, and the output carries no address (it ends with its url-like count, which must be 0).
 
-After a run, `python3 -I perf/perf.py best` folds its runs into `best.json`.
+After a run, `python3 -I perf/perf.py best` folds its runs of code on main into `best.json`, and keeps each entry they don't beat. `--branch` also counts this checkout's own commits, for a branch whose app code differs from main only in Debug builds. Each entry names its commit, date, target (`real`, or `mock:<profile>` and the film when it isn't the jump film) and platform.
 
 ## Pieces
 

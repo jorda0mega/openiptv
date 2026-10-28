@@ -96,7 +96,8 @@ class TimingCase: XCTestCase {
         }
         let alert = app.alerts.firstMatch
         let error = app.staticTexts["debug-start-error"].firstMatch
-        let message = error.exists && !error.label.isEmpty ? String(error.label.prefix(80)).replacingOccurrences(of: "://", with: " ") : "none"
+        // On the real feeds only whether there is one: a server's own error text can name its host.
+        let message = !error.exists || error.label.isEmpty ? "none" : onRealFeeds ? "shown" : String(error.label.prefix(80))
         print("START none: player \(app.staticTexts["debug-item"].firstMatch.exists ? "open" : "not open") | alert \(alert.exists ? "shown" : "none") | "
               + "error \(message) | loading \(text("load-progress")) | parts \(text("debug-start-parts").replacingOccurrences(of: " | ", with: "; "))")
     }
