@@ -10,6 +10,7 @@ final class AccountScopeTests: XCTestCase {
     private let film = PlanKey(itemId: "m1", kind: "Movie", versions: ["m1"])
 
     private final class Player: KeptPlayer {
+        var hasStarted = true
         var hasFailed = false
         private(set) var stopped = 0
         func shutdown() { stopped += 1 }
@@ -67,6 +68,38 @@ final class AccountScopeTests: XCTestCase {
         scope.close()
         let stopped = await scope.run { Task.isCancelled }.value
         XCTAssertTrue(stopped)
+    }
+
+    func testWorkForTheAccountOnACallersBehalfStopsWhenTheAccountCloses() async {
+        let scope = scope()
+        let caller = Task { await scope.attach { () -> Bool in
+            try? await Task.sleep(for: .seconds(3600))
+            return Task.isCancelled
+        } }
+        await settle()
+        scope.close()
+        let stopped = await caller.value
+        XCTAssertTrue(stopped)
+    }
+
+    func testWorkForTheAccountOnACallersBehalfStopsWhenTheCallerDoes() async {
+        let scope = scope()
+        let caller = Task { await scope.attach { () -> Bool in
+            try? await Task.sleep(for: .seconds(3600))
+            return Task.isCancelled
+        } }
+        await settle()
+        caller.cancel()
+        let stopped = await caller.value
+        XCTAssertTrue(stopped)
+        XCTAssertTrue(scope.isOpen)
+    }
+
+    func testNoPlayerIsKeptWithNoAccountSignedIn() {
+        let scope = AccountScope(client: nil), player = Player()
+        scope.keepWarm(player, film(at: 600), parked: true, for: .seconds(300))
+        XCTAssertEqual(player.stopped, 1)
+        XCTAssertNil(scope.warm)
     }
 
     func testClosingStopsTheWarmPlayer() {

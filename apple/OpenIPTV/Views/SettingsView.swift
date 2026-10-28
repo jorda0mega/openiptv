@@ -29,7 +29,7 @@ struct SettingsView: View {
                     NavigationLink { page("Playback") { playbackSection } } label: {
                         SettingsRow(title: "Playback", symbol: "play.circle.fill", tint: .blue, value: prefs.playerProfile.title)
                     }
-                    if !model.rows.isEmpty {
+                    if !model.account.rows.isEmpty {
                         NavigationLink { page("Home") { homeSection } } label: {
                             SettingsRow(title: "Home", symbol: "house.fill", tint: .orange)
                         }
@@ -198,7 +198,7 @@ struct SettingsView: View {
 
     @ViewBuilder private var homeSection: some View {
         Section {
-            ForEach(model.rows) { row in
+            ForEach(model.account.rows) { row in
                 Toggle(isOn: Binding(
                     get: { !prefs.hiddenRows.contains(row.title) },
                     set: { show in

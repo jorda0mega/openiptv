@@ -25,8 +25,8 @@ struct MovieView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                TitleHero(backdrop: item.flatMap { model.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
-                          logo: item.flatMap { model.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
+                TitleHero(backdrop: item.flatMap { model.account.emby?.backdropURL(for: $0, width: AppModel.pageBackdropWidth) },
+                          logo: item.flatMap { model.account.emby?.logoURL(for: $0, width: AppModel.pageLogoWidth) },
                           title: route.title, line: genreLine) {
                     HStack(alignment: .top, spacing: 12) {
                         PlayCapsule(label: playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
@@ -122,18 +122,18 @@ struct MovieView: View {
 
     /// The page as last seen (or fetched ahead), complete from the first
     /// frame; brought up to date in the background.
-    private var item: EmbyItem? { model.movieState(route.id).value?.item }
+    private var item: EmbyItem? { model.account.movieState(route.id).value?.item }
 
     private var similar: [Card] {
-        guard let emby = model.emby, let data = model.movieState(route.id).value else { return [] }
+        guard let emby = model.account.emby, let data = model.account.movieState(route.id).value else { return [] }
         let width = Int(Layout.posterWidth * displayScale)
         return data.similar.filter { $0.userData?.played != true }
             .map { emby.card($0, context: .poster, shape: .portrait, width: width) }
     }
 
     private func load() async {
-        if pin == nil { pin = model.pin(route.id) }
-        _ = model.cachedMovie(route.id)
+        if pin == nil { pin = model.account.pin(route.id) }
+        _ = model.account.cachedMovie(route.id)
         _ = await model.loadMovie(route.id)
     }
 

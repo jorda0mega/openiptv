@@ -24,24 +24,11 @@ final class AppModel {
     var movieRequest: MovieRoute?
     var movieOnScreen: String?
 
-    // MARK: Home (Emby)
-
-    var rows: [HomeRow] = [] {
-        didSet { holdContinueWatching() }
-    }
-    var featured: Featured?
-    /// Apple TV's hero titles (see HomeContent.spotlight).
-    var spotlight: [Featured] = []
-    var homeError: String?
+    /// The signed-in Emby account's data and work (none signed in: a scope
+    /// with no server).
+    private(set) var account = AccountScope(client: nil)
+    @ObservationIgnored private var session = AccountSession(signedIn: false)
     private var lastCardWidth = 360
-    /// The viewer's My List (Emby's favorites), newest first, and which
-    /// titles are on it (nil: not loaded yet).
-    private(set) var myList: [Card] = []
-    private(set) var myListIDs: Set<String>?
-    /// My List's copies of each title (an HD and a 4K film are one title,
-    /// one card): the ids on the server's list, by each key the title is
-    /// known by.
-    @ObservationIgnored private var myListCopies: [String: Set<String>] = [:]
 
     // MARK: Live TV
 
@@ -91,20 +78,6 @@ final class AppModel {
     private var channelById: [String: LiveChannel] = [:]
     /// Channel names prepared for instant search.
     private(set) var channelCorpus = SearchCorpus<LiveChannel>(name: \.name)
-    /// Server search results by query, for episodes the index doesn't hold.
-    private var serverSearchCache: [String: [Card]] = [:]
-    @ObservationIgnored private(set) lazy var plans = Plans.shelf { [weak self] key in
-        guard let (emby, shows) = await self?.planSource() else { throw SourceError.unexpected("Add your Emby server in Settings.") }
-        #if DEBUG
-        let clock = PlanClock(copies: key.versions)
-        await self?.notePlanClock(clock, for: key)
-        return try await PlanClock.$current.withValue(clock) {
-            try await emby.playback(versions: key.versions, kind: key.kind, maxWidth: AppModel.maxWidth, showCopies: shows)
-        }
-        #else
-        return try await emby.playback(versions: key.versions, kind: key.kind, maxWidth: AppModel.maxWidth, showCopies: shows)
-        #endif
-    }
     private var visible: Set<String> = []
     /// The rows just below the last one scrolled to, fetched ahead.
     private var lookahead: [String] = []
@@ -142,6 +115,8 @@ final class AppModel {
             sources.useTemporaryIPTV(source)
         }
         #endif
+        session = AccountSession(signedIn: sources.emby != nil)
+        account = scope(for: sources.emby)
         selectedCategory = UserDefaults.standard.string(forKey: "category")
         // Ready before the first film opens.
         DispatchQueue.global(qos: .userInitiated).async { StreamRelay.shared.start() }
@@ -153,33 +128,26 @@ final class AppModel {
         // channels, which spell out the login.
         for old in ["live-lineup.v1.json", "live-lineup.v2.json"] { AppCache.remove(old) }
         #if DEBUG
-        let home: HomeContent? = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NO_SAVED_HOME"] != nil ? nil : AppCache.read("home.v4.json")
+        let home: HomeContent? = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NO_SAVED_HOME"] != nil ? nil : AppCache.read(AccountScope.homeFile)
         #else
-        let home: HomeContent? = AppCache.read("home.v4.json")
+        let home: HomeContent? = AppCache.read(AccountScope.homeFile)
         #endif
-        rows = home?.rows ?? []
-        featured = home?.featured
-        spotlight = home?.spotlight ?? []
-        homeBuiltAt = home?.builtAt
+        account.restore(home)
         #if DEBUG
         // UI tests (OPENREEL_DEBUG_HOME_STALE): the saved Home is old, so the
         // launch builds every row again.
-        if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_HOME_STALE"] != nil { homeBuiltAt = .distantPast }
+        if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_HOME_STALE"] != nil { account.homeBuiltAt = .distantPast }
         #endif
-        homeHistory = home?.history ?? []
-        shownBuiltAt = home?.builtAt
-        shownHistory = home?.history ?? []
         // A launch is a moment Home may change: a build ready in the
         // first seconds goes straight on the page.
-        homeAwaitsFirstBuild = true
+        account.homeAwaitsFirstBuild = true
         observeAppState()
         // Watching the connection from the start (speculative work waits
         // until it's known to be unmetered).
         _ = NetworkStatus.shared
         MemoryWarnings.watch()
         ServerSubtitles.atLaunch()
-        // Title pages not visited in a month.
-        AppCache.prune(startingWith: ["show-", "movie-"], olderThan: 30)
+        AccountScope.pruneSaved()
         Task.detached(priority: .background) { AppCache.removeStaleDownloads() }
         // The first screen's pictures, decoded from the disk cache while the
         // app is still drawing its first frame, so Home opens with them.
@@ -192,53 +160,34 @@ final class AppModel {
         holdContinueWatching()
     }
 
-    var emby: EmbyClient? {
-        sources.emby.map { EmbyClient(account: $0, deviceId: sources.deviceId) }
+    /// A scope for `account`'s data and work (nil: none signed in).
+    private func scope(for account: EmbyAccount?, readsSaved: Bool = true) -> AccountScope {
+        AccountScope(client: account.map { EmbyClient(account: $0, deviceId: sources.deviceId) }, readsSaved: readsSaved,
+                     askPlan: { [weak self] emby, key in
+                         let shows: @Sendable (String) -> [String] = await self?.showCopies ?? { [$0] }
+                         #if DEBUG
+                         let clock = PlanClock(copies: key.versions)
+                         await self?.notePlanClock(clock, for: key)
+                         return try await PlanClock.$current.withValue(clock) {
+                             try await emby.playback(versions: key.versions, kind: key.kind, maxWidth: AppModel.maxWidth, showCopies: shows)
+                         }
+                         #else
+                         return try await emby.playback(versions: key.versions, kind: key.kind, maxWidth: AppModel.maxWidth, showCopies: shows)
+                         #endif
+                     },
+                     retryHome: { [weak self] in await self?.tryHomeAgain() },
+                     rowsChanged: { [weak self] in self?.holdContinueWatching() })
     }
 
     // MARK: Home
 
-    /// The Home build in progress. Leaving Home cancels the page's task but
-    /// not this, so a build cut off halfway (its rows fetched as empty)
-    /// never replaces the page.
-    @ObservationIgnored private var homeLoad: Task<Void, Never>?
-    @ObservationIgnored private var homeLoadID = UUID()
-    @ObservationIgnored private lazy var homeRetry = HomeRetry { [weak self] in
-        guard let self, !accountChanging else { return }
-        await tryHomeAgain()
-    }
-
-    /// Home doesn't change while you look at it, like Netflix's: a Home
-    /// built in the background (new titles, the charts, IMDb's catalog, a
-    /// server's change) waits here for a moment the page may change. The
-    /// moments: a launch or coming back after a long time away (a build
-    /// ready in the first seconds), a pull to refresh, and Home chosen from
-    /// another tab. Its Continue Watching is the newest the server gave.
-    @ObservationIgnored private var stagedHome: HomeContent?
-    /// After a launch or a long time away, the first Home built goes
-    /// straight on the page, however long the server takes, unless the
-    /// viewer has started browsing it meanwhile (then it waits for the next
-    /// moment). One per launch: later builds wait. (A five-second window
-    /// left a slow server's first build hidden until another tab.)
-    @ObservationIgnored private var homeAwaitsFirstBuild = false
-    /// Until when Continue Watching's cards may move, appear or go: just
-    /// after the player closed, until the server's answer for that stop.
-    @ObservationIgnored private var continueMovesUntil: Date?
-    /// When the page on screen was built, and the recent watches its Top
-    /// picks came from (what's saved; `homeBuiltAt` is the newest build,
-    /// waiting or shown). Watched: see `homePending`.
-    private var shownBuiltAt: Date?
-    @ObservationIgnored private var shownHistory: [String] = []
-
     /// The first Home is being built (nothing built shown yet, no error):
     /// the page keeps the hero's space meanwhile.
     var homePending: Bool {
-        sources.emby != nil && shownBuiltAt == nil && homeError == nil && featured == nil && spotlight.isEmpty
+        sources.emby != nil && account.shownBuiltAt == nil && account.homeError == nil && account.featured == nil && account.spotlight.isEmpty
     }
     /// When the app last went to the background.
     @ObservationIgnored private var backgroundedAt: Date?
-    /// The card width My List was last loaded at (iPhone, iPad, Apple TV).
-    @ObservationIgnored private var myListWidth: Int?
     /// Away this long, coming back is like a launch for Home.
     private static var longAway: TimeInterval {
         #if DEBUG
@@ -257,55 +206,46 @@ final class AppModel {
     /// One build at a time: a full one waits for the one before, any other
     /// joins it.
     func loadHome(cardWidth: Int, sync: Bool = true, full: Bool = false, show: Bool = false) async {
-        if let running = homeLoad, !full { return await running.value }
-        let previous = homeLoad
+        let scope = account
+        guard scope.isOpen else { return }
+        if let running = scope.homeLoad, !full { return await running.value }
+        let previous = scope.homeLoad
         let id = UUID()
-        homeLoadID = id
-        let load = Task {
+        scope.homeLoadID = id
+        let load = scope.run {
             await previous?.value
-            await buildHome(cardWidth: cardWidth, sync: sync, full: full, show: show)
-            if homeLoadID == id { homeLoad = nil }
+            await self.buildHome(in: scope, cardWidth: cardWidth, sync: sync, full: full, show: show)
+            if scope.homeLoadID == id { scope.homeLoad = nil }
         }
-        homeLoad = load
+        scope.homeLoad = load
         await load.value
     }
 
     /// Home came on screen from another tab (or first, at launch): what
     /// was built meanwhile goes on now, before the page is drawn.
     func homeAppeared() {
-        showStagedHome()
+        showStagedHome(in: account)
     }
 
     /// Try Again after Home failed: the build under way, else every row
     /// built afresh, and shown.
     func tryHomeAgain() async {
-        await loadHome(cardWidth: lastCardWidth, full: homeLoad == nil, show: true)
-    }
-
-    /// Whether a build may go straight on the page: Home is still opening,
-    /// or has nothing built on it yet (only Continue Watching, or nothing).
-    private var homeOpening: Bool {
-        homeAwaitsFirstBuild || nothingBuiltShown
-    }
-
-    private var nothingBuiltShown: Bool {
-        shownBuiltAt == nil || rows.isEmpty
+        await loadHome(cardWidth: lastCardWidth, full: account.homeLoad == nil, show: true)
     }
 
     /// The viewer scrolled Home or moved along it: what's built from now
     /// on waits for the next moment.
     func homeBrowsed() {
-        homeAwaitsFirstBuild = false
+        account.homeAwaitsFirstBuild = false
     }
 
-    private func buildHome(cardWidth: Int, sync: Bool, full: Bool, show: Bool) async {
+    private func buildHome(in scope: AccountScope, cardWidth: Int, sync: Bool, full: Bool, show: Bool) async {
         lastCardWidth = cardWidth
-        let account = accountGeneration
-        guard let emby else {
-            rows = []
-            featured = nil
-            spotlight = []
-            stagedHome = nil
+        guard let emby = scope.emby else {
+            scope.rows = []
+            scope.featured = nil
+            scope.spotlight = []
+            scope.stagedHome = nil
             return
         }
         // Trending and versions come from the index and charts on the
@@ -316,12 +256,12 @@ final class AppModel {
         // A page with no featured title is rebuilt: it was made before
         // anything could be picked (or by a build that was cut off). The
         // newest Home decides (one waiting, else the one shown).
-        let newestFeatured = stagedHome.map(\.featured) ?? featured
-        if !full, !rows.isEmpty, newestFeatured != nil, let builtAt = homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600 {
-            async let historyChanged = refreshContinueWatching(checkingHistory: true)
+        let newestFeatured = scope.stagedHome.map(\.featured) ?? scope.featured
+        if !full, !scope.rows.isEmpty, newestFeatured != nil, let builtAt = scope.homeBuiltAt, Date().timeIntervalSince(builtAt) < 6 * 3600 {
+            async let historyChanged = refreshContinueWatching(in: scope, checkingHistory: true)
             await opened
             if library.changedAt.map({ $0 <= builtAt }) ?? true, await !historyChanged {
-                if sync { Task { await syncLibrary(emby) } }
+                if sync { scope.run { await self.syncLibrary(emby, in: scope) } }
                 return
             }
         } else {
@@ -333,13 +273,15 @@ final class AppModel {
         do {
             // Nothing on Home yet (first launch, just signed in): Continue
             // Watching shows as soon as it's known; the rest follows.
-            let empty = rows.isEmpty
+            let empty = scope.rows.isEmpty
             var fresh = try await HomeFeed.load(emby, library: library, cardWidth: cardWidth,
                                                 backdropWidth: Self.backdropWidth, sources: pendingSources,
-                                                early: { [weak self] row in
-                                                    guard let self, empty, self.rows.isEmpty, account == self.accountGeneration else { return }
-                                                    self.rows = [row]
+                                                early: { row in
+                                                    guard empty, scope.rows.isEmpty else { return }
+                                                    scope.rows = [row]
                                                 })
+            // Signed out or into another account meanwhile: not its Home.
+            guard scope.isOpen else { return }
             fresh.rows = variedForTests(fresh.rows)
             // The pictures first (all at once), so the page changes in one go
             // instead of covers popping in; on the very first load, show the
@@ -356,24 +298,22 @@ final class AppModel {
                     await ImagePipeline.shared.store(rest)
                 }
             }
-            homeBuiltAt = fresh.builtAt
-            homeHistory = fresh.history ?? []
-            homeError = nil
-            // Signed out or into another account meanwhile: not its Home.
-            guard account == accountGeneration else { return }
-            if homeRetry.failing { Task { await refreshMyList() } }
-            homeRetry.stop()
-            if show || homeOpening {
+            scope.homeBuiltAt = fresh.builtAt
+            scope.homeHistory = fresh.history ?? []
+            scope.homeError = nil
+            if scope.homeRetry.failing { Task { await refreshMyList() } }
+            scope.homeRetry.stop()
+            if show || scope.homeOpening {
                 // The hero's titles too: a new one undecoded showed black
                 // for a moment.
-                if !rows.isEmpty, fresh.rows != rows || fresh.featured != featured || (fresh.spotlight ?? []) != spotlight {
+                if !scope.rows.isEmpty, fresh.rows != scope.rows || fresh.featured != scope.featured || (fresh.spotlight ?? []) != scope.spotlight {
                     await Self.wait(for: prefetch, atMost: 1.5)
                 }
-                guard account == accountGeneration else { return }
-                homeAwaitsFirstBuild = false
-                showHome(fresh)
+                guard scope.isOpen else { return }
+                scope.homeAwaitsFirstBuild = false
+                showHome(fresh, in: scope)
             } else {
-                stageHome(fresh)
+                stageHome(fresh, in: scope)
             }
             // The first few things you'd tap on Home are ready before you do:
             // their pages, and how to play the featured one (the rows' get
@@ -382,43 +322,43 @@ final class AppModel {
             pages.forEach(prefetchTitle)
             prepareRotation()
             prepare(fresh.featured.map { [$0.card.playTarget] } ?? [], at: .homeForecast)
-            if sync { Task { await syncLibrary(emby) } }
+            if sync { scope.run { await self.syncLibrary(emby, in: scope) } }
         } catch {
-            homeError = SourceError.wrap(error).localizedDescription
-            if account == accountGeneration, nothingBuiltShown { homeRetry.askAgainLater() }
+            scope.homeError = SourceError.wrap(error).localizedDescription
+            if scope.isOpen, scope.nothingBuiltShown { scope.homeRetry.askAgainLater() }
         }
     }
 
     /// Puts a built Home on the page, and saves it as shown (with this
     /// device's stops), not as the server still had it.
-    private func showHome(_ fresh: HomeContent) {
-        stagedHome = nil
+    private func showHome(_ fresh: HomeContent, in scope: AccountScope) {
+        scope.stagedHome = nil
         // What was just stopped here, even if the server hasn't caught up.
-        let freshRows = withStops(fresh.rows)
-        if freshRows != rows { rows = freshRows }
-        if fresh.featured != featured { featured = fresh.featured }
-        if (fresh.spotlight ?? []) != spotlight { spotlight = fresh.spotlight ?? [] }
-        shownBuiltAt = fresh.builtAt
-        shownHistory = fresh.history ?? []
-        saveShownHome()
+        let freshRows = withStops(fresh.rows, in: scope)
+        if freshRows != scope.rows { scope.rows = freshRows }
+        if fresh.featured != scope.featured { scope.featured = fresh.featured }
+        if (fresh.spotlight ?? []) != scope.spotlight { scope.spotlight = fresh.spotlight ?? [] }
+        scope.shownBuiltAt = fresh.builtAt
+        scope.shownHistory = fresh.history ?? []
+        saveShownHome(of: scope)
     }
 
     /// Keeps a built Home for the next moment. Its Continue Watching's
     /// progress shows at once when only that changed.
-    private func stageHome(_ fresh: HomeContent) {
-        stagedHome = fresh
-        offerContinue(reconciled(fresh.rows.first { $0.title == Self.continueTitle }))
+    private func stageHome(_ fresh: HomeContent, in scope: AccountScope) {
+        scope.stagedHome = fresh
+        offerContinue(reconciled(fresh.rows.first { $0.title == Self.continueTitle }, in: scope), in: scope)
     }
 
     /// The Home waiting, on the page now (a moment it may change).
-    private func showStagedHome() {
-        guard let staged = stagedHome else { return }
-        showHome(staged)
+    private func showStagedHome(in scope: AccountScope) {
+        guard let staged = scope.stagedHome else { return }
+        showHome(staged, in: scope)
     }
 
-    private func saveShownHome() {
-        AppCache.save("home.v4.json", HomeContent(featured: featured, rows: rows, builtAt: shownBuiltAt,
-                                                  history: shownHistory, spotlight: spotlight))
+    private func saveShownHome(of scope: AccountScope) {
+        scope.save(AccountScope.homeFile, HomeContent(featured: scope.featured, rows: scope.rows, builtAt: scope.shownBuiltAt,
+                                                      history: scope.shownHistory, spotlight: scope.spotlight))
     }
 
     /// Back from the background: after a long time away (half an hour),
@@ -433,7 +373,7 @@ final class AppModel {
             MainActor.assumeIsolated { self?.cameBack() }
         }
         center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.homeRetry.askAgainNow() }
+            MainActor.assumeIsolated { self?.account.homeRetry.askAgainNow() }
         }
         #endif
     }
@@ -443,13 +383,13 @@ final class AppModel {
     /// cards waiting on them got nothing fetched ahead.
     private func cameBack() {
         if let backgroundedAt {
-            plans.forget(askedBefore: backgroundedAt)
+            account.plans.forget(askedBefore: backgroundedAt)
             holdContinueWatchingAgain()
         }
         guard let away = backgroundedAt.map({ Date().timeIntervalSince($0) }), away >= Self.longAway else { return }
-        homeAwaitsFirstBuild = true
-        showStagedHome()
-        guard emby != nil else { return }
+        account.homeAwaitsFirstBuild = true
+        showStagedHome(in: account)
+        guard account.emby != nil else { return }
         Task { await loadHome(cardWidth: lastCardWidth) }
     }
 
@@ -520,7 +460,7 @@ final class AppModel {
     #endif
 
     func startBackdrop(_ itemId: String, episode: Bool) -> [CardImage] {
-        emby?.startBackdrop(itemId: itemId, episode: episode) ?? []
+        account.emby?.startBackdrop(itemId: itemId, episode: episode) ?? []
     }
 
     func tap(_ itemId: String, kind: String?, title: String, images: [CardImage] = [], show: String? = nil) -> TappedFilm {
@@ -539,7 +479,7 @@ final class AppModel {
     }
 
     func keptPicture(of itemId: String) -> FirstPicture {
-        guard let warm, warm.key == itemId || warm.playback.itemId == itemId, warm.player.hasStarted, !warm.player.hasFailed
+        guard let warm = account.warm, warm.key == itemId || warm.playback.itemId == itemId, warm.player.hasStarted, !warm.player.hasFailed
         else { return .backdrop }
         return .still(at: warm.playback.startSeconds ?? 0)
     }
@@ -554,21 +494,22 @@ final class AppModel {
         let started = Date()
         let first = !filmTapped
         filmTapped = true
+        let scope = account
         // Just closed here, and kept: no need to ask the server anything.
-        if let warm, warm.parked, warm.key == itemId {
+        if let warm = scope.warm, warm.parked, warm.key == itemId {
             var playback = warm.playback
             playback.resolvedIn = 0
             playback.requestedAt = started
-            playback.tap = .at(first: first, planKept: plans.isKept(planKey(itemId, kind: kind)), openPlayer: !warm.player.hasFailed)
+            playback.tap = .at(first: first, planKept: scope.plans.isKept(planKey(itemId, kind: kind)), openPlayer: !warm.player.hasFailed)
             return playback
         }
         let key = planKey(itemId, kind: kind)
-        let prepared = plans.isKept(key)
+        let prepared = scope.plans.isKept(key)
         #if DEBUG
         lastPlanKept = prepared
-        let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
+        let planAtTheTap = scope.plans.debugState(key, at: .continueWatching, .likely)
         #endif
-        var playback = withLocalResume(try await Plans.forStart(key, on: plans, again: again))
+        var playback = withLocalResume(try await Plans.forStart(key, on: scope.plans, again: again), in: scope)
         #if DEBUG
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         lastPlan = debugPlanClocks[key].map { clock in
@@ -588,7 +529,7 @@ final class AppModel {
     /// only another copy has it), from `seconds`: the pick is kept for
     /// every copy, so the copies are chosen again with it.
     func playback(heardIn language: String, instead current: EmbyPlayback, from seconds: Double) async throws -> EmbyPlayback {
-        guard let emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
+        guard let emby = account.emby else { throw SourceError.unexpected("Add your Emby server in Settings.") }
         TrackChoice.rememberAudio(language, role: nil, for: current.trackKeys)
         var next = try await emby.playback(versions: current.copyIds, kind: current.copyKind, maxWidth: Self.maxWidth)
         next.startSeconds = seconds
@@ -600,10 +541,6 @@ final class AppModel {
         PlanKey(itemId: itemId, kind: kind, versions: library.versions(of: itemId))
     }
 
-    private func planSource() -> (EmbyClient, @Sendable (String) -> [String])? {
-        emby.map { ($0, showCopies) }
-    }
-
     /// A show's copies by its id (another library's), to find an episode
     /// in each of them.
     private var showCopies: @Sendable (String) -> [String] {
@@ -613,57 +550,18 @@ final class AppModel {
 
     // MARK: Shows
 
-    /// A show page's data, kept so reopening (or opening something prepared
-    /// ahead) draws at once; refreshed quietly behind.
-    struct ShowData: Codable, Equatable {
-        /// With its cast, crew and genres.
-        let show: EmbyItem
-        let episodes: [EmbyItem]
-        let nextUp: EmbyItem?
-        let loadedAt: Date
-        /// Shows like it (nil in pages saved before it was kept).
-        var similar: [EmbyItem]? = nil
-    }
-
-    /// Not observed as a whole: a page watches its own title's state (see
-    /// `showState`), so fetching other shows ahead doesn't redraw it.
-    @ObservationIgnored private(set) var shows: [String: ShowData] = [:] {
-        didSet { for (id, state) in showStates where state.value != shows[id] { state.value = shows[id] } }
-    }
-    @ObservationIgnored private var showStates: [String: TitleState<ShowData>] = [:]
-
-    /// One show's page data, to watch: it changes only when this show does.
-    func showState(_ id: String) -> TitleState<ShowData> {
-        if let state = showStates[id] { return state }
-        let state = TitleState(shows[id])
-        showStates[id] = state
-        return state
-    }
-    private var showLoads: [String: Task<ShowData?, Never>] = [:]
-
-    /// The show's details, every episode and the next one to watch.
-    /// A show's page as last seen: in memory, else saved on the device, so
-    /// it opens at once (even after a relaunch) while it's brought up to date.
-    func cachedShow(_ id: String) -> ShowData? {
-        if let data = shows[id] { return data }
-        guard let saved: ShowData = AppCache.read(Self.showFile(id)) else { return nil }
-        shows[id] = saved
-        return saved
-    }
-
-    private static func showFile(_ id: String) -> String { "show-\(id).json" }
-
     /// Brings a show up to date. Saved within the last day: only the
     /// episodes that changed since (usually none) and the next episode;
     /// otherwise everything (which also drops deleted episodes).
     func loadShow(_ id: String) async -> ShowData? {
-        if let running = showLoads[id] { return await running.value }
-        guard let emby else { return nil }
-        let file = Self.showFile(id)
-        let inMemory = shows[id]
+        let scope = account
+        if let running = scope.showLoads[id] { return await running.value }
+        guard let emby = scope.emby else { return nil }
+        let file = AccountScope.showFile(id)
+        let inMemory = scope.shows[id]
         // Registered before anything waits, so a page opening while the
         // same show is being fetched ahead joins that fetch.
-        let task = Task<ShowData?, Never> {
+        let task = scope.run { () -> ShowData? in
             // The saved copy is read off the main thread (prefetching several
             // shows shouldn't read and decode each on it).
             var previous = inMemory
@@ -671,7 +569,7 @@ final class AppModel {
             if let previous, Date().timeIntervalSince(previous.loadedAt) < 24 * 3600 {
                 async let changes = emby.episodeChanges(of: id, since: previous.loadedAt)
                 async let next = emby.nextEpisode(of: id)
-                async let like: [EmbyItem]? = previous.similar == nil ? moreLikeThis(id, emby: emby) : previous.similar
+                async let like: [EmbyItem]? = previous.similar == nil ? self.moreLikeThis(id, emby: emby) : previous.similar
                 if let changed = try? await changes {
                     return ShowData(show: previous.show, episodes: Self.merge(previous.episodes, changed),
                                     nextUp: (try? await next) ?? previous.nextUp, loadedAt: Date(), similar: await like)
@@ -682,117 +580,40 @@ final class AppModel {
             async let item = emby.details(id)
             async let list = emby.episodes(of: id, season: nil)
             async let next = emby.nextEpisode(of: id)
-            async let like = moreLikeThis(id, emby: emby)
+            async let like = self.moreLikeThis(id, emby: emby)
             guard let show = await item, let episodes = try? await list else { return nil }
             return ShowData(show: show, episodes: episodes, nextUp: try? await next, loadedAt: Date(), similar: await like)
         }
-        showLoads[id] = task
-        let account = accountGeneration
+        scope.showLoads[id] = task
         let data = await task.value
-        if showLoads[id] == task { showLoads[id] = nil }
+        if scope.showLoads[id] == task { scope.showLoads[id] = nil }
         // Signed out (or in as someone else) meanwhile: not this account's.
-        guard account == accountGeneration else { return nil }
+        guard scope.isOpen else { return nil }
         if let data {
-            if shows.count > 80 {
+            if scope.shows.count > 80 {
                 // The oldest go; never a page that's open (or under another).
-                for old in shows.filter({ pinned[$0.key] == nil }).sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) {
-                    shows[old.key] = nil
+                for old in scope.shows.filter({ scope.pinned[$0.key] == nil }).sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) {
+                    scope.shows[old.key] = nil
                 }
             }
-            if shows[id] == nil {
+            if scope.shows[id] == nil {
                 prefetchArt(data.show)
                 prefetchStills(data)
             }
-            shows[id] = data
-            AppCache.save(Self.showFile(id), data)
+            scope.shows[id] = data
+            scope.save(AccountScope.showFile(id), data)
         }
         return data
     }
 
-    /// Title pages that exist (on screen or under another page), whose data
-    /// is never evicted.
-    @ObservationIgnored private var pinned: [String: Int] = [:]
-
-    /// Keeps this title's page data for as long as the returned pin lives
-    /// (a page holds it in its state).
-    func pin(_ id: String) -> PagePin {
-        pinned[id, default: 0] += 1
-        return PagePin { [weak self] in Task { @MainActor in self?.unpin(id) } }
-    }
-
-    private func unpin(_ id: String) {
-        if let count = pinned[id], count > 1 {
-            pinned[id] = count - 1
-        } else {
-            pinned[id] = nil
-            showStates[id] = nil
-            movieStates[id] = nil
-        }
-    }
-
     // MARK: Intent
-
-    /// What this device plays, and when (the last 20 times each): the titles
-    /// in rotation, and the channels watched most, are kept ready so they
-    /// open and start at once.
-    private struct Habits: Codable {
-        var titles: [String: Played] = [:]
-        var channels: [String: [Date]] = [:]
-        struct Played: Codable { var kind: String; var at: [Date] }
-    }
-    @ObservationIgnored private lazy var habits: Habits = AppCache.read("habits.json") ?? Habits()
-
-    /// How much, and how lately (each play counts less the older it is:
-    /// half as much after a week).
-    private static func score(_ dates: [Date], now: Date = Date()) -> Double {
-        dates.reduce(0) { $0 + pow(0.5, now.timeIntervalSince($1) / (7 * 24 * 3600)) }
-    }
-
-    private func notePlay(_ id: String, kind: String) {
-        var played = habits.titles[id] ?? Habits.Played(kind: kind, at: [])
-        played.at = Array((played.at + [Date()]).suffix(20))
-        habits.titles[id] = played
-        // The 100 that count most are enough.
-        if habits.titles.count > 100 {
-            for (id, _) in habits.titles.sorted(by: { Self.score($0.value.at) < Self.score($1.value.at) }).prefix(habits.titles.count - 100) {
-                habits.titles[id] = nil
-            }
-        }
-        AppCache.save("habits.json", habits)
-    }
-
-    func noteChannel(_ id: String) {
-        habits.channels[id] = Array(((habits.channels[id] ?? []) + [Date()]).suffix(20))
-        if habits.channels.count > 100 {
-            for (id, _) in habits.channels.sorted(by: { Self.score($0.value) < Self.score($1.value) }).prefix(habits.channels.count - 100) {
-                habits.channels[id] = nil
-            }
-        }
-        AppCache.save("habits.json", habits)
-    }
-
-    /// The titles in rotation, most likely first.
-    func inRotation(_ limit: Int = 6) -> [(id: String, kind: String)] {
-        let now = Date()
-        return habits.titles.map { (id: $0.key, kind: $0.value.kind, score: Self.score($0.value.at, now: now)) }
-            .filter { $0.score > 0.2 }
-            .sorted { $0.score > $1.score }
-            .prefix(limit).map { ($0.id, $0.kind) }
-    }
-
-    /// The channels watched most, most first.
-    func favouriteChannels(_ limit: Int = 12) -> [String] {
-        let now = Date()
-        return habits.channels.map { ($0.key, Self.score($0.value, now: now)) }
-            .filter { $0.1 > 0.2 }.sorted { $0.1 > $1.1 }.prefix(limit).map(\.0)
-    }
 
     /// The titles in rotation ready before they're chosen: their pages and
     /// pictures, and how to play them (the next episode, or where a film
     /// was left), so opening or resuming any of them is instant.
     func prepareRotation() {
         guard !PlaybackActivity.isPlaying else { return }
-        let rotation = inRotation()
+        let rotation = account.inRotation()
         for (id, kind) in rotation {
             if kind == "Series" { prefetchShows([id]) } else { Task(priority: .utility) { await refreshTitle(id, kind: kind) } }
         }
@@ -811,7 +632,7 @@ final class AppModel {
     /// (loaded when it isn't yet); nil after the last.
     func episode(after playback: EmbyPlayback) async -> EmbyItem? {
         guard let series = playback.seriesId else { return nil }
-        var show = shows[series]
+        var show = account.shows[series]
         if show == nil { show = await loadShow(series) }
         guard let data = show, let index = data.episodes.firstIndex(where: { $0.id == playback.itemId }) else { return nil }
         return data.episodes[(index + 1)...].first { $0.userData?.played != true }
@@ -819,45 +640,12 @@ final class AppModel {
 
     /// The channels watched most: what's on now and next, ready for Live TV.
     func prepareFavouriteChannels() async {
-        let channels = favouriteChannels().compactMap { channelById[$0] }
+        let channels = account.favouriteChannels().compactMap { channelById[$0] }
         guard !channels.isEmpty else { return }
         await ensureNowNext(channels)
     }
 
     // MARK: Films
-
-    /// A film's page: its details and the titles like it.
-    struct MovieData: Codable, Sendable, Equatable {
-        let item: EmbyItem
-        let similar: [EmbyItem]
-        let loadedAt: Date
-    }
-
-    /// Not observed as a whole (see `shows`).
-    @ObservationIgnored private(set) var movies: [String: MovieData] = [:] {
-        didSet { for (id, state) in movieStates where state.value != movies[id] { state.value = movies[id] } }
-    }
-    @ObservationIgnored private var movieStates: [String: TitleState<MovieData>] = [:]
-
-    /// One film's page data, to watch: it changes only when this film does.
-    func movieState(_ id: String) -> TitleState<MovieData> {
-        if let state = movieStates[id] { return state }
-        let state = TitleState(movies[id])
-        movieStates[id] = state
-        return state
-    }
-    private var movieLoads: [String: Task<MovieData?, Never>] = [:]
-
-    /// A film's page as last seen: in memory, else saved on the device, so
-    /// it opens complete at once while it's brought up to date.
-    func cachedMovie(_ id: String) -> MovieData? {
-        if let data = movies[id] { return data }
-        guard let saved: MovieData = AppCache.read(Self.movieFile(id)) else { return nil }
-        movies[id] = saved
-        return saved
-    }
-
-    private static func movieFile(_ id: String) -> String { "movie-\(id).json" }
 
     /// The library's titles most like this one by IMDb's data (who made
     /// them, genres, era, rating), with what's been watched of them; Emby's
@@ -870,30 +658,30 @@ final class AppModel {
 
     /// Details and titles like it, at once; one load at a time per film.
     func loadMovie(_ id: String) async -> MovieData? {
-        if let running = movieLoads[id] { return await running.value }
-        guard let emby else { return nil }
-        let account = accountGeneration
-        let task = Task<MovieData?, Never> {
-            async let like = moreLikeThis(id, emby: emby)
-            guard let item = await emby.details(id), account == accountGeneration else { return nil }
+        let scope = account
+        if let running = scope.movieLoads[id] { return await running.value }
+        guard let emby = scope.emby else { return nil }
+        let task = scope.run { () -> MovieData? in
+            async let like = self.moreLikeThis(id, emby: emby)
+            guard let item = await emby.details(id), scope.isOpen else { return nil }
             // The page's own details (and where you got to) as soon as
             // they're here; titles like it (a slower request) follow.
-            if movies[id] == nil { prefetchArt(item) }
-            movies[id] = MovieData(item: item, similar: movies[id]?.similar ?? [], loadedAt: Date())
+            if scope.movies[id] == nil { self.prefetchArt(item) }
+            scope.movies[id] = MovieData(item: item, similar: scope.movies[id]?.similar ?? [], loadedAt: Date())
             return MovieData(item: item, similar: await like, loadedAt: Date())
         }
-        movieLoads[id] = task
+        scope.movieLoads[id] = task
         let data = await task.value
-        if movieLoads[id] == task { movieLoads[id] = nil }
-        guard account == accountGeneration else { return nil }
+        if scope.movieLoads[id] == task { scope.movieLoads[id] = nil }
+        guard scope.isOpen else { return nil }
         if let data {
-            if movies.count > 80 {
-                for old in movies.filter({ pinned[$0.key] == nil }).sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) {
-                    movies[old.key] = nil
+            if scope.movies.count > 80 {
+                for old in scope.movies.filter({ scope.pinned[$0.key] == nil }).sorted(by: { $0.value.loadedAt < $1.value.loadedAt }).prefix(20) {
+                    scope.movies[old.key] = nil
                 }
             }
-            movies[id] = data
-            AppCache.save(Self.movieFile(id), data)
+            scope.movies[id] = data
+            scope.save(AccountScope.movieFile(id), data)
         }
         return data
     }
@@ -902,8 +690,8 @@ final class AppModel {
     /// minutes old (or not loaded yet).
     func refreshTitle(_ id: String, kind: String) async {
         if kind == "Series" {
-            if shows[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true { _ = await loadShow(id) }
-        } else if movies[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
+            if account.shows[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true { _ = await loadShow(id) }
+        } else if account.movies[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
             _ = await loadMovie(id)
         }
     }
@@ -931,7 +719,7 @@ final class AppModel {
     /// and its neighbours', fetched with the page.
     private func prefetchStills(_ data: ShowData) {
         #if os(tvOS)
-        guard let emby, NetworkStatus.shared.knownUnmetered else { return }
+        guard let emby = account.emby, NetworkStatus.shared.knownUnmetered else { return }
         let at = data.episodes.firstIndex { $0.id == data.nextUp?.id } ?? 0
         let around = data.episodes[max(0, at - 2)..<min(data.episodes.count, at + 4)]
         let urls = around.compactMap { emby.card(for: $0, landscape: true, width: 960).images.first.flatMap { URL(string: $0.url) } }
@@ -940,7 +728,7 @@ final class AppModel {
     }
 
     private func prefetchArt(_ item: EmbyItem) {
-        guard let emby, NetworkStatus.shared.knownUnmetered else { return }
+        guard let emby = account.emby, NetworkStatus.shared.knownUnmetered else { return }
         let urls = [emby.backdropURL(for: item, width: Self.pageBackdropWidth), emby.logoURL(for: item, width: Self.pageLogoWidth)]
             .compactMap(\.self)
         Task(priority: .utility) { await ImagePipeline.shared.prefetch(urls) }
@@ -971,12 +759,12 @@ final class AppModel {
             return user
         }
         // A film's page shows where it got to (Continue, time left) at once.
-        if let data = movies[playback.itemId] {
+        if let data = account.movies[playback.itemId] {
             var item = data.item
             item.userData = watched(item.userData)
-            movies[playback.itemId] = MovieData(item: item, similar: data.similar, loadedAt: data.loadedAt)
+            account.movies[playback.itemId] = MovieData(item: item, similar: data.similar, loadedAt: data.loadedAt)
         }
-        guard let series = playback.seriesId, let data = cachedShow(series),
+        guard let series = playback.seriesId, let data = account.cachedShow(series),
               let index = data.episodes.firstIndex(where: { $0.id == playback.itemId }) else { return }
         var episodes = data.episodes
         episodes[index].userData = watched(episodes[index].userData)
@@ -984,21 +772,17 @@ final class AppModel {
         // Continue Watching does).
         let nextUp = finished ? episodes[(index + 1)...].first { $0.userData?.played != true } : data.nextUp
         // Keep loadedAt: the next update still asks for everything since.
-        shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: nextUp, loadedAt: data.loadedAt, similar: data.similar)
+        account.shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: nextUp, loadedAt: data.loadedAt, similar: data.similar)
     }
-
-    /// What was stopped on this device in the last two minutes: a server
-    /// answer that hasn't caught up yet doesn't undo it.
-    @ObservationIgnored private var recentStops: [String: ContinueStop] = [:]
 
     /// The server's Continue Watching, with this device's stops of the last
     /// two minutes over anything older it still says: each one's card in
     /// front (newest first) in place of the server's for that title or
     /// show, also when the server doesn't list it yet.
-    private func reconciled(_ row: HomeRow?) -> HomeRow? {
-        recentStops = recentStops.filter { Date().timeIntervalSince($0.value.at) < 120 }
-        guard !recentStops.isEmpty else { return row }
-        let cards = ContinueStop.applied(recentStops.values, toServer: row?.cards ?? [])
+    private func reconciled(_ row: HomeRow?, in scope: AccountScope) -> HomeRow? {
+        scope.recentStops = scope.recentStops.filter { Date().timeIntervalSince($0.value.at) < 120 }
+        guard !scope.recentStops.isEmpty else { return row }
+        let cards = ContinueStop.applied(scope.recentStops.values, toServer: row?.cards ?? [])
         guard !cards.isEmpty else { return nil }
         let shape = Artwork.Shape.landscape
         return HomeRow(title: "Continue Watching", shape: row?.shape ?? shape.rawValue, aspect: row?.aspect ?? shape.aspect, cards: cards)
@@ -1008,9 +792,9 @@ final class AppModel {
 
     /// Rows with Continue Watching reconciled (first), and the other rows
     /// without what's in it.
-    private func withStops(_ rows: [HomeRow]) -> [HomeRow] {
-        guard !recentStops.isEmpty else { return rows }
-        return Self.replacingContinue(in: rows, with: reconciled(rows.first { $0.title == Self.continueTitle }))
+    private func withStops(_ rows: [HomeRow], in scope: AccountScope) -> [HomeRow] {
+        guard !scope.recentStops.isEmpty else { return rows }
+        return Self.replacingContinue(in: rows, with: reconciled(rows.first { $0.title == Self.continueTitle }, in: scope))
     }
 
     /// These rows with this Continue Watching first (or none), and the
@@ -1037,15 +821,15 @@ final class AppModel {
     /// the player closed, or when only progress changed (the same cards in
     /// the same order); otherwise it waits with the next Home, so no card
     /// appears, goes or moves while you look.
-    private func offerContinue(_ row: HomeRow?, now: Bool = false) {
-        let shown = rows.first { $0.title == Self.continueTitle }
-        let opening = homeOpening
-        let mayMove = opening || now || continueMovesUntil.map { Date() < $0 } ?? false
+    private func offerContinue(_ row: HomeRow?, now: Bool = false, in scope: AccountScope) {
+        let shown = scope.rows.first { $0.title == Self.continueTitle }
+        let opening = scope.homeOpening
+        let mayMove = opening || now || scope.continueMovesUntil.map { Date() < $0 } ?? false
         // The newest Continue Watching always waits too, so a moment
         // later never puts an older one back.
-        if var staged = stagedHome {
+        if var staged = scope.stagedHome {
             staged.rows = Self.replacingContinue(in: staged.rows, with: row)
-            stagedHome = staged
+            scope.stagedHome = staged
         }
         // The same cards: the same titles and, for shows, the same
         // episodes (a show's card moving on to its next episode is a new
@@ -1054,14 +838,14 @@ final class AppModel {
         if mayMove || identity(row) == identity(shown) {
             // Opening, the other rows lose what's now in it; otherwise
             // they stay as they are until the next moment.
-            let updated = opening ? Self.replacingContinue(in: rows, with: row) : Self.settingContinue(in: rows, to: row)
-            if updated != rows {
-                rows = updated
-                saveShownHome()
+            let updated = opening ? Self.replacingContinue(in: scope.rows, with: row) : Self.settingContinue(in: scope.rows, to: row)
+            if updated != scope.rows {
+                scope.rows = updated
+                saveShownHome(of: scope)
             }
-        } else if stagedHome == nil {
-            stagedHome = HomeContent(featured: featured, rows: Self.replacingContinue(in: rows, with: row),
-                                     builtAt: shownBuiltAt, history: shownHistory, spotlight: spotlight)
+        } else if scope.stagedHome == nil {
+            scope.stagedHome = HomeContent(featured: scope.featured, rows: Self.replacingContinue(in: scope.rows, with: row),
+                                           builtAt: scope.shownBuiltAt, history: scope.shownHistory, spotlight: scope.spotlight)
         }
     }
 
@@ -1070,29 +854,30 @@ final class AppModel {
     /// new progress; once finished, a show's next episode instead (as the
     /// TV app does), a film gone. A title that wasn't in the row joins it.
     private func patchContinueWatching(_ playback: EmbyPlayback, seconds: Double) {
-        guard let emby else { return }
-        let page = rows
+        let scope = account
+        guard let emby = scope.emby else { return }
+        let page = scope.rows
         // The player closing is a moment for Continue Watching: what the
         // server said meanwhile goes on first, this stop over it, and the
         // server's answer for the stop may still move cards.
-        if let staged = stagedHome {
-            let updated = Self.settingContinue(in: rows, to: staged.rows.first { $0.title == Self.continueTitle })
-            if updated != rows { rows = updated }
+        if let staged = scope.stagedHome {
+            let updated = Self.settingContinue(in: scope.rows, to: staged.rows.first { $0.title == Self.continueTitle })
+            if updated != scope.rows { scope.rows = updated }
         }
-        continueMovesUntil = Date().addingTimeInterval(10)
+        scope.continueMovesUntil = Date().addingTimeInterval(10)
         let duration = playback.durationSeconds ?? 0
         let finished = duration > 0 && seconds >= duration * 0.9
         let progress = duration > 0 ? seconds / duration * 100 : nil
-        let index = rows.firstIndex { $0.title == Self.continueTitle }
-        let shown = index.map { rows[$0].cards } ?? []
+        let index = scope.rows.firstIndex { $0.title == Self.continueTitle }
+        let shown = index.map { scope.rows[$0].cards } ?? []
         let old = shown.first { $0.id == playback.itemId || $0.episodeId == playback.itemId }
         func card(_ item: EmbyItem) -> Card? { emby.showRow(Self.continueTitle, [item], lastCardWidth)?.cards.first }
         var lead: Card?
-        if let series = playback.seriesId, let data = shows[series],
+        if let series = playback.seriesId, let data = scope.shows[series],
            let at = data.episodes.firstIndex(where: { $0.id == playback.itemId }) {
             let next = finished ? data.episodes[(at + 1)...].first { $0.userData?.played != true } : data.episodes[at]
             lead = next.flatMap(card)
-        } else if let item = movies[playback.itemId]?.item {
+        } else if let item = scope.movies[playback.itemId]?.item {
             lead = finished ? nil : card(item)
         } else if let old, !finished {
             var card = old
@@ -1102,26 +887,26 @@ final class AppModel {
         let outcome: ContinueStop.Outcome = if let lead { .card(lead) } else if finished { .gone } else { .progress(progress) }
         let stop = ContinueStop(itemId: playback.itemId, at: Date(), outcome: outcome, seriesId: playback.seriesId,
                                 seriesName: playback.seriesName)
-        recentStops[playback.itemId] = stop
+        scope.recentStops[playback.itemId] = stop
         let cards = stop.applied(to: shown)
         let shape = Artwork.Shape.landscape
-        let row = cards.isEmpty ? nil : HomeRow(title: Self.continueTitle, shape: index.map { rows[$0].shape } ?? shape.rawValue,
-                                                aspect: index.map { rows[$0].aspect } ?? shape.aspect, cards: cards)
-        let updated = Self.settingContinue(in: rows, to: row)
-        if updated != rows { rows = updated }
+        let row = cards.isEmpty ? nil : HomeRow(title: Self.continueTitle, shape: index.map { scope.rows[$0].shape } ?? shape.rawValue,
+                                                aspect: index.map { scope.rows[$0].aspect } ?? shape.aspect, cards: cards)
+        let updated = Self.settingContinue(in: scope.rows, to: row)
+        if updated != scope.rows { scope.rows = updated }
         // The Home waiting has it too.
-        if var staged = stagedHome {
+        if var staged = scope.stagedHome {
             staged.rows = Self.replacingContinue(in: staged.rows, with: row)
-            stagedHome = staged
+            scope.stagedHome = staged
         }
         // Saved now: the server's answer for this stop often matches it,
         // and then saves nothing.
-        if rows != page { saveShownHome() }
+        if scope.rows != page { saveShownHome(of: scope) }
     }
 
     /// Loads shows the user is likely to open next, in the background.
     func prefetchShows(_ ids: [String], force: Bool = false) {
-        for id in ids where force || shows[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
+        for id in ids where force || account.shows[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
             Task(priority: .utility) { _ = await loadShow(id) }
         }
     }
@@ -1133,67 +918,59 @@ final class AppModel {
     /// the caller rebuilds everything instead.
     /// `afterStop`: the server's answer for what the player just stopped,
     /// the last that may move cards on the page.
-    @discardableResult
     /// `returning`: back in the app, where it goes on at once (what was
     /// watched on another device meanwhile is your own, not a
     /// recommendation; it waited for the next moment and looked unsynced).
+    @discardableResult
     func refreshContinueWatching(checkingHistory: Bool = false, afterStop: Bool = false, returning: Bool = false) async -> Bool {
-        guard let emby else { return false }
+        await refreshContinueWatching(in: account, checkingHistory: checkingHistory, afterStop: afterStop, returning: returning)
+    }
+
+    @discardableResult
+    private func refreshContinueWatching(in scope: AccountScope, checkingHistory: Bool = false, afterStop: Bool = false,
+                                         returning: Bool = false) async -> Bool {
+        guard let emby = scope.emby else { return false }
         async let watching = emby.watching()
         async let nextUp = emby.nextUp()
         async let played: [EmbyItem]? = checkingHistory ? (try? await emby.played(limit: 10)) : nil
         guard let watching = try? await watching else { return false }
         if let played = await played,
-           HomeFeed.seeds(watching: watching, played: played).map(\.id) != homeHistory {
+           HomeFeed.seeds(watching: watching, played: played).map(\.id) != scope.homeHistory {
             return true
         }
         let items = HomeFeed.continueItems(watching: watching, nextUp: (try? await nextUp) ?? [])
         let server = emby.showRow(Self.continueTitle, items, lastCardWidth).map { variedForTests([$0], numbered: false)[0] }
-        let row = reconciled(server)
-        offerContinue(row, now: returning)
-        if afterStop { continueMovesUntil = nil }
+        let row = reconciled(server, in: scope)
+        offerContinue(row, now: returning, in: scope)
+        if afterStop { scope.continueMovesUntil = nil }
         return false
     }
 
-    /// The newest Home built (waiting or shown): when, and the recent
-    /// watches its Top picks came from.
-    private var homeBuiltAt: Date?
-    private var homeHistory: [String] = []
-
     // MARK: Warm start
 
-    private var warm: (key: String, player: MPVPlayer, playback: EmbyPlayback, parked: Bool)?
     @ObservationIgnored private var filmTapped = false
-    private var warmExpiry: Task<Void, Never>?
-
-    /// The preview stills (BIF) of the last two titles got ready ahead of a
-    /// tap, and fetches under way.
-    @ObservationIgnored private var previews: [(id: String, data: Data)] = []
-    @ObservationIgnored private var previewLoads: [String: Task<Data?, Never>] = [:]
 
     /// A title's preview stills, fetched once (joining a fetch under way).
     func previewStills(_ itemId: String) async -> Data? {
+        let scope = account
         if let data = cachedPreviewStills(itemId) { return data }
-        // Per account: another account's fetch of the same id isn't joined.
-        let account = accountGeneration
-        let key = "\(account)|\(itemId)"
-        if let running = previewLoads[key] {
+        if let running = scope.previewLoads[itemId] {
             let data = await running.value
-            return account == accountGeneration ? data : nil
+            return scope.isOpen ? data : nil
         }
-        guard let emby else { return nil }
-        let task = Task(priority: .utility) { await emby.previewThumbnails(itemId: itemId) }
-        previewLoads[key] = task
+        guard let emby = scope.emby else { return nil }
+        let task = scope.run(priority: .utility) { await emby.previewThumbnails(itemId: itemId) }
+        scope.previewLoads[itemId] = task
         let data = await task.value
-        if previewLoads[key] == task { previewLoads[key] = nil }
-        guard account == accountGeneration else { return nil }
-        if let data { previews = Array((previews.filter { $0.id != itemId } + [(itemId, data)]).suffix(2)) }
+        if scope.previewLoads[itemId] == task { scope.previewLoads[itemId] = nil }
+        guard scope.isOpen else { return nil }
+        if let data { scope.previews = Array((scope.previews.filter { $0.id != itemId } + [(itemId, data)]).suffix(2)) }
         return data
     }
 
     /// Stills already here, without waiting.
     func cachedPreviewStills(_ itemId: String) -> Data? {
-        previews.first { $0.id == itemId }?.data
+        account.previews.first { $0.id == itemId }?.data
     }
 
     /// What plays next in the player screen, opened out of sight and paused
@@ -1202,7 +979,7 @@ final class AppModel {
     /// its picture is ready (see takeWarm). Unlike work ahead, while something
     /// plays and on any connection: it was asked for.
     func warmSwitch(_ playback: EmbyPlayback, options: [(String, String)], hardwareDecoding: Bool) -> MPVPlayer {
-        coolDown()
+        account.coolDown()
         let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding,
                                picture: .film(playback.surface))
         player.prepareOffscreen()
@@ -1210,34 +987,14 @@ final class AppModel {
                     tracks: playback.tracks)
         player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
         player.addCopies(playback.subtitleCopies)
-        warm = (playback.itemId, player, playback, false)
-        warmExpiry = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(120))
-            guard !Task.isCancelled else { return }
-            self?.coolDown()
-        }
+        account.keepWarm(player, playback, parked: false, for: .seconds(120))
         return player
     }
 
-    /// Hands over the warmed-up player for this episode or movie, if it's
-    /// open at `start` (one opened at another second, say before the last
-    /// stop reached the server, would play from there: "the same frame
-    /// again").
+    /// The player kept for this episode or movie, if it's open at `start`
+    /// (see AccountScope.takeWarm).
     func takeWarm(_ itemId: String, at start: Double?) -> MPVPlayer? {
-        guard let warm, warm.playback.itemId == itemId else { return nil }
-        // Failed meanwhile (the connection lost, the app away): the title
-        // opens afresh. Handed over, it waited for a start that never came.
-        guard !warm.player.hasFailed else {
-            coolDown()
-            return nil
-        }
-        guard abs((warm.playback.startSeconds ?? 0) - (start ?? 0)) < 2 else {
-            coolDown()
-            return nil
-        }
-        self.warm = nil
-        warmExpiry?.cancel()
-        return warm.player
+        account.takeWarm(itemId, at: start) as? MPVPlayer
     }
 
     /// Keeps a player that just closed, paused where it stopped, for five
@@ -1246,34 +1003,18 @@ final class AppModel {
     func park(_ player: MPVPlayer, _ playback: EmbyPlayback) {
         let seconds = playback.startSeconds ?? 0
         guard let duration = playback.durationSeconds, duration > 0, seconds < duration * 0.9 else { return player.shutdown() }
-        coolDown()
+        account.coolDown()
         player.onEvent = nil
         player.setPaused(true)
         player.setReadahead(.warm)
-        warm = (playback.itemId, player, playback, true)
-        warmExpiry = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(300))
-            guard !Task.isCancelled else { return }
-            self?.coolDown()
-        }
+        account.keepWarm(player, playback, parked: true, for: .seconds(300))
     }
 
-    /// Where this device last stopped a title (0: finished), for half an
-    /// hour: it wins over the server's resume point, which may not have
-    /// heard yet.
-    @ObservationIgnored private var stops: [String: (seconds: Double, at: Date)] = [:]
-
-    private func withLocalResume(_ playback: EmbyPlayback) -> EmbyPlayback {
-        guard let stop = stops[playback.itemId], Date().timeIntervalSince(stop.at) < 1800 else { return playback }
+    private func withLocalResume(_ playback: EmbyPlayback, in scope: AccountScope) -> EmbyPlayback {
+        guard let stop = scope.stops[playback.itemId], Date().timeIntervalSince(stop.at) < 1800 else { return playback }
         var playback = playback
         playback.startSeconds = stop.seconds > 0 ? stop.seconds : nil
         return playback
-    }
-
-    func coolDown() {
-        warmExpiry?.cancel()
-        warm?.player.shutdown()
-        warm = nil
     }
 
     #if DEBUG
@@ -1307,7 +1048,7 @@ final class AppModel {
         debugServer = await ServerProbe.measure(account, film: film)?.readout ?? "server: no answer"
     }
 
-    private var continueCard: Card? { rows.first { $0.title == Self.continueTitle }?.cards.first }
+    private var continueCard: Card? { account.rows.first { $0.title == Self.continueTitle }?.cards.first }
 
     func debugFilmHeardOnlyInAnotherCopy(limit: Int = 12) async -> EmbyPlayback? {
         for _ in 0..<90 where library.versions.isEmpty { try? await Task.sleep(for: .seconds(1)) }
@@ -1335,23 +1076,20 @@ final class AppModel {
     /// before it.
     /// A card is held again from the start when what its plan is asked for changes: another copy the library found
     /// (versionsChanged), another account.
+    /// A closed account's cards are held by nothing (its rows stay on the page until the server logs it out).
     private func holdContinueWatching() {
-        let cards = rows.first { $0.title == Self.continueTitle }?.cards ?? []
-        let targets = playerShown || Self.noPrepareAhead || accountChanging ? [] : cards.prefix(2).map(\.playTarget)
+        let cards = account.rows.first { $0.title == Self.continueTitle }?.cards ?? []
+        let targets = playerShown || Self.noPrepareAhead || !account.isOpen ? [] : cards.prefix(2).map(\.playTarget)
         let keys = Dictionary(targets.map { ($0, planKey($0)) }, uniquingKeysWith: { first, _ in first })
-        let sameAsk = targets.filter { heldPlans[$0] == keys[$0] }
+        let sameAsk = targets.filter { account.heldPlans[$0] == keys[$0] }
         ahead.hold(only: sameAsk, at: .homeForecast)
-        heldPlans = keys
+        account.heldPlans = keys
         ahead.hold(only: targets, at: .homeForecast)
     }
 
-    @ObservationIgnored private var heldPlans: [Target: PlanKey] = [:]
-    /// Signing out: no card is held till it's done (the old account's rows are still on the page meanwhile).
-    @ObservationIgnored private var accountChanging = false
-
     /// Every held card asked afresh: their plans were forgotten, or are another account's.
     private func holdContinueWatchingAgain() {
-        heldPlans = [:]
+        account.heldPlans = [:]
         holdContinueWatching()
     }
 
@@ -1362,9 +1100,9 @@ final class AppModel {
             guard !AppModel.noStreamAhead else { return }
             _ = await FileStarts.shelf.hold(FileStart(start), for: interest)
         },
-        connection: { start, interest in
-            guard !AppModel.noStreamAhead, !AppModel.noPreconnect else { return }
-            await Connections.keepWarm(FileStart(start), for: interest)
+        connection: { [weak self] start, interest in
+            guard !AppModel.noStreamAhead, !AppModel.noPreconnect, let scope = self?.account else { return }
+            await scope.attach { await Connections.keepWarm(FileStart(start), for: interest) }
         },
         subtitle: { subtitle, interest in await ServerSubtitles.warm(subtitle, for: interest) },
         previews: { [weak self] plan, interest in
@@ -1378,13 +1116,13 @@ final class AppModel {
         let refused = lanes.filter { $0.1.debugRefused > 0 }.map { name, lane in
             " | \(name) refused \(lane.debugRefused), last: " + (lane.debugLastRefusal.map { "\($0)" } ?? "none")
         }
-        return "held \(ahead.held) plans \(plans.fetched) starts \(FileStarts.shelf.fetched) warmed \(StreamRelay.warmed.value) "
+        return "held \(ahead.held) plans \(account.plans.fetched) starts \(FileStarts.shelf.fetched) warmed \(StreamRelay.warmed.value) "
             + "files \(ServerSubtitles.beside.fetched) "
             + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) " + String(format: "disk %.1f GB", Double(now.freeDisk.bytes) / 1e9)
             + " thermal \(now.thermal.rawValue)"
             + (now.lowPower ? " low power" : "") + (now.memoryWarned ? " memory warned" : "") + (now.playing ? " playing" : "")
             + (Lane.fileStarts.debugRefusal(at: .continueWatching, .likely).map { " | starts not allowed: \($0)" } ?? "")
-            + " | no plan \(ahead.planless), plans failed \(plans.failed), last \(plans.lastFailure), stopped \(plans.stopped)"
+            + " | no plan \(ahead.planless), plans failed \(account.plans.failed), last \(account.plans.lastFailure), stopped \(account.plans.stopped)"
             + ", starts failed \(FileStarts.shelf.failed) stopped \(FileStarts.shelf.stopped)" + refused.joined()
             + " | holds: " + ahead.trail.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
     }
@@ -1399,10 +1137,10 @@ final class AppModel {
 
     /// `held`: for a card's hold, which waits for the device to allow it (prepare's asks go once).
     private func preparePlan(_ target: Target, _ interest: Interest, held: Bool = false) async -> EmbyPlayback? {
-        let account = accountGeneration
+        let scope = account
         let key = planKey(target)
-        let plan = if held { await plans.hold(key, for: interest) } else { await plans.warm(key, for: interest) }
-        return account == accountGeneration ? plan.map(withLocalResume) : nil
+        let plan = if held { await scope.plans.hold(key, for: interest) } else { await scope.plans.warm(key, for: interest) }
+        return scope.isOpen ? plan.map { withLocalResume($0, in: scope) } : nil
     }
 
     private func planKey(_ target: Target) -> PlanKey {
@@ -1415,7 +1153,7 @@ final class AppModel {
     /// Continue Watching's cards' plans as the row shows (Plans.forecast).
     func forecastPlans(_ cards: [Card]) async {
         guard !Self.noPrepareAhead, !Self.noPlanForecast else { return }
-        await Plans.forecast(cards.map { planKey($0.playTarget) }, on: plans)
+        await Plans.forecast(cards.map { planKey($0.playTarget) }, on: account.plans)
     }
 
     /// Subtitle files found for a film heard in neither English nor
@@ -1434,7 +1172,7 @@ final class AppModel {
         #if DEBUG
         NSLog("%@", "PERF subtitles needed? wanted=\(playback.tracks?.subtitles ?? []) has=\(playback.subtitleLanguages.sorted()) source=\(playback.mediaSourceId ?? "none")")
         #endif
-        guard let emby, let wanted = playback.tracks?.subtitles,
+        guard let emby = account.emby, let wanted = playback.tracks?.subtitles,
               playback.subtitleLanguages.isDisjoint(with: ["en", "es"]) else { return [] }
         let folder = FoundSubtitles.folder(playback.itemId)
         #if DEBUG
@@ -1500,7 +1238,7 @@ final class AppModel {
         #if DEBUG
         NSLog("%@", "PERF subtitles picked \(file.id)")
         #endif
-        guard let emby else { return }
+        guard let emby = account.emby else { return }
         Task(priority: .utility) {
             do { try await emby.downloadSubtitle(itemId, mediaSourceId: mediaSourceId, id: file.id) } catch {
                 #if DEBUG
@@ -1521,7 +1259,7 @@ final class AppModel {
     /// with the audio track at `audio` (its place in the file). Its play
     /// session is set as it opens (EmbyPlayback.opening).
     func convertedURL(for playback: EmbyPlayback, bitrate: Int, start: Double, copy: Bool = false, audio: Int? = nil) -> URL? {
-        emby?.hlsURL(playback.itemId, mediaSourceId: playback.mediaSourceId ?? playback.itemId,
+        account.emby?.hlsURL(playback.itemId, mediaSourceId: playback.mediaSourceId ?? playback.itemId,
                      playSessionId: nil, start: start, bitrate: bitrate, copy: copy, audioStreamIndex: audio)
     }
 
@@ -1538,14 +1276,15 @@ final class AppModel {
     }
 
     func diagnose(_ playback: EmbyPlayback) async -> String {
-        await emby?.diagnose(playback) ?? ""
+        await account.emby?.diagnose(playback) ?? ""
     }
 
     func prepareLibrary(checkingChanges: Bool = false) async {
-        if let emby { await syncLibrary(emby, urgent: checkingChanges) }
+        let scope = account
+        if let emby = scope.emby { await syncLibrary(emby, in: scope, urgent: checkingChanges) }
     }
 
-    private func syncLibrary(_ emby: EmbyClient, urgent: Bool = false) async {
+    private func syncLibrary(_ emby: EmbyClient, in scope: AccountScope, urgent: Bool = false) async {
         let before = library.trending.prefix(40).map(\.id)
         let hadNotable = !library.notable.isEmpty
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
@@ -1557,24 +1296,24 @@ final class AppModel {
         // first two minutes: browsing and a first play get the connection,
         // and a quick look doesn't start a download it won't finish.
         let hadCatalog = library.catalog != nil
-        // One at a time, owned, so signing out stops it.
-        catalogJob?.cancel()
-        let account = accountGeneration
-        catalogJob = Task(priority: .background) { [weak self] in
+        // One at a time, owned by the account, so signing out stops it.
+        scope.catalogJob?.cancel()
+        scope.catalogJob = scope.run(priority: .background) { [library] in
             try? await Task.sleep(for: .seconds(120))
-            guard let self, !Task.isCancelled, account == accountGeneration else { return }
+            guard !Task.isCancelled else { return }
             await withTaskCancellationHandler {
-                await self.library.refreshCatalog(unmetered: NetworkStatus.shared.knownUnmetered)
-            } onCancel: { [library] in
+                await library.refreshCatalog(unmetered: NetworkStatus.shared.knownUnmetered)
+            } onCancel: {
                 Task { @MainActor in library.cancelCatalog() }
             }
-            guard !Task.isCancelled, account == accountGeneration else { return }
-            if !hadCatalog, library.catalog != nil { await loadHome(cardWidth: lastCardWidth, sync: false, full: true) }
+            guard !Task.isCancelled else { return }
+            if !hadCatalog, library.catalog != nil { await self.loadHome(cardWidth: self.lastCardWidth, sync: false, full: true) }
         }
         await charts
+        guard scope.isOpen else { return }
         // New titles since Home was built: its other rows are built again,
         // and go on at the next moment, not while you look.
-        if let changed = library.changedAt, let built = homeBuiltAt, changed > built {
+        if let changed = library.changedAt, let built = scope.homeBuiltAt, changed > built {
             await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
             return
         }
@@ -1592,21 +1331,16 @@ final class AppModel {
         try await playback(itemId: card.id, kind: card.kind)
     }
 
-    @ObservationIgnored private var reportChain: Task<Void, Never>?
-    /// The newest position not yet sent: while one progress report waits
-    /// its turn, newer ones replace it rather than queueing behind it.
-    @ObservationIgnored private var queuedProgress: (playback: EmbyPlayback, seconds: Double)?
-
     /// The title's page and Home as they'll be after this stop, before the
     /// server hears; called while the player is still up, so the page
     /// appears as it will stay (nothing changes on it after).
     func noteStop(_ playback: EmbyPlayback, seconds: Double) {
         let duration = playback.durationSeconds ?? 0
-        stops[playback.itemId] = (duration > 0 && seconds >= duration * 0.9 ? 0 : seconds, Date())
+        account.stops[playback.itemId] = (duration > 0 && seconds >= duration * 0.9 ? 0 : seconds, Date())
         // Where it was stopped, for every device's Continue Watching (the
         // server keeps nothing this early in a title).
         let finished = duration > 0 && seconds >= duration * 0.9
-        if let emby { Task(priority: .utility) { await emby.noteStarted(playback.itemId, seconds: finished ? nil : seconds) } }
+        if let emby = account.emby { Task(priority: .utility) { await emby.noteStarted(playback.itemId, seconds: finished ? nil : seconds) } }
         #if DEBUG
         debugStop = "stop noted player=\(debugPlayerUp ? "up" : "gone")"
         #endif
@@ -1633,130 +1367,66 @@ final class AppModel {
 
     /// `noted`: a stop already on the page (see noteStop).
     func report(_ playback: EmbyPlayback, seconds: Double, event: EmbyClient.PlaybackEvent, noted: Bool = false) async {
+        let scope = account
         if event == .started {
-            notePlay(playback.seriesId ?? playback.itemId, kind: playback.seriesId != nil ? "Series" : "Movie")
+            scope.notePlay(playback.seriesId ?? playback.itemId, kind: playback.seriesId != nil ? "Series" : "Movie")
         }
         if event == .stopped, !noted {
             noteStop(playback, seconds: seconds)
         }
         // In the order they happened: a progress report sent a moment before
         // Stopped must not land after it and move the resume point back.
-        let client = emby
+        let client = scope.emby
         if event == .progress {
-            let waiting = queuedProgress != nil
-            queuedProgress = (playback, seconds)
+            let waiting = scope.queuedProgress != nil
+            scope.queuedProgress = (playback, seconds)
             if waiting { return }
-            await enqueueReport { [weak self] in
-                guard let (playback, seconds) = await self?.takeQueuedProgress() else { return }
+            await enqueueReport(in: scope) {
+                guard let (playback, seconds) = scope.queuedProgress else { return }
+                scope.queuedProgress = nil
                 await client?.report(.progress, itemId: playback.itemId, seconds: seconds,
                                      mediaSourceId: playback.mediaSourceId, playSessionId: await playback.session())
             }.value
             return
         }
-        await enqueueReport {
+        await enqueueReport(in: scope) {
             await client?.report(event, itemId: playback.itemId, seconds: seconds,
                                  mediaSourceId: playback.mediaSourceId, playSessionId: await playback.session())
         }.value
-        guard event == .stopped else { return }
-        plans.forget { $0.itemId == playback.itemId || $0.itemId == playback.seriesId }
+        guard event == .stopped, scope.isOpen else { return }
+        scope.plans.forget { $0.itemId == playback.itemId || $0.itemId == playback.seriesId }
         // A player kept for this title stays if it's where this stopped.
-        if let warm, warm.key == playback.itemId || (playback.seriesId != nil && warm.key == playback.seriesId),
+        if let warm = scope.warm, warm.key == playback.itemId || (playback.seriesId != nil && warm.key == playback.seriesId),
            warm.playback.itemId != playback.itemId || abs((warm.playback.startSeconds ?? 0) - seconds) >= 2 {
-            coolDown()
+            scope.coolDown()
         }
         if let series = playback.seriesId { prefetchShows([series], force: true) }
         // Only Continue Watching changed; the rest of Home stays as it is.
-        await refreshContinueWatching(afterStop: true)
+        await refreshContinueWatching(in: scope, afterStop: true)
     }
 
-    private func enqueueReport(_ work: @escaping @Sendable () async -> Void) -> Task<Void, Never> {
-        let previous = reportChain
-        let task = Task {
+    private func enqueueReport(in scope: AccountScope, _ work: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = scope.reportChain
+        let task = scope.run {
             await previous?.value
             await work()
         }
-        reportChain = task
+        scope.reportChain = task
         return task
-    }
-
-    private func takeQueuedProgress() -> (playback: EmbyPlayback, seconds: Double)? {
-        defer { queuedProgress = nil }
-        return queuedProgress
     }
 
     // MARK: Accounts
 
-    /// Changes when the Emby account does: loads that began before ignore
-    /// their results.
-    @ObservationIgnored private var accountGeneration = 0
-    /// IMDb's catalog, fetched a while after the library syncs.
-    @ObservationIgnored private var catalogJob: Task<Void, Never>?
-
     func signedInToEmby(_ account: EmbyAccount) async {
-        accountGeneration += 1
-        ahead.hold(only: [], at: .homeForecast)
-        StreamRelay.shared.forgetAccount()
-        FileStarts.shelf.forgetAll()
-        plans.forgetAll()
-        // A Home on its way for the old account is dropped, not waited for.
-        homeLoad = nil
-        homeRetry.stop()
-        homeLoadID = UUID()
-        stagedHome = nil
-        recentStops = [:]
-        stops = [:]
-        previews = []
-        previewLoads = [:]
-        catalogJob?.cancel()
-        showLoads = [:]
-        movieLoads = [:]
-        sources.setEmby(account)
-        holdContinueWatchingAgain()
-        // Another account's Home: nothing of the last one waits or counts.
-        stagedHome = nil
-        shownBuiltAt = nil
-        await loadHome(cardWidth: lastCardWidth, full: true, show: true)
+        await send(.signedIn(account))
     }
 
     func signOutOfEmby() async {
-        accountGeneration += 1
-        accountChanging = true
-        defer { accountChanging = false }
-        holdContinueWatching()
-        homeLoad = nil
-        homeRetry.stop()
-        homeLoadID = UUID()
-        stagedHome = nil
-        recentStops = [:]
-        stops = [:]
-        catalogJob?.cancel()
-        showLoads = [:]
-        movieLoads = [:]
-        await emby?.logout()
-        sources.setEmby(nil)
-        rows = []
-        featured = nil
-        spotlight = []
-        stagedHome = nil
-        shownBuiltAt = nil
-        homeBuiltAt = nil
-        coolDown()
-        // Title pages carry this account's progress; what was prepared and
-        // watched is this account's too.
-        shows = [:]
-        movies = [:]
-        plans.forgetAll()
-        previews = []
-        previewLoads = [:]
-        StreamRelay.shared.forgetAccount()
-        FileStarts.shelf.forgetAll()
-        await ServerSubtitles.forgetAll()
-        habits = Habits()
-        AppCache.remove("habits.json")
-        AppCache.remove("home.v4.json")
-        AppCache.removeAll(startingWith: ["show-", "movie-"])
-        library.clear()
-        serverSearchCache = [:]
+        await send(.signOut)
+    }
+
+    func forgetEverything() async {
+        await send(.forgetEverything)
     }
 
     func add(_ source: IPTVSource) async {
@@ -1769,41 +1439,41 @@ final class AppModel {
         await loadLive()
     }
 
-    func forgetEverything() async {
-        accountGeneration += 1
-        accountChanging = true
-        defer { accountChanging = false }
-        holdContinueWatching()
-        homeRetry.stop()
-        await emby?.logout()
-        sources.forgetEverything()
-        await guide.clear()
-        AppCache.remove(Self.lineupFile)
-        library.clear()
-        StreamRelay.shared.forgetAccount()
-        FileStarts.shelf.forgetAll()
-        plans.forgetAll()
-        await ServerSubtitles.forgetAll()
-        serverSearchCache = [:]
-        channelCorpus = SearchCorpus(name: \.name)
-        rows = []
-        featured = nil
-        spotlight = []
-        stagedHome = nil
-        shownBuiltAt = nil
-        homeBuiltAt = nil
-        AppCache.remove("home.v4.json")
-        categories = []
-        allChannels = []
-        channelsByCategory = [:]
-        channelById = [:]
-        clearNowNext()
-        localCache = nil
-        providers = [:]
-        liveChecks = [:]
-        providerEPG = [:]
-        selectedCategory = nil
-        guideState = .idle
+    private func send(_ event: AccountSession.Event) async {
+        for effect in session.on(event) { await run(effect) }
+    }
+
+    private func run(_ effect: AccountSession.Effect) async {
+        switch effect {
+        case .closeScope:
+            account.close()
+            holdContinueWatchingAgain()
+        case .forgetShared:
+            StreamRelay.shared.forgetAccount()
+            FileStarts.shelf.forgetAll()
+            library.clear()
+            await ServerSubtitles.forgetAll()
+        case .logOut:
+            await sources.emby.map { EmbyClient(account: $0, deviceId: sources.deviceId) }?.logout()
+            await send(.loggedOut)
+        case let .wipe(wipe):
+            sources.setEmby(nil)
+            AccountScope.removeSaved()
+            account = scope(for: nil, readsSaved: false)
+            holdContinueWatchingAgain()
+            if wipe == .everything {
+                sources.forgetEverything()
+                await guide.clear()
+                AppCache.remove(Self.lineupFile)
+                await forgetLiveTV()
+            }
+        case let .open(signedIn):
+            sources.setEmby(signedIn)
+            account = scope(for: signedIn)
+            holdContinueWatchingAgain()
+        case .loadHome:
+            await loadHome(cardWidth: lastCardWidth, full: true, show: true)
+        }
     }
 
     // MARK: Live TV
@@ -1849,6 +1519,18 @@ final class AppModel {
     /// An update already running is waited for first.
     func loadLive(force: Bool = false) async {
         await updateLive(for: nil, force: force)
+    }
+
+    /// Forget everything: no subscription's lineup, check, session or
+    /// guide state is left in memory.
+    private func forgetLiveTV() async {
+        await applyLineup(categories: [], channels: [])
+        selectedCategory = nil
+        clearNowNext()
+        providers = [:]
+        liveChecks = [:]
+        providerEPG = [:]
+        guideState = .idle
     }
 
     /// One line per source whose last check failed ("Test: Your provider
@@ -2111,7 +1793,7 @@ final class AppModel {
         // their logos and the first shelf's, so Live TV opens drawn.
         Task { await prepareFavouriteChannels() }
         let firstShelf = shelves.first?.sections.flatMap(\.entries).prefix(30).compactMap(\.logo) ?? []
-        let favourites = favouriteChannels().compactMap { built.byId[$0]?.logo }
+        let favourites = account.favouriteChannels().compactMap { built.byId[$0]?.logo }
         let logos = Array(Set(favourites + firstShelf))
         Task(priority: .utility) { await ImagePipeline.shared.prefetch(logos) }
     }
@@ -2385,7 +2067,7 @@ final class AppModel {
         liveFailures.noteSharedGame(all.map(\.id), kickoff: event(of: channel)?.start)
         dropMarksAsTheyEnd()
         let keys = all.compactMap(sharedKey)
-        guard let emby, !keys.isEmpty else { return }
+        guard let emby = account.emby, !keys.isEmpty else { return }
         let life = liveFailures.sharedGameLife
         Task(priority: .utility) {
             let now = Date().timeIntervalSince1970
@@ -2396,7 +2078,7 @@ final class AppModel {
     }
 
     private func readGamesOtherDevicesFoundNotPlaying() async {
-        guard let emby, let record = await emby.notPlayingRecord(), !record.isEmpty else { return }
+        guard let emby = account.emby, let record = await emby.notPlayingRecord(), !record.isEmpty else { return }
         let found = liveLibrary.feeds.keys.compactMap { id -> (channel: LiveChannel, at: Double)? in
             guard let channel = channelById[id], let key = sharedKey(channel), let at = record[key] else { return nil }
             return (channel, at)
@@ -2438,7 +2120,7 @@ final class AppModel {
         let cleared = liveFailures.gamePlayed(ids)
         sayCleared(cleared.values.min { $0.noted < $1.noted }, game: true)
         let keys = all.filter { cleared[$0.id] != nil }.compactMap(sharedKey)
-        guard let emby, !keys.isEmpty else { return }
+        guard let emby = account.emby, !keys.isEmpty else { return }
         Task(priority: .utility) {
             guard var record = await emby.notPlayingRecord(), keys.contains(where: { record[$0] != nil }) else { return }
             for key in keys { record[key] = nil }
@@ -2476,21 +2158,22 @@ final class AppModel {
     /// Emby server. Answers are kept for the session so retyping is instant.
     func serverSearch(_ query: String, cardWidth: Int) async -> [Card] {
         let key = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard key.count >= 2, let emby else { return [] }
-        if let cached = serverSearchCache[key] { return cached }
+        let scope = account
+        guard key.count >= 2, let emby = scope.emby else { return [] }
+        if let cached = scope.serverSearchCache[key] { return cached }
         guard let cards = try? await emby.search(key, cardWidth: cardWidth) else { return [] }
-        serverSearchCache[key] = cards
+        scope.serverSearchCache[key] = cards
         return cards
     }
 
     func card(for entry: LibraryEntry, width: Int, with person: String? = nil) -> Card? {
-        guard let card = emby?.card(for: entry, width: width, rating: library.rating(entry)) else { return nil }
+        guard let card = account.emby?.card(for: entry, width: width, rating: library.rating(entry)) else { return nil }
         return person.map { card.adding("with " + $0) } ?? card
     }
 
     /// A search card for a title found through someone in it.
     func card(for item: EmbyItem, width: Int, with person: String) -> Card? {
-        guard let emby else { return nil }
+        guard let emby = account.emby else { return nil }
         let base = emby.card(item, context: .poster, shape: .portrait, width: width)
         let details = [item.kind == "Series" ? "Show" : "Movie", item.productionYear.map(String.init),
                        library.ratings?.rating(item.imdb).map(IMDbRatings.label), "with " + person]
@@ -2500,25 +2183,23 @@ final class AppModel {
 
     // MARK: Search across cast
 
-    /// Actors and directors of titles checked so far this session.
-    private var castCache: [String: [String]] = [:]
-
     /// The server part of a search. Titles waiting for a cast check keep
     /// only if each leftover word is in an actor's or director's name
     /// (noting whom), and people named by the query bring their titles
     /// ("antonio banderas"), the asked year's and the most popular first.
     func refine(_ query: SearchQuery, hits: [SearchHit]) async -> (hits: [SearchHit], people: [(item: EmbyItem, person: String)]) {
-        guard let emby else { return (hits.filter { $0.pending.isEmpty }, []) }
-        let unknown = hits.filter { !$0.pending.isEmpty && castCache[$0.entry.id] == nil }.map(\.entry.id)
+        let scope = account
+        guard let emby = scope.emby else { return (hits.filter { $0.pending.isEmpty }, []) }
+        let unknown = hits.filter { !$0.pending.isEmpty && scope.castCache[$0.entry.id] == nil }.map(\.entry.id)
         async let castLists = emby.people(of: Array(unknown.prefix(40)))
         async let persons = query.words.isEmpty ? [] : emby.persons(matching: query.title)
         for (id, people) in await castLists {
-            castCache[id] = people.filter { [nil, "Actor", "Director", "GuestStar"].contains($0.type) }.prefix(25).map(\.name)
+            scope.castCache[id] = people.filter { [nil, "Actor", "Director", "GuestStar"].contains($0.type) }.prefix(25).map(\.name)
         }
         var refined: [SearchHit] = []
         for var hit in hits {
             guard !hit.pending.isEmpty else { refined.append(hit); continue }
-            guard let cast = castCache[hit.entry.id] else { continue }
+            guard let cast = scope.castCache[hit.entry.id] else { continue }
             let found = hit.pending.compactMap { word in cast.first { SearchQuery.startsWord(word, in: $0) } }
             guard found.count == hit.pending.count else { continue }
             hit.pending = []
@@ -2706,21 +2387,6 @@ final class AppModel {
     }
 }
 
-/// Held by a title page: its data stays cached while the page exists.
-final class PagePin {
-    private let release: @Sendable () -> Void
-    init(_ release: @escaping @Sendable () -> Void) { self.release = release }
-    deinit { release() }
-}
-
-/// One title page's data, observed on its own.
-@Observable
-@MainActor
-final class TitleState<Value> {
-    var value: Value?
-    init(_ value: Value?) { self.value = value }
-}
-
 #if canImport(UIKit)
 /// Time to finish a piece of work once the app leaves the front, given
 /// back once: when the work ends, or when iOS runs out of it, after
@@ -2849,8 +2515,9 @@ extension AppModel {
     /// out of sight. (The first read on a device stamps nothing: the
     /// server's order for titles no device dated.)
     func loadMyList(cardWidth: Int) async {
-        myListWidth = cardWidth
-        guard let emby else { return }
+        let scope = account
+        scope.myListWidth = cardWidth
+        guard let emby = scope.emby else { return }
         async let shared = emby.myListDates()
         guard let found = try? await emby.favorites() else { return }
         let record = await shared
@@ -2891,11 +2558,11 @@ extension AppModel {
                 groups.append((item, keys, [item.id]))
             }
         }
-        myListCopies = Dictionary(groups.flatMap { group in group.keys.map { ($0, group.ids) } }, uniquingKeysWith: { $0.union($1) })
+        scope.myListCopies = Dictionary(groups.flatMap { group in group.keys.map { ($0, group.ids) } }, uniquingKeysWith: { $0.union($1) })
         let cards = groups.map { emby.card($0.first, context: .poster, shape: .portrait, width: cardWidth) }
-        if cards != myList { myList = cards }
+        if cards != scope.myList { scope.myList = cards }
         let ids = Set(found.map(\.id))
-        if ids != myListIDs { myListIDs = ids }
+        if ids != scope.myListIDs { scope.myListIDs = ids }
     }
 
     /// The titles that can share one second of being put on My List, at
@@ -2905,14 +2572,14 @@ extension AppModel {
     /// My List read again (back in the app: something may have been put on
     /// it on another device meanwhile).
     func refreshMyList() async {
-        guard let myListWidth else { return }
-        await loadMyList(cardWidth: myListWidth)
+        guard let width = account.myListWidth else { return }
+        await loadMyList(cardWidth: width)
     }
 
     /// Whether a title is on My List, in any copy (what the server said of
     /// the title itself until the list is loaded).
     func isOnMyList(_ id: String, item: EmbyItem?) -> Bool {
-        guard let myListIDs else { return item?.userData?.isFavorite == true }
+        guard let myListIDs = account.myListIDs else { return item?.userData?.isFavorite == true }
         if myListIDs.contains(id) { return true }
         return !copiesOnMyList(item).isEmpty
     }
@@ -2920,34 +2587,35 @@ extension AppModel {
     /// The ids of this title's copies on My List.
     private func copiesOnMyList(_ item: EmbyItem?) -> Set<String> {
         guard let item else { return [] }
-        return item.titleKeys.compactMap { myListCopies[$0] }.reduce(into: Set<String>()) { $0.formUnion($1) }
-            .union((myListIDs ?? []).contains(item.id) ? [item.id] : [])
+        return item.titleKeys.compactMap { account.myListCopies[$0] }.reduce(into: Set<String>()) { $0.formUnion($1) }
+            .union((account.myListIDs ?? []).contains(item.id) ? [item.id] : [])
     }
 
     /// Puts a title on My List or takes it off: on screen at once (the row
     /// on Home too), then on the server; back as it was if that fails.
     func toggleMyList(_ item: EmbyItem, cardWidth: Int = 360) {
-        guard let emby else { return }
+        let scope = account
+        guard let emby = scope.emby else { return }
         let on = !isOnMyList(item.id, item: item)
-        let before = (myList, myListIDs, myListCopies)
-        var ids = myListIDs ?? []
+        let before = (scope.myList, scope.myListIDs, scope.myListCopies)
+        var ids = scope.myListIDs ?? []
         // Off: every copy of the title comes off (the other one would
         // bring it back).
         let copies = on ? [item.id] : copiesOnMyList(item).union([item.id])
         if on {
             ids.insert(item.id)
-            myList.removeAll { $0.id == item.id }
-            myList.insert(emby.card(item, context: .poster, shape: .portrait, width: cardWidth), at: 0)
+            scope.myList.removeAll { $0.id == item.id }
+            scope.myList.insert(emby.card(item, context: .poster, shape: .portrait, width: cardWidth), at: 0)
             myListAdded[item.id] = Date().timeIntervalSince1970
-            for key in item.titleKeys { myListCopies[key, default: []].insert(item.id) }
+            for key in item.titleKeys { scope.myListCopies[key, default: []].insert(item.id) }
         } else {
             ids.subtract(copies)
-            myList.removeAll { copies.contains($0.id) }
+            scope.myList.removeAll { copies.contains($0.id) }
             for id in copies { myListAdded[id] = nil }
-            for key in item.titleKeys { myListCopies[key] = nil }
-            myListCopies = myListCopies.filter { $0.value.isDisjoint(with: copies) }
+            for key in item.titleKeys { scope.myListCopies[key] = nil }
+            scope.myListCopies = scope.myListCopies.filter { $0.value.isDisjoint(with: copies) }
         }
-        myListIDs = ids
+        scope.myListIDs = ids
         let stamp = myListAdded[item.id]
         Task {
             do {
@@ -2959,9 +2627,9 @@ extension AppModel {
                     await emby.saveMyListDates(record)
                 }
             } catch {
-                myList = before.0
-                myListIDs = before.1
-                myListCopies = before.2
+                scope.myList = before.0
+                scope.myListIDs = before.1
+                scope.myListCopies = before.2
             }
         }
     }

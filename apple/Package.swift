@@ -27,6 +27,8 @@ let package = Package(
                 "Live/StreamFailure.swift",
                 "Live/WatchOn.swift",
                 "Live/XtreamProvider.swift",
+                "Model/AccountScope.swift",
+                "Model/AccountSession.swift",
                 "Model/Ahead.swift",
                 "Model/Flex.swift",
                 "Model/HomeFeed.swift",

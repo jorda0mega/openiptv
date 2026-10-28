@@ -557,7 +557,7 @@ struct LivePlayerView: View {
     private func start() {
         // A film warmed up in the background would only compete, as would
         // what was fetched ahead for Continue Watching.
-        model.coolDown()
+        model.account.coolDown()
         StreamRelay.shared.stopAhead(keeping: nil)
         let player = makePlayer(prefs: prefs, picture: .gpu)
         player.onEvent = { event, attempt in handle(event, attempt) }
@@ -584,7 +584,7 @@ struct LivePlayerView: View {
         pendingPick = nil
         choices = model.watchChoices(for: channel)
         let first = copy ?? choices.first?.channel ?? model.liveOrder(of: channel).first ?? channel
-        model.noteChannel(channel.id)
+        model.account.noteChannel(channel.id)
         send(.play(first, feeds: feeds, after: delay, startLimit: startLimit))
         showAround()
         showControls()

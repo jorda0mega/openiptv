@@ -190,7 +190,7 @@ struct CastRow: View {
                 Text(person.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined())
                     .font(.headline).foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                if let url = model.emby?.personImageURL(person, width: 200) {
+                if let url = model.account.emby?.personImageURL(person, width: 200) {
                     CoverImage(images: [CardImage(url: url.absoluteString, contain: false)], title: "")
                 }
             }
