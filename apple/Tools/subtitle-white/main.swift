@@ -31,7 +31,6 @@ final class Frames: @unchecked Sendable {
         }, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    /// The frame drawn again with the subtitles as they are now: its brightest code in the bottom 40%.
     func peak() -> UInt8 {
         queue.sync {
             _ = mpv_render_context_update(context)
@@ -77,8 +76,6 @@ final class Frames: @unchecked Sendable {
     }
 }
 
-/// One frame with its subtitle as the iPhone's software picture draws it, and how bright Core Image shows the
-/// subtitle's peak, in SDR whites, once the frame is tagged as the app tags it.
 func brightest(film: URL, subtitle: URL?) -> (codec: String, peak: UInt8, white: Double) {
     guard let mpv = mpv_create() else { fatalError("mpv_create") }
     defer { mpv_terminate_destroy(mpv) }
@@ -127,7 +124,6 @@ func brightest(film: URL, subtitle: URL?) -> (codec: String, peak: UInt8, white:
         guard let event = mpv_wait_event(mpv, 0.1)?.pointee else { continue }
         switch event.event_id {
         case MPV_EVENT_VIDEO_RECONFIG:
-            // The white MPVPlayer.noteFilmSize gives this transfer.
             color = FrameColor(gamma: property("video-params/gamma"))
             mpv_set_property_string(mpv, "sub-color", color.subtitleColor)
         case MPV_EVENT_PLAYBACK_RESTART:

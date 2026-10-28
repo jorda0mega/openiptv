@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
-"""make_sup.py OUT.sup: one PGS (Blu-ray picture) subtitle for a 1920x1080 film, on screen from 0.5 s to 59 s.
-
-A white bar 600x60 px with a 4 px black edge at the bottom middle, drawn the way Blu-ray subtitles are:
-an indexed picture with a YCbCr palette (white Y 235, black Y 16, the rest transparent).
-"""
 import struct
 import sys
 
 W, H = 1920, 1080
 BAR_W, BAR_H, EDGE = 600, 60, 4
 X, Y = (W - BAR_W) // 2, H - 160
+pgs_clock = 90_000
 
 
 def segment(kind, pts, data):
@@ -52,6 +48,7 @@ def display_set(pts, show):
     out = segment(0x16, pts, pcs)
     out += segment(0x17, pts, struct.pack(">BBHHHH", 1, 0, X, Y, BAR_W, BAR_H))
     if show:
+        # Limited-range YCbCr. White is Y 235, black is Y 16, and the rest is transparent.
         palette = struct.pack(">BB", 0, 0) + bytes([0, 16, 128, 128, 0, 1, 235, 128, 128, 255, 2, 16, 128, 128, 255])
         out += segment(0x14, pts, palette)
         data = picture()
@@ -62,4 +59,4 @@ def display_set(pts, show):
 
 
 with open(sys.argv[1], "wb") as f:
-    f.write(display_set(45000, True) + display_set(59 * 90000, False))
+    f.write(display_set(pgs_clock // 2, True) + display_set(59 * pgs_clock, False))

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# How bright subtitles show over HDR10, HLG and SDR films on iPhone and iPad: each drawn by the app's libmpv
-# (MPVKit's macOS slice) as the software picture draws it, with sub-color set as MPVPlayer sets it, then read
-# through Core Image as FrameColor tags the frame. Fails when a text subtitle is not at SDR white. On the Mac, with
-# no simulator; needs ffmpeg with libx265.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 [[ -d Vendor/Libmpv.xcframework ]] || scripts/fetch-mpvkit.sh
