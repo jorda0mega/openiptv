@@ -368,6 +368,25 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(again, 2)
     }
 
+    func testForgettingWhatIsKeptLetsAFetchUnderWayFinishForItsCard() async throws {
+        let gate = Fetches(held: true), count = Locked(0)
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(60))) { key in
+            if key == "asked" { _ = try await gate.fetch(key) }
+            count.mutate { $0 += 1 }
+            return count.value
+        }
+        _ = try await shelf.value(for: "kept")
+        let warming = Task { await shelf.warm("asked", for: Interest(at: .homeForecast, .likely)) }
+        var started = gate.started.makeAsyncIterator()
+        _ = await started.next()
+        shelf.forgetKept()
+        gate.letThrough()
+        let warmed = await warming.value
+        XCTAssertEqual(warmed, 2, "a plan asked as the app became active was stopped, and its card got nothing more")
+        let kept = try await shelf.value(for: "kept")
+        XCTAssertEqual(kept, 3, "a plan kept from before the app went away was kept")
+    }
+
     func testAnInterestIsNeverTakenForAnEarlierOne() {
         var ids: Set<Interest.ID> = []
         for _ in 0..<1000 { ids.insert(Interest(at: .posterRow, .glance).id) }
