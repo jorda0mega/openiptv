@@ -1562,8 +1562,11 @@ final class AppModel {
         if let emby { await syncLibrary(emby, urgent: checkingChanges) }
     }
 
+    /// Back from the background, plans kept from before may be out of date. Not at launch, and not ones under way:
+    /// stopping those left the cards waiting on them with nothing fetched ahead.
     func forgetPlaybackPlans() {
-        plans.forgetAll()
+        guard backgroundedAt != nil else { return }
+        plans.forgetKept()
     }
 
     private func syncLibrary(_ emby: EmbyClient, urgent: Bool = false) async {
