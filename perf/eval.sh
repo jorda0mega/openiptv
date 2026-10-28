@@ -24,6 +24,8 @@ run() { OUT=$OUT zsh $HERE/run.sh sim_runs.sh "$@" $commit 2>&1 | grep -vE "wait
 media=/tmp/openiptv/subs-look-media
 if [ $mode = real ]; then
   export FEED=${FEED:-http://127.0.0.1:8799}
+  # A worktree of its own: a test server bisect may be using the shared one.
+  export WT=/tmp/openiptv/wt-real-$(basename $REPO)
   curl -sf -o /dev/null $FEED/emby || { echo "the logins helper isn't running"; exit 1; }
   echo "== real feeds, commit $commit, $(date '+%a %H:%M')"
   wants starts ios && PLATFORM=ios LIMIT=2400 run StartTimingTests/testStarts
