@@ -1,7 +1,8 @@
 #!/usr/bin/env python3 -I
 """The app's named measurements, read from runner output, against the best
-table (perf/best.json). Names come from apple/OpenIPTV/Player/PerfMetric.swift
-and nowhere else.
+table (perf/best.json). Names come from apple/OpenIPTV/Telemetry/ and nowhere
+else: Metric.Name (Measurement.swift, also sent from TestFlight builds) and
+Metric.EvalName (EvalMetric.swift, the eval suite's own).
 
     perf.py names                       every metric name and unit
     perf.py parse FILE...               runner output to JSON lines, one sample each
@@ -25,7 +26,7 @@ import sys
 from datetime import datetime
 
 REPO = os.environ.get("REPO") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REGISTRY = os.path.join(REPO, "apple/OpenIPTV/Player/PerfMetric.swift")
+REGISTRY = [os.path.join(REPO, "apple/OpenIPTV/Telemetry", name) for name in ("Measurement.swift", "EvalMetric.swift")]
 BEST = os.path.join(REPO, "perf/best.json")
 RESULTS = "/tmp/openiptv"
 
@@ -50,23 +51,31 @@ READING_FLAGS = {"-noFileProbe", "-debugHTTP2", "YES"}
 
 
 def names():
-    with open(REGISTRY) as f:
-        text = f.read()
-    cases = dict(re.findall(r'case (\w+) = "([a-z0-9_]+\.[a-z0-9_.]+)"', text))
-    units = {}
-    for block, unit in re.findall(r"case ((?:\.\w+, )*\.\w+): \.(\w+)", text):
-        for case in re.findall(r"\.(\w+)", block):
-            units[cases[case]] = unit
-    default = re.search(r"default: \.(\w+)", text).group(1)
-    symbol = dict(seconds="s", milliseconds="ms", count="count", ratio="ratio")
-    return {name: symbol[units.get(name, default)] for name in cases.values()}
+    """Every metric name, in Metric.Name's then Metric.EvalName's order, with the unit the eval suite prints it in."""
+    found = []
+    for path in REGISTRY:
+        with open(path) as f:
+            text = f.read()
+        for block in re.findall(r"enum (?:Name|EvalName): String[^{]*\{(.*?)\n    \}", text, re.S):
+            found += re.findall(r'case \w+ = "([a-z0-9_.]+)"', block)
+    return {name: unit_of(name) for name in found}
+
+
+def unit_of(name):
+    if name.startswith("film.start."):
+        return "s"
+    if name.startswith(("film.subtitles.peak", "film.subtitles.scale")):
+        return "ratio"
+    if name in ("film.jump.loading_shown", "film.play.pauses_120s"):
+        return "count"
+    return "ms"
 
 
 # Each runner line that is a sample: (pattern on the text after "REAL ", metric).
 REAL_LINES = [
-    (r"(?:link start cold|start card \d+ cold): tap to first frame ([0-9.]+) s", "film.start.first_tap"),
+    (r"(?:link start cold|start card \d+ cold): tap to first frame ([0-9.]+) s", "film.start.unprepared"),
     (r"(?:link start ready|start card \d+ ready): tap to first frame ([0-9.]+) s", "film.start.prepared"),
-    (r"link playback start: tap to first frame ([0-9.]+) s", "film.start.launch_tap"),
+    (r"link playback start: tap to first frame ([0-9.]+) s", "film.start.first_tap"),
     (r"(?:link )?jump \+5 min: (\d+) ms", "film.jump.forward_5min"),
     (r"link first 120 s: pauses (\d+)", "film.play.pauses_120s"),
     (r"link subtitles: switch .*? ; after=(\d+) ;", "film.subtitles.first_line"),
@@ -118,7 +127,7 @@ def parse(path, commit=None, platform=None, target=None, first_only=False):
             parts = dict(re.findall(r"(start|return) (.*?)(?: \||$)", text[8:]))
             for kind, part in parts.items():
                 fields = dict((k, float(v)) for k, v in re.findall(r"(\w+)=(\d+)", part))
-                rows += [(f"pip.{kind}.picture_gap", fields.get("frames")), (f"pip.{kind}.sound_gap", fields.get("audio"))]
+                rows += [(f"film.pip.{kind}_gap", fields.get("frames")), (f"film.pip.{kind}_sound_gap", fields.get("audio"))]
         elif text.startswith("PERF live open"):
             fields = dict(re.findall(r"(\w+)=(-?\d+)", text))
             if int(fields.get("tap", -1)) >= 0:
@@ -196,8 +205,7 @@ FLOOR = dict(s=0.1, ms=42, count=0.5, ratio=0.05)
 
 def compare(paths, known, platforms):
     """Each metric this run measured against the best for its target, link and platform: better or
-    REGRESSION when its median is further from the best than the run's own spread (its interquartile
-    range, at least FLOOR), else same."""
+    REGRESSION when its median is further from the best than the spread (see noise below), else same."""
     samples = [json.loads(line) for path in paths for line in open(path) if line.strip()]
     with open(BEST) as f:
         table = json.load(f)["metrics"]
@@ -217,8 +225,11 @@ def compare(paths, known, platforms):
                 if not values:
                     print(f"{platform:8} {metric:28} {0:>3} {'-':>9} {'-':>9} {'-':>9}  {fmt(best['value']) if best else '-':>9} {set_by:<22} not measured")
                     continue
-                p50, p95, top = pct(values, 50), pct(values, 95), max(values)
-                noise = max(pct(values, 75) - pct(values, 25), FLOOR[unit])
+                p50, p95, top = statistics.median(values), pct(values, 95), max(values)
+                # The spread: this run's interquartile range (half its range under 5 samples), or the best run's
+                # own, whichever is wider, and never under FLOOR.
+                own = pct(values, 75) - pct(values, 25) if len(values) >= 5 else (top - min(values)) / 2
+                noise = max(own, best.get("spread", 0) if best else 0, FLOOR[unit])
                 verdict = ("no best yet" if best is None else "better" if p50 < best["value"] - noise
                            else "REGRESSION" if p50 > best["value"] + noise else "same")
                 print(f"{platform:8} {metric:28} {len(values):>3} {fmt(p50):>9} {fmt(p95):>9} {fmt(top):>9}  "
@@ -264,7 +275,7 @@ def main(argv):
         samples = recorded()
         table, skipped = best(samples, known)
         unknown = sorted({s["metric"] for s in samples} - set(known))
-        assert not unknown, f"samples under names PerfMetric lacks: {unknown}"
+        assert not unknown, f"samples under names Metric.Name and Metric.EvalName lack: {unknown}"
         with open(BEST, "w") as f:
             json.dump(dict(about="Best recorded run per metric, target (real Emby or mock:<profile>), link and platform: the "
                                  "run's median (value), its sample count and interquartile spread, and the build. Lower is "
@@ -299,6 +310,7 @@ def main(argv):
                 opens.append(int(m.group(1)))
         for k, ms in enumerate(opens):
             print(f"METRIC {'live.start' if k == 0 else 'live.switch'} {ms} ms")
+    elif argv[:1] == ["compare"]:
         platforms = (os.environ.get("PLATFORMS") or "ios tvos").split()
         compare(argv[1:], known, platforms)
     else:

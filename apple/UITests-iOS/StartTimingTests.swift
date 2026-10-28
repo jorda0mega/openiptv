@@ -2,11 +2,13 @@ import XCTest
 
 /// iPhone: how long Continue Watching's titles take to start, each from a
 /// fresh launch of an installed app. Kinds, in each of START_ROUNDS rounds
-/// (3 unless set): the first tap with nothing prepared (-noPrepareAhead), a
-/// tap as soon as the card shows, a card tapped once its plan and start are
-/// fetched ahead (at most 30 s), and another card after the first played and
-/// closed. The install's first launch comes first, timed on its own. Each
-/// start prints a METRIC line and a START line with the app's parts.
+/// (3 unless set), by Metric's names: the first tap with nothing prepared
+/// (film.start.unprepared, -noPrepareAhead), a tap as soon as the card shows
+/// (film.start.first_tap), a card tapped once its plan and start are fetched
+/// ahead, at most 30 s (film.start.prepared), and another card after the
+/// first played and closed (film.start.resume). The install's first launch
+/// comes first (film.start.first_tap too). Each start prints a METRIC line
+/// and a START line with the app's parts.
 /// Continue Watching needs two cards.
 final class StartTimingTests: TimingCase {
     func testStarts() throws {
@@ -15,7 +17,7 @@ final class StartTimingTests: TimingCase {
         app.launch()
         let first = try firstCard()
         app.buttons[first].tap()
-        say("install_tap", "film.start.launch_tap", start())
+        say("install_tap", "film.start.first_tap", start())
         app.terminate()
         // The rest of the install's first launches, which a busy server answers late.
         for _ in 0..<3 {
@@ -28,13 +30,13 @@ final class StartTimingTests: TimingCase {
             app.launchArguments = shipped + ["-noPrepareAhead", "YES"]
             app.launch()
             app.buttons[try firstCard()].tap()
-            say("first_tap", "film.start.first_tap", start())
+            say("unprepared", "film.start.unprepared", start())
             app.terminate()
 
             app.launchArguments = shipped
             app.launch()
             app.buttons[try firstCard()].tap()
-            say("launch_tap", "film.start.launch_tap", start())
+            say("first_tap", "film.start.first_tap", start())
             app.terminate()
 
             app.launch()
@@ -52,9 +54,9 @@ final class StartTimingTests: TimingCase {
             if let other {
                 sleep(2)
                 app.buttons[other].tap()
-                say("resume_other", "film.start.resume_other", start())
+                say("resume", "film.start.resume", start())
             } else {
-                print("START resume_other: no second card")
+                print("START resume: no second card")
             }
             app.terminate()
         }
