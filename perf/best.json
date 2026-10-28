@@ -17,7 +17,8 @@
      "landed_as": "2989ab3",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-extreme-runs/extreme.txt"
+     "source": "fsr-extreme-runs/extreme.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-busy",
@@ -32,7 +33,8 @@
      "landed_as": "15945fa",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "filmbuf/ab/new-real-busy.txt"
+     "source": "filmbuf/ab/new-real-busy.txt",
+     "between_runs": 2.4
     },
     {
      "target": "mock:real-busy",
@@ -47,7 +49,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/ship/busy.txt"
+     "source": "filmbuf/ship/busy.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -62,7 +65,8 @@
      "landed_as": "c4ee7a1",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "fsr-plan-tools/cal-quiet-1.txt"
+     "source": "fsr-plan-tools/cal-quiet-1.txt",
+     "between_runs": 0.2
     },
     {
      "target": "mock:real-quiet",
@@ -77,7 +81,8 @@
      "landed_as": "9dfe06d",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/val-real-quiet.txt"
+     "source": "fsr-tv/val-real-quiet.txt",
+     "between_runs": 0.3
     },
     {
      "target": "mock:real-quiet",
@@ -92,22 +97,24 @@
      "landed_as": "9c77b5b",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/open-real-quiet.txt"
+     "source": "fsr-tv/open-real-quiet.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:worst",
      "link": "none",
      "platform": "ios",
      "unit": "s",
-     "runs": 9,
-     "value": 8.8,
-     "samples": 3,
-     "spread": 7.2,
-     "commit": "ebfec05",
-     "landed_as": "ebfec05",
-     "testflight": "202610262043",
+     "runs": 10,
+     "value": 7.8,
+     "samples": 4,
+     "spread": 4.4,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
      "date": "2026-10-27",
-     "source": "perf-runs/StartTimingTests-ios-worst/ebfec05/metrics.txt"
+     "source": "perf-evals/mock-1027-2117/StartTimingTests-ios-worst/3691de8/metrics.txt",
+     "between_runs": 1.6
     },
     {
      "target": "real",
@@ -122,7 +129,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 4.6
     },
     {
      "target": "real",
@@ -137,7 +145,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 3.4
     },
     {
      "target": "real",
@@ -152,7 +161,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "verdict-real-tv-1026-1255/run.txt"
+     "source": "verdict-real-tv-1026-1255/run.txt",
+     "between_runs": 0.0
     },
     {
      "target": "real",
@@ -167,7 +177,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 0.0
     }
    ]
   },
@@ -187,7 +198,8 @@
      "landed_as": "2989ab3",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-extreme-runs/extreme.txt"
+     "source": "fsr-extreme-runs/extreme.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-busy",
@@ -202,7 +214,8 @@
      "landed_as": "15945fa",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "filmbuf/ab/new-real-busy.txt"
+     "source": "filmbuf/ab/new-real-busy.txt",
+     "between_runs": 0.4
     },
     {
      "target": "mock:real-busy",
@@ -217,7 +230,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/ship/busy.txt"
+     "source": "filmbuf/ship/busy.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -232,7 +246,8 @@
      "landed_as": "bdfe8e5",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "fsr-plan-tools/b2-real-quiet-efg.txt"
+     "source": "fsr-plan-tools/b2-real-quiet-efg.txt",
+     "between_runs": 2.4
     },
     {
      "target": "mock:real-quiet",
@@ -247,7 +262,8 @@
      "landed_as": "9c77b5b",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/open-real-quiet.txt"
+     "source": "fsr-tv/open-real-quiet.txt",
+     "between_runs": 0.2
     },
     {
      "target": "mock:real-quiet",
@@ -262,14 +278,15 @@
      "landed_as": "9c77b5b",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/open-real-quiet.txt"
+     "source": "fsr-tv/open-real-quiet.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:worst",
      "link": "none",
      "platform": "ios",
      "unit": "s",
-     "runs": 10,
+     "runs": 11,
      "value": 4.8,
      "samples": 3,
      "spread": 5.9,
@@ -277,7 +294,8 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "perf-runs/StartTimingTests-ios-worst/09afc6f/metrics.txt"
+     "source": "perf-runs/StartTimingTests-ios-worst/09afc6f/metrics.txt",
+     "between_runs": 9.1
     },
     {
      "target": "real",
@@ -292,7 +310,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-1913/run.txt"
+     "source": "baseline-real-1025-1913/run.txt",
+     "between_runs": 0.0
     },
     {
      "target": "real",
@@ -307,7 +326,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "verdict-real-1026-1246/run.txt"
+     "source": "verdict-real-1026-1246/run.txt",
+     "between_runs": 35.4
     },
     {
      "target": "real",
@@ -322,7 +342,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "verdict-real-tv-1026-1255/run.txt"
+     "source": "verdict-real-tv-1026-1255/run.txt",
+     "between_runs": 0.0
     },
     {
      "target": "real",
@@ -337,7 +358,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 0.0
     }
    ]
   },
@@ -349,7 +371,7 @@
      "link": "none",
      "platform": "ios",
      "unit": "s",
-     "runs": 4,
+     "runs": 5,
      "value": 4.4,
      "samples": 3,
      "spread": 1.2,
@@ -357,7 +379,8 @@
      "landed_as": "ebfec05",
      "testflight": "202610262043",
      "date": "2026-10-27",
-     "source": "perf-runs/StartTimingTests-ios-worst/ebfec05/metrics.txt"
+     "source": "perf-runs/StartTimingTests-ios-worst/ebfec05/metrics.txt",
+     "between_runs": 0.2
     }
    ]
   },
@@ -381,14 +404,15 @@
      "landed_as": "3169823",
      "testflight": "202610261846",
      "date": "2026-10-27",
-     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt"
+     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
+     "between_runs": 13.0
     },
     {
      "target": "mock:worst",
      "link": "none",
      "platform": "ios",
      "unit": "ms",
-     "runs": 4,
+     "runs": 5,
      "value": 159.0,
      "samples": 10,
      "spread": 127.0,
@@ -396,7 +420,8 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "perf-runs/JumpTimingTests-worst/09afc6f/metrics.txt"
+     "source": "perf-runs/JumpTimingTests-worst/09afc6f/metrics.txt",
+     "between_runs": 1030.0
     }
    ]
   },
@@ -416,22 +441,40 @@
      "landed_as": "3169823",
      "testflight": "202610261846",
      "date": "2026-10-27",
-     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt"
+     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
+     "between_runs": 22.0
     },
     {
      "target": "mock:worst",
      "link": "none",
      "platform": "ios",
      "unit": "ms",
-     "runs": 4,
-     "value": 146.0,
+     "runs": 5,
+     "value": 142.0,
      "samples": 10,
-     "spread": 12.0,
-     "commit": "09afc6f",
-     "landed_as": "09afc6f",
-     "testflight": "202610271425",
+     "spread": 24.0,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
      "date": "2026-10-27",
-     "source": "perf-runs/JumpTimingTests-worst/09afc6f/metrics.txt"
+     "source": "perf-evals/mock-1027-2117/JumpTimingTests-ios-worst/3691de8/metrics.txt",
+     "between_runs": 5.0
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "ms",
+     "runs": 1,
+     "value": 10271.0,
+     "samples": 4,
+     "spread": 1063.0,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
+     "date": "2026-10-27",
+     "source": "perf-evals/mock-1027-2117/JumpTimingTests-tvos-worst/3691de8/metrics.txt",
+     "between_runs": 0.0
     }
    ]
   },
@@ -451,7 +494,8 @@
      "landed_as": "15945fa",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "filmbuf/ab/new-real-busy.txt"
+     "source": "filmbuf/ab/new-real-busy.txt",
+     "between_runs": 691.0
     },
     {
      "target": "mock:real-busy",
@@ -466,7 +510,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/ship/busy.txt"
+     "source": "filmbuf/ship/busy.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -481,7 +526,8 @@
      "landed_as": "3169823",
      "testflight": "202610261846",
      "date": "2026-10-27",
-     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt"
+     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
+     "between_runs": 515.0
     },
     {
      "target": "mock:real-quiet",
@@ -496,7 +542,8 @@
      "landed_as": "9c77b5b",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/open-real-quiet.txt"
+     "source": "fsr-tv/open-real-quiet.txt",
+     "between_runs": 9.0
     },
     {
      "target": "mock:real-quiet",
@@ -511,7 +558,8 @@
      "landed_as": "9c77b5b",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/open-real-quiet.txt"
+     "source": "fsr-tv/open-real-quiet.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:worst",
@@ -526,7 +574,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "filmbuf/ab/base-worst.txt"
+     "source": "filmbuf/ab/base-worst.txt",
+     "between_runs": 5085.0
     },
     {
      "target": "real",
@@ -541,7 +590,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 3474.0
     },
     {
      "target": "real",
@@ -556,7 +606,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-1913/run.txt"
+     "source": "baseline-real-1025-1913/run.txt",
+     "between_runs": 17.0
     },
     {
      "target": "real",
@@ -571,7 +622,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "verdict-real-tv-1026-1255/run.txt"
+     "source": "verdict-real-tv-1026-1255/run.txt",
+     "between_runs": 0.0
     },
     {
      "target": "real",
@@ -586,7 +638,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 0.0
     }
    ]
   },
@@ -598,7 +651,7 @@
      "link": "none",
      "platform": "ipad",
      "unit": "ms",
-     "runs": 9,
+     "runs": 10,
      "value": 40.0,
      "samples": 2,
      "spread": 3.0,
@@ -606,7 +659,8 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "subs-fix-runs/run-pip.out"
+     "source": "subs-fix-runs/run-pip.out",
+     "between_runs": 9.0
     }
    ]
   },
@@ -618,7 +672,7 @@
      "link": "none",
      "platform": "ipad",
      "unit": "ms",
-     "runs": 9,
+     "runs": 10,
      "value": 40.0,
      "samples": 2,
      "spread": 1.0,
@@ -626,17 +680,52 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "subs-fix-runs/run-pip2.out"
+     "source": "subs-fix-runs/run-pip2.out",
+     "between_runs": 2.0
     }
    ]
   },
   "live.start": {
    "unit": "ms",
-   "best": []
+   "best": [
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "runs": 1,
+     "value": 7854.0,
+     "samples": 1,
+     "spread": 0.0,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
+     "date": "2026-10-27",
+     "source": "perf-evals/mock-1027-2117/LiveTimingTests-ios-worst/3691de8/metrics.txt",
+     "between_runs": 0.0
+    }
+   ]
   },
   "live.switch": {
    "unit": "ms",
-   "best": []
+   "best": [
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ms",
+     "runs": 1,
+     "value": 2853.0,
+     "samples": 5,
+     "spread": 406.0,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
+     "date": "2026-10-27",
+     "source": "perf-evals/mock-1027-2117/LiveTimingTests-ios-worst/3691de8/metrics.txt",
+     "between_runs": 0.0
+    }
+   ]
   },
   "film.start.unprepared": {
    "unit": "s",
@@ -654,7 +743,8 @@
      "landed_as": "0d57cd4",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "fsr-plan-tools/b6-extreme-final.txt"
+     "source": "fsr-plan-tools/b6-extreme-final.txt",
+     "between_runs": 86.7
     },
     {
      "target": "mock:real-busy",
@@ -669,7 +759,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "filmbuf/ab/base-real-busy.txt"
+     "source": "filmbuf/ab/base-real-busy.txt",
+     "between_runs": 0.9
     },
     {
      "target": "mock:real-busy",
@@ -684,7 +775,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/ship/busy.txt"
+     "source": "filmbuf/ship/busy.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -699,7 +791,8 @@
      "landed_as": "bdfe8e5",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "fsr-plan-tools/b2-real-quiet-efg.txt"
+     "source": "fsr-plan-tools/b2-real-quiet-efg.txt",
+     "between_runs": 1.2
     },
     {
      "target": "mock:real-quiet",
@@ -714,7 +807,8 @@
      "landed_as": "f6973c2",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/recheck2/quiet-tv.txt"
+     "source": "filmbuf/recheck2/quiet-tv.txt",
+     "between_runs": 0.1
     },
     {
      "target": "mock:real-quiet",
@@ -729,22 +823,24 @@
      "landed_as": "9c77b5b",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/open-real-quiet.txt"
+     "source": "fsr-tv/open-real-quiet.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:worst",
      "link": "none",
      "platform": "ios",
      "unit": "s",
-     "runs": 10,
-     "value": 5.0,
-     "samples": 3,
-     "spread": 2.2,
-     "commit": "ebfec05",
-     "landed_as": "ebfec05",
-     "testflight": "202610262043",
+     "runs": 11,
+     "value": 4.3,
+     "samples": 2,
+     "spread": 3.8,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
      "date": "2026-10-27",
-     "source": "perf-runs/StartTimingTests-ios-worst/ebfec05/metrics.txt"
+     "source": "perf-evals/mock-1027-2117/StartTimingTests-ios-worst/3691de8/metrics.txt",
+     "between_runs": 9.5
     },
     {
      "target": "real",
@@ -759,7 +855,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 31.9
     },
     {
      "target": "real",
@@ -774,7 +871,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "verdict-real-1026-1246/run.txt"
+     "source": "verdict-real-1026-1246/run.txt",
+     "between_runs": 8.7
     },
     {
      "target": "real",
@@ -789,7 +887,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "verdict-real-tv-1026-1255/run.txt"
+     "source": "verdict-real-tv-1026-1255/run.txt",
+     "between_runs": 0.0
     },
     {
      "target": "real",
@@ -804,7 +903,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 0.0
     }
    ]
   },
@@ -824,14 +924,15 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/09afc6f/metrics.txt"
+     "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/09afc6f/metrics.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:worst",
      "link": "none",
      "platform": "ios",
      "unit": "count",
-     "runs": 4,
+     "runs": 5,
      "value": 0.0,
      "samples": 1,
      "spread": 0.0,
@@ -839,7 +940,24 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "perf-runs/JumpTimingTests-worst/09afc6f/metrics.txt"
+     "source": "perf-runs/JumpTimingTests-worst/09afc6f/metrics.txt",
+     "between_runs": 2.0
+    },
+    {
+     "target": "mock:worst",
+     "link": "none",
+     "platform": "tvos",
+     "unit": "count",
+     "runs": 1,
+     "value": 18.0,
+     "samples": 1,
+     "spread": 0.0,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
+     "date": "2026-10-27",
+     "source": "perf-evals/mock-1027-2117/JumpTimingTests-tvos-worst/3691de8/metrics.txt",
+     "between_runs": 0.0
     }
    ]
   },
@@ -859,7 +977,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "filmbuf/ab/base-real-busy-r2.txt"
+     "source": "filmbuf/ab/base-real-busy-r2.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-busy",
@@ -874,7 +993,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/ship/busy.txt"
+     "source": "filmbuf/ship/busy.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -889,7 +1009,8 @@
      "landed_as": "f6973c2",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/recheck/quiet.txt"
+     "source": "filmbuf/recheck/quiet.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -904,7 +1025,8 @@
      "landed_as": "f6973c2",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/recheck2/quiet-tv.txt"
+     "source": "filmbuf/recheck2/quiet-tv.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -919,7 +1041,8 @@
      "landed_as": "9c77b5b",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "fsr-tv/open-real-quiet.txt"
+     "source": "fsr-tv/open-real-quiet.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:worst",
@@ -934,7 +1057,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "filmbuf/ab/base-worst-r2.txt"
+     "source": "filmbuf/ab/base-worst-r2.txt",
+     "between_runs": 1.0
     },
     {
      "target": "real",
@@ -949,7 +1073,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 1.0
     },
     {
      "target": "real",
@@ -964,7 +1089,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-1913/run.txt"
+     "source": "baseline-real-1025-1913/run.txt",
+     "between_runs": 0.0
     },
     {
      "target": "real",
@@ -979,7 +1105,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "verdict-real-tv-1026-1255/run.txt"
+     "source": "verdict-real-tv-1026-1255/run.txt",
+     "between_runs": 0.0
     },
     {
      "target": "real",
@@ -994,7 +1121,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-25",
-     "source": "baseline-real-1025-2106/run.txt"
+     "source": "baseline-real-1025-2106/run.txt",
+     "between_runs": 0.0
     }
    ]
   },
@@ -1014,7 +1142,8 @@
      "landed_as": "15945fa",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "filmbuf/ab/new-real-busy.txt"
+     "source": "filmbuf/ab/new-real-busy.txt",
+     "between_runs": 623.0
     },
     {
      "target": "mock:real-busy",
@@ -1029,7 +1158,8 @@
      "landed_as": "451f5b3",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/ship/busy.txt"
+     "source": "filmbuf/ship/busy.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:real-quiet",
@@ -1044,7 +1174,8 @@
      "landed_as": "bdfe8e5",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "fsr-plan-tools/b2-link-efg.txt"
+     "source": "fsr-plan-tools/b2-link-efg.txt",
+     "between_runs": 1.0
     },
     {
      "target": "mock:real-quiet",
@@ -1059,7 +1190,8 @@
      "landed_as": "f6973c2",
      "testflight": "202610261439",
      "date": "2026-10-26",
-     "source": "filmbuf/recheck2/quiet-tv.txt"
+     "source": "filmbuf/recheck2/quiet-tv.txt",
+     "between_runs": 0.0
     },
     {
      "target": "mock:worst",
@@ -1074,7 +1206,8 @@
      "landed_as": "661ecba",
      "testflight": "202610261439",
      "date": "2026-10-23",
-     "source": "filmbuf/ab/base-worst.txt"
+     "source": "filmbuf/ab/base-worst.txt",
+     "between_runs": 397.0
     }
    ]
   },
@@ -1086,21 +1219,39 @@
      "link": "none",
      "platform": "ios",
      "unit": "ratio",
-     "runs": 1,
+     "runs": 2,
      "value": 1.0,
      "samples": 1,
      "spread": 0.0,
-     "commit": "cf5fed1",
-     "landed_as": "1e66780",
+     "commit": "3691de8",
+     "landed_as": "3691de8",
      "testflight": null,
      "date": "2026-10-27",
-     "source": "perf-runs/SubtitleLookTests-ios-none-sdr-720/cf5fed1/metrics.txt"
+     "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-sdr720/3691de8/metrics.txt",
+     "between_runs": 0.0
     }
    ]
   },
   "film.subtitles.peak_hdr": {
    "unit": "ratio",
-   "best": []
+   "best": [
+    {
+     "target": "mock:none",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ratio",
+     "runs": 1,
+     "value": 49.26,
+     "samples": 1,
+     "spread": 0.0,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
+     "date": "2026-10-27",
+     "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-hdr10/3691de8/metrics.txt",
+     "between_runs": 0.0
+    }
+   ]
   },
   "film.subtitles.scale": {
    "unit": "ratio",
@@ -1110,15 +1261,16 @@
      "link": "none",
      "platform": "ios",
      "unit": "ratio",
-     "runs": 1,
-     "value": 1.83,
+     "runs": 3,
+     "value": 1.22,
      "samples": 1,
      "spread": 0.0,
-     "commit": "cf5fed1",
-     "landed_as": "1e66780",
+     "commit": "3691de8",
+     "landed_as": "3691de8",
      "testflight": null,
      "date": "2026-10-27",
-     "source": "perf-runs/SubtitleLookTests-ios-none-sdr-720/cf5fed1/metrics.txt"
+     "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-hdr10/3691de8/metrics.txt",
+     "between_runs": 0.61
     }
    ]
   },
@@ -1130,7 +1282,7 @@
      "link": "none",
      "platform": "ipad",
      "unit": "ms",
-     "runs": 9,
+     "runs": 10,
      "value": 0.0,
      "samples": 2,
      "spread": 1.0,
@@ -1138,7 +1290,8 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "subs-fix-runs/run-pip.out"
+     "source": "subs-fix-runs/run-pip.out",
+     "between_runs": 0.0
     }
    ]
   },
@@ -1150,7 +1303,7 @@
      "link": "none",
      "platform": "ipad",
      "unit": "ms",
-     "runs": 9,
+     "runs": 10,
      "value": 0.0,
      "samples": 2,
      "spread": 0.0,
@@ -1158,7 +1311,8 @@
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "subs-fix-runs/run-pip.out"
+     "source": "subs-fix-runs/run-pip.out",
+     "between_runs": 0.0
     }
    ]
   }

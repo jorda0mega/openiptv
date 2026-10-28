@@ -35,12 +35,14 @@ else
   [ -f $media/hdr10-1080.mkv ] || zsh $HERE/make_look_films.sh $media
   echo "== test server $profile, commit $commit, $(date '+%a %H:%M')"
   export PROFILE=$profile
-  wants starts ios && PLATFORM=ios SET="watched_elsewhere=m7" LIMIT=2400 run StartTimingTests/testStarts
+  # Continue Watching: m7 first (3:36 in), the episode 2 minutes in (the test server's 10 minutes is past the film's end).
+  cards="watched_elsewhere=m7&episode_resume=120"
+  wants starts ios && PLATFORM=ios SET=$cards LIMIT=2400 run StartTimingTests/testStarts
   wants jumps ios && PLATFORM=ios run JumpTimingTests/testTenSecondJumps
   wants look ios && PLATFORM=ios PROFILE=none TAG=sdr720 FILM=$media/sdr-720.mkv run SubtitleLookTests/testSubtitleLook
   wants look ios && PLATFORM=ios PROFILE=none TAG=hdr10 FILM=$media/hdr10-1080.mkv run SubtitleLookTests/testSubtitleLook
   wants live ios && PLATFORM=ios run LiveTimingTests/testLiveStartAndSwitch
-  wants jumps tvos && PLATFORM=tvos SET="watched_elsewhere=m7" run JumpTimingTests/testTenSecondJumps
+  wants jumps tvos && PLATFORM=tvos SET=$cards run JumpTimingTests/testTenSecondJumps
   wants pip ipad && PLATFORM=ipad PROFILE=none run PlayerLookTests/testOpeningTheAppBringsTheFilmBackInline
 fi
 # Subtitle look and Picture in Picture run on the test server's own profile-free link: they compare against

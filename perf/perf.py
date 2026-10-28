@@ -189,7 +189,8 @@ def recorded():
         for path in sorted(glob.glob(os.path.join(RESULTS, pattern))):
             what = dict(what, commit=what["commit"] and git("rev-parse", "--short", what["commit"]))
             samples += parse(path, **what)
-    for path in sorted(glob.glob(os.path.join(RESULTS, "perf-runs/**/samples.jsonl"), recursive=True)):
+    for path in sorted(glob.glob(os.path.join(RESULTS, "perf-runs/**/samples.jsonl"), recursive=True)
+                       + glob.glob(os.path.join(RESULTS, "perf-evals/**/samples.jsonl"), recursive=True)):
         samples += [dict(dict(changed=False, link="none"), **json.loads(line)) for line in open(path) if line.strip()]
     return samples
 
@@ -226,10 +227,10 @@ def compare(paths, known, platforms):
                     print(f"{platform:8} {metric:28} {0:>3} {'-':>9} {'-':>9} {'-':>9}  {fmt(best['value']) if best else '-':>9} {set_by:<22} not measured")
                     continue
                 p50, p95, top = statistics.median(values), pct(values, 95), max(values)
-                # The spread: this run's interquartile range (half its range under 5 samples), or the best run's
-                # own, whichever is wider, and never under FLOOR.
+                # The spread: this run's interquartile range (half its range under 5 samples), the best run's own,
+                # or how far run medians move from run to run, whichever is widest, and never under FLOOR.
                 own = pct(values, 75) - pct(values, 25) if len(values) >= 5 else (top - min(values)) / 2
-                noise = max(own, best.get("spread", 0) if best else 0, FLOOR[unit])
+                noise = max(own, best.get("spread", 0) if best else 0, best.get("between_runs", 0) if best else 0, FLOOR[unit])
                 verdict = ("no best yet" if best is None else "better" if p50 < best["value"] - noise
                            else "REGRESSION" if p50 > best["value"] + noise else "same")
                 print(f"{platform:8} {metric:28} {len(values):>3} {fmt(p50):>9} {fmt(p95):>9} {fmt(top):>9}  "
@@ -238,8 +239,8 @@ def compare(paths, known, platforms):
 
 def best(samples, known):
     """Per metric, target, link and platform: the run (one source file) with the lowest median, with its
-    build, sample count and spread. A run's median, not its single best sample, so that perf.py compare
-    weighs like against like."""
+    build, sample count and spread, and the spread of every run's median (between_runs). A run's median,
+    not its single best sample, so that perf.py compare weighs like against like."""
     runs, skipped = {}, 0
     for s in samples:
         main = None if s["changed"] else landed(s["commit"])
@@ -247,15 +248,19 @@ def best(samples, known):
             skipped += 1
             continue
         runs.setdefault((s["metric"], s["target"], s["link"], s["platform"], s["source"]), []).append((s, main))
-    table = {}
+    table, medians = {}, {}
     for (metric, target, link, platform, source), found in runs.items():
         values = sorted(s["value"] for s, _ in found)
         median, (first, main) = pct(values, 50), found[0]
         entry = table.setdefault((metric, target, link, platform), dict(runs=0))
         entry["runs"] += 1
+        medians.setdefault((metric, target, link, platform), []).append(median)
         if "value" not in entry or median < entry["value"]:
             entry.update(value=median, samples=len(values), spread=round(pct(values, 75) - pct(values, 25), 3),
                          commit=first["commit"], landed_as=main, testflight=first_build(main), date=first["date"], source=source)
+    for key, entry in table.items():
+        # How far one run's median moves from the next: the interquartile range of every run's median.
+        entry["between_runs"] = round(pct(medians[key], 75) - pct(medians[key], 25), 3)
     out = {}
     for (metric, target, link, platform), entry in sorted(table.items()):
         out.setdefault(metric, []).append(dict(target=target, link=link, platform=platform, unit=known[metric], **entry))
