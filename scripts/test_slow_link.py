@@ -403,7 +403,7 @@ class TestServer(unittest.TestCase):
     def ask(self, connection, method, path, headers=None):
         """Seconds to the answer's head, the answer and its body (cut short: what came)."""
         asked = time.monotonic()
-        connection.request(method, path, headers={"X-Emby-Token": "tok", "User-Agent": "Openreel/check", **(headers or {})})
+        connection.request(method, path, headers={"X-Emby-Token": "tok", "User-Agent": "Zapline/check", **(headers or {})})
         answer = connection.getresponse()
         head = time.monotonic() - asked
         try:

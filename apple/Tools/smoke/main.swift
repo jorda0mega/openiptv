@@ -412,7 +412,7 @@ if value("OPENIPTV_SMOKE_MODE") == "xtream-probe" {
         request.timeoutInterval = 30
         request.setValue(gzip ? "gzip" : "identity", forHTTPHeaderField: "Accept-Encoding")
         let config = URLSessionConfiguration.ephemeral
-        config.httpAdditionalHeaders = ["User-Agent": "Openreel"]
+        config.httpAdditionalHeaders = ["User-Agent": "Zapline"]
         let redirect = NoRedirect()
         let session = URLSession(configuration: config, delegate: follow ? nil : redirect, delegateQueue: nil)
         defer { session.invalidateAndCancel() }

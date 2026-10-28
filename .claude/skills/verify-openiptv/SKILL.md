@@ -1,11 +1,11 @@
 ---
 name: verify-openiptv
-description: Proof on the Openreel (OpenIPTV) iPhone app. Drives it on a private simulator against the repo's test server, as a user would, and saves screenshots and accessibility snapshots. Use to prove an iPhone UI change, to reproduce a UI bug before fixing it, or to run the XCUITests (iPhone; Apple TV secondary).
+description: Proof on the Zapline (OpenIPTV) iPhone app. Drives it on a private simulator against the repo's test server, as a user would, and saves screenshots and accessibility snapshots. Use to prove an iPhone UI change, to reproduce a UI bug before fixing it, or to run the XCUITests (iPhone; Apple TV secondary).
 ---
 
-# Verify Openreel (OpenIPTV)
+# Verify Zapline (OpenIPTV)
 
-Openreel is a SwiftUI player for an Emby library and IPTV live TV. The primary surface is the iPhone app: scheme `OpenIPTV`, bundle `com.jorda0mega.openiptv`, project `apple/OpenIPTV.xcodeproj`. The Apple TV app (scheme `OpenIPTV TV`) is secondary, see [Apple TV](#apple-tv-secondary).
+Zapline is a SwiftUI player for an Emby library and IPTV live TV. The primary surface is the iPhone app: scheme `OpenIPTV`, bundle `com.jorda0mega.openiptv`, project `apple/OpenIPTV.xcodeproj`. The Apple TV app (scheme `OpenIPTV TV`) is secondary, see [Apple TV](#apple-tv-secondary).
 
 Run everything through the helper, from the repo root:
 

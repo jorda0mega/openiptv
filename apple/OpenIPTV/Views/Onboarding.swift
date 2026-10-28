@@ -10,7 +10,7 @@ struct WelcomeView: View {
             VStack(spacing: 28) {
                 Image("Logo").resizable().frame(width: 112, height: 112).accessibilityHidden(true)
                 VStack(spacing: 10) {
-                    Text("Openreel").font(.largeTitle.weight(.bold))
+                    Text("Zapline").font(.largeTitle.weight(.bold))
                     Text("Your Emby library and live TV in one fast app.")
                         .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }

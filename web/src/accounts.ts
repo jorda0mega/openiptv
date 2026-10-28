@@ -1,5 +1,5 @@
 // Accounts: sign in to Emby and an Xtream Codes subscription. Logins go to
-// this Openreel server, which keeps them only in memory (never on disk) and
+// this Zapline server, which keeps them only in memory (never on disk) and
 // talks to your providers directly. Nothing is stored in the browser.
 
 import { api } from "./api";
@@ -23,7 +23,7 @@ async function render(container: HTMLElement): Promise<void> {
   container.replaceChildren(
     h("h1", {}, "Accounts"),
     h("p", { class: "muted" },
-      "Your logins are sent only to this Openreel server, which keeps them in memory (not on disk) and never logs them. Restarting the server signs you out."),
+      "Your logins are sent only to this Zapline server, which keeps them in memory (not on disk) and never logs them. Restarting the server signs you out."),
     status.emby.ok ? signedIn("Emby", status.emby.server ?? "", "emby", refresh) : embyForm(refresh),
     status.live.ok
       ? signedIn("Live TV", `${(status.live.channels ?? 0).toLocaleString()} channels`, "live", refresh)

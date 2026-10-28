@@ -1,5 +1,5 @@
 #!/bin/bash
-# Drives Openreel (OpenIPTV) on a private iPhone simulator against a private
+# Drives Zapline (OpenIPTV) on a private iPhone simulator against a private
 # test server. Usage and recipes: ../SKILL.md.
 set -euo pipefail
 

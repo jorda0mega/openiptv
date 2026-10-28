@@ -248,7 +248,7 @@ struct SettingsView: View {
         } header: {
             Text("Privacy")
         } footer: {
-            Text("Logins live only in this device's Keychain (not iCloud, not backups). Openreel has no servers, collects nothing and logs nothing.")
+            Text("Logins live only in this device's Keychain (not iCloud, not backups). Zapline has no servers, collects nothing and logs nothing.")
         }
     }
 

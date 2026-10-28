@@ -584,7 +584,7 @@ struct Connected {
 
 async fn probe_emby(http: &reqwest::Client, out: &mut Map<String, Value>) -> AnyResult<()> {
     let device = Device {
-        client: "Openreel Probe".into(),
+        client: "Zapline Probe".into(),
         name: "openiptv-probe".into(),
         id: "openiptv-probe".into(),
         version: env!("CARGO_PKG_VERSION").into(),

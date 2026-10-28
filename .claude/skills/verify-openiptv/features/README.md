@@ -1,6 +1,6 @@
-# Openreel verification map
+# Zapline verification map
 
-This directory is the maintained source for verifying what an Openreel iPhone user sees and does. Read this index before you drive the app, then use the matching feature file as the recipe. `$V` is `.claude/skills/verify-openiptv/scripts/verify`, run from the repo root.
+This directory is the maintained source for verifying what an Zapline iPhone user sees and does. Read this index before you drive the app, then use the matching feature file as the recipe. `$V` is `.claude/skills/verify-openiptv/scripts/verify`, run from the repo root.
 
 ## Baseline preconditions
 

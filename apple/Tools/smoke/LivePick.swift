@@ -22,7 +22,7 @@ enum LivePick {
         let region = Locale.current.region?.identifier ?? "US"
         let home = value("OPENIPTV_PICK_HOME") ?? (region == "GB" ? "UK" : region)
         guard let login = await LiveProbe.login(env) else { LiveProbe.say("PICK config no_login"); return 1 }
-        LiveProbe.agents = [.app: "Openreel/\(LiveProbe.appVersion)"]
+        LiveProbe.agents = [.app: "Zapline/\(LiveProbe.appVersion)"]
         guard let categoryData = await list(login, "get_live_categories"), let streamData = await list(login, "get_live_streams")
         else { return 1 }
 
