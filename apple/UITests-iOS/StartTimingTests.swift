@@ -46,7 +46,7 @@ final class StartTimingTests: TimingCase {
             let ahead = app.staticTexts["debug-ahead"].firstMatch.label
             app.buttons[card].tap()
             say("prepared", "film.start.prepared", start(), note: String(format: "waited %.0f s, %@", Date().timeIntervalSince(began),
-                                                                         ahead.components(separatedBy: " | ").first ?? ""))
+                                                                         ahead.replacingOccurrences(of: " | ", with: "; ")))
             sleep(8)
             close()
             let other = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).allElementsBoundByIndex
