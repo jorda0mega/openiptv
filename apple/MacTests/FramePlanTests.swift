@@ -68,4 +68,25 @@ final class FramePlanTests: XCTestCase {
         XCTAssertEqual(FrameColor(gamma: "bt.1886"), .bt709)
         XCTAssertEqual(FrameColor(gamma: nil), .bt709)
     }
+
+    /// BT.2408: SDR white in an HDR picture is 203 nits.
+    func testSubtitleWhiteIsSDRWhiteInEachTransfer() {
+        XCTAssertEqual(pqNits(FrameColor.pq.subtitleWhite), 203, accuracy: 6, "HDR10")
+        XCTAssertEqual(hlgNits(FrameColor.hlg.subtitleWhite), 203, accuracy: 6, "HLG on a 1000-nit screen")
+        XCTAssertEqual(FrameColor.bt709.subtitleWhite, 255, "SDR")
+    }
+
+    /// SMPTE ST 2084.
+    private func pqNits(_ code: UInt8) -> Double {
+        let m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875
+        let p = pow(Double(code) / 255, 1 / m2)
+        return 10000 * pow(max(p - c1, 0) / (c2 - c3 * p), 1 / m1)
+    }
+
+    /// BT.2100 HLG with a system gamma of 1.2.
+    private func hlgNits(_ code: UInt8) -> Double {
+        let a = 0.17883277, b = 0.28466892, c = 0.55991073, e = Double(code) / 255
+        let scene = e <= 0.5 ? e * e / 3 : (exp((e - c) / a) + b) / 12
+        return 1000 * pow(scene, 1.2)
+    }
 }
