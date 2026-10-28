@@ -157,6 +157,8 @@ final class Lane {
     private let atOnce: Int
     private let bucket: Bucket?
     private let conditions: @MainActor () -> Conditions
+    /// How often a refused interest looks again: room on the disk, heat and power change without a word.
+    private let recheckEvery: Duration
     private var tokens: Int
     private var refilledAt = ContinuousClock.now
     private var refill: Task<Void, Never>?
@@ -164,10 +166,12 @@ final class Lane {
     private var waiting: [Ticket] = []
     private static let every = NSHashTable<Lane>.weakObjects()
 
-    init(_ weight: Weight, atOnce: Int, bucket: Bucket? = nil, conditions: @escaping @MainActor () -> Conditions) {
+    init(_ weight: Weight, atOnce: Int, bucket: Bucket? = nil, recheckEvery: Duration = .seconds(3),
+         conditions: @escaping @MainActor () -> Conditions) {
         self.weight = weight
         self.atOnce = atOnce
         self.bucket = bucket
+        self.recheckEvery = recheckEvery
         self.conditions = conditions
         tokens = bucket?.size ?? 0
         Self.every.add(self)
@@ -198,6 +202,15 @@ final class Lane {
             leave(ticket)
             throw CancellationError()
         }
+    }
+
+    func refuses(_ interest: Interest) -> Bool {
+        !allows(Ticket(interest), conditions())
+    }
+
+    /// Returns once the conditions allow `interest`; throws when cancelled first.
+    func untilAllowed(_ interest: Interest) async throws {
+        while refuses(interest) { try await Task.sleep(for: recheckEvery) }
     }
 
     func whenAllowed(for interest: Interest, _ work: () async -> Void) async {
@@ -459,6 +472,15 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         let value = try? await wait(for: job, key, keepingJob: false)
         if Task.isCancelled { release(key, from: interest.id) }
         return value
+    }
+
+    /// `warm`, and while the device's conditions refuse it, warmed again once they allow it, till the interest goes.
+    /// Regression: a card's start refused once (2 GB free for a moment) was never fetched while it stayed on screen.
+    func hold(_ key: Key, for interest: Interest) async -> Value? {
+        while true {
+            if let value = await warm(key, for: interest) { return value }
+            guard !Task.isCancelled, policy.lane.refuses(interest), (try? await policy.lane.untilAllowed(interest)) != nil else { return nil }
+        }
     }
 
     func release(_ key: Key, from interest: Interest.ID) {

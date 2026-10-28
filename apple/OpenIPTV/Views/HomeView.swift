@@ -516,7 +516,6 @@ private struct ContinueRow: View {
             }
             .scrollIndicators(.hidden)
         }
-        .preparesAhead(row.cards.first?.playTarget, at: .homeForecast)
         .task(id: row.cards.map(\.id)) { await model.forecastPlans(row.cards) }
     }
 

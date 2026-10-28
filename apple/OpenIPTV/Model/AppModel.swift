@@ -26,7 +26,9 @@ final class AppModel {
 
     // MARK: Home (Emby)
 
-    var rows: [HomeRow] = []
+    var rows: [HomeRow] = [] {
+        didSet { holdContinueWatching() }
+    }
     var featured: Featured?
     /// Apple TV's hero titles (see HomeContent.spotlight).
     var spotlight: [Featured] = []
@@ -182,6 +184,7 @@ final class AppModel {
             Task.detached(priority: .userInitiated) { await ImagePipeline.shared.prefetch(urls) }
         }
         Task { await guide.loadCache(); guideState = await guide.state }
+        holdContinueWatching()
     }
 
     var emby: EmbyClient? {
@@ -1359,14 +1362,24 @@ final class AppModel {
     }
     #endif
 
-    var playerShown = false
+    var playerShown = false {
+        didSet { holdContinueWatching() }
+    }
+
+    /// Continue Watching's first two cards, held from launch rather than from when Home shows them, till a film plays:
+    /// their plans, starts and connections go before the tap, so a server slow on its first read after a while is slow
+    /// before it.
+    private func holdContinueWatching() {
+        let cards = rows.first { $0.title == Self.continueTitle }?.cards ?? []
+        ahead.hold(only: playerShown || Self.noPrepareAhead ? [] : cards.prefix(2).map(\.playTarget), at: .homeForecast)
+    }
 
     @ObservationIgnored private(set) lazy var ahead = Ahead(Ahead.Work(
         page: { [weak self] target, interest in await self?.preparePage(target, interest) },
         plan: { [weak self] target, interest in await self?.preparePlan(target, interest) },
         fileStart: { start, interest in
             guard !AppModel.noStreamAhead else { return }
-            _ = await FileStarts.shelf.warm(FileStart(start), for: interest)
+            _ = await FileStarts.shelf.hold(FileStart(start), for: interest)
         },
         connection: { start, interest in
             guard !AppModel.noStreamAhead, !AppModel.noPreconnect else { return }
