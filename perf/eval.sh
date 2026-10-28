@@ -26,7 +26,7 @@ if [ $mode = real ]; then
   export FEED=${FEED:-http://127.0.0.1:8799}
   # A worktree of its own: a test server bisect may be using the shared one.
   export WT=/tmp/openiptv/wt-real-$(basename $REPO)
-  curl -sf -o /dev/null $FEED/emby || { echo "the logins helper isn't running"; exit 1; }
+  curl -sf -o /dev/null $FEED/emby 2>/dev/null || { echo "the logins helper isn't running"; exit 1; }
   echo "== real feeds, commit $commit, $(date '+%a %H:%M')"
   wants starts ios && PLATFORM=ios LIMIT=2400 run StartTimingTests/testStarts
   wants jumps ios && PLATFORM=ios run JumpTimingTests/testTenSecondJumps
@@ -50,6 +50,8 @@ fi
 # Subtitle look and Picture in Picture run on the test server's own profile-free link: they compare against
 # the best for mock:none, the rest against the best for this run's target.
 echo "== against perf/best.json"
-PLATFORMS="$PLATFORMS" python3 -I $HERE/perf.py compare $OUT/*/*/samples.jsonl | tee $OUT/table.txt
-echo "lines $(cat $OUT/table.txt | wc -l | tr -d ' '), url-like $(cat $OUT/*/*/jumps.txt $OUT/table.txt 2>/dev/null | grep -cE '://|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.(com|net|org|tv|me|io)\b')"
+setopt null_glob
+samples=($OUT/*/*/samples.jsonl)
+[ ${#samples} -gt 0 ] && PLATFORMS="$PLATFORMS" python3 -I $HERE/perf.py compare $samples | tee $OUT/table.txt || echo "no samples" | tee $OUT/table.txt
+echo "lines $(cat $OUT/table.txt | wc -l | tr -d ' '), url-like $(cat $OUT/*/*/jumps.txt(N) $OUT/table.txt 2>/dev/null | grep -cE '://|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.(com|net|org|tv|me|io)\b')"
 echo "== eval done $(date '+%H:%M'), results in $OUT"

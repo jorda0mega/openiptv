@@ -8,7 +8,7 @@
 #     address; nothing here reads or prints the logins, and the app reports nothing to the server.
 #   Each commit is built in one detached worktree (WT) into one DerivedData folder per platform (DD; for the
 #   real feeds dd-ios-real and dd-tv-real, which no helper builds into), this tree's timing tests copied in.
-#   JumpTimingTests on the test server: the screen is recorded while JUMPS BEGIN is up, decoded to
+#   JumpTimingTests on the test server: the screen is recorded from the test's jumps-begin file on, decoded to
 #   series.json and deleted (KEEP=1 keeps it), and perf/jumps.py times each tap with the app's log.
 #   MPV_LOG=1: libmpv's debug log (a diagnostic run, not a timed one). TEST_RUNNER_* reach the test.
 #   Each lock is held only for its step (build.lock for the build, sim.lock for the simulator), and both stay
@@ -30,7 +30,10 @@ WT=${WT:-/tmp/openiptv/wt-bisect-$NAME}
 OUT=${OUT:-/tmp/openiptv/perf-runs}
 FILM=${FILM:-/tmp/openiptv/jump-media/jump.mkv}
 PROFILE=${PROFILE:-worst}
-TARGET_NAME=$([ -n "${FEED:-}" ] && echo real || echo mock:$PROFILE)
+# The test server's target names its film when it isn't the jump film (a 4K film, a subtitle film), so one
+# film's numbers never stand in for another's.
+film=${FILM:t:r}
+TARGET_NAME=$([ -n "${FEED:-}" ] && echo real || echo mock:$PROFILE$([ $film = jump ] || echo ":$film"))
 # Unique to this run, so no other run's cleanup takes its locks for its own.
 OWNER="perf-evals $NAME $$"
 VENDOR=$(readlink $REPO/apple/Vendor)
@@ -44,6 +47,7 @@ boot120() {
     [ $t -ge 120 ] && { pkill -P $pid 2>/dev/null; kill $pid 2>/dev/null; return 1; }
     sleep 2; t=$((t + 2))
   done
+  wait $pid
 }
 watchdog() { local pid=$1 limit=$2 t=0; while kill -0 $pid 2>/dev/null; do sleep 5; t=$((t + 5)); [ $t -ge $limit ] && { kill $pid; echo "watchdog: stopped after $limit s"; }; done; }
 cleanup() {
@@ -107,13 +111,13 @@ for commit in "$@"; do
     xcrun simctl shutdown $SIM 2>/dev/null; give /tmp/openiptv/sim.lock; sleep 60; take /tmp/openiptv/sim.lock
     boot120 || { xcrun simctl shutdown $SIM; give /tmp/openiptv/sim.lock; [ -n "${mock:-}" ] && kill $mock; mock=""; echo "boot failed twice: $commit skipped"; continue; }
   fi
-  rm -f $dir/{test.log,recorder.log,recording.mp4,mpv.log,perf-log.ndjson,series.json,jumps.txt,look.txt,live.txt,metrics.txt,samples.jsonl} $dir/*.png(N)
+  rm -f $dir/{jumps-begin,test.log,recorder.log,recording.mp4,mpv.log,perf-log.ndjson,series.json,jumps.txt,look.txt,live.txt,metrics.txt,samples.jsonl} $dir/*.png(N)
   began=$(date '+%Y-%m-%d %H:%M:%S')
   xcodebuild test-without-building -project $WT/apple/OpenIPTV.xcodeproj -scheme $SCHEME -destination "id=$SIM" -derivedDataPath $DD \
     "-only-testing:$TARGET/$TEST" > $dir/test.log 2>&1 &
   pid=$!; watchdog $pid ${LIMIT:-1500} &
   if [ -z "${FEED:-}" ]; then
-    ( until grep -q "JUMPS BEGIN" $dir/test.log 2>/dev/null || ! kill -0 $pid 2>/dev/null; do sleep 0.3; done
+    ( until [ -f $dir/jumps-begin ] || ! kill -0 $pid 2>/dev/null; do sleep 0.3; done
       kill -0 $pid 2>/dev/null && xcrun simctl io $SIM recordVideo --codec=h264 --force $dir/recording.mp4 2>&1 \
         | perl -MTime::HiRes=time -ne '$|=1; printf "%.3f %s", time, $_' > $dir/recorder.log ) &
   fi

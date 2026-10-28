@@ -33,6 +33,10 @@ final class JumpTimingTests: XCTestCase {
         sleep(20)
 
         print("JUMPS BEGIN")
+        // The runner starts its recording on this file: xcodebuild can hold the line above back.
+        if let folder = ProcessInfo.processInfo.environment["LOOK_SHOTS"] {
+            FileManager.default.createFile(atPath: folder + "/jumps-begin", contents: nil)
+        }
         sleep(4)
         for (button, sign) in [(XCUIRemote.Button.right, "+"), (.left, "-")] {
             for n in 1...10 {

@@ -424,7 +424,7 @@
      "between_runs": 10.5
     },
     {
-     "target": "mock:real-quiet:4k-hdr",
+     "target": "mock:real-quiet:jump-4k-hdr",
      "link": "none",
      "platform": "ios",
      "unit": "ms",
@@ -509,7 +509,7 @@
      "between_runs": 14.5
     },
     {
-     "target": "mock:real-quiet:4k-hdr",
+     "target": "mock:real-quiet:jump-4k-hdr",
      "link": "none",
      "platform": "ios",
      "unit": "ms",
@@ -658,7 +658,7 @@
      "between_runs": 0.0
     },
     {
-     "target": "mock:real-quiet:4k-hdr",
+     "target": "mock:real-quiet:jump-4k-hdr",
      "link": "none",
      "platform": "ios",
      "unit": "ms",
@@ -1044,7 +1044,7 @@
      "between_runs": 0.0
     },
     {
-     "target": "mock:real-quiet:4k-hdr",
+     "target": "mock:real-quiet:jump-4k-hdr",
      "link": "none",
      "platform": "ios",
      "unit": "count",
@@ -1363,7 +1363,7 @@
    "unit": "ratio",
    "best": [
     {
-     "target": "mock:none",
+     "target": "mock:none:sdr-720",
      "link": "none",
      "platform": "ios",
      "unit": "ratio",
@@ -1384,7 +1384,7 @@
    "unit": "ratio",
    "best": [
     {
-     "target": "mock:none",
+     "target": "mock:none:hdr10-1080",
      "link": "none",
      "platform": "ios",
      "unit": "ratio",
@@ -1405,11 +1405,11 @@
    "unit": "ratio",
    "best": [
     {
-     "target": "mock:none",
+     "target": "mock:none:hdr10-1080",
      "link": "none",
      "platform": "ios",
      "unit": "ratio",
-     "runs": 3,
+     "runs": 1,
      "value": 1.22,
      "samples": 1,
      "spread": 0.0,
@@ -1418,7 +1418,23 @@
      "testflight": null,
      "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-hdr10/3691de8/metrics.txt",
-     "between_runs": 0.61
+     "between_runs": 0.0
+    },
+    {
+     "target": "mock:none:sdr-720",
+     "link": "none",
+     "platform": "ios",
+     "unit": "ratio",
+     "runs": 2,
+     "value": 1.83,
+     "samples": 1,
+     "spread": 0.0,
+     "commit": "3691de8",
+     "landed_as": "3691de8",
+     "testflight": null,
+     "date": "2026-10-28",
+     "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-sdr720/3691de8/metrics.txt",
+     "between_runs": 0.0
     }
    ]
   },

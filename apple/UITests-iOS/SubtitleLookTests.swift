@@ -34,7 +34,8 @@ final class SubtitleLookTests: TimingCase {
             if way == "sideways" {
                 app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
                 let rotate = app.buttons["Rotate to landscape"].firstMatch
-                if rotate.waitForExistence(timeout: 3) { rotate.tap() }
+                guard rotate.waitForExistence(timeout: 3) else { return XCTFail("no Rotate to landscape: no sideways shot") }
+                rotate.tap()
                 sleep(6)
             }
             // The controls hide 3 s after showing, and the picture stays.

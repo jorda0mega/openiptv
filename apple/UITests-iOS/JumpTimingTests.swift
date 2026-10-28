@@ -21,6 +21,10 @@ final class JumpTimingTests: TimingCase {
         sleep(20)
 
         print("JUMPS BEGIN")
+        // The runner starts its recording on this file: xcodebuild can hold the line above back.
+        if let folder = ProcessInfo.processInfo.environment["LOOK_SHOTS"] {
+            FileManager.default.createFile(atPath: folder + "/jumps-begin", contents: nil)
+        }
         sleep(4)
         for (label, sign) in [("Forward 10 seconds", "+"), ("Back 10 seconds", "-")] {
             for n in 1...10 {
