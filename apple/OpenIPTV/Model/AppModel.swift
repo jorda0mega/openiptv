@@ -1383,7 +1383,8 @@ final class AppModel {
         let cards = rows.first { $0.title == Self.continueTitle }?.cards ?? []
         let targets = playerShown || Self.noPrepareAhead || accountChanging ? [] : cards.prefix(2).map(\.playTarget)
         let keys = Dictionary(targets.map { ($0, planKey($0)) }, uniquingKeysWith: { first, _ in first })
-        ahead.hold(only: targets.filter { heldPlans[$0] == keys[$0] }, at: .homeForecast)
+        let sameAsk = targets.filter { heldPlans[$0] == keys[$0] }
+        ahead.hold(only: sameAsk, at: .homeForecast)
         heldPlans = keys
         ahead.hold(only: targets, at: .homeForecast)
     }
