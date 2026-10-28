@@ -181,7 +181,10 @@ final class Lane {
         if ticket.running { return }
         try Task.checkCancellation()
         if ticket.plays { return start(ticket) }
-        guard ticket.interest != nil, allows(ticket, conditions()) else { throw CancellationError() }
+        guard ticket.interest != nil, allows(ticket, conditions()) else {
+            noteRefused(ticket, conditions())
+            throw CancellationError()
+        }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { turn in
                 ticket.turn = turn
@@ -230,13 +233,20 @@ final class Lane {
     func conditionsChanged() {
         let now = conditions()
         if [.expensive, .constrained].contains(now.network) {
-            for ticket in underWay where !ticket.plays && !allows(ticket, now) { ticket.stop?() }
+            for ticket in underWay where !ticket.plays && !allows(ticket, now) {
+                noteRefused(ticket, now)
+                ticket.stop?()
+            }
         }
         admit()
     }
 
     #if DEBUG
     var debugCounts: String { "\(underWay.count) under way, \(waiting.count) waiting" }
+
+    /// Fetches ahead the conditions refused (asked, waiting or under way), and the last refusal.
+    private(set) var debugRefused = 0
+    private(set) var debugLastRefusal: Conditions.Refusal?
 
     func debugRefusal(at place: Place, _ likelihood: Likelihood) -> Conditions.Refusal? {
         conditions().refusal(weight, at: place, likelihood)
@@ -266,6 +276,7 @@ final class Lane {
     private func admit() {
         let now = conditions()
         for ticket in waiting where !allows(ticket, now) {
+            noteRefused(ticket, now)
             withdraw(ticket)
         }
         refillTokens()
@@ -277,8 +288,19 @@ final class Lane {
     }
 
     private func allows(_ ticket: Ticket, _ now: Conditions) -> Bool {
-        guard let interest = ticket.interest else { return now.allows(weight, at: .page, .next) }
-        return now.allows(weight, at: interest.place, interest.likelihood, restedOn: interest.isRestedOn())
+        refusal(ticket, now) == nil
+    }
+
+    private func refusal(_ ticket: Ticket, _ now: Conditions) -> Conditions.Refusal? {
+        guard let interest = ticket.interest else { return now.refusal(weight, at: .page, .next) }
+        return now.refusal(weight, at: interest.place, interest.likelihood, restedOn: interest.isRestedOn())
+    }
+
+    private func noteRefused(_ ticket: Ticket, _ now: Conditions) {
+        #if DEBUG
+        debugRefused += 1
+        debugLastRefusal = refusal(ticket, now) ?? debugLastRefusal
+        #endif
     }
 
     private func goesBefore(_ a: Ticket, _ b: Ticket) -> Bool {
@@ -353,6 +375,9 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     private var entries: [Key: Entry] = [:]
     #if DEBUG
     private(set) var fetched = 0
+    /// Fetches that failed, the last one's kind (an error's type and code, never its words), and those stopped.
+    private(set) var failed = 0, stopped = 0
+    private(set) var lastFailure = "none"
     #endif
     private let policy: Policy
     private let disk: Disk?
@@ -481,6 +506,14 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             case let .success((value, at)):
                 entries[key] = .kept(value, until: at.addingTimeInterval(policy.lifetime / .seconds(1)))
             case let .failure(error):
+                #if DEBUG
+                if Task.isCancelled || error is CancellationError {
+                    stopped += 1
+                } else {
+                    failed += 1
+                    lastFailure = (error as? URLError).map { "URLError \($0.code.rawValue)" } ?? "\(type(of: error))"
+                }
+                #endif
                 entries[key] = Task.isCancelled || error is CancellationError
                     ? nil : .failed(error, until: now().addingTimeInterval(policy.failureKept / .seconds(1)))
             }

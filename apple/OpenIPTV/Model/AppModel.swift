@@ -1380,12 +1380,18 @@ final class AppModel {
     #if DEBUG
     var aheadCounts: String {
         let now = Conditions.current()
+        let lanes: [(String, Lane)] = [("plans", .emby), ("starts", .fileStarts), ("warm reads", .connections)]
+        let refused = lanes.filter { $0.1.debugRefused > 0 }.map { name, lane in
+            " | \(name) refused \(lane.debugRefused), last: " + (lane.debugLastRefusal.map { "\($0)" } ?? "none")
+        }
         return "held \(ahead.held) plans \(plans.fetched) starts \(FileStarts.shelf.fetched) warmed \(StreamRelay.warmed.value) "
             + "files \(ServerSubtitles.beside.fetched) "
             + "copies \(ServerSubtitles.inFile.fetched) | \(now.network) " + String(format: "disk %.1f GB", Double(now.freeDisk.bytes) / 1e9)
             + " thermal \(now.thermal.rawValue)"
             + (now.lowPower ? " low power" : "") + (now.memoryWarned ? " memory warned" : "") + (now.playing ? " playing" : "")
             + (Lane.fileStarts.debugRefusal(at: .continueWatching, .likely).map { " | starts not allowed: \($0)" } ?? "")
+            + " | no plan \(ahead.planless), plans failed \(plans.failed) (last: \(plans.lastFailure)) stopped \(plans.stopped)"
+            + ", starts failed \(FileStarts.shelf.failed) stopped \(FileStarts.shelf.stopped)" + refused.joined()
     }
     #endif
 
