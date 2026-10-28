@@ -246,3 +246,43 @@ enum HomeFeed {
         return HomeContent(featured: featured, rows: rows, builtAt: Date(), history: seeds.map(\.id), spotlight: spotlight)
     }
 }
+
+@MainActor
+final class HomeRetry {
+    static let waits: [Duration] = [.seconds(2), .seconds(5), .seconds(15), .seconds(30)]
+    private let sleep: @Sendable (Duration) async throws -> Void
+    private let attempt: @MainActor () async -> Void
+    private var failures = 0
+    private var waiting: Task<Void, Never>?
+
+    init(sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         attempt: @escaping @MainActor () async -> Void) {
+        self.sleep = sleep
+        self.attempt = attempt
+    }
+
+    func askAgainLater() {
+        failures += 1
+        ask(after: Self.waits[min(failures, Self.waits.count) - 1])
+    }
+
+    func askAgainNow() {
+        if waiting != nil { ask(after: .zero) }
+    }
+
+    func stop() {
+        failures = 0
+        waiting?.cancel()
+        waiting = nil
+    }
+
+    private func ask(after wait: Duration) {
+        waiting?.cancel()
+        waiting = Task { [weak self, sleep] in
+            do { try await sleep(wait) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            waiting = nil
+            await attempt()
+        }
+    }
+}
