@@ -204,8 +204,8 @@ final class AppModel {
     @ObservationIgnored private var homeLoad: Task<Void, Never>?
     @ObservationIgnored private var homeLoadID = UUID()
     @ObservationIgnored private lazy var homeRetry = HomeRetry { [weak self] in
-        guard let self else { return }
-        await loadHome(cardWidth: lastCardWidth)
+        guard let self, !accountChanging else { return }
+        await tryHomeAgain()
     }
 
     /// Home doesn't change while you look at it, like Netflix's: a Home
@@ -277,14 +277,20 @@ final class AppModel {
     }
 
     /// Try Again after Home failed: every row built afresh, and shown.
-    func refreshHome(cardWidth: Int) async {
-        await loadHome(cardWidth: cardWidth, full: true, show: true)
+    func tryHomeAgain() async {
+        async let home: Void = loadHome(cardWidth: lastCardWidth, full: true, show: true)
+        async let list: Void = refreshMyList()
+        _ = await (home, list)
     }
 
     /// Whether a build may go straight on the page: Home is still opening,
     /// or has nothing built on it yet (only Continue Watching, or nothing).
     private var homeOpening: Bool {
-        homeAwaitsFirstBuild || shownBuiltAt == nil || rows.isEmpty
+        homeAwaitsFirstBuild || nothingBuiltShown
+    }
+
+    private var nothingBuiltShown: Bool {
+        shownBuiltAt == nil || rows.isEmpty
     }
 
     /// The viewer scrolled Home or moved along it: what's built from now
@@ -353,9 +359,9 @@ final class AppModel {
             homeBuiltAt = fresh.builtAt
             homeHistory = fresh.history ?? []
             homeError = nil
-            homeRetry.stop()
             // Signed out or into another account meanwhile: not its Home.
             guard account == accountGeneration else { return }
+            homeRetry.stop()
             if show || homeOpening {
                 // The hero's titles too: a new one undecoded showed black
                 // for a moment.
@@ -378,7 +384,7 @@ final class AppModel {
             if sync { Task { await syncLibrary(emby) } }
         } catch {
             homeError = SourceError.wrap(error).localizedDescription
-            if shownBuiltAt == nil || rows.isEmpty { homeRetry.askAgainLater() }
+            if account == accountGeneration, nothingBuiltShown { homeRetry.askAgainLater() }
         }
     }
 
@@ -1757,6 +1763,7 @@ final class AppModel {
         plans.forgetAll()
         // A Home on its way for the old account is dropped, not waited for.
         homeLoad = nil
+        homeRetry.stop()
         homeLoadID = UUID()
         stagedHome = nil
         recentStops = [:]
@@ -1780,6 +1787,7 @@ final class AppModel {
         defer { accountChanging = false }
         holdContinueWatching()
         homeLoad = nil
+        homeRetry.stop()
         homeLoadID = UUID()
         stagedHome = nil
         recentStops = [:]

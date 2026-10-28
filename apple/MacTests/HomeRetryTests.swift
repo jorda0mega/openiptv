@@ -53,6 +53,16 @@ final class HomeRetryTests: XCTestCase {
         XCTAssertEqual(sleeps.asked, [2, 5, 15, 2].map { Duration.seconds($0) })
     }
 
+    func testAFailureWhileARetryWaitsKeepsItsTime() async {
+        let sleeps = FakeSleep(waitsPass: false)
+        let retry = HomeRetry(sleep: sleeps.sleep) {}
+        retry.askAgainLater()
+        retry.askAgainLater()
+        retry.askAgainLater()
+        await settle()
+        XCTAssertEqual(sleeps.asked, [.seconds(2)])
+    }
+
     func testAsksAtOnceWhenToldWhileWaiting() async {
         let sleeps = FakeSleep(waitsPass: false)
         var attempts = 0
