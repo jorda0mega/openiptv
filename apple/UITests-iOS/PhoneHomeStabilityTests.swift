@@ -119,6 +119,53 @@ final class PhoneHomeStabilityTests: XCTestCase {
         XCTAssertNotEqual(later, saved, "the slow first build never went on the page")
     }
 
+    func testFailedHomeRecoversByItself() throws {
+        let server = try launchWithHomeFailing()
+        defer { configure(server, ["reset": "1"]) }
+        sleep(4)
+        shot("home error while the server fails")
+        configure(server, ["reset": "1"])
+        let recovered = secondsUntilContinueWatching(since: Date(), within: 40, "server back")
+        shot("home after the server is back")
+        let seconds = try XCTUnwrap(recovered, "Home stayed on its error after the server was back")
+        XCTAssertLessThan(seconds, 10, "Continue Watching came \(seconds) s after the server was back")
+    }
+
+    func testFailedHomeRecoversAtOnceWhenTheAppIsBack() throws {
+        let server = try launchWithHomeFailing()
+        defer { configure(server, ["reset": "1"]) }
+        sleep(9)
+        configure(server, ["reset": "1"])
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        app.activate()
+        let recovered = secondsUntilContinueWatching(since: Date(), within: 30, "app back")
+        shot("home after the app is back")
+        let seconds = try XCTUnwrap(recovered, "Home stayed on its error after the app came back")
+        XCTAssertLessThan(seconds, 5, "Continue Watching came \(seconds) s after the app came back")
+    }
+
+    private func launchWithHomeFailing() throws -> URL {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["home_status": "502"])
+        app.launchEnvironment["OPENREEL_DEBUG_NO_SAVED_HOME"] = "1"
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Couldn't load Emby"].waitForExistence(timeout: 30), "Home didn't show its error while the server failed")
+        return server
+    }
+
+    private func secondsUntilContinueWatching(since start: Date, within timeout: TimeInterval, _ note: String) -> Double? {
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        guard card.waitForExistence(timeout: timeout) else {
+            print("HOMERETRY \(note): no Continue Watching within \(Int(timeout)) s")
+            return nil
+        }
+        let seconds = Date().timeIntervalSince(start)
+        print(String(format: "HOMERETRY %@: Continue Watching after %.1f s", note, seconds))
+        return seconds
+    }
+
     /// Coming back after a long time away is a moment Home may change (the
     /// Home built meanwhile goes on); a short trip away isn't. Here "long"
     /// is 8 seconds (OPENREEL_DEBUG_LONG_AWAY).

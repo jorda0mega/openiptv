@@ -152,6 +152,9 @@ final class AppModel {
         // Lineups saved before v3 could hold a provider's "Account Info"
         // channels, which spell out the login.
         for old in ["live-lineup.v1.json", "live-lineup.v2.json"] { AppCache.remove(old) }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NO_SAVED_HOME"] != nil { AppCache.remove("home.v4.json") }
+        #endif
         let home: HomeContent? = AppCache.read("home.v4.json")
         rows = home?.rows ?? []
         featured = home?.featured
