@@ -9,7 +9,14 @@ import XCTest
 /// (on the test server, with perf/make_jump_film.sh's film).
 final class JumpTimingTests: TimingCase {
     func testTenSecondJumps() throws {
-        guard let started = openFilm() else { return XCTFail("no first frame in 180 s") }
+        // The first tap after an install can fail (the app gives up at 30 s): say so, then try once more.
+        var started = openFilm()
+        if started == nil {
+            print("JUMP first start failed: launching again")
+            app.terminate()
+            started = openFilm()
+        }
+        guard let started else { return XCTFail("no first frame in 180 s, twice") }
         print(String(format: "JUMP start %.1f s after the tap", started))
         sleep(20)
 

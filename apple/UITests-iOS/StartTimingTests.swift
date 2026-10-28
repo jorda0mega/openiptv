@@ -78,13 +78,14 @@ final class StartTimingTests: TimingCase {
 
     /// Seconds from the tap to the first frame, and the app's own parts; nil when no start in 120 s.
     private func start() -> (seconds: Double?, parts: String) {
-        let readout = app.staticTexts["debug-start"].firstMatch
+        let readout = app.staticTexts["debug-start"].firstMatch, failed = app.staticTexts["debug-start-error"].firstMatch
         let tapped = Date()
         var words: [Substring] = []
-        while Date().timeIntervalSince(tapped) < 120, words.count < 4 {
+        while Date().timeIntervalSince(tapped) < 120, words.count < 4, !(failed.exists && !failed.label.isEmpty) {
             usleep(250_000)
             words = readout.exists ? readout.label.split(separator: " ") : []
         }
+        if words.count < 4 { print(String(format: "START none after %.0f s", Date().timeIntervalSince(tapped))) }
         let parts = app.staticTexts["debug-start-parts"].firstMatch
         return (words.count == 4 ? Double(words[1]) : nil, parts.exists ? parts.label : "no parts")
     }

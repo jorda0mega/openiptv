@@ -53,9 +53,11 @@ class TimingCase: XCTestCase {
             play.tap()
         }
         let tapped = Date()
-        let start = app.staticTexts["debug-start"].firstMatch
-        while Date().timeIntervalSince(tapped) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4 { sleep(1) }
+        let start = app.staticTexts["debug-start"].firstMatch, failed = app.staticTexts["debug-start-error"].firstMatch
+        while Date().timeIntervalSince(tapped) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4,
+              !(failed.exists && !failed.label.isEmpty) { sleep(1) }
         guard start.exists, start.label.split(separator: " ").count == 4 else {
+            print(String(format: "START none after %.0f s", Date().timeIntervalSince(tapped)))
             sayWhyNoStart()
             return nil
         }
@@ -78,7 +80,9 @@ class TimingCase: XCTestCase {
             return element.exists ? (element.label.isEmpty || onRealFeeds ? "shown" : element.label) : "none"
         }
         let alert = app.alerts.firstMatch
-        print("START none: player \(app.staticTexts["debug-item"].firstMatch.exists ? "open" : "not open") | alert \(alert.exists ? alert.label : "none") | "
-              + "error \(text("debug-start-error")) | loading \(text("load-progress")) | parts \(text("debug-start-parts").replacingOccurrences(of: " | ", with: "; "))")
+        let error = app.staticTexts["debug-start-error"].firstMatch
+        let message = error.exists && !error.label.isEmpty ? String(error.label.prefix(80)).replacingOccurrences(of: "://", with: " ") : "none"
+        print("START none: player \(app.staticTexts["debug-item"].firstMatch.exists ? "open" : "not open") | alert \(alert.exists ? "shown" : "none") | "
+              + "error \(message) | loading \(text("load-progress")) | parts \(text("debug-start-parts").replacingOccurrences(of: " | ", with: "; "))")
     }
 }

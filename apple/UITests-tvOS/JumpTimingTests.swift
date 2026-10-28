@@ -21,7 +21,14 @@ final class JumpTimingTests: XCTestCase {
     }
 
     func testTenSecondJumps() throws {
-        guard let started = openFilm() else { return XCTFail("no first frame in 180 s") }
+        // The first start after an install can fail (the app gives up at 30 s): say so, then try once more.
+        var started = openFilm()
+        if started == nil {
+            print("JUMP first start failed: launching again")
+            app.terminate()
+            started = openFilm()
+        }
+        guard let started else { return XCTFail("no first frame in 180 s, twice") }
         print(String(format: "JUMP start %.1f s after the tap", started))
         sleep(20)
 
@@ -71,9 +78,17 @@ final class JumpTimingTests: XCTestCase {
         sleep(3)
         remote.press(.select)
         let pressed = Date()
-        let start = app.staticTexts["debug-start"].firstMatch
-        while Date().timeIntervalSince(pressed) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4 { sleep(1) }
-        guard start.exists, start.label.split(separator: " ").count == 4 else { return nil }
+        let start = app.staticTexts["debug-start"].firstMatch, failed = app.staticTexts["debug-start-error"].firstMatch
+        while Date().timeIntervalSince(pressed) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4,
+              !(failed.exists && !failed.label.isEmpty) { sleep(1) }
+        guard start.exists, start.label.split(separator: " ").count == 4 else {
+            // What the app shows instead: its own message (fixed words) and whether the loading view is up.
+            let message = failed.exists && !failed.label.isEmpty ? String(failed.label.prefix(80)).replacingOccurrences(of: "://", with: " ") : "none"
+            let loading = app.descendants(matching: .any)["load-progress"].firstMatch.exists
+            print(String(format: "START none after %.0f s: ", Date().timeIntervalSince(pressed))
+                  + "player \(app.staticTexts["debug-item"].firstMatch.exists ? "open" : "not open") | error \(message) | loading \(loading ? "shown" : "none")")
+            return nil
+        }
         return Date().timeIntervalSince(pressed)
     }
 
