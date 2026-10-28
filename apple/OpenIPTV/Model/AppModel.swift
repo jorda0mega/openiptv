@@ -276,11 +276,10 @@ final class AppModel {
         showStagedHome()
     }
 
-    /// Try Again after Home failed: every row built afresh, and shown.
+    /// Try Again after Home failed: the build under way, else every row
+    /// built afresh, and shown.
     func tryHomeAgain() async {
-        async let home: Void = loadHome(cardWidth: lastCardWidth, full: true, show: true)
-        async let list: Void = refreshMyList()
-        _ = await (home, list)
+        await loadHome(cardWidth: lastCardWidth, full: homeLoad == nil, show: true)
     }
 
     /// Whether a build may go straight on the page: Home is still opening,
@@ -361,6 +360,7 @@ final class AppModel {
             homeError = nil
             // Signed out or into another account meanwhile: not its Home.
             guard account == accountGeneration else { return }
+            if homeRetry.failing { Task { await refreshMyList() } }
             homeRetry.stop()
             if show || homeOpening {
                 // The hero's titles too: a new one undecoded showed black
