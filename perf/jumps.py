@@ -64,17 +64,25 @@ def taps(test_log):
 
 
 def seeks(ndjson):
-    """(Mac time, film second, by) of each "PERF cache at <s> by <+n> ..." line."""
+    """(Mac time, film second, by, seconds downloaded ahead, the read-ahead asked, whether the target was
+    downloaded already) of each "PERF cache at <s> by <+n> ranges <a-b,...> ahead <s> readahead <s> ..." line."""
     found = []
     for line in open(ndjson, errors="replace"):
         try:
             entry = json.loads(line.rstrip(",\n"))
         except ValueError:
             continue
-        m = re.match(r"PERF cache at ([0-9.]+) by ([+-]\d+)", entry.get("eventMessage", ""))
+        message = entry.get("eventMessage", "")
+        m = re.match(r"PERF cache at ([0-9.]+) by ([+-]\d+)", message)
         if m:
-            found.append((datetime.strptime(entry["timestamp"], "%Y-%m-%d %H:%M:%S.%f%z").timestamp(), float(m.group(1)),
-                          int(m.group(2))))
+            at, by = float(m.group(1)), int(m.group(2))
+            ranges = re.search(r" ranges (\S*)", message)
+            spans = [tuple(float(x) for x in r.split("-")) for r in (ranges.group(1).split(",") if ranges else []) if "-" in r]
+            ahead = re.search(r" ahead ([0-9.]+)", message)
+            readahead = re.search(r" readahead ([0-9.]+)", message)
+            found.append((datetime.strptime(entry["timestamp"], "%Y-%m-%d %H:%M:%S.%f%z").timestamp(), at, by,
+                          float(ahead.group(1)) if ahead else None, float(readahead.group(1)) if readahead else None,
+                          any(a <= at + by + 1 <= b for a, b in spans) if ranges else None))
     return found
 
 
@@ -108,6 +116,15 @@ def visible_jumps(series):
     return out
 
 
+def cache_words(j):
+    """What libmpv held at the seek: seconds downloaded ahead, the read-ahead the app asked for, and whether the
+    jump's target was among the downloaded stretches."""
+    ahead = "-" if j["ahead"] is None else f"{j['ahead']:.0f} s"
+    readahead = "-" if j["readahead"] is None else f"{j['readahead']:.0f} s"
+    target = {True: "downloaded", False: "not downloaded", None: "-"}[j["cached"]]
+    return f"{ahead} downloaded ahead (read-ahead {readahead}), target {target}"
+
+
 def pct(values, p):
     values = sorted(values)
     return values[min(len(values) - 1, round(p / 100 * (len(values) - 1)))]
@@ -130,6 +147,7 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
         if seek:
             logged.remove(seek)
         j["to_seek"] = seek[0] - j["tap"] if seek else None
+        j["ahead"], j["readahead"], j["cached"] = (seek[3], seek[4], seek[5]) if seek else (None, None, None)
         # Where the new picture should be in the recording: the tap (or the seek) on the recorder's clock, as
         # far off as the last pair was, plus libmpv's restart; the nearest picture jump that way within 3 s.
         expected = (seek[0] if seek else j["tap"]) - started + drift + (j["restart"] or 0) / 1000
@@ -159,7 +177,7 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
         ms = lambda s: "-" if s is None else f"{s * 1000:.0f}"
         print(f"{j['sign']}10 n={j['n']:2d} tap to new picture {ms(total):>5} ms = tap to seek {ms(j['to_seek']):>4} + picture still "
               f"{ms(j['still']):>5} | libmpv restart {j['restart']} ms, {j['mb']} MB from the server | moved "
-              f"{(j['by'] or 0):+5.1f} s | loading view {'yes' if j['loading'] else 'no'}")
+              f"{(j['by'] or 0):+5.1f} s | loading view {'yes' if j['loading'] else 'no'} | {cache_words(j)}")
         if total is not None:
             by[j["sign"]].append(total * 1000)
     for sign, name in (("+", "forward_10s"), ("-", "back_10s")):
@@ -168,7 +186,9 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
         if v:
             print(f"{sign}10: {len(v)} of {len(mine)} timed, tap to new picture p50 {pct(v, 50):.0f} ms, p95 {pct(v, 95):.0f} ms, "
                   f"max {max(v):.0f} ms | libmpv restart p50 {pct(restarts, 50)} ms, max {max(restarts)} ms | "
-                  f"read from the server {sum(1 for j in mine if (j['mb'] or 0) > 0)} | loading view {sum(1 for j in mine if j['loading'])}")
+                  f"read from the server {sum(1 for j in mine if (j['mb'] or 0) > 0)} | loading view {sum(1 for j in mine if j['loading'])} | "
+                  f"downloaded ahead at the tap p50 {pct([j['ahead'] for j in mine if j['ahead'] is not None] or [0], 50):.0f} s, "
+                  f"target downloaded {sum(1 for j in mine if j['cached'])} of {sum(1 for j in mine if j['cached'] is not None)}")
             if metric:
                 for x in v:
                     print(f"METRIC film.jump.{name} {x:.0f} ms")
