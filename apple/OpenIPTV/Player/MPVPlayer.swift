@@ -1249,8 +1249,8 @@ final class MPVPlayer: @unchecked Sendable {
         apply(frames.video(PixelSize(width: Int(width), height: Int(height)), color: color))
         if let change = white.raise {
             frames.afterDraws(on: queue) { [weak self] in
-                guard let self, let raised = subtitleWhite.drawn(change, color) else { return }
-                setSubtitleColor(raised)
+                guard let self, subtitleWhite.drawn(change, color) else { return }
+                setSubtitleColor(color)
             }
         }
     }

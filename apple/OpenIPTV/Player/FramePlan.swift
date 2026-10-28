@@ -108,8 +108,6 @@ struct HeldSubtitleWhite: Equatable, Sendable {
     private(set) var white = FrameColor.bt709.subtitleWhite
     private var changes = 0
 
-    /// Before the frames take `color`: the colour whose white goes to mpv now, and the change whose raise waits for
-    /// the frames drawn so far.
     mutating func noted(_ color: FrameColor) -> (now: FrameColor?, raise: Int?) {
         changes += 1
         if color.subtitleWhite < white {
@@ -119,10 +117,9 @@ struct HeldSubtitleWhite: Equatable, Sendable {
         return (nil, color.subtitleWhite > white ? changes : nil)
     }
 
-    /// The frames drawn before `change` are out: the colour whose white goes to mpv, unless a later change came.
-    mutating func drawn(_ change: Int, _ color: FrameColor) -> FrameColor? {
-        guard change == changes, color.subtitleWhite > white else { return nil }
+    mutating func drawn(_ change: Int, _ color: FrameColor) -> Bool {
+        guard change == changes, color.subtitleWhite > white else { return false }
         white = color.subtitleWhite
-        return color
+        return true
     }
 }

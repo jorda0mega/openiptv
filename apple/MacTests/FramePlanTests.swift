@@ -76,21 +76,17 @@ final class FramePlanTests: XCTestCase {
         XCTAssertEqual(FrameColor.bt709.subtitleWhite, 255, "SDR")
     }
 
-    /// The orders the reviews walked: `drained(c)` is the drawing queue reaching change c's hop, `hop(c)` that hop
-    /// on the player's queue. Notes can come in between.
     func testSubtitleWhiteNeverRisesOverAFrameStillDrawing() {
-        play([.note(.pq), .note(.bt709), .note(.hlg), .drained(2), .hop(2), .drained(3), .hop(3)])
-        play([.note(.pq), .note(.bt709), .drained(2), .hop(2)])
-        play([.note(.hlg), .note(.bt709), .note(.hlg), .drained(2), .hop(2)])
-        play([.note(.pq), .note(.bt709), .note(.bt709), .drained(2), .hop(2), .drained(3), .hop(3)])
-        play([.note(.pq), .note(.bt709), .drained(2), .note(.hlg), .hop(2), .drained(3), .hop(3)])
+        play([.note(.pq), .note(.bt709), .note(.hlg), .framesBeforeOut(2), .playerApplies(2), .framesBeforeOut(3), .playerApplies(3)])
+        play([.note(.pq), .note(.bt709), .framesBeforeOut(2), .playerApplies(2)])
+        play([.note(.hlg), .note(.bt709), .note(.hlg), .framesBeforeOut(2), .playerApplies(2)])
+        play([.note(.pq), .note(.bt709), .note(.bt709), .framesBeforeOut(2), .playerApplies(2), .framesBeforeOut(3), .playerApplies(3)])
+        play([.note(.pq), .note(.bt709), .framesBeforeOut(2), .note(.hlg), .playerApplies(2), .framesBeforeOut(3), .playerApplies(3)])
         play([.note(.bt709), .note(.hlg), .note(.pq)])
     }
 
-    private enum Step { case note(FrameColor), drained(Int), hop(Int) }
+    private enum Step { case note(FrameColor), framesBeforeOut(Int), playerApplies(Int) }
 
-    /// After each step, no tag a frame may still be drawing under has a white below mpv's; at the end, mpv holds
-    /// the last tag's white.
     private func play(_ order: [Step], line: UInt = #line) {
         var held = HeldSubtitleWhite()
         var drawing: [(change: Int, color: FrameColor)] = [(0, .bt709)]
@@ -103,9 +99,9 @@ final class FramePlanTests: XCTestCase {
                 let next = held.noted(color)
                 drawing.append((notes, color))
                 if let change = next.raise { raises[change] = color }
-            case .drained(let change):
+            case .framesBeforeOut(let change):
                 drawing.removeAll { $0.change < change }
-            case .hop(let change):
+            case .playerApplies(let change):
                 if let color = raises[change] { _ = held.drawn(change, color) }
             }
             XCTAssertTrue(drawing.allSatisfy { held.white <= $0.color.subtitleWhite },
