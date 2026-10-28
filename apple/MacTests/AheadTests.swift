@@ -65,6 +65,28 @@ final class AheadTests: XCTestCase {
         for _ in 0..<50 { await Task.yield() }
     }
 
+    /// True once `holds` does, false after `seconds`.
+    private func eventually(within seconds: Double = 5, _ holds: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !holds() {
+            guard ContinuousClock.now < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return true
+    }
+
+    /// `task`'s value, or nil after `seconds` (a failure, not a hang).
+    private func value<T: Sendable>(of task: Task<T?, Never>, within seconds: Double = 5) async -> T? {
+        let answer = Locked<T??>(nil)
+        Task { let value = await task.value; answer.mutate { $0 = .some(value) } }
+        guard await eventually(within: seconds, { answer.value != nil }) else {
+            XCTFail("no answer in \(seconds) s")
+            task.cancel()
+            return nil
+        }
+        return answer.value ?? nil
+    }
+
     private func asked(_ target: Target, at place: Place, on platform: Platform = .phone, stays: Duration,
                        plan: EmbyPlayback? = nil) async -> [String] {
         let server = Server()
@@ -387,7 +409,7 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(fetched, true, "not fetched ahead without -lowDisk")
     }
 
-    func testAStartRefusedForWantOfRoomIsFetchedOnceThereIsRoomWhileItsCardIsHeld() async throws {
+    func testAStartRefusedForWantOfRoomIsFetchedOnceThereIsRoomWhileItsCardIsHeld() async {
         let room = Locked(Int64(1_900_000_000)), base = conditions(playing: false)
         let lane = Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) {
             var device = base
@@ -397,25 +419,46 @@ final class AheadTests: XCTestCase {
         let shelf = FileStarts.shelf(lane: lane) { _ in true }
         let start = FileStart(film()), interest = Interest(at: .continueWatching, .likely)
         let held = Task { await shelf.hold(start, for: interest) }
-        try await Task.sleep(for: .milliseconds(80))
+        await settle()
         XCTAssertEqual(shelf.debugState(start, at: .continueWatching, .likely), "not asked, not allowed now: disk 1.9 GB, needs 2.0 GB")
         room.mutate { $0 = 10_000_000_000 }
-        let fetched = await held.value
+        let fetched = await value(of: held)
         XCTAssertEqual(fetched, true, "a card's start refused for want of room wasn't fetched once there was room, the card still held")
     }
 
-    func testAStartRefusedIsLetGoWithItsCard() async throws {
-        var full = conditions(playing: false)
-        full.freeDisk.bytes = 1_000_000_000
-        let asked = Locked(0)
-        let shelf = FileStarts.shelf(lane: Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) { [full] in full }) { _ in
+    func testARefusedStartGoesAsSoonAsTheLaneHearsOfAChangeNotAtItsNextLook() async {
+        let network = Locked(Conditions.Network.unknown), base = conditions(playing: false)
+        let lane = Lane(.bytes, atOnce: 2, recheckEvery: .seconds(3600)) {
+            var device = base
+            device.network = network.value
+            return device
+        }
+        let shelf = FileStarts.shelf(lane: lane) { _ in true }
+        let held = Task { await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely)) }
+        await settle()
+        network.mutate { $0 = .unmetered }
+        lane.conditionsChanged()
+        let fetched = await value(of: held)
+        XCTAssertEqual(fetched, true, "a start refused before the network was known waited for the lane's next look")
+    }
+
+    func testAStartRefusedIsLetGoWithItsCard() async {
+        let room = Locked(Int64(1_000_000_000)), base = conditions(playing: false), asked = Locked(0)
+        let lane = Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) {
+            var device = base
+            device.freeDisk.bytes = room.value
+            return device
+        }
+        let shelf = FileStarts.shelf(lane: lane) { _ in
             asked.mutate { $0 += 1 }
             return true
         }
         let held = Task { await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely)) }
-        try await Task.sleep(for: .milliseconds(80))
+        await settle()
         held.cancel()
-        let fetched = await held.value
+        let fetched = await value(of: held)
+        room.mutate { $0 = 10_000_000_000 }
+        try? await Task.sleep(for: .milliseconds(50))
         XCTAssertNil(fetched)
         XCTAssertEqual(asked.value, 0, "a start was fetched for a card that went")
     }
@@ -429,6 +472,23 @@ final class AheadTests: XCTestCase {
         let fetched = await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely))
         XCTAssertNil(fetched)
         XCTAssertEqual(asked.value, 1)
+    }
+
+    func testACardHeldFromLaunchWhosePlanFailedIsHeldAgainWhenAskedAgain() async {
+        let plans = Locked(0), started = Locked<[String]>([])
+        let ahead = Ahead(Ahead.Work(page: { _, _ in }, plan: { target, _ in
+            plans.mutate { $0 += 1 }
+            guard plans.value > 1, case let .playable(id, _) = target else { return nil }
+            return EmbyPlayback(itemId: id, title: id, subtitle: nil, url: URL(string: "http://server/Videos/\(id)/stream")!,
+                                durationSeconds: 7200)
+        }, fileStart: { plan, _ in started.mutate { $0.append(plan.itemId) } }, connection: { _, _ in }, subtitle: { _, _ in },
+        previews: { _, _ in }), platform: .phone, sleep: { _ in })
+        ahead.hold(only: [card], at: .homeForecast)
+        await settle()
+        XCTAssertEqual(started.value, [])
+        ahead.hold(only: [card], at: .homeForecast)
+        let held = await eventually { started.value == ["m5"] }
+        XCTAssertTrue(held, "a card whose first plan failed was never held again")
     }
 
     func testContinueWatchingsFirstCardsHeldFromLaunchGetReadyAndAreLetGoWhenTheyChange() async {
@@ -483,7 +543,7 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(pings.count, 3, "used again after the card went")
     }
 
-    func testNoConnectionIsKeptOpenWhileSomethingPlaysAndItIsOnceNothingDoesWhileTheCardStays() async throws {
+    func testNoConnectionIsKeptOpenWhileSomethingPlaysAndItIsOnceNothingDoesWhileTheCardStays() async {
         let pings = Pings(), playing = Locked(true), base = conditions(playing: false)
         let lane = Lane(.connection, atOnce: 1, recheckEvery: .milliseconds(10)) {
             var device = base
@@ -494,11 +554,11 @@ final class AheadTests: XCTestCase {
             await Connections.keepWarm(FileStart(film()), for: Interest(at: .continueWatching, .likely), lane: lane,
                                        every: .seconds(10), sleep: Screen(stays: .seconds(5)).sleep, ping: pings.ping)
         }
-        try await Task.sleep(for: .milliseconds(80))
+        await settle()
         XCTAssertEqual(pings.count, 0, "the connection was used while something played")
         playing.mutate { $0 = false }
-        try await Task.sleep(for: .milliseconds(80))
-        XCTAssertEqual(pings.count, 1, "the connection wasn't opened once nothing played, with the card still there")
+        let opened = await eventually { pings.count == 1 }
+        XCTAssertTrue(opened, "the connection wasn't opened once nothing played, with the card still there")
         warm.cancel()
         await warm.value
     }

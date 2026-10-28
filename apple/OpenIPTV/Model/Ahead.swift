@@ -160,8 +160,8 @@ final class Ahead {
     private func note(_ place: Place, _ event: String) { trail["\(place) \(event)", default: 0] += 1 }
     #endif
     let showing = Showing()
-    /// Held by the app rather than a view on screen (hold(only:at:)).
-    private var kept: [Target: Task<Void, Never>] = [:]
+    /// Held by the app rather than a view on screen (hold(only:at:)), each with its own mark.
+    private var kept: [Target: (mark: UUID, task: Task<Void, Never>)] = [:]
     private let platform: Platform
     private let sleep: @Sendable (Duration) async throws -> Void
     private let restsOnOneCard: @MainActor () -> Bool
@@ -185,14 +185,19 @@ final class Ahead {
         }
     }
 
-    /// These targets held from now on, at `place`, whatever is on screen: new ones begin, ones no longer listed stop.
+    /// These targets held from now on, at `place`, whatever is on screen: new ones begin, ones no longer listed stop,
+    /// and one whose hold ended (its plan failed) begins again.
     func hold(only targets: [Target], at place: Place) {
-        for (target, task) in kept where !targets.contains(target) {
-            task.cancel()
+        for (target, held) in kept where !targets.contains(target) {
+            held.task.cancel()
             kept[target] = nil
         }
         for target in targets where kept[target] == nil {
-            kept[target] = Task { await holding(target, at: place) }
+            let mark = UUID()
+            kept[target] = (mark, Task { [weak self] in
+                await self?.holding(target, at: place)
+                if self?.kept[target]?.mark == mark { self?.kept[target] = nil }
+            })
         }
     }
 

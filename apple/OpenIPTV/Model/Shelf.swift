@@ -157,8 +157,10 @@ final class Lane {
     private let atOnce: Int
     private let bucket: Bucket?
     private let conditions: @MainActor () -> Conditions
-    /// How often a refused interest looks again: room on the disk, heat and power change without a word.
+    /// How often a refused interest looks again besides each change the lane hears of (the network, the card rested on):
+    /// room on the disk, heat and power change without a word.
     private let recheckEvery: Duration
+    private var refused: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var tokens: Int
     private var refilledAt = ContinuousClock.now
     private var refill: Task<Void, Never>?
@@ -166,7 +168,7 @@ final class Lane {
     private var waiting: [Ticket] = []
     private static let every = NSHashTable<Lane>.weakObjects()
 
-    init(_ weight: Weight, atOnce: Int, bucket: Bucket? = nil, recheckEvery: Duration = .seconds(3),
+    init(_ weight: Weight, atOnce: Int, bucket: Bucket? = nil, recheckEvery: Duration = .seconds(15),
          conditions: @escaping @MainActor () -> Conditions) {
         self.weight = weight
         self.atOnce = atOnce
@@ -186,7 +188,9 @@ final class Lane {
         try Task.checkCancellation()
         if ticket.plays { return start(ticket) }
         guard ticket.interest != nil, allows(ticket, conditions()) else {
+            #if DEBUG
             noteRefused(ticket, conditions())
+            #endif
             throw CancellationError()
         }
         try await withTaskCancellationHandler {
@@ -210,7 +214,27 @@ final class Lane {
 
     /// Returns once the conditions allow `interest`; throws when cancelled first.
     func untilAllowed(_ interest: Interest) async throws {
-        while refuses(interest) { try await Task.sleep(for: recheckEvery) }
+        while refuses(interest) {
+            try Task.checkCancellation()
+            await nextLook()
+        }
+        try Task.checkCancellation()
+    }
+
+    /// The next change the lane hears of, or `recheckEvery`, or a cancel, whichever comes first.
+    private func nextLook() async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { look in
+                refused[id] = look
+                Task { [weak self, recheckEvery] in
+                    try? await Task.sleep(for: recheckEvery)
+                    self?.refused.removeValue(forKey: id)?.resume()
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in self.refused.removeValue(forKey: id)?.resume() }
+        }
     }
 
     func whenAllowed(for interest: Interest, _ work: () async -> Void) async {
@@ -252,6 +276,9 @@ final class Lane {
             }
         }
         admit()
+        let looks = refused.values
+        refused = [:]
+        looks.forEach { $0.resume() }
     }
 
     #if DEBUG
@@ -362,6 +389,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     private final class Job {
         let ticket: Lane.Ticket
+        var began = Date.distantPast
         var task: Task<Void, Never>?
         var holders: Set<Interest.ID> = []
         var waiters: [UUID: CheckedContinuation<Value, Error>] = [:]
@@ -490,9 +518,15 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         stopIfUnwanted(job, key)
     }
 
-    /// What's kept, and failures, go; fetches under way finish for whoever waits on them, asked as they were just now.
-    func forgetKept() {
-        for (key, entry) in entries where entry.job == nil { entries[key] = nil }
+    /// What's kept, failures, and fetches asked before `date` go; fetches asked since finish for whoever waits on them.
+    func forget(askedBefore date: Date) {
+        for (key, entry) in entries {
+            if let job = entry.job {
+                guard job.began < date else { continue }
+                stop(job)
+            }
+            entries[key] = nil
+        }
     }
 
     func forgetAll() {
@@ -516,6 +550,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     private func start(_ key: Key, _ ticket: Lane.Ticket) -> Job {
         let job = Job(ticket)
+        job.began = now()
         ticket.stop = { [weak self, weak job] in
             guard let self, let job, entries[key]?.job === job else { return }
             stop(job)
