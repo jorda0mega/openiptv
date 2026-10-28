@@ -259,31 +259,44 @@ struct ContinueStop {
         /// Partway, but no card could be made here (nothing about it
         /// saved): the server's card stays, with this progress.
         case progress(Double?)
+
+        var addsCard: Bool { if case .gone = self { false } else { true } }
     }
 
     let itemId: String
     let at: Date
     let outcome: Outcome
-    /// Its show, whose card it replaces whichever episode that had.
+    /// Its show, whose card it replaces whichever episode that had: by id,
+    /// and by name as `EmbyClient.showRow` makes its cards. The same show
+    /// in two libraries has two ids, and an episode may play from the
+    /// other copy (Dragon Ball Z's English one).
     let seriesId: String?
     let seriesName: String?
 
-    /// These stops over the server's cards, oldest first.
+    /// These stops over the server's cards, oldest first. A finished stop
+    /// leaves out the older ones of its copy: what they put in front is
+    /// done, and another copy's card stays.
     static func applied(_ stops: some Collection<ContinueStop>, toServer server: [Card]) -> [Card] {
-        stops.sorted { $0.at < $1.at }.reduce(server) { $1.applied(to: $0, server: server) }
+        let stops = stops.sorted { $0.at < $1.at }
+        let current = stops.indices.filter { index in
+            !stops[(index + 1)...].contains { !$0.outcome.addsCard && $0.seriesId != nil && $0.seriesId == stops[index].seriesId }
+        }
+        return current.reduce(server) { stops[$1].applied(to: $0, server: server) }
     }
 
     /// These cards with this stop's card in front, in place of the one for
     /// this title or show. `server`: the cards as the server sent them.
     func applied(to cards: [Card], server: [Card] = []) -> [Card] {
+        func exact(_ card: Card) -> Bool { card.id == itemId || card.episodeId == itemId }
+        // A finished stop takes out only its own copy's cards: another copy
+        // may go further, and a stop that adds no card can't make two.
         func isIt(_ card: Card) -> Bool {
-            card.id == itemId || card.episodeId == itemId
-                || seriesId.map { card.id == $0 || card.seriesId == $0 } ?? false
+            exact(card) || seriesId.map { card.id == $0 || card.seriesId == $0 } ?? false
+                || outcome.addsCard && card.kind == "Series" && seriesName.map { card.title.lowercased() == $0.lowercased() } ?? false
         }
         // Its card as it stands, else as the server sent it (an older
         // stop of the same show may have taken it out already); this
         // very episode or film before any card of its show.
-        func exact(_ card: Card) -> Bool { card.id == itemId || card.episodeId == itemId }
         var cards = cards
         let candidates = cards + server
         let theirs = candidates.first(where: exact) ?? candidates.first(where: isIt)
@@ -297,9 +310,9 @@ struct ContinueStop {
             // The server's own card, in front with where it got to.
             guard let old = theirs else { break }
             // The new progress only on a card for this very title.
-            cards.insert(Card(id: old.id, kind: old.kind, title: old.title, subtitle: old.subtitle, images: old.images,
-                              progress: exact(old) ? (progress ?? old.progress) : old.progress, playable: old.playable,
-                              episodeId: old.episodeId, seriesId: old.seriesId), at: 0)
+            var card = old
+            if exact(old) { card.progress = progress ?? old.progress }
+            cards.insert(card, at: 0)
         }
         return cards
     }
