@@ -153,6 +153,8 @@ final class Ahead {
     private let work: Work
     #if DEBUG
     private(set) var held = 0
+    /// Holds whose plan came back empty, so nothing else of theirs was fetched.
+    private(set) var planless = 0
     #endif
     let showing = Showing()
     private let platform: Platform
@@ -202,7 +204,13 @@ final class Ahead {
         await withTaskGroup(of: Void.self) { group in
             if needs.contains(.page) { group.addTask { await self.work.page(target, interest) } }
             let playing = needs.filter { $0 != .page }
-            guard !playing.isEmpty, let plan = await work.plan(target, interest) else { return }
+            guard !playing.isEmpty else { return }
+            guard let plan = await work.plan(target, interest) else {
+                #if DEBUG
+                planless += 1
+                #endif
+                return
+            }
             for need in playing { group.addTask { await self.prepare(need, of: plan, interest) } }
         }
     }
