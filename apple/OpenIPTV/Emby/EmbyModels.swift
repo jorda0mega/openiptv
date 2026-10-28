@@ -202,7 +202,7 @@ struct Card: Codable, Hashable, Identifiable {
     let title: String
     let subtitle: String?
     let images: [CardImage]
-    let progress: Double?
+    var progress: Double?
     let playable: Bool
     /// For a show in Continue Watching / Next Up: the episode to resume.
     var episodeId: String? = nil

@@ -974,10 +974,6 @@ final class AppModel {
         shows[series] = ShowData(show: data.show, episodes: episodes, nextUp: nextUp, loadedAt: data.loadedAt, similar: data.similar)
     }
 
-    /// Continue Watching as it'll be, straight away when playback stops
-    /// (the server's answer follows): the title just watched first with its
-    /// new progress; once finished, a show's next episode instead (as the
-    /// TV app does), a film gone. A title that wasn't in the row joins it.
     /// What was stopped on this device in the last two minutes: a server
     /// answer that hasn't caught up yet doesn't undo it.
     @ObservationIgnored private var recentStops: [String: ContinueStop] = [:]
@@ -1056,8 +1052,13 @@ final class AppModel {
         }
     }
 
+    /// Continue Watching as it'll be, straight away when playback stops
+    /// (the server's answer follows): the title just watched first with its
+    /// new progress; once finished, a show's next episode instead (as the
+    /// TV app does), a film gone. A title that wasn't in the row joins it.
     private func patchContinueWatching(_ playback: EmbyPlayback, seconds: Double) {
         guard let emby else { return }
+        let page = rows
         // The player closing is a moment for Continue Watching: what the
         // server said meanwhile goes on first, this stop over it, and the
         // server's answer for the stop may still move cards.
@@ -1068,30 +1069,28 @@ final class AppModel {
         continueMovesUntil = Date().addingTimeInterval(10)
         let duration = playback.durationSeconds ?? 0
         let finished = duration > 0 && seconds >= duration * 0.9
+        let progress = duration > 0 ? seconds / duration * 100 : nil
         let index = rows.firstIndex { $0.title == Self.continueTitle }
-        var cards = index.map { rows[$0].cards } ?? []
-        let old = cards.firstIndex { $0.id == playback.itemId || $0.episodeId == playback.itemId }.map { cards.remove(at: $0) }
+        let shown = index.map { rows[$0].cards } ?? []
+        let old = shown.first { $0.id == playback.itemId || $0.episodeId == playback.itemId }
         func card(_ item: EmbyItem) -> Card? { emby.showRow(Self.continueTitle, [item], lastCardWidth)?.cards.first }
         var lead: Card?
         if let series = playback.seriesId, let data = shows[series],
            let at = data.episodes.firstIndex(where: { $0.id == playback.itemId }) {
-            // One card per show, whichever episode it had.
-            cards.removeAll { $0.id == series }
             let next = finished ? data.episodes[(at + 1)...].first { $0.userData?.played != true } : data.episodes[at]
             lead = next.flatMap(card)
         } else if let item = movies[playback.itemId]?.item {
             lead = finished ? nil : card(item)
         } else if let old, !finished {
-            let progress = duration > 0 ? seconds / duration * 100 : old.progress
-            lead = Card(id: old.id, kind: old.kind, title: old.title, subtitle: old.subtitle, images: old.images,
-                        progress: progress, playable: old.playable, episodeId: old.episodeId, seriesId: old.seriesId)
+            var card = old
+            card.progress = progress ?? old.progress
+            lead = card
         }
-        if let lead { cards.insert(lead, at: 0) }
-        let outcome: ContinueStop.Outcome = if let lead { .card(lead) } else if finished { .gone } else {
-            .progress(duration > 0 ? seconds / duration * 100 : nil)
-        }
-        recentStops[playback.itemId] = ContinueStop(itemId: playback.itemId, at: Date(), outcome: outcome, seriesId: playback.seriesId,
-                                                    seriesName: playback.seriesName)
+        let outcome: ContinueStop.Outcome = if let lead { .card(lead) } else if finished { .gone } else { .progress(progress) }
+        let stop = ContinueStop(itemId: playback.itemId, at: Date(), outcome: outcome, seriesId: playback.seriesId,
+                                seriesName: playback.seriesName)
+        recentStops[playback.itemId] = stop
+        let cards = stop.applied(to: shown)
         let shape = Artwork.Shape.landscape
         let row = cards.isEmpty ? nil : HomeRow(title: Self.continueTitle, shape: index.map { rows[$0].shape } ?? shape.rawValue,
                                                 aspect: index.map { rows[$0].aspect } ?? shape.aspect, cards: cards)
@@ -1102,6 +1101,9 @@ final class AppModel {
             staged.rows = Self.replacingContinue(in: staged.rows, with: row)
             stagedHome = staged
         }
+        // Saved now: the server's answer for this stop often matches it,
+        // and then saves nothing.
+        if rows != page { saveShownHome() }
     }
 
     /// Loads shows the user is likely to open next, in the background.
