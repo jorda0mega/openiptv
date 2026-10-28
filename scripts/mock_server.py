@@ -158,6 +158,12 @@ XTREAM_REQUESTS = []
 # addresses are searched for it. Never printed or sent back.
 FAKE_LOGIN = {}
 SENTRY_ENVELOPES = []
+# Every request to the fake servers (not /mock/), (time, kind): "video" a
+# read of a film, "logout", "other"; and the ones still being answered.
+# GET /mock/server_requests?since= (a time from /mock/mark) counts them.
+SERVER_REQUESTS = []
+OPEN_ANSWERS = [0]
+OPEN_LOCK = threading.Lock()
 IPTV_ADDRESSES = []
 LIVE_REQUESTS = []
 LIVE_HELD = {}
@@ -636,10 +642,26 @@ class Handler(BaseHTTPRequestHandler):
         if self.link:
             self.wfile = ShapedWriter(self.wfile, self.link)
 
+    def handle_one_request(self):
+        self.counted = False
+        try:
+            super().handle_one_request()
+        finally:
+            if self.counted:
+                with OPEN_LOCK:
+                    OPEN_ANSWERS[0] -= 1
+
     def parse_request(self):
         if not super().parse_request():
             return False
         self.read = None
+        path = urlparse(self.path).path
+        if not path.startswith("/mock/"):
+            kind = "video" if opens_file(path) else "logout" if path.lower().endswith("/sessions/logout") else "other"
+            with OPEN_LOCK:
+                SERVER_REQUESTS.append((time.time(), kind))
+                OPEN_ANSWERS[0] += 1
+            self.counted = True
         if self.link:
             path = urlparse(self.path).path
             self.wfile.on = not path.startswith("/mock/")
@@ -895,6 +917,13 @@ class Handler(BaseHTTPRequestHandler):
                                                  q.get("problems", "").split(",")))
         if path == "/mock/mark":
             return self.send({"t": time.time()})
+        if path == "/mock/server_requests":
+            since = float(q.get("since", "0"))
+            with OPEN_LOCK:
+                kinds = [kind for t, kind in SERVER_REQUESTS if t >= since]
+                still = OPEN_ANSWERS[0]
+            return self.send({"requests": len(kinds), "video": kinds.count("video"), "logout": kinds.count("logout"),
+                              "answering": still})
         if path == "/mock/video_requests":
             since = float(q.get("since", "0"))
             return self.send({"items": [item for t, item in VIDEO_REQUESTS if t >= since]})
