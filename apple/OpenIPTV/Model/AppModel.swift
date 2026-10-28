@@ -1833,9 +1833,11 @@ final class AppModel {
     }
 
     func forgetEverything() async {
+        accountGeneration += 1
         accountChanging = true
         defer { accountChanging = false }
         holdContinueWatching()
+        homeRetry.stop()
         await emby?.logout()
         sources.forgetEverything()
         await guide.clear()
