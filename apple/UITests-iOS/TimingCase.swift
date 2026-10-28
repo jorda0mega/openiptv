@@ -26,14 +26,20 @@ class TimingCase: XCTestCase {
     }
 
     /// A film playing to its first frame: the test server's "Animals" from Search, or Continue Watching's first
-    /// card on the real feeds. Seconds from the tap, nil when no first frame in 180 s.
+    /// card on the real feeds or with START_FROM=card (tapped once fetched ahead, at most 30 s: the kept player
+    /// a viewer's tap takes). Seconds from the tap, nil when no first frame in 180 s; then the app's own reason
+    /// is printed (START none: ...).
     func openFilm(_ arguments: [String] = []) -> Double? {
-        app.launchArguments = launchBase + (onRealFeeds ? [] : ["-debugSearch", "animals"]) + arguments
+        let fromCard = onRealFeeds || ProcessInfo.processInfo.environment["START_FROM"] == "card"
+        app.launchArguments = launchBase + (fromCard ? [] : ["-debugSearch", "animals"]) + arguments
         app.launch()
-        if onRealFeeds {
+        if fromCard {
             let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
             XCTAssertTrue(card.waitForExistence(timeout: 90), "no Continue Watching card")
-            sleep(3)
+            let began = Date()
+            while Date().timeIntervalSince(began) < 30, !fetchedAhead() { sleep(1) }
+            let ahead = app.staticTexts["debug-ahead"].firstMatch
+            print("START card after \(Int(Date().timeIntervalSince(began))) s: \(ahead.exists ? ahead.label.replacingOccurrences(of: " | ", with: "; ") : "no readout")")
             card.tap()
         } else {
             sleep(4)
@@ -49,7 +55,30 @@ class TimingCase: XCTestCase {
         let tapped = Date()
         let start = app.staticTexts["debug-start"].firstMatch
         while Date().timeIntervalSince(tapped) < 180, (start.exists ? start.label.split(separator: " ").count : 0) < 4 { sleep(1) }
-        guard start.exists, start.label.split(separator: " ").count == 4 else { return nil }
+        guard start.exists, start.label.split(separator: " ").count == 4 else {
+            sayWhyNoStart()
+            return nil
+        }
         return Date().timeIntervalSince(tapped)
+    }
+
+    /// Continue Watching's first card's plan and start fetched ahead ("plans 1 starts 1").
+    func fetchedAhead() -> Bool {
+        let readout = app.staticTexts["debug-ahead"].firstMatch
+        let words = readout.exists ? readout.label.split(separator: " ") : []
+        func count(_ name: String) -> Int { words.firstIndex(of: Substring(name)).flatMap { Int(words[$0 + 1]) } ?? 0 }
+        return count("plans") > 0 && count("starts") > 0
+    }
+
+    /// No first frame: what the app shows and says instead (words and counts only).
+    func sayWhyNoStart() {
+        func text(_ id: String) -> String {
+            let element = app.descendants(matching: .any)[id].firstMatch
+            // On the real feeds only whether it shows: its words can name the film.
+            return element.exists ? (element.label.isEmpty || onRealFeeds ? "shown" : element.label) : "none"
+        }
+        let alert = app.alerts.firstMatch
+        print("START none: player \(app.staticTexts["debug-item"].firstMatch.exists ? "open" : "not open") | alert \(alert.exists ? alert.label : "none") | "
+              + "error \(text("debug-start-error")) | loading \(text("load-progress")) | parts \(text("debug-start-parts").replacingOccurrences(of: " | ", with: "; "))")
     }
 }
