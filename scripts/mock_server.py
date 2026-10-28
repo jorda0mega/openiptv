@@ -72,8 +72,12 @@ CONNECTIONS = set()
 # as Emby makes it, see converted_segment), "convert_delay" (seconds before
 # a conversion's first segment), "convert_clock" (see converted_segment),
 # "resume_movies" ("1,2,3": those films in Continue Watching after the
-# rest, each stopped 5 minutes in), "wide_pictures" ("1": Thumb and Backdrop
-# pictures 16:9, as a real server's are, not the 2:3 of a poster),
+# rest, each stopped 5 minutes in), "show_copy" ("1": the show s1 has a
+# second copy, cs1, in another library, its episodes ce<n> in 1080p for
+# the 4K e<n>: an iPhone plays ce203 from s1's card, as Dragon Ball Z
+# plays its other copy; "4k": the copy is the 4K one, for Apple TV),
+# "wide_pictures" ("1": Thumb and Backdrop pictures 16:9, as a real
+# server's are, not the 2:3 of a poster),
 # "redirect_film" and "redirect_segment" ("same" or "elsewhere": each
 # request for the film's file, or for a converted version's segment, is
 # redirected to its own address, on this server or at localhost, which the
@@ -216,7 +220,8 @@ DOWNLOADED = []
 
 def media_source(item):
     """How `item` plays, as Emby lists it in PlaybackInfo and in the item's full record."""
-    width = 3840 if item.startswith("k") else 1920
+    copy = CONTROL.get("show_copy")
+    width = 3840 if item.startswith("k") or (copy == "1" and item.startswith("e")) or (copy == "4k" and item.startswith("ce")) else 1920
     streams = file_streams()
     # "copy_audio": "a8:fre": that copy's sound in that language only;
     # "a8:spa+spa+jpn": those tracks in that order (another copy of the
@@ -1406,15 +1411,19 @@ class Handler(BaseHTTPRequestHandler):
                 if "People" in q.get("Fields", ""):
                     item["People"] = [{"Name": n, "Type": t, "Id": "p_" + n.replace(" ", "_")} for n, t in CAST.get(item_id, [])]
                 return self.send(item)
-            if item_id.startswith("s"):
+            if item_id.startswith("s") or (CONTROL.get("show_copy") and item_id == "cs1"):
                 names = SERIES_NAMES
                 n = int(item_id[1:]) if item_id[1:].isdigit() and int(item_id[1:]) < len(names) else 1
                 return self.send({"Id": item_id, "Name": names[n], "Type": "Series", "ProductionYear": 2000 + n,
                                   "ProviderIds": {"Imdb": SHOW_IMDB.get(names[n], "")},
                                   "Overview": "Real cases solved with forensic science.",
                                   "ImageTags": {"Primary": "p"}, "BackdropImageTags": ["b"]})
-            if item_id.startswith("e"):
-                item = episode(int(item_id[1:])) | {"RunTimeTicks": 18000000000, "MediaSources": [media_source(item_id)]}
+            if item_id.startswith("e") or (CONTROL.get("show_copy") and item_id.startswith("ce")):
+                n = int(item_id.removeprefix("c").removeprefix("e"))
+                item = episode(n) | {"Id": item_id, "RunTimeTicks": 18000000000, "MediaSources": [media_source(item_id)]}
+                # "show_copy": its season and number, to find it in the other copy.
+                if CONTROL.get("show_copy"):
+                    item |= {"ParentIndexNumber": n // 100, "IndexNumber": n % 100} | ({"SeriesId": "cs1"} if item_id[0] == "c" else {})
                 # "intro": "start,end" seconds, marked as Emby's intro
                 # detection marks them (chapters with a MarkerType).
                 if CONTROL.get("intro"):
@@ -1431,11 +1440,13 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/Shows/") and path.endswith("/Episodes"):
             # Specials plus ten seasons, like a long-running show.
             seasons = [int(q["SeasonId"][-1])] if "SeasonId" in q else list(range(0, 11))
+            copy = path.split("/")[2] == "cs1"
             return self.send({"Items": [episode(s * 100 + i) | {"Name": f"Case {i}", "IndexNumber": i, "ParentIndexNumber": s,
                                                                 "RunTimeTicks": 13200000000, "Overview": "A small-town mystery.",
                                                                 "UserData": {"Played": s == 1 or (s == 2 and i < 3),
                                                                              "PlayedPercentage": 40 if (s, i) == (2, 3) else None,
                                                                              "PlaybackPositionTicks": 5280000000 if (s, i) == (2, 3) else 0}}
+                                        | ({"Id": f"ce{s * 100 + i}", "SeriesId": "cs1"} if copy else {})
                                          for s in seasons for i in range(1, 9)]})
         if path == "/Shows/NextUp":
             items = [episode(203) | {"Name": "Case 3", "IndexNumber": 3, "ParentIndexNumber": 2,
@@ -1613,6 +1624,7 @@ class Handler(BaseHTTPRequestHandler):
             shows = [{"Id": f"s{i}", "Name": n, "Type": "Series", "ProductionYear": 2000 + i,
                       "ProviderIds": {"Imdb": SHOW_IMDB.get(n, ""), "Tmdb": SHOW_TMDB.get(n, "")},
                       "ImageTags": {"Primary": "p"}} for i, n in enumerate(names)]
+            shows += [shows[1] | {"Id": "cs1"}] if CONTROL.get("show_copy") else []
             # Same-named and similar titles with real IMDb ids, to check
             # that search ranks by popularity (the 2026 "Animals" first).
             known = [known_item(entry) for entry in KNOWN_TITLES] + added_titles()

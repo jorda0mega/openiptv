@@ -57,6 +57,48 @@ final class HomeStabilityTests: XCTestCase {
         }
     }
 
+    /// Regression: pressing Dragon Ball Z's card played the episode from
+    /// the show's other copy (another library); back on Home, the show had
+    /// a card for each copy. The one card left resumes that episode.
+    func testPlayingTheShowsOtherCopyLeavesOneCard() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["show_copy": "4k", "episode_resume": "60"])
+        defer { configure(server, ["reset": "1"]) }
+        // A library read afresh, with the copy in it; the start asked at the
+        // press, once the library knows the copy; the show's card first.
+        app.launchArguments = ["-tvTab", "home", "-cacheFolder", "show-copy-\(UUID())", "-noPrepareAhead", "YES"]
+        app.launchEnvironment["OPENREEL_DEBUG_HOME_VARY"] = nil
+        app.launch()
+        let original = app.buttons["continue-s1"].firstMatch
+        XCTAssertTrue(original.waitForExistence(timeout: 30), "the show isn't in Continue Watching")
+        wait(seconds: 15)
+        focus("continue-s1")
+        remote.press(.select)
+        let playing = app.staticTexts["debug-item"].firstMatch
+        XCTAssertTrue(playing.waitForExistence(timeout: 30), "the player didn't open")
+        wait(seconds: 6)
+        XCTAssertEqual(playing.label, "ce203", "the card didn't play the show's other copy")
+        let copy = app.buttons["continue-cs1"].firstMatch
+        for _ in 0..<3 where !copy.exists {
+            remote.press(.menu)
+            sleep(3)
+        }
+        XCTAssertTrue(copy.waitForExistence(timeout: 10), "the episode just watched has no card")
+        wait(seconds: 3)
+        shot("one card after the other copy")
+        XCTAssertFalse(original.exists, "the show has a card for each copy")
+
+        focus("continue-cs1")
+        remote.press(.select)
+        XCTAssertTrue(playing.waitForExistence(timeout: 30), "the card didn't play")
+        wait(seconds: 4)
+        shot("the card resumed")
+        XCTAssertEqual(playing.label, "ce203", "the card didn't resume the episode just watched")
+        let seconds = Double(app.staticTexts["debug-position"].firstMatch.label.split(separator: " ").first ?? "") ?? 0
+        XCTAssertGreaterThanOrEqual(seconds, 60, "the card started the episode over")
+    }
+
     /// Moving along a row moves only that row: the page doesn't scroll up
     /// or down (the row's heading stays where it is).
     func testMovingAlongARowKeepsThePageStill() {
@@ -209,6 +251,24 @@ final class HomeStabilityTests: XCTestCase {
     private func focusedLabel() -> String {
         let element = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
         return element.exists ? element.label : "nothing"
+    }
+
+    /// Moves focus onto the card with this id: down from the hero, else
+    /// back up.
+    private func focus(_ id: String) {
+        func focusedId() -> String {
+            let element = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            return element.exists ? element.identifier : "nothing"
+        }
+        for _ in 0..<5 where focusedId() != id {
+            remote.press(.down)
+            sleep(1)
+        }
+        for _ in 0..<8 where focusedId() != id {
+            remote.press(.up)
+            sleep(1)
+        }
+        XCTAssertEqual(focusedId(), id, "\(id) never took focus (on \(focusedLabel()))")
     }
 
     private func focusedIsTab() -> Bool {

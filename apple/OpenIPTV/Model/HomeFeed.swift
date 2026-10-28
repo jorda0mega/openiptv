@@ -247,6 +247,64 @@ enum HomeFeed {
     }
 }
 
+/// A title stopped on this device in the last two minutes, as Continue
+/// Watching shows it: a server answer that hasn't caught up yet doesn't
+/// undo it.
+struct ContinueStop {
+    enum Outcome {
+        /// The card Continue Watching showed for it.
+        case card(Card)
+        /// Finished with nothing next: no card.
+        case gone
+        /// Partway, but no card could be made here (nothing about it
+        /// saved): the server's card stays, with this progress.
+        case progress(Double?)
+    }
+
+    let itemId: String
+    let at: Date
+    let outcome: Outcome
+    /// Its show, whose card it replaces whichever episode that had.
+    let seriesId: String?
+    let seriesName: String?
+
+    /// These stops over the server's cards, oldest first.
+    static func applied(_ stops: some Collection<ContinueStop>, toServer server: [Card]) -> [Card] {
+        stops.sorted { $0.at < $1.at }.reduce(server) { $1.applied(to: $0, server: server) }
+    }
+
+    /// These cards with this stop's card in front, in place of the one for
+    /// this title or show. `server`: the cards as the server sent them.
+    func applied(to cards: [Card], server: [Card] = []) -> [Card] {
+        func isIt(_ card: Card) -> Bool {
+            card.id == itemId || card.episodeId == itemId
+                || seriesId.map { card.id == $0 || card.seriesId == $0 } ?? false
+        }
+        // Its card as it stands, else as the server sent it (an older
+        // stop of the same show may have taken it out already); this
+        // very episode or film before any card of its show.
+        func exact(_ card: Card) -> Bool { card.id == itemId || card.episodeId == itemId }
+        var cards = cards
+        let candidates = cards + server
+        let theirs = candidates.first(where: exact) ?? candidates.first(where: isIt)
+        cards.removeAll(where: isIt)
+        switch outcome {
+        case let .card(card):
+            cards.insert(card, at: 0)
+        case .gone:
+            break
+        case let .progress(progress):
+            // The server's own card, in front with where it got to.
+            guard let old = theirs else { break }
+            // The new progress only on a card for this very title.
+            cards.insert(Card(id: old.id, kind: old.kind, title: old.title, subtitle: old.subtitle, images: old.images,
+                              progress: exact(old) ? (progress ?? old.progress) : old.progress, playable: old.playable,
+                              episodeId: old.episodeId, seriesId: old.seriesId), at: 0)
+        }
+        return cards
+    }
+}
+
 @MainActor
 final class HomeRetry {
     private static let waits: [Duration] = [.seconds(2), .seconds(5), .seconds(15), .seconds(30)]
