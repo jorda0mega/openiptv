@@ -403,10 +403,26 @@ final class ShelfTests: XCTestCase {
         _ = await started.next()
         clock.mutate { $0 += 60 }
         shelf.forget(askedBefore: clock.value)
-        _ = await started.next()
         gate.letThrough()
         let value = await held.value
         XCTAssertEqual(value, 2, "a card on screen whose plan was forgotten on coming back got nothing more")
+    }
+
+    func testAHoldWhoseFetchWasForgottenWithItsAccountEnds() async throws {
+        let gate = Fetches(held: true), clock = Locked(start)
+        let shelf = Shelf<String, Int>(.init(lane: lane(), lifetime: .seconds(600)), now: { clock.value }) { key in
+            try await gate.fetch(key)
+        }
+        let held = Task { await shelf.hold("plan", for: Interest(at: .episodeRow, .likely)) }
+        var started = gate.started.makeAsyncIterator()
+        _ = await started.next()
+        clock.mutate { $0 += 60 }
+        shelf.forget(askedBefore: clock.value)
+        shelf.forgetAll()
+        gate.letThrough()
+        let value = await held.value
+        XCTAssertNil(value, "a hold asked again for a signed-out account")
+        XCTAssertEqual(gate.asked, 1)
     }
 
     func testAnInterestIsNeverTakenForAnEarlierOne() {

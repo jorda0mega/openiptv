@@ -417,8 +417,8 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     private var entries: [Key: Entry] = [:]
-    /// Times `forget(askedBefore:)` ran: a hold whose fetch it stopped asks again.
-    private var forgotten = 0
+    /// Times `forget(askedBefore:)` ran: a hold whose fetch it stopped asks again, unless `forgetAll` ran too.
+    private var forgotten = 0, forgottenAll = 0
     #if DEBUG
     private(set) var fetched = 0
     /// Fetches that failed, the last one's kind (an error's type and code, never its words), and those stopped.
@@ -512,9 +512,9 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     /// Asked again too when what it waited on was forgotten as out of date (`forget(askedBefore:)`).
     func hold(_ key: Key, for interest: Interest) async -> Value? {
         while true {
-            let forgetting = forgotten
+            let (forgetting, forgettingAll) = (forgotten, forgottenAll)
             if let value = await warm(key, for: interest) { return value }
-            guard !Task.isCancelled else { return nil }
+            guard !Task.isCancelled, forgottenAll == forgettingAll else { return nil }
             if forgotten != forgetting { continue }
             guard policy.lane.refuses(interest) else { return nil }
             guard (try? await policy.lane.untilAllowed(interest)) != nil else { return nil }
@@ -540,6 +540,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     func forgetAll() {
+        forgottenAll += 1
         for case let job? in entries.values.map(\.job) { stop(job) }
         entries = [:]
     }

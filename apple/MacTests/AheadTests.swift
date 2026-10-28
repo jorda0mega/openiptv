@@ -453,6 +453,22 @@ final class AheadTests: XCTestCase {
         XCTAssertEqual(fetched, true, "a start refused before the network was known waited for the lane's next look")
     }
 
+    func testAStartRefusedWhileAFilmPlayedGoesWhenPlaybackEndsNotAtTheNextLook() async {
+        let base = conditions(playing: false)
+        let lane = Lane(.bytes, atOnce: 2, recheckEvery: .seconds(3600)) {
+            var device = base
+            device.playing = PlaybackActivity.isPlaying
+            return device
+        }
+        let shelf = FileStarts.shelf(lane: lane) { _ in true }
+        PlaybackActivity.began()
+        let held = Task { await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely)) }
+        await settle()
+        PlaybackActivity.ended()
+        let fetched = await value(of: held)
+        XCTAssertEqual(fetched, true, "a start refused while Picture in Picture played waited for the lane's next look")
+    }
+
     func testAStartRefusedIsLetGoWithItsCard() async {
         let room = Locked(Int64(1_000_000_000)), base = conditions(playing: false), asked = Locked(0)
         let lane = Lane(.bytes, atOnce: 2, recheckEvery: .milliseconds(10)) {
