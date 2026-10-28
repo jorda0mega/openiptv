@@ -184,6 +184,7 @@ final class AppModel {
             Task.detached(priority: .userInitiated) { await ImagePipeline.shared.prefetch(urls) }
         }
         Task { await guide.loadCache(); guideState = await guide.state }
+        library.versionsChanged = { [weak self] in self?.holdContinueWatching() }
         holdContinueWatching()
     }
 
@@ -454,7 +455,6 @@ final class AppModel {
 
     private func openLibrary(_ emby: EmbyClient) async {
         await library.open(emby)
-        holdContinueWatching()
         await library.loadCachedCharts()
     }
 
@@ -1377,22 +1377,24 @@ final class AppModel {
     /// Continue Watching's first two cards, held from launch rather than from when Home shows them, till a film plays:
     /// their plans, starts and connections go before the tap, so a server slow on its first read after a while is slow
     /// before it.
-    /// Held again from the start when what their plans are asked for changes: another copy the library found, another
-    /// account.
+    /// A card is held again from the start when what its plan is asked for changes: another copy the library found
+    /// (versionsChanged), another account.
     private func holdContinueWatching() {
         let cards = rows.first { $0.title == Self.continueTitle }?.cards ?? []
-        let targets = playerShown || Self.noPrepareAhead ? [] : cards.prefix(2).map(\.playTarget)
-        let keys = Set(targets.map(planKey))
-        if keys != heldPlans { ahead.hold(only: [], at: .homeForecast) }
+        let targets = playerShown || Self.noPrepareAhead || accountChanging ? [] : cards.prefix(2).map(\.playTarget)
+        let keys = Dictionary(targets.map { ($0, planKey($0)) }, uniquingKeysWith: { first, _ in first })
+        ahead.hold(only: targets.filter { heldPlans[$0] == keys[$0] }, at: .homeForecast)
         heldPlans = keys
         ahead.hold(only: targets, at: .homeForecast)
     }
 
-    @ObservationIgnored private var heldPlans: Set<PlanKey> = []
+    @ObservationIgnored private var heldPlans: [Target: PlanKey] = [:]
+    /// Signing out: no card is held till it's done (the old account's rows are still on the page meanwhile).
+    @ObservationIgnored private var accountChanging = false
 
     /// Every held card asked afresh: their plans were forgotten, or are another account's.
     private func holdContinueWatchingAgain() {
-        heldPlans = []
+        heldPlans = [:]
         holdContinueWatching()
     }
 
@@ -1760,7 +1762,9 @@ final class AppModel {
 
     func signOutOfEmby() async {
         accountGeneration += 1
-        ahead.hold(only: [], at: .homeForecast)
+        accountChanging = true
+        defer { accountChanging = false }
+        holdContinueWatching()
         homeLoad = nil
         homeLoadID = UUID()
         stagedHome = nil
@@ -1807,7 +1811,9 @@ final class AppModel {
     }
 
     func forgetEverything() async {
-        ahead.hold(only: [], at: .homeForecast)
+        accountChanging = true
+        defer { accountChanging = false }
+        holdContinueWatching()
         await emby?.logout()
         sources.forgetEverything()
         await guide.clear()
