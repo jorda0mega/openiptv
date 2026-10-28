@@ -153,9 +153,10 @@ final class AppModel {
         // channels, which spell out the login.
         for old in ["live-lineup.v1.json", "live-lineup.v2.json"] { AppCache.remove(old) }
         #if DEBUG
-        if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NO_SAVED_HOME"] != nil { AppCache.remove("home.v4.json") }
-        #endif
+        let home: HomeContent? = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NO_SAVED_HOME"] != nil ? nil : AppCache.read("home.v4.json")
+        #else
         let home: HomeContent? = AppCache.read("home.v4.json")
+        #endif
         rows = home?.rows ?? []
         featured = home?.featured
         spotlight = home?.spotlight ?? []
