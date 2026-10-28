@@ -77,6 +77,11 @@ enum FrameColor: Equatable, Sendable {
         }
     }
 
+    /// Subtitle white as a code value, for mpv's `sub-color`.
+    var subtitleWhite: UInt8 { 255 }
+
+    var subtitleColor: String { String(format: "#%02X%02X%02X", subtitleWhite, subtitleWhite, subtitleWhite) }
+
     func tag(_ buffer: CVPixelBuffer) {
         let (primaries, transfer): (CFString, CFString) = switch self {
         case .bt709: (kCVImageBufferColorPrimaries_ITU_R_709_2, kCVImageBufferTransferFunction_ITU_R_709_2)
