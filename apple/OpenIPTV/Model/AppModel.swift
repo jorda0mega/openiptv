@@ -1392,6 +1392,7 @@ final class AppModel {
             + (Lane.fileStarts.debugRefusal(at: .continueWatching, .likely).map { " | starts not allowed: \($0)" } ?? "")
             + " | no plan \(ahead.planless), plans failed \(plans.failed) (last: \(plans.lastFailure)) stopped \(plans.stopped)"
             + ", starts failed \(FileStarts.shelf.failed) stopped \(FileStarts.shelf.stopped)" + refused.joined()
+            + " | holds: " + ahead.trail.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
     }
     #endif
 
