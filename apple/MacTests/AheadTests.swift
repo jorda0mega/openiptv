@@ -65,7 +65,6 @@ final class AheadTests: XCTestCase {
         for _ in 0..<50 { await Task.yield() }
     }
 
-    /// True once `holds` does, false after `seconds`.
     private func eventually(within seconds: Double = 5, _ holds: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(seconds)
         while !holds() {

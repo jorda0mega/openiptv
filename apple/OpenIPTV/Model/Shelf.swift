@@ -187,10 +187,9 @@ final class Lane {
         if ticket.running { return }
         try Task.checkCancellation()
         if ticket.plays { return start(ticket) }
-        guard ticket.interest != nil, allows(ticket, conditions()) else {
-            #if DEBUG
-            noteRefused(ticket, conditions())
-            #endif
+        let now = conditions()
+        guard ticket.interest != nil, allows(ticket, now) else {
+            noteRefused(ticket, now)
             throw CancellationError()
         }
         try await withTaskCancellationHandler {
@@ -212,7 +211,6 @@ final class Lane {
         !allows(Ticket(interest), conditions())
     }
 
-    /// Returns once the conditions allow `interest`; throws when cancelled first.
     func untilAllowed(_ interest: Interest) async throws {
         while refuses(interest) {
             try Task.checkCancellation()
@@ -221,7 +219,6 @@ final class Lane {
         try Task.checkCancellation()
     }
 
-    /// The next change the lane hears of, or `recheckEvery`, or a cancel, whichever comes first.
     private func nextLook() async {
         let id = UUID()
         await withTaskCancellationHandler {
@@ -275,19 +272,18 @@ final class Lane {
             }
         }
         admit()
-        refused.keys.forEach(endLook)
+        for id in Array(refused.keys) { endLook(id) }
     }
 
     private func endLook(_ id: UUID) {
-        guard let waiting = refused.removeValue(forKey: id) else { return }
-        waiting.timer.cancel()
-        waiting.look.resume()
+        guard let pending = refused.removeValue(forKey: id) else { return }
+        pending.timer.cancel()
+        pending.look.resume()
     }
 
     #if DEBUG
     var debugCounts: String { "\(underWay.count) under way, \(waiting.count) waiting" }
 
-    /// Fetches ahead the conditions refused (asked, waiting or under way), and the last refusal.
     private(set) var debugRefused = 0
     private(set) var debugLastRefusal: Conditions.Refusal?
 
@@ -392,14 +388,17 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
 
     private final class Job {
         let ticket: Lane.Ticket
-        var began = Date.distantPast
+        let began: Date
         var task: Task<Void, Never>?
         var holders: Set<Interest.ID> = []
         var waiters: [UUID: CheckedContinuation<Value, Error>] = [:]
         var nonOwningWaiters: [UUID: CheckedContinuation<Value, Error>] = [:]
         var result: Result<Value, Error>?
 
-        init(_ ticket: Lane.Ticket) { self.ticket = ticket }
+        init(_ ticket: Lane.Ticket, began: Date) {
+            self.ticket = ticket
+            self.began = began
+        }
     }
 
     private enum Entry {
@@ -507,7 +506,6 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         return value
     }
 
-    /// `warm`, and while the device's conditions refuse it, warmed again once they allow it, till the interest goes.
     /// Regression: a card's start refused once (2 GB free for a moment) was never fetched while it stayed on screen.
     /// Asked again too when what it waited on was forgotten as out of date (`forget(askedBefore:)`).
     func hold(_ key: Key, for interest: Interest) async -> Value? {
@@ -527,7 +525,6 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         stopIfUnwanted(job, key)
     }
 
-    /// What's kept, failures, and fetches asked before `date` go; fetches asked since finish for whoever waits on them.
     func forget(askedBefore date: Date) {
         forgotten += 1
         for (key, entry) in entries {
@@ -560,8 +557,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     private func start(_ key: Key, _ ticket: Lane.Ticket) -> Job {
-        let job = Job(ticket)
-        job.began = now()
+        let job = Job(ticket, began: now())
         ticket.stop = { [weak self, weak job] in
             guard let self, let job, entries[key]?.job === job else { return }
             stop(job)
@@ -580,15 +576,16 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             case let .success((value, at)):
                 entries[key] = .kept(value, until: at.addingTimeInterval(policy.lifetime / .seconds(1)))
             case let .failure(error):
+                let cancelled = Task.isCancelled || error is CancellationError
                 #if DEBUG
-                if Task.isCancelled || error is CancellationError {
+                if cancelled {
                     stopped += 1
                 } else {
                     failed += 1
                     lastFailure = (error as? URLError).map { "URLError \($0.code.rawValue)" } ?? "\(type(of: error))"
                 }
                 #endif
-                entries[key] = Task.isCancelled || error is CancellationError
+                entries[key] = cancelled
                     ? nil : .failed(error, until: now().addingTimeInterval(policy.failureKept / .seconds(1)))
             }
         }

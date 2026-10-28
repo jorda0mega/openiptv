@@ -153,14 +153,11 @@ final class Ahead {
     private let work: Work
     #if DEBUG
     private(set) var held = 0
-    /// Holds whose plan came back empty, so nothing else of theirs was fetched.
     private(set) var planless = 0
-    /// What each place's holds reached, counted: "continueWatching began 2, likely 1, planned 1, ended 1".
     private(set) var trail: [String: Int] = [:]
     private func note(_ place: Place, _ event: String) { trail["\(place) \(event)", default: 0] += 1 }
     #endif
     let showing = Showing()
-    /// Held by the app rather than a view on screen (hold(only:at:)), each with its own mark.
     private var kept: [Target: (mark: UUID, task: Task<Void, Never>)] = [:]
     private let platform: Platform
     private let sleep: @Sendable (Duration) async throws -> Void
@@ -185,8 +182,6 @@ final class Ahead {
         }
     }
 
-    /// These targets held from now on, at `place`, whatever is on screen: new ones begin, ones no longer listed stop,
-    /// and one whose hold ended (its plan failed) begins again.
     func hold(only targets: [Target], at place: Place) {
         for (target, held) in kept where !targets.contains(target) {
             held.task.cancel()
