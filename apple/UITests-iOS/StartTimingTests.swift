@@ -90,7 +90,10 @@ final class StartTimingTests: TimingCase {
     }
 
     private func say(_ kind: String, _ metric: String, _ start: (seconds: Double?, parts: String), note: String = "") {
-        guard let seconds = start.seconds else { return print("START \(kind): no start in 120 s") }
+        guard let seconds = start.seconds else {
+            print("START \(kind): no start in 120 s")
+            return sayWhyNoStart()
+        }
         print(String(format: "METRIC %@ %.2f s", metric, seconds))
         print(String(format: "START %@: %.2f s%@ | %@", kind, seconds, note.isEmpty ? "" : " (\(note))", start.parts))
     }
