@@ -115,7 +115,8 @@ for commit in "$@"; do
   # The app's seeks and live opens, with the Mac's time: numbers only, by these two fixed beginnings.
   xcrun simctl spawn $SIM log show --style ndjson --start "$began" \
     --predicate 'eventMessage BEGINSWITH "PERF cache at" OR eventMessage BEGINSWITH "PERF live open"' > $dir/perf-log.ndjson 2>/dev/null
-  xcrun simctl shutdown $SIM 2>/dev/null
+  # Erased as it is left: the film bytes the app kept fill the Mac's disk (a run leaves about 2 GB).
+  xcrun simctl shutdown $SIM 2>/dev/null; xcrun simctl erase $SIM 2>/dev/null
   give /tmp/openiptv/sim.lock
   [ -n "${mock:-}" ] && kill $mock 2>/dev/null; mock=""
   grep -E "Test Case .*(passed|failed|skipped)|error: -" $dir/test.log | sed -E 's/^.*Test Case //; s#^.*error: -#error: -#; s#/[^ ]*/##g' | head -5
