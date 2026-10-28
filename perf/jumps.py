@@ -161,14 +161,20 @@ def time(series_path, recorder_log, test_log, ndjson, metric):
             pair = next((v for v in queue if fits(v) and abs(v["at"] - expected) < 8), None)
         if pair:
             queue = queue[queue.index(pair) + 1:]
-        # From the seek at the earliest: a picture already stopped by a stall before the tap isn't the jump's
-        # (unless the recorder's clock isn't known yet, or has slipped past the seek: then from the last change).
-        since_seek = pair and pair["at"] - (expected - (j["restart"] or 0) / 1000)
-        j["still"] = pair and (min(pair["still"], since_seek) if calibrated and since_seek > 0 else pair["still"])
+        # The picture stood still from its last change to the new place. A freeze that began before the tap (a
+        # stall) shows as one longer than libmpv's restart by over a second: then it counts from the seek, as far
+        # as the recorder's clock is known.
+        restart = None if j["restart"] is None else j["restart"] / 1000
+        j["still"] = pair and pair["still"]
+        if pair and calibrated and restart is not None and pair["still"] > restart + 1:
+            since_seek = pair["at"] - (expected - restart)
+            j["still"] = since_seek if since_seek > 0 else pair["still"]
         j["moving"] = pair and pair["moving"]
         j["by"] = pair and pair["by"]
-        if pair:
-            drift += pair["at"] - expected
+        # The recorder's clock, from clean jumps only (the picture back within 0.15 s of libmpv's restart), aligned
+        # on where the old picture stopped: a slow picture or a stall isn't taken for the clock's slip.
+        if pair and (restart is None or abs(pair["still"] - restart) < 0.15):
+            drift += (pair["at"] - pair["still"]) - (expected - (restart or 0))
             calibrated = True
         if not recorded and j["restart"] is not None:
             j["still"] = j["restart"] / 1000

@@ -1,5 +1,5 @@
 {
- "about": "Best recorded run per metric, target (real Emby or mock:<profile>), link and platform: the run's median (value), its sample count and interquartile spread, and the build. Lower is better for every metric. Rebuilt by perf/perf.py best from the runs under /tmp/openiptv, eval runs (perf/eval.sh) included.",
+ "about": "Best recorded run per metric, target (real Emby or mock:<profile>), link and platform: the run's median (value), its sample count and interquartile spread, and the build. Lower is better for every metric. perf/perf.py best folds in the runs under /tmp/openiptv, eval runs (perf/eval.sh) included, and keeps each entry they don't beat.",
  "metrics": {
   "film.start.first_tap": {
    "unit": "s",
@@ -106,7 +106,7 @@
      "platform": "ios",
      "unit": "s",
      "runs": 8,
-     "value": 7.8,
+     "value": 5.6,
      "samples": 4,
      "spread": 4.4,
      "commit": "3691de8",
@@ -114,7 +114,7 @@
      "testflight": null,
      "date": "2026-10-27",
      "source": "perf-evals/mock-1027-2117/StartTimingTests-ios-worst/3691de8/metrics.txt",
-     "between_runs": 1.6
+     "between_runs": 4.6
     },
     {
      "target": "real",
@@ -413,7 +413,7 @@
      "platform": "ios",
      "unit": "ms",
      "runs": 3,
-     "value": 154.0,
+     "value": 153.5,
      "samples": 8,
      "spread": 32.0,
      "commit": "09afc6f",
@@ -421,7 +421,7 @@
      "testflight": "202610271425",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet/09afc6f/metrics.txt",
-     "between_runs": 10.0
+     "between_runs": 10.5
     },
     {
      "target": "mock:real-quiet:4k-hdr",
@@ -429,15 +429,15 @@
      "platform": "ios",
      "unit": "ms",
      "runs": 2,
-     "value": 141.0,
+     "value": 143.0,
      "samples": 10,
-     "spread": 54.0,
+     "spread": 65.0,
      "commit": "3169823",
      "landed_as": "3169823",
      "testflight": "202610261846",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
-     "between_runs": 13.0
+     "between_runs": 19.0
     },
     {
      "target": "mock:worst",
@@ -445,15 +445,15 @@
      "platform": "ios",
      "unit": "ms",
      "runs": 6,
-     "value": 155.0,
+     "value": 163.0,
      "samples": 10,
-     "spread": 42.0,
+     "spread": 39.0,
      "commit": "fd226e3",
      "landed_as": "fd226e3",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-worst-nofirst/fd226e3/metrics.txt",
-     "between_runs": 1412.0
+     "between_runs": 1444.5
     },
     {
      "target": "real",
@@ -461,13 +461,13 @@
      "platform": "ios",
      "unit": "ms",
      "runs": 1,
-     "value": 160.0,
+     "value": 161.5,
      "samples": 10,
      "spread": 18.0,
      "commit": "1713f9f",
      "landed_as": "1713f9f",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-evals/real-1027-2312/JumpTimingTests-ios-real/1713f9f/metrics.txt",
      "between_runs": 0.0
     },
@@ -477,7 +477,7 @@
      "platform": "tvos",
      "unit": "ms",
      "runs": 1,
-     "value": 73.0,
+     "value": 75.5,
      "samples": 10,
      "spread": 9.0,
      "commit": "eed753d",
@@ -506,7 +506,7 @@
      "testflight": "202610261136",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-card/3744a94/metrics.txt",
-     "between_runs": 7.0
+     "between_runs": 14.5
     },
     {
      "target": "mock:real-quiet:4k-hdr",
@@ -514,15 +514,15 @@
      "platform": "ios",
      "unit": "ms",
      "runs": 2,
-     "value": 136.0,
+     "value": 139.0,
      "samples": 10,
-     "spread": 13.0,
+     "spread": 24.0,
      "commit": "3169823",
      "landed_as": "3169823",
      "testflight": "202610261846",
      "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-real-quiet-4k/3169823/metrics.txt",
-     "between_runs": 22.0
+     "between_runs": 37.0
     },
     {
      "target": "mock:worst",
@@ -532,13 +532,13 @@
      "runs": 6,
      "value": 142.0,
      "samples": 10,
-     "spread": 24.0,
+     "spread": 37.0,
      "commit": "3691de8",
      "landed_as": "3691de8",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/JumpTimingTests-ios-worst/3691de8/metrics.txt",
-     "between_runs": 5.0
+     "between_runs": 16.5
     },
     {
      "target": "real",
@@ -546,13 +546,13 @@
      "platform": "ios",
      "unit": "ms",
      "runs": 1,
-     "value": 169.0,
+     "value": 170.0,
      "samples": 10,
      "spread": 16.0,
      "commit": "1713f9f",
      "landed_as": "1713f9f",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-evals/real-1027-2312/JumpTimingTests-ios-real/1713f9f/metrics.txt",
      "between_runs": 0.0
     },
@@ -685,7 +685,7 @@
      "commit": "fd226e3",
      "landed_as": "fd226e3",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-worst-nofirst/fd226e3/metrics.txt",
      "between_runs": 608.0
     },
@@ -765,14 +765,14 @@
      "unit": "ms",
      "runs": 10,
      "value": 40.0,
-     "samples": 2,
-     "spread": 3.0,
+     "samples": 1,
+     "spread": 0.0,
      "commit": "09afc6f",
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "subs-fix-runs/run-pip.out",
-     "between_runs": 9.0
+     "source": "pip-return-runs/before-restore3.out",
+     "between_runs": 9.5
     }
    ]
   },
@@ -786,14 +786,14 @@
      "unit": "ms",
      "runs": 10,
      "value": 40.0,
-     "samples": 2,
-     "spread": 1.0,
+     "samples": 1,
+     "spread": 0.0,
      "commit": "09afc6f",
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "subs-fix-runs/run-pip2.out",
-     "between_runs": 2.0
+     "source": "pip-return-runs/before-restore3.out",
+     "between_runs": 1.5
     }
    ]
   },
@@ -896,7 +896,7 @@
      "platform": "ios",
      "unit": "s",
      "runs": 7,
-     "value": 1.5,
+     "value": 1.45,
      "samples": 4,
      "spread": 0.1,
      "commit": "9216729",
@@ -944,15 +944,15 @@
      "platform": "ios",
      "unit": "s",
      "runs": 8,
-     "value": 4.3,
-     "samples": 2,
-     "spread": 3.8,
-     "commit": "3691de8",
-     "landed_as": "3691de8",
-     "testflight": null,
+     "value": 5.0,
+     "samples": 3,
+     "spread": 2.2,
+     "commit": "ebfec05",
+     "landed_as": "ebfec05",
+     "testflight": "202610262043",
      "date": "2026-10-27",
-     "source": "perf-evals/mock-1027-2117/StartTimingTests-ios-worst/3691de8/metrics.txt",
-     "between_runs": 9.5
+     "source": "perf-runs/StartTimingTests-ios-worst/ebfec05/metrics.txt",
+     "between_runs": 9.4
     },
     {
      "target": "real",
@@ -1020,6 +1020,10 @@
     }
    ]
   },
+  "film.start.failed": {
+   "unit": "count",
+   "best": []
+  },
   "film.jump.loading_shown": {
    "unit": "count",
    "best": [
@@ -1067,7 +1071,7 @@
      "commit": "fd226e3",
      "landed_as": "fd226e3",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-runs/JumpTimingTests-ios-worst-nofirst/fd226e3/metrics.txt",
      "between_runs": 2.0
     },
@@ -1083,7 +1087,7 @@
      "commit": "1713f9f",
      "landed_as": "1713f9f",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-evals/real-1027-2312/JumpTimingTests-ios-real/1713f9f/metrics.txt",
      "between_runs": 0.0
     },
@@ -1092,7 +1096,7 @@
      "link": "none",
      "platform": "tvos",
      "unit": "count",
-     "runs": 2,
+     "runs": 3,
      "value": 0.0,
      "samples": 1,
      "spread": 0.0,
@@ -1370,7 +1374,7 @@
      "commit": "3691de8",
      "landed_as": "3691de8",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-sdr720/3691de8/metrics.txt",
      "between_runs": 0.0
     }
@@ -1391,7 +1395,7 @@
      "commit": "3691de8",
      "landed_as": "3691de8",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-hdr10/3691de8/metrics.txt",
      "between_runs": 0.0
     }
@@ -1412,7 +1416,7 @@
      "commit": "3691de8",
      "landed_as": "3691de8",
      "testflight": null,
-     "date": "2026-10-27",
+     "date": "2026-10-28",
      "source": "perf-evals/mock-1027-2117/SubtitleLookTests-ios-none-hdr10/3691de8/metrics.txt",
      "between_runs": 0.61
     }
@@ -1429,13 +1433,13 @@
      "runs": 10,
      "value": 0.0,
      "samples": 2,
-     "spread": 1.0,
+     "spread": 0.0,
      "commit": "09afc6f",
      "landed_as": "09afc6f",
      "testflight": "202610271425",
      "date": "2026-10-27",
-     "source": "subs-fix-runs/run-pip.out",
-     "between_runs": 0.0
+     "source": "subs-fix-runs/run-pip2.out",
+     "between_runs": 2.0
     }
    ]
   },

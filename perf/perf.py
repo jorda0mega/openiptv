@@ -6,7 +6,7 @@ Metric.EvalName (EvalMetric.swift, the eval suite's own).
 
     perf.py names                       every metric name and unit
     perf.py parse FILE...               runner output to JSON lines, one sample each
-    perf.py best [--keep-current]       rebuild best.json from SOURCES (the recorded runs)
+    perf.py best                        best.json from the recorded runs, keeping each entry they don't beat
     perf.py samples FOLDER COMMIT TARGET PLATFORM  one perf/sim_runs.sh run's samples.jsonl
     perf.py live LOG.ndjson              the app's live opens as METRIC lines (live.start, then live.switch)
     perf.py compare SAMPLES.jsonl...     a table against best.json: better, same or REGRESSION (PLATFORMS)
@@ -62,6 +62,8 @@ def names():
 
 
 def unit_of(name):
+    if name == "film.start.failed":
+        return "count"
     if name.startswith("film.start."):
         return "s"
     if name.startswith(("film.subtitles.peak", "film.subtitles.scale")):
@@ -227,10 +229,10 @@ def compare(paths, known, platforms):
                     print(f"{platform:8} {metric:28} {0:>3} {'-':>9} {'-':>9} {'-':>9}  {fmt(best['value']) if best else '-':>9} {set_by:<22} not measured")
                     continue
                 p50, p95, top = statistics.median(values), pct(values, 95), max(values)
-                # The spread: this run's interquartile range (half its range under 5 samples), the best run's own,
-                # or how far run medians move from run to run, whichever is widest, and never under FLOOR.
+                # The spread: this run's interquartile range (half its range under 5 samples) or the best run's own,
+                # whichever is wider, and never under FLOOR. Not the spread between runs: those ran other commits.
                 own = pct(values, 75) - pct(values, 25) if len(values) >= 5 else (top - min(values)) / 2
-                noise = max(own, best.get("spread", 0) if best else 0, best.get("between_runs", 0) if best else 0, FLOOR[unit])
+                noise = max(own, best.get("spread", 0) if best else 0, FLOOR[unit])
                 verdict = ("no best yet" if best is None else "better" if p50 < best["value"] - noise
                            else "REGRESSION" if p50 > best["value"] + noise else "same")
                 print(f"{platform:8} {metric:28} {len(values):>3} {fmt(p50):>9} {fmt(p95):>9} {fmt(top):>9}  "
@@ -251,7 +253,7 @@ def best(samples, known):
     table, medians = {}, {}
     for (metric, target, link, platform, source), found in runs.items():
         values = sorted(s["value"] for s, _ in found)
-        median, (first, main) = pct(values, 50), found[0]
+        median, (first, main) = statistics.median(values), found[0]
         entry = table.setdefault((metric, target, link, platform), dict(runs=0))
         entry["runs"] += 1
         medians.setdefault((metric, target, link, platform), []).append(median)
@@ -281,16 +283,35 @@ def main(argv):
         table, skipped = best(samples, known)
         unknown = sorted({s["metric"] for s in samples} - set(known))
         assert not unknown, f"samples under names Metric.Name and Metric.EvalName lack: {unknown}"
+        # The runs under /tmp go away: an entry already in best.json stays unless a recorded run beats it.
+        kept = 0
+        if os.path.exists(BEST):
+            with open(BEST) as f:
+                before = json.load(f)["metrics"]
+            for metric, entry in before.items():
+                if metric not in known:
+                    continue
+                for old in entry["best"]:
+                    rows = table.setdefault(metric, [])
+                    key = (old["target"], old["link"], old["platform"])
+                    new = next((r for r in rows if (r["target"], r["link"], r["platform"]) == key), None)
+                    if new is None:
+                        rows.append(old)
+                        kept += 1
+                    elif old["value"] < new["value"]:
+                        rows[rows.index(new)] = old
+                        kept += 1
         with open(BEST, "w") as f:
             json.dump(dict(about="Best recorded run per metric, target (real Emby or mock:<profile>), link and platform: the "
                                  "run's median (value), its sample count and interquartile spread, and the build. Lower is "
-                                 "better for every metric. Rebuilt by perf/perf.py best from the runs under /tmp/openiptv, "
-                                 "eval runs (perf/eval.sh) included.",
-                           metrics={name: dict(unit=unit, best=table.get(name, [])) for name, unit in known.items()}),
+                                 "better for every metric. perf/perf.py best folds in the runs under /tmp/openiptv, eval runs "
+                                 "(perf/eval.sh) included, and keeps each entry they don't beat.",
+                           metrics={name: dict(unit=unit, best=sorted(table.get(name, []), key=lambda r: (r["target"], r["link"], r["platform"])))
+                                    for name, unit in known.items()}),
                       f, indent=1)
             f.write("\n")
         print(f"{len(samples)} samples, {len(samples) - skipped} from code on main, "
-              f"{sum(len(v) for v in table.values())} best entries over {len(table)} of {len(known)} metrics")
+              f"{sum(len(v) for v in table.values())} best entries over {len(table)} of {len(known)} metrics, {kept} kept from before")
     elif argv[:1] == ["samples"]:
         # One run's folder (perf/sim_runs.sh): its METRIC and PIP gap lines, from the test's log and the readers'
         # outputs, as samples.jsonl for that commit, target and platform.

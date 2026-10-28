@@ -31,7 +31,8 @@ OUT=${OUT:-/tmp/openiptv/perf-runs}
 FILM=${FILM:-/tmp/openiptv/jump-media/jump.mkv}
 PROFILE=${PROFILE:-worst}
 TARGET_NAME=$([ -n "${FEED:-}" ] && echo real || echo mock:$PROFILE)
-OWNER="perf-evals $NAME"
+# Unique to this run, so no other run's cleanup takes its locks for its own.
+OWNER="perf-evals $NAME $$"
 VENDOR=$(readlink $REPO/apple/Vendor)
 free_mb() { df -m /tmp | awk 'NR == 2 { print $4 }'; }
 take() { until mkdir "$1" 2>/dev/null; do echo "$(date +%H:%M) $(basename $1) held by $(cat "$1/owner" 2>/dev/null), waiting 60 s"; sleep 60; done; echo "$OWNER" > "$1/owner"; }
@@ -46,13 +47,19 @@ boot120() {
 }
 watchdog() { local pid=$1 limit=$2 t=0; while kill -0 $pid 2>/dev/null; do sleep 5; t=$((t + 5)); [ $t -ge $limit ] && { kill $pid; echo "watchdog: stopped after $limit s"; }; done; }
 cleanup() {
+  # Its build or test first, so nothing of this run is still at work once its locks are free.
   pkill -INT -f "recordVideo.*$OUT" 2>/dev/null
+  pkill -P $$ 2>/dev/null; sleep 1
   [ -n "${mock:-}" ] && kill $mock 2>/dev/null
-  xcrun simctl shutdown $SIM 2>/dev/null
-  give /tmp/openiptv/build.lock; give /tmp/openiptv/sim.lock
+  [ "$(cat /tmp/openiptv/sim.lock/owner 2>/dev/null)" = "$OWNER" ] && xcrun simctl shutdown $SIM 2>/dev/null
+  give /tmp/openiptv/build.lock; give /tmp/openiptv/sim.lock; give $DD.lock
 }
 trap cleanup EXIT INT TERM HUP
 [ -n "${FEED:-}" ] || [ -f $FILM ] || { echo "no film at $FILM (perf/make_jump_film.sh)"; exit 1; }
+# libmpv's log writes the stream's address: never on the real feeds.
+[ -n "${FEED:-}" ] && [ "${MPV_LOG:-0}" = 1 ] && { echo "MPV_LOG=1 is for the test server only: not run"; exit 1; }
+# One run at a time per build folder (and its worktree): another would swap the app between build and test.
+take $DD.lock
 [ -d $WT ] || git -C $REPO worktree add --detach $WT HEAD -q
 
 for commit in "$@"; do
@@ -100,7 +107,7 @@ for commit in "$@"; do
     xcrun simctl shutdown $SIM 2>/dev/null; give /tmp/openiptv/sim.lock; sleep 60; take /tmp/openiptv/sim.lock
     boot120 || { xcrun simctl shutdown $SIM; give /tmp/openiptv/sim.lock; [ -n "${mock:-}" ] && kill $mock; mock=""; echo "boot failed twice: $commit skipped"; continue; }
   fi
-  rm -f $dir/test.log $dir/recorder.log $dir/recording.mp4 $dir/mpv.log $dir/perf-log.ndjson $dir/series.json $dir/*.png
+  rm -f $dir/{test.log,recorder.log,recording.mp4,mpv.log,perf-log.ndjson,series.json,jumps.txt,look.txt,live.txt,metrics.txt,samples.jsonl} $dir/*.png(N)
   began=$(date '+%Y-%m-%d %H:%M:%S')
   xcodebuild test-without-building -project $WT/apple/OpenIPTV.xcodeproj -scheme $SCHEME -destination "id=$SIM" -derivedDataPath $DD \
     "-only-testing:$TARGET/$TEST" > $dir/test.log 2>&1 &

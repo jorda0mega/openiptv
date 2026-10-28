@@ -4,6 +4,7 @@ extension Metric {
     /// perf/perf.py reads both lists from this folder, and the best table (perf/best.json) uses no other names.
     enum EvalName: String, CaseIterable, Sendable {
         case filmStartUnprepared = "film.start.unprepared"
+        case filmStartFailed = "film.start.failed"
         case filmJumpLoadingShown = "film.jump.loading_shown"
         case filmPauses = "film.play.pauses_120s"
         case subtitleFirstLine = "film.subtitles.first_line"

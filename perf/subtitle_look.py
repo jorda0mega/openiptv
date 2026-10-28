@@ -106,7 +106,8 @@ def main(argv):
             scale, ratio = shown_w / drawn_w, peak_ratio(color, peak)
             parts += [f"drawn {f.group(1)}x{f.group(2)}, shown {f.group(3)}x{f.group(4)}: scaled up {scale:.2f}x",
                       f"{color} peak code {peak}: {ratio:.2f}x SDR white"]
-            if metric and way == "sideways":
+            # Only with the line on screen: with no subtitle, the peak is the picture's, and lower would read as better.
+            if metric and way == "sideways" and shown == "shown" and e and e["edges"]:
                 print(f"METRIC film.subtitles.scale {scale:.2f} ratio")
                 print(f"METRIC film.subtitles.peak_{'hdr' if color in ('pq', 'hlg') else 'sdr'} {ratio:.2f} ratio")
         else:

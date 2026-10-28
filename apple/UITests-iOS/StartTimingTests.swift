@@ -60,7 +60,11 @@ final class StartTimingTests: TimingCase {
             }
             app.terminate()
         }
+        // A start that never came counts against the run, not out of it.
+        print("METRIC film.start.failed \(failed) count")
     }
+
+    private var failed = 0
 
     private func firstCard() throws -> String {
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
@@ -97,6 +101,7 @@ final class StartTimingTests: TimingCase {
 
     private func say(_ kind: String, _ metric: String, _ start: (seconds: Double?, parts: String), note: String = "") {
         guard let seconds = start.seconds else {
+            failed += 1
             print("START \(kind): no start in 120 s")
             return sayWhyNoStart()
         }
