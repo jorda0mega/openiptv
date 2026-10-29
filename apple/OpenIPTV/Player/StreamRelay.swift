@@ -70,16 +70,8 @@ final class StreamRelay: @unchecked Sendable {
 
     func arrived(for film: String) -> Int64 { arrivals.value[film] ?? 0 }
 
-    private func arrive(_ count: Int, for film: String?) {
-        guard let film else { return }
+    private func arrive(_ count: Int, for film: String) {
         arrivals.mutate { $0[film, default: 0] += Int64(count) }
-    }
-
-    static func film(in address: URL) -> String? {
-        let parts = address.pathComponents
-        guard let videos = parts.firstIndex(where: { $0.caseInsensitiveCompare("Videos") == .orderedSame }), videos + 1 < parts.count
-        else { return nil }
-        return parts[videos + 1]
     }
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
@@ -121,14 +113,14 @@ final class StreamRelay: @unchecked Sendable {
 
     /// A local address for this file that the player can open, or nil to
     /// open it directly (relay not running).
-    func localURL(for url: URL, headers: [String], film: String? = nil) -> URL? {
+    func localURL(for url: URL, headers: [String], film: String) -> URL? {
         start()
         lock.lock()
         defer { lock.unlock() }
         guard let port else { return nil }
         // A new address each time (see RelayRoutes).
         let token = UUID().uuidString.lowercased()
-        routes.add(Self.route(url, headers), token: token)
+        routes.add(Self.route(url, headers, film: film), token: token)
         // Keep the file extension: it helps the player pick the demuxer.
         let ext = url.pathExtension.isEmpty ? "" : "." + url.pathExtension
         return URL(string: "http://127.0.0.1:\(port)/\(token)\(ext)")
@@ -136,14 +128,14 @@ final class StreamRelay: @unchecked Sendable {
 
     /// A converted version's list: the player reads it and its segments
     /// from here, and only the relay asks the server, with `headers`.
-    func localURL(serving listed: ConvertedPlaylist.Listed, headers: [String], given: URL) -> URL? {
+    func localURL(serving listed: ConvertedPlaylist.Listed, headers: [String], given: URL, film: String) -> URL? {
         start()
         lock.lock()
         defer { lock.unlock() }
         guard let port else { return nil }
         let token = UUID().uuidString.lowercased()
         let segments = Dictionary(uniqueKeysWithValues: listed.segments.map { ($0.name, $0.url) })
-        playlists.append(Converted(token: token, body: Data(listed.playlist.utf8), segments: segments, headers: headers, given: given))
+        playlists.append(Converted(token: token, body: Data(listed.playlist.utf8), segments: segments, headers: headers, given: given, film: film))
         if playlists.count > 4 { playlists.removeFirst() }
         return URL(string: "http://127.0.0.1:\(port)/\(token)/\(Converted.list)")
     }
@@ -155,6 +147,7 @@ final class StreamRelay: @unchecked Sendable {
         let segments: [String: URL]
         let headers: [String]
         let given: URL
+        let film: String
     }
 
     // MARK: Serving
@@ -212,7 +205,7 @@ final class StreamRelay: @unchecked Sendable {
     /// for (up to 3 s, once: that fetch has no wait for a first byte of its
     /// own), not asked for again: on a server 1-3 s a read, the read under
     /// way at the tap is the start's first.
-    private func serve(_ route: (url: URL, headers: [(String, String)]), method: String, range: String?, connection: NWConnection,
+    private func serve(_ route: RelayRoutes.Route, method: String, range: String?, connection: NWConnection,
                        cache: ByteCache?, waitedSince: Double? = nil) {
         let since = waitedSince ?? CFAbsoluteTimeGetCurrent()
         if waitedSince == nil, let cache, let (from, count) = Self.asked(range),
@@ -231,7 +224,7 @@ final class StreamRelay: @unchecked Sendable {
                 head += "Content-Length: \(to - from + 1)\r\nContent-Range: bytes \(from)-\(to)/\(total)\r\n"
                 head += "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n"
                 connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
-                sendCached(connection, cache, from: from, count: have, film: Self.film(in: route.url)) { [weak self] in
+                sendCached(connection, cache, from: from, count: have, film: route.film) { [weak self] in
                     guard let self else { return }
                     if from + have > to {
                         connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
@@ -261,15 +254,15 @@ final class StreamRelay: @unchecked Sendable {
     private func serve(_ converted: Converted, _ name: String?, method: String, range: String?, _ connection: NWConnection) {
         if name == Converted.list {
             let head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: \(converted.body.count)\r\nConnection: close\r\n\r\n"
-            if method == "GET" { arrive(converted.body.count, for: Self.film(in: converted.given)) }
+            if method == "GET" { arrive(converted.body.count, for: converted.film) }
             return connection.send(content: Data(head.utf8) + (method == "GET" ? converted.body : Data()), contentContext: .finalMessage,
                                    isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
         }
         guard let segment = name.flatMap({ converted.segments[$0] }) else { return fail(connection, 404) }
         guard HTTP.sameServer(segment, converted.given) else { return fail(connection, 403) }
         let given = converted.given
-        fetch(Self.route(segment, converted.headers), method: method, range: range, connection: connection, cache: nil, head: true,
-              film: Self.film(in: given)) { request, _ in
+        fetch(Self.route(segment, converted.headers, film: converted.film), method: method, range: range, connection: connection,
+              cache: nil, head: true) { request, _ in
             HTTP.redirected(request, from: given)
         }
     }
@@ -491,7 +484,7 @@ final class StreamRelay: @unchecked Sendable {
 
     /// The Emby key goes in a header: the system logs the address of a
     /// request that fails or is stopped.
-    private static func route(_ url: URL, _ headers: [String]) -> (url: URL, headers: [(String, String)]) {
+    private static func route(_ url: URL, _ headers: [String], film: String) -> RelayRoutes.Route {
         let request = HTTP.keyInHeader(URLRequest(url: url))
         var pairs = headers.compactMap { header -> (String, String)? in
             let pair = header.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -500,12 +493,12 @@ final class StreamRelay: @unchecked Sendable {
         if let key = request.value(forHTTPHeaderField: "X-Emby-Token"), !pairs.contains(where: { $0.0 == "X-Emby-Token" }) {
             pairs.append(("X-Emby-Token", key))
         }
-        return (request.url ?? url, pairs)
+        return (request.url ?? url, pairs, film)
     }
 
     /// Kept bytes to the player, a megabyte at a time, each once the last
     /// has gone out.
-    private func sendCached(_ connection: NWConnection, _ cache: ByteCache, from: Int64, count: Int64, film: String?,
+    private func sendCached(_ connection: NWConnection, _ cache: ByteCache, from: Int64, count: Int64, film: String,
                             then: @escaping () -> Void) {
         var at = from
         let end = from + count
@@ -527,11 +520,10 @@ final class StreamRelay: @unchecked Sendable {
     /// (not when kept bytes have gone first, with their own).
     /// A read with no first byte within `firstByteWait` is asked once
     /// more (`again`), then ends, and the player goes on to its next way.
-    private func fetch(_ route: (url: URL, headers: [(String, String)]), method: String = "GET", range: String?,
-                       connection: NWConnection, cache: ByteCache?, head: Bool, film: String? = nil,
+    private func fetch(_ route: RelayRoutes.Route, method: String = "GET", range: String?,
+                       connection: NWConnection, cache: ByteCache?, head: Bool,
                        redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest = StreamRelay.redirected,
                        again: Bool = false) {
-        let film = film ?? Self.film(in: route.url)
         var upstream = URLRequest(url: route.url)
         upstream.httpMethod = method
         upstream.timeoutInterval = 30
@@ -539,7 +531,7 @@ final class StreamRelay: @unchecked Sendable {
         if let range { upstream.setValue(range, forHTTPHeaderField: "Range") }
         let task = HTTP.session.dataTask(with: upstream)
         let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head,
-                             arrive: { [weak self] in self?.arrive($0, for: film) }, redirected: redirected)
+                             arrive: { [weak self] in self?.arrive($0, for: route.film) }, redirected: redirected)
         #if DEBUG
         relay.relay = self
         relay.read = startRead(for: connection)
@@ -558,7 +550,7 @@ final class StreamRelay: @unchecked Sendable {
                 guard relay.giveUpUnanswered(closing: again) else { return }
                 self?.askedAgain.mutate { $0 += 1 }
                 self?.fetch(route, method: method, range: range, connection: connection, cache: cache, head: head,
-                            film: film, redirected: redirected, again: true)
+                            redirected: redirected, again: true)
             }
         }
         guard !again else { return }
@@ -593,7 +585,7 @@ final class StreamRelay: @unchecked Sendable {
             aheadFiles.insert(key)
             return true
         }
-        let route = Self.route(file.url, file.headers)
+        let route = Self.route(file.url, file.headers, film: file.itemId)
         guard allowed, let cache = cache(for: route.url) else { return false }
         let fetch = fetcher(route, cache, ahead: key)
         #if DEBUG
@@ -622,7 +614,7 @@ final class StreamRelay: @unchecked Sendable {
     static let noWaitForAhead = false
     #endif
 
-    private func fetcher(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, ahead key: String? = nil) -> Matroska.Fetch {
+    private func fetcher(_ route: RelayRoutes.Route, _ cache: ByteCache, ahead key: String? = nil) -> Matroska.Fetch {
         { [self] from, count in
             await withCheckedContinuation { done in
                 queue.async { [self] in
@@ -638,7 +630,7 @@ final class StreamRelay: @unchecked Sendable {
     /// then `then` with them and the file's size (nil: failed). `ahead`:
     /// fetched ahead of a tap for this file (low priority; nothing more once
     /// something else plays, see stopAhead).
-    private func ensure(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, from: Int64, count: Int64,
+    private func ensure(_ route: RelayRoutes.Route, _ cache: ByteCache, from: Int64, count: Int64,
                         ahead key: String? = nil, then: @escaping @Sendable (Data?, Int64?) -> Void) {
         if count > 0, cache.available(from: from) >= count, let kept = cache.read(from, Int(count)) {
             cache.keep(from..<from + count)
@@ -703,7 +695,7 @@ final class StreamRelay: @unchecked Sendable {
     /// The file's first byte, asked as playback asks for it: the same
     /// session and server, the key in the header and only to that server.
     func warmConnection(_ file: FileStart) async {
-        let route = Self.route(file.url, file.headers)
+        let route = Self.route(file.url, file.headers, film: file.itemId)
         var request = URLRequest(url: route.url)
         request.timeoutInterval = 10
         for (name, value) in route.headers { request.setValue(value, forHTTPHeaderField: name) }
@@ -767,7 +759,7 @@ final class StreamRelay: @unchecked Sendable {
     /// jump waited for the server, and the picture stopped meanwhile (it
     /// waits for the new subtitles). `tries`: the file's start isn't here
     /// yet (a player opened ahead reads little).
-    private func prefetchIndex(_ route: (url: URL, headers: [(String, String)]), _ cache: ByteCache, tries: Int = 5) {
+    private func prefetchIndex(_ route: RelayRoutes.Route, _ cache: ByteCache, tries: Int = 5) {
         guard let total = cache.total else {
             if tries > 0 { queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.prefetchIndex(route, cache, tries: tries - 1) } }
             return

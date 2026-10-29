@@ -1,13 +1,13 @@
 import Foundation
 
 /// The relay's local addresses: a token for each file opened (a warmed-up
-/// player, the one playing, ones prepared ahead) → its real address and
-/// headers. Kept to the `limit` most recently used: the one playing is
-/// asked for on every read, so it stays. Regression: past 16 addresses all
-/// were dropped, the playing film's too; its next read (a seek) got "not
-/// found" and had to connect again.
+/// player, the one playing, ones prepared ahead) → its real address,
+/// headers and film. Kept to the `limit` most recently used: the one
+/// playing is asked for on every read, so it stays. Regression: past 16
+/// addresses all were dropped, the playing film's too; its next read (a
+/// seek) got "not found" and had to connect again.
 struct RelayRoutes {
-    typealias Route = (url: URL, headers: [(String, String)])
+    typealias Route = (url: URL, headers: [(String, String)], film: String)
 
     let limit: Int
     private var routes: [String: Route] = [:]

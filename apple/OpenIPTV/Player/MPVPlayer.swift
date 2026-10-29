@@ -438,17 +438,17 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     /// Start a stream with any headers the provider requires; `start`
-    /// resumes a file at that many seconds. Files (`file: true`, Emby) are
-    /// read in bounded ranges over one kept-alive connection, so the jumps
-    /// to the end of a Matroska file and back (index, tags) and the resume
-    /// seek don't each pay for a new HTTPS handshake. Live streams can't be
+    /// resumes a file at that many seconds. A film's file (`film`: its Emby
+    /// item) is read in bounded ranges over one kept-alive connection, so
+    /// the jumps to the end of a Matroska file and back (index, tags) and
+    /// the resume seek don't each pay for a new HTTPS handshake. Live streams can't be
     /// range-requested, so they're read as one stream. `sequential` reads
     /// a stream straight through even if the server could jump (an IPTV
     /// recording: opening one jumps to its end and back, extra connections
     /// a one-connection provider may refuse); jumps stay within what's
     /// downloaded. `converting`: segments the server converts as they're
     /// asked for (Emby's converted versions).
-    func load(_ url: URL, headers: [String] = [], start: Double? = nil, file: Bool = false, sequential: Bool = false,
+    func load(_ url: URL, headers: [String] = [], start: Double? = nil, film: String? = nil, sequential: Bool = false,
               converting: Bool = false, readahead: Readahead = .live, tracks: TrackPlan? = nil, sameFilm clock: Double? = nil,
               attempt: Int? = nil) {
         // A reload of its own (a converted version's open, a jump in it)
@@ -460,13 +460,14 @@ final class MPVPlayer: @unchecked Sendable {
         // Files go through the in-app relay, which keeps one warm HTTP/2
         // connection to the server instead of a new one per seek.
         var url = url, headers = headers
+        let file = film != nil
         #if DEBUG
         // The player's own requests (a converted version's) through the
         // throttling proxy too: https as a tunnel, plain http only to the
         // test server, never to the relay on this device.
         let proxy = HTTP.debugProxy().map { url.scheme?.lowercased() == "https" || HTTP.plainThroughDebugProxy() ? "http://\($0.host):\($0.port)" : "" }
         #endif
-        if file, url.scheme?.hasPrefix("http") == true, let local = StreamRelay.shared.localURL(for: url, headers: headers) {
+        if let film, url.scheme?.hasPrefix("http") == true, let local = StreamRelay.shared.localURL(for: url, headers: headers, film: film) {
             url = local
             headers = []
         }

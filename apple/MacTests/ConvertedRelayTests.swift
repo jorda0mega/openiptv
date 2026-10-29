@@ -30,7 +30,7 @@ final class ConvertedRelayTests: XCTestCase {
         let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
         let list = try list((0..<200).map { "hls1/main/\($0).ts?PlaySessionId=p1" }, at: master)
         for (second, old) in [(301.5, false), (301.5, true)] {
-            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, headers: key, old: old), "the relay isn't running")
+            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, headers: key, film: "m1", old: old), "the relay isn't running")
             let read = try await segments(opened.address)
             XCTAssertEqual(read.count, old ? 200 : 100)
             let away = read.filter { !HTTP.sameServer($0, opened.address) }
@@ -42,7 +42,7 @@ final class ConvertedRelayTests: XCTestCase {
         let master = URL(string: "https://emby.example/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
         let list = try list((0..<200).map { "hls1/main/\($0).ts" }, at: master)
         for old in [false, true] {
-            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, headers: key, old: old) { _, _, _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
+            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, headers: key, film: "m1", old: old) { _, _, _, _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
             XCTAssertFalse(opened.headers.contains { $0.contains("test-key") }, "the player sends the key\(old ? ", the old way" : "")")
         }
     }
@@ -60,7 +60,7 @@ final class ConvertedRelayTests: XCTestCase {
         defer { server.stop() }
         let given = URL(string: "http://127.0.0.1:\(server.port)/emby/Videos/m1/master.m3u8?MediaSourceId=m1")!
         let list = try list((0..<3).map { "/hls1/main/\($0).ts" }, at: given)
-        let opened = try XCTUnwrap(FilmStream.converted(given, list, at: 0, headers: key), "the relay isn't running")
+        let opened = try XCTUnwrap(FilmStream.converted(given, list, at: 0, headers: key, film: "m1"), "the relay isn't running")
         let read = try await segments(opened.address)
         XCTAssertEqual(read.count, 3)
         var bodies: [String] = []
@@ -79,7 +79,7 @@ final class ConvertedRelayTests: XCTestCase {
         let server = try Upstream { path, _ in (200, [:], "bytes of \(path)") }
         defer { server.stop() }
         let given = URL(string: "http://127.0.0.1:\(server.port)/emby/Videos/m1/master.m3u8")!
-        let opened = try XCTUnwrap(FilmStream.converted(given, try list((0..<3).map { "/hls1/main/\($0).ts" }, at: given), at: 0, headers: key))
+        let opened = try XCTUnwrap(FilmStream.converted(given, try list((0..<3).map { "/hls1/main/\($0).ts" }, at: given), at: 0, headers: key, film: "m1"))
         let before = StreamRelay.shared.arrived(for: "m1")
         let session = URLSession(configuration: .ephemeral)
         let listed = try await session.data(from: opened.address).0
@@ -97,7 +97,7 @@ final class ConvertedRelayTests: XCTestCase {
         defer { server.stop() }
         let given = URL(string: "http://127.0.0.1:\(server.port)/emby/Videos/m1/master.m3u8")!
         let list = try list(["/hls1/main/0.ts", "http://localhost:\(server.port)/hls1/main/1.ts"], at: given)
-        let opened = try XCTUnwrap(FilmStream.converted(given, list, at: 0, headers: key), "the relay isn't running")
+        let opened = try XCTUnwrap(FilmStream.converted(given, list, at: 0, headers: key, film: "m1"), "the relay isn't running")
         let read = try await segments(opened.address)
         XCTAssertEqual(read.count, 2)
         let here = try await get(read[0]), away = try await get(read[1])

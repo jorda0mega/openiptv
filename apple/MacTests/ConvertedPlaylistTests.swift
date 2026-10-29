@@ -166,7 +166,7 @@ final class ConvertedPlaylistTests: XCTestCase {
     /// With the relay not running, the version opened as the server lists it.
     func testAVersionTheRelayCannotServeDoesNotOpen() throws {
         let list = try listed(emby(segments: 200))
-        XCTAssertNil(FilmStream.converted(master, list, at: 301.5, headers: key) { _, _, _ in nil }, "the server's own master")
+        XCTAssertNil(FilmStream.converted(master, list, at: 301.5, headers: key, film: "m1") { _, _, _, _ in nil }, "the server's own master")
     }
 
     /// Kept on closing, or back from Picture in Picture, a converted version
@@ -175,7 +175,7 @@ final class ConvertedPlaylistTests: XCTestCase {
         XCTAssertTrue(FilmStream.whole.isOriginal)
         let list = try listed(emby(segments: 200))
         for (second, old) in [(0.0, false), (301.5, false), (301.5, true)] {
-            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, headers: key, old: old) { _, _, _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
+            let opened = try XCTUnwrap(FilmStream.converted(master, list, at: second, headers: key, film: "m1", old: old) { _, _, _, _ in URL(string: "http://127.0.0.1:8/list.m3u8") })
             XCTAssertFalse(opened.stream.isOriginal, "from \(second)\(old ? ", the old way" : "")")
         }
     }
@@ -214,7 +214,7 @@ final class ConvertedPlaylistTests: XCTestCase {
         let list = try listed(emby(segments: 200))
         let local = URL(string: "http://127.0.0.1:8/list.m3u8")!
         var served: [ConvertedPlaylist.Listed] = []
-        let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, headers: key, old: true) { listed, _, _ in served.append(listed); return local })
+        let opened = try XCTUnwrap(FilmStream.converted(master, list, at: 301.5, headers: key, film: "m1", old: true) { listed, _, _, _ in served.append(listed); return local })
         XCTAssertEqual(opened.address, local, "not served from here")
         XCTAssertEqual(opened.start, 301.5)
         XCTAssertEqual(opened.stream.clockStart, 0)
