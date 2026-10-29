@@ -241,6 +241,7 @@ struct MoviePlayerView: View {
     let playback: EmbyPlayback
     let held: FirstPicture
     @Binding var loading: FilmLoading
+    let look: FilmLoading.Look.Summary
     let tryAgainAsked: Int
     let closeAsked: Int
     var switchTo: ((TappedFilm) -> Void)? = nil
@@ -420,7 +421,7 @@ struct MoviePlayerView: View {
                 }, isEnabled: UIDevice.current.userInterfaceIdiom == .phone)
                 .accessibilityHidden(true)
             #endif
-            if controlsVisible, loading.look.controls { controls.transition(.opacity) }
+            if controlsVisible, look.controls { controls.transition(.opacity) }
             #if os(iOS)
             DuringIntro(clock: playClock, intro: playback.intro, allowed: skipIntroAllowed) {
                 skipIntroButton.transition(.opacity)
@@ -466,7 +467,7 @@ struct MoviePlayerView: View {
                 ClockReadout(clock: playClock)
                 debugReadout(startReadout, "debug-start")
                 debugReadout(startParts, "debug-start-parts")
-                debugReadout(loading.look.failure?.cause ?? "", "debug-start-error")
+                debugReadout(look.failure?.cause ?? "", "debug-start-error")
                 debugReadout(convertedReadout, "debug-converted")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
@@ -511,7 +512,7 @@ struct MoviePlayerView: View {
         .task { start() }
         .onChange(of: tryAgainAsked) { tryAgain() }
         .onChange(of: closeAsked) { close() }
-        .onChange(of: loading.look.failure) { _, failure in if let failure { stop(for: failure) } }
+        .onChange(of: look.failure) { _, failure in if let failure { stop(for: failure) } }
         .task(id: playback.itemId) { await loadSeason() }
         .onAppear {
             PlaybackActivity.began()
@@ -558,7 +559,7 @@ struct MoviePlayerView: View {
         // A film shows its title alone, as in the Apple TV app; an episode
         // its "S1:E3 · Name" over the show.
         PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
-                     paused: paused, waiting: loading.look.ringShown, ready: started,
+                     paused: paused, waiting: look.ringShown, ready: started,
                      topActions: pictureActions, pills: pills,
                      selectedPill: showInfo ? "Info" : showEpisodes ? "Episodes" : showContinue ? "Continue Watching" : nil,
                      panel: showInfo ? infoPanel : showEpisodes ? episodesPanel : showContinue ? continuePanel : nil,
@@ -936,7 +937,7 @@ struct MoviePlayerView: View {
     }
 
     private var note: (text: String, color: Color)? {
-        if loading.look.failure != nil { return nil }
+        if look.failure != nil { return nil }
         if let temporaryMessage { return (temporaryMessage, .yellow) }
         if let timing { return (timing, .white.opacity(0.6)) }
         #if DEBUG
@@ -2170,6 +2171,13 @@ struct MoviePlayerView: View {
         return s >= 3600
             ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
             : String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+extension MoviePlayerView: Equatable {
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.playback.itemId == b.playback.itemId && a.held == b.held && a.look == b.look
+            && a.tryAgainAsked == b.tryAgainAsked && a.closeAsked == b.closeAsked
     }
 }
 

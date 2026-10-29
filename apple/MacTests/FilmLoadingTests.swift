@@ -208,6 +208,18 @@ final class FilmLoadingTests: XCTestCase {
         XCTAssertFalse(start.loading.acceptsPicture)
     }
 
+    func testARingStepChangesNothingThePlayerDrawsFrom() {
+        var start = started()
+        start.loading.send(.bytes(1), at: at(1))
+        let before = start.loading.look
+        start.loading.send(.bytes(2), at: at(1.25))
+        start.loading.send(.bytes(3), at: at(1.5))
+        XCTAssertNotEqual(start.loading.look, before, "the ring didn't turn")
+        XCTAssertEqual(start.loading.look.summary, before.summary, "a byte step redraws the whole player")
+        XCTAssertEqual(look(start.loading, at: 4.6).summary, before.summary, "the ring dimming redraws the whole player")
+        XCTAssertNotEqual(look(start.loading, at: 30).summary, before.summary, "the failure didn't reach the player")
+    }
+
     func testAFilmTakenBackFromPictureInPictureShowsNoStart() {
         let loading = FilmLoading.moving(at: tap)
         XCTAssertEqual(loading.look, film())

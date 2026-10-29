@@ -101,8 +101,9 @@ private struct FilmScreen: View {
             if playback == nil { Color.clear.statusBarHidden() }
             #endif
             if let playback {
-                MoviePlayerView(playback: playback, held: tapped.held, loading: $loading, tryAgainAsked: tryAgainAsked,
-                                closeAsked: closeAsked, switchTo: switchTo)
+                MoviePlayerView(playback: playback, held: tapped.held, loading: $loading, look: loading.look.summary,
+                                tryAgainAsked: tryAgainAsked, closeAsked: closeAsked, switchTo: switchTo)
+                    .equatable()
             }
             #if os(tvOS)
             if playback == nil {

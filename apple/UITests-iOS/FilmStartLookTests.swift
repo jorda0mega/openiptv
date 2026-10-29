@@ -29,9 +29,7 @@ final class FilmStartLookTests: XCTestCase {
         let began = Date()
         while !failure.exists, Date().timeIntervalSince(began) < 15 {
             XCTAssertFalse(tryAgain.exists, "Try again before the start failed")
-            for text in app.staticTexts.allElementsBoundByIndex where !text.identifier.hasPrefix("debug-") {
-                seen.insert(text.label)
-            }
+            if let screen = try? app.snapshot() { seen.formUnion(Self.texts(in: screen)) }
             usleep(250_000)
         }
         XCTAssertTrue(failure.exists, "no failure by 15 s: \(app.staticTexts["debug-film-loading"].firstMatch.label)")
@@ -86,6 +84,11 @@ final class FilmStartLookTests: XCTestCase {
         let waited = Date().timeIntervalSince(opened)
         print(String(format: "WAIT RENDERS %d in %.1f s | %@", drawn, waited, app.staticTexts["debug-film-loading"].firstMatch.label))
         XCTAssertFalse(started.label.isEmpty, "no first frame in 40 s")
+    }
+
+    private static func texts(in element: XCUIElementSnapshot) -> [String] {
+        let own = element.elementType == .staticText && !element.identifier.hasPrefix("debug-") ? [element.label] : []
+        return own + element.children.flatMap(texts(in:))
     }
 
     private func get(_ server: URL, _ path: String, _ query: [String: String]) {
