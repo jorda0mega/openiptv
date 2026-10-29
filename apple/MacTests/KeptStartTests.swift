@@ -119,6 +119,28 @@ final class FirstByteTests: XCTestCase {
     }
 }
 
+final class RelayArrivedTests: XCTestCase {
+    func testArrivedCountsServerAndDeviceBytesAndNeverGoesDown() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0)
+        let relay = StreamRelay()
+        let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
+        func read() async throws -> Int {
+            var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+            read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
+            read.timeoutInterval = 5
+            return try await URLSession(configuration: .ephemeral).data(for: read).0.count
+        }
+        let fromServer = try await read()
+        XCTAssertEqual(relay.arrived.value, Int64(fromServer))
+        #if DEBUG
+        relay.beginStartReads()
+        #endif
+        let fromDevice = try await read()
+        XCTAssertEqual(server.ranges.count, 1, "the second read went to the server, not the device")
+        XCTAssertEqual(relay.arrived.value, Int64(fromServer + fromDevice), "the device's bytes didn't count, or the count went back")
+    }
+}
+
 final class KeptStartUseTests: XCTestCase {
     /// The tap came while the fetch ahead was reading the file's first
     /// bytes, as on a server 1-3 s a read: the player's first read is the
