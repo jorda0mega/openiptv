@@ -24,33 +24,23 @@ enum Plans {
         Shelf(.init(lane: lane ?? .emby, lifetime: .seconds(180), failureKept: .zero), now: now, fetch: fetch)
     }
 
-    /// A start's plan, asked once more if it fails or has no answer by
-    /// `retryAfter`, and again for the server's track list if it came
-    /// without, for as long again at most. The film's loading decides when
-    /// the start has waited too long.
     static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, again: Bool = false,
                          retryAfter: Duration = StartPatience.retryAfter) async throws -> EmbyPlayback {
         var playback = if again { try await shelf.fresh(key) }
-            else if StartPatience.off { try await taken(key, on: shelf) }
+            else if StartPatience.off { try await takeTwice(key, on: shelf) }
             else { try await asked(key, on: shelf, againAfter: retryAfter) }
         if !playback.listed, let listed = try? await StartPatience.by(.now + retryAfter, { try await shelf.take(key) }) { playback = listed }
         return playback
     }
 
-    private static func taken(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>) async throws -> EmbyPlayback {
-        do {
-            return try await shelf.take(key)
-        } catch {
-            return try await shelf.take(key)
-        }
+    private static func takeTwice(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>) async throws -> EmbyPlayback {
+        do { return try await shelf.take(key) } catch { return try await shelf.take(key) }
     }
 
-    /// The plan, and with none by `againAfter` a fresh ask beside it: the
-    /// first answer plays. One that fails before then fails the start.
     private static func asked(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, againAfter: Duration) async throws -> EmbyPlayback {
         let began = ContinuousClock.now
         return try await withThrowingTaskGroup(of: EmbyPlayback.self) { group in
-            group.addTask { try await taken(key, on: shelf) }
+            group.addTask { try await takeTwice(key, on: shelf) }
             group.addTask {
                 try await Task.sleep(for: againAfter)
                 return try await shelf.fresh(key)
@@ -62,7 +52,8 @@ enum Plans {
                 case let .success(playback): return playback
                 case let .failure(error):
                     failure = error
-                    if ContinuousClock.now - began < againAfter { throw error }
+                    let failedBeforeTheFreshAsk = ContinuousClock.now - began < againAfter
+                    if failedBeforeTheFreshAsk { throw error }
                 }
             }
             throw failure
@@ -80,8 +71,6 @@ enum Plans {
     }
 }
 
-/// How long each part of a start may take: a step with no answer is asked
-/// once more at 15 s, and a channel's start fails at 30 s.
 enum StartPatience {
     static let retryAfter = Duration.seconds(15)
     /// A read's first byte took up to 9 s on a busy server.

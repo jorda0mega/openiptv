@@ -281,9 +281,7 @@ struct MoviePlayerView: View {
     /// "HDR") for the Info panel.
     @State private var tracks: [Track] = []
     @State private var badges: [String] = []
-    /// The title being started in this player screen (the next episode, or
-    /// one from Continue Watching).
-    @State private var switching: String?
+    @State private var openingCopy = false
     /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
     /// An episode: its season's episodes, for the player's Episodes list
@@ -868,14 +866,14 @@ struct MoviePlayerView: View {
     /// other opens out of sight a few seconds ahead, and takes over once its
     /// picture is ready and the film reaches that moment.
     private func playHeard(in language: String) {
-        guard let switchTo, switching == nil else { return }
-        switching = language
+        guard let switchTo, !openingCopy else { return }
+        openingCopy = true
         let lead = paused ? 0.0 : 6.0
         #if DEBUG
         let tapped = Date()
         #endif
         Task {
-            defer { switching = nil }
+            defer { openingCopy = false }
             do {
                 let next = try await model.playback(heardIn: language, instead: playback, from: position + lead)
                 #if DEBUG
