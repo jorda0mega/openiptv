@@ -201,7 +201,7 @@ private struct FilmScreen: View {
         guard playback == nil else { return tryAgainAsked += 1 }
         loading.send(.tryAgain, at: Date())
         asking?.cancel()
-        let plan = Task { [model, tapped] in try await model.playback(itemId: tapped.itemId, kind: tapped.kind) }
+        let plan = Task { [model, tapped] in try await model.playback(itemId: tapped.itemId, kind: tapped.kind, again: true) }
         asking = Task { await ask(plan) }
     }
 

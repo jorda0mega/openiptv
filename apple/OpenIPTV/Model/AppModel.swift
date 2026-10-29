@@ -540,7 +540,7 @@ final class AppModel {
         return .still(at: warm.playback.startSeconds ?? 0)
     }
 
-    func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
+    func playback(itemId: String, kind: String? = nil, again: Bool = false) async throws -> EmbyPlayback {
         let started = Date()
         let first = !filmTapped
         filmTapped = true
@@ -558,7 +558,7 @@ final class AppModel {
         lastPlanKept = prepared
         let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
         #endif
-        var playback = withLocalResume(try await Plans.forStart(key, on: plans))
+        var playback = withLocalResume(try await Plans.forStart(key, on: plans, again: again))
         #if DEBUG
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         lastPlan = debugPlanClocks[key].map { clock in

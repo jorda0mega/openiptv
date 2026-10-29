@@ -139,6 +139,17 @@ final class PlansTests: XCTestCase {
         XCTAssertLessThan(ContinuousClock.now - began, .seconds(1))
     }
 
+    func testTryAgainAsksTheServerAfreshRatherThanWaitOnTheAskThatHung() async throws {
+        let plans = plans(Server(waits: [1: 30]))
+        let hung = Task { try await Plans.forStart(film, on: plans) }
+        defer { hung.cancel() }
+        try await Task.sleep(for: .milliseconds(200))
+        let began = ContinuousClock.now
+        let again = try await Plans.forStart(film, on: plans, again: true)
+        XCTAssertEqual(again.playSessionId, "session 2")
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(2), "Try again waited on the ask that hung")
+    }
+
     func testAStartsPlanThatFailsIsAskedOnceMore() async throws {
         let played = try await Plans.forStart(film, on: plans(Server(failing: [1])))
         XCTAssertEqual(played.playSessionId, "session 2")

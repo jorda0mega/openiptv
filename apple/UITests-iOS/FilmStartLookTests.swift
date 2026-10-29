@@ -14,13 +14,13 @@ final class FilmStartLookTests: XCTestCase {
     func testASlowServerShowsOnePictureOneRingOneFailureAndTryAgainShowsTheRingAtOnce() throws {
         let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
         configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "60", "hang": "item,plan"])
         defer { configure(server, ["reset": "1"]) }
         app.launchArguments = ["-noPrepareAhead", "YES", "-noStreamAhead", "YES", "-filmLoadingLimit", "8",
                                "-cacheFolder", "film-start-look-\(UUID())"]
         app.launch()
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
-        configure(server, ["plan_delay": "10"])
         card.tap()
 
         let failure = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH 'didn’t start'")).firstMatch
@@ -35,12 +35,12 @@ final class FilmStartLookTests: XCTestCase {
             }
             usleep(250_000)
         }
-        XCTAssertTrue(failure.exists, "no failure by 15 s")
+        XCTAssertTrue(failure.exists, "no failure by 15 s: \(app.staticTexts["debug-film-loading"].firstMatch.label)")
         let counting = seen.filter { $0.hasSuffix(" s") }
         XCTAssertTrue(counting.isEmpty, "words counting the wait: \(counting)")
         XCTAssertTrue(tryAgain.exists, "no Try again over the failure")
 
-        configure(server, ["plan_delay": "0"])
+        configure(server, ["hang": "none"])
         tryAgain.tap()
         XCTAssertTrue(app.staticTexts["debug-position"].firstMatch.waitForExistence(timeout: 20), "the film didn't open")
         let looks = app.staticTexts["debug-film-loading"].firstMatch
