@@ -315,7 +315,9 @@ final class AccountScope {
     }
 
     func plan(_ key: PlanKey, again: Bool = false) async throws -> EmbyPlayback {
-        try await Plans.forStart(key, on: plans, again: again)
+        let playback = try await Plans.forStart(key, on: plans, again: again)
+        guard isOpen else { throw CancellationError() }
+        return playback
     }
 
     // MARK: Warm start
