@@ -38,6 +38,9 @@ final class FilmFrames: @unchecked Sendable {
         if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_BEHIND_PICTURE"] == "red" { layer.backgroundColor = UIColor.red.cgColor }
         #endif
         layer.controlTimebase = clock
+        // AVKit removes its "playing in Picture in Picture" icon from this layer as the window stops, and Core
+        // Animation's default for a removed sublayer is a quarter-second fade: on the iPhone, the film faded in from black.
+        layer.actions = ["sublayers": NSNull()]
     }
 
     func attach(to mpv: OpaquePointer) {
