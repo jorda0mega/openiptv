@@ -45,8 +45,11 @@ struct PlayerScreen: View {
         // for 0.6 s, and went in one frame).
         .opacity(shown ? 1 : 0)
         .onAppear {
-            guard item.card == nil else { return shown = true }
-            withAnimation(.easeOut(duration: 0.25)) { shown = true }
+            if item.card != nil {
+                shown = true
+            } else {
+                withAnimation(.easeOut(duration: 0.25)) { shown = true }
+            }
         }
         .environment(\.closePlayer, ClosePlayer {
             withAnimation(.easeIn(duration: 0.2)) { shown = false }
