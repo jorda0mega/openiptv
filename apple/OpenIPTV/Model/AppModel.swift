@@ -1495,8 +1495,8 @@ final class AppModel {
             account = scope(for: nil, readsSaved: false)
             holdContinueWatchingAgain()
             if wipe == .everything {
-                await forgetLiveTV()
                 sources.forgetEverything()
+                await forgetLiveTV()
                 await guide.clear()
                 AppCache.remove(Self.lineupFile)
             }
@@ -1733,7 +1733,7 @@ final class AppModel {
 
         let keep = Set(channels.compactMap(\.epgId))
         let stale = await guide.isStale()
-        if !guides.isEmpty, force || stale || Self.freshGuide {
+        if !guides.isEmpty, force || stale || Self.freshGuide, !Task.isCancelled {
             guideState = .loading
             let guide = guide
             Task.detached {
@@ -1810,7 +1810,6 @@ final class AppModel {
         let built = await Task.detached(priority: .userInitiated) {
             Lineup(categories: allCategories, channels: allListed, prefixes: prefixes, home: home)
         }.value
-        guard !Task.isCancelled else { return }
         liveLibrary = built.library
         categories = built.categories
         allChannels = built.channels

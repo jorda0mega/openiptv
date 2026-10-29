@@ -457,6 +457,7 @@ final class LibraryIndex {
             syncedAt = now
             if !changed.isEmpty {
                 let all = await Self.merge(ordered(), changed)
+                guard self.server == server else { return }
                 pages = Self.paged(all)
                 total = all.count
                 await publish(all)
