@@ -21,6 +21,10 @@ enum PlayerItem: Identifiable {
         case .live: false
         }
     }
+
+    var card: String? {
+        if case let .film(film) = self { film.card } else { nil }
+    }
 }
 
 struct PlayerScreen: View {
@@ -40,7 +44,10 @@ struct PlayerScreen: View {
         // In and out with the same quick fade, as in the TV app (it slid up
         // for 0.6 s, and went in one frame).
         .opacity(shown ? 1 : 0)
-        .onAppear { withAnimation(.easeOut(duration: 0.25)) { shown = true } }
+        .onAppear {
+            guard item.card == nil else { return shown = true }
+            withAnimation(.easeOut(duration: 0.25)) { shown = true }
+        }
         .environment(\.closePlayer, ClosePlayer {
             withAnimation(.easeIn(duration: 0.2)) { shown = false }
             Task {

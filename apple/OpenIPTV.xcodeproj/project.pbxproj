@@ -173,6 +173,7 @@
 		7263FB90AA94BC6DF86C2833 /* PreviewThumbnails.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D5A050F91C28695C55089A /* PreviewThumbnails.swift */; };
 		72AB75424AE3FE7F262C40CF /* FramePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C5F164238F23BE4A851105 /* FramePlan.swift */; };
 		745069F235FB22D844A7CC35 /* Libssl.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00EF07025216C13B1F3C7908 /* Libssl.xcframework */; };
+		74BEA4DAEBF1CEF986904C6C /* FilmStartLookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 782EB00CEAC6C970FA1AF868 /* FilmStartLookTests.swift */; };
 		750E615B0E612900CCA865E5 /* TVPlayerOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */; };
 		760E273F99B961DCBF917D46 /* MovieView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E895C7A337E5874B38A8020C /* MovieView.swift */; };
 		764C48551392DEFB47995D89 /* RemoteFocusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890075B848C59F9A66DD756E /* RemoteFocusTests.swift */; };
@@ -449,6 +450,7 @@
 		7155AE8826997263B83512B3 /* PlayerClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerClock.swift; sourceTree = "<group>"; };
 		72303AAC600EF3DE6075EF7A /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		766249862D814DF2C6786AF4 /* LiveShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveShelfViews.swift; sourceTree = "<group>"; };
+		782EB00CEAC6C970FA1AF868 /* FilmStartLookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmStartLookTests.swift; sourceTree = "<group>"; };
 		7A1F2D0451F66503C9B600AF /* libbz2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libbz2.tbd; path = usr/lib/libbz2.tbd; sourceTree = SDKROOT; };
 		7C24FE14EDDFC06A76BFE381 /* PlayerFacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerFacing.swift; sourceTree = "<group>"; };
 		8109F8BC5559C9CA077C2CBE /* TVWatchOnRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVWatchOnRow.swift; sourceTree = "<group>"; };
@@ -861,6 +863,7 @@
 		7307F6DA46B44D3D69D3FF06 /* UITests-iOS */ = {
 			isa = PBXGroup;
 			children = (
+				782EB00CEAC6C970FA1AF868 /* FilmStartLookTests.swift */,
 				88BB9E0E61880448EAAA0349 /* ForgetEverythingTests.swift */,
 				E181E6602A0A74CA82B8EB92 /* HomeAfterLandscapeTests.swift */,
 				A8DD6BCA3D732E716C638FF8 /* IPTVLoginLeakTests.swift */,
@@ -1246,6 +1249,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6C373796D8148B8826D68337 /* FilmLink.swift in Sources */,
+				74BEA4DAEBF1CEF986904C6C /* FilmStartLookTests.swift in Sources */,
 				454211AE88EFB3C5E11706AB /* ForgetEverythingTests.swift in Sources */,
 				6164F58D3BB936D5574C3FC1 /* HomeAfterLandscapeTests.swift in Sources */,
 				99C2332005A0415F51BC32E2 /* IPTVLoginLeakTests.swift in Sources */,

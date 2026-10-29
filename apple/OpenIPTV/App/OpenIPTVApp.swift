@@ -39,6 +39,7 @@ struct RootView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    @Namespace private var filmCards
     @State private var playing: PlayerItem?
     /// The player on screen: `playing`, put up and taken away with no
     /// slide (the player fades itself in and out).
@@ -88,8 +89,12 @@ struct RootView: View {
         }
         .fullScreenCover(item: $shown) { item in
             PlayerScreen(item: item) { RootView.quietly { shown = nil } }
+                .grownFrom(item.card, in: filmCards)
         }
-        .onChange(of: playing?.id) { RootView.quietly { shown = playing } }
+        .environment(\.filmCards, filmCards)
+        .onChange(of: playing?.id) {
+            if playing?.card != nil { shown = playing } else { RootView.quietly { shown = playing } }
+        }
         .onChange(of: shown?.id) { if shown == nil, playing != nil { playing = nil } }
         .task { await model.loadLive() }
         #if DEBUG

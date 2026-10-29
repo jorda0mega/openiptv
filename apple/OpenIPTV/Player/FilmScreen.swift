@@ -23,6 +23,7 @@ struct TappedFilm: Identifiable {
     let picture: UIImage?
     let tappedAt: Date
     let start: Start
+    var card: String?
 
     static func planned(_ playback: EmbyPlayback, held: FirstPicture) -> TappedFilm {
         TappedFilm(itemId: playback.itemId, kind: nil, title: playback.title, held: held, picture: nil, tappedAt: Date(),
@@ -32,6 +33,32 @@ struct TappedFilm: Identifiable {
     static func backFromPictureInPicture(_ playback: EmbyPlayback) -> TappedFilm {
         TappedFilm(itemId: playback.itemId, kind: nil, title: playback.title, held: .backdrop, picture: nil, tappedAt: Date(),
                    start: .backFromPictureInPicture(playback))
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var filmCards: Namespace.ID?
+}
+
+extension View {
+    @ViewBuilder func growsIntoFilm(_ card: String, in cards: Namespace.ID?) -> some View {
+        #if os(iOS)
+        if let cards { matchedTransitionSource(id: card, in: cards) } else { self }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder func grownFrom(_ card: String?, in cards: Namespace.ID?) -> some View {
+        #if os(iOS)
+        if let card, let cards {
+            navigationTransition(.zoom(sourceID: card, in: cards)).interactiveDismissDisabled()
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
     }
 }
 
@@ -138,7 +165,9 @@ private struct FilmScreen: View {
             if case let .asking(plan) = tapped.start { plan.cancel() }
         }
         #if DEBUG
-        .onChange(of: loading.look.kind, initial: true) { _, kind in looks.append(kind.rawValue) }
+        .onChange(of: loading.look.kind, initial: true) { _, kind in
+            looks.append(kind.rawValue + String(format: " %.2f", Date().timeIntervalSince(tapped.tappedAt)))
+        }
         #endif
         .onDisappear {
             asking?.cancel()

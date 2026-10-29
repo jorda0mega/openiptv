@@ -184,7 +184,7 @@ final class AppModel {
         // The first screen's pictures, decoded from the disk cache while the
         // app is still drawing its first frame, so Home opens with them.
         if let home {
-            let urls = Self.visibleImages(home)
+            let urls = Self.visibleImages(home) + startPictures(home)
             Task.detached(priority: .userInitiated) { await ImagePipeline.shared.prefetch(urls) }
         }
         Task { await guide.loadCache(); guideState = await guide.state }
@@ -345,7 +345,8 @@ final class AppModel {
             // instead of covers popping in; on the very first load, show the
             // rows straight away and let the pictures follow. A Home that
             // waits has them ready when it goes on.
-            let prefetch = Task { await ImagePipeline.shared.prefetch(Self.visibleImages(fresh)) }
+            let urls = Self.visibleImages(fresh) + startPictures(fresh)
+            let prefetch = Task { await ImagePipeline.shared.prefetch(urls) }
             // Then every other cover on Home into the disk cache (Wi-Fi),
             // so rows further down don't fill in as they scroll into view.
             if NetworkStatus.shared.knownUnmetered {
@@ -500,6 +501,13 @@ final class AppModel {
         let covers = home.rows.prefix(3).flatMap { $0.cards.prefix(6) }.compactMap { $0.images.first.flatMap { URL(string: $0.url) } }
         var seen = Set<URL>()
         return (art + covers).filter { seen.insert($0).inserted }
+    }
+
+    private func startPictures(_ home: HomeContent) -> [URL] {
+        let cards = home.rows.first { $0.title == "Continue Watching" }?.cards.prefix(3) ?? []
+        return cards.compactMap { card in
+            startBackdrop(card.episodeId ?? card.id, episode: card.episodeId != nil).first.flatMap { URL(string: $0.url) }
+        }
     }
 
     /// Which copy of a title to play when there are several: the sharpest
