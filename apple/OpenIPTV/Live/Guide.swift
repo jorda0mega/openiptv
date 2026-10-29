@@ -46,12 +46,12 @@ actor GuideStore {
     /// lookups aren't held up meanwhile.
     func loadCache() async {
         guard programmes.isEmpty else { return }
-        let url = cacheURL
+        let url = cacheURL, asked = forgotten
         let cache = await Task.detached(priority: .userInitiated) { () -> Cache? in
             guard let data = try? Data(contentsOf: url) else { return nil }
             return try? JSONDecoder().decode(Cache.self, from: data)
         }.value
-        guard let cache, programmes.isEmpty else { return }
+        guard let cache, programmes.isEmpty, forgotten == asked else { return }
         programmes = cache.programmes
         fetchedAt = cache.fetchedAt
         state = .ready(programmes: programmes.values.reduce(0) { $0 + $1.count }, fetchedAt: cache.fetchedAt)
