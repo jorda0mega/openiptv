@@ -72,6 +72,14 @@ struct FilmLoading: Equatable {
             }
         }
 
+        struct Summary: Equatable {
+            let controls: Bool
+            let ringShown: Bool
+            let failure: Failure?
+        }
+
+        var summary: Summary { Summary(controls: controls, ringShown: ringShown, failure: failure) }
+
         func headline(_ title: String) -> String? {
             guard failure != nil else { return nil }
             return under == .film ? "\(title) stopped" : "\(title) didn’t start"
@@ -165,7 +173,7 @@ struct FilmLoading: Equatable {
     var acceptsPicture: Bool {
         switch phase {
         case .starting, .playing, .frozen: true
-        case .startFailed, .playFailed, .closed: false
+        case .failed, .closed: false
         }
     }
 
