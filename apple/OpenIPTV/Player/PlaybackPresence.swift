@@ -11,27 +11,36 @@ struct PlaybackPresence: Equatable, Sendable {
         case active, inactive, background
     }
 
+    enum Playback: Equatable, Sendable {
+        case loading, playing, paused, stopped
+    }
+
     enum Event: Equatable, Sendable {
-        case moving(Bool)
+        case playback(Playback)
         case app(App)
+        case asked(pause: Bool)
     }
 
     enum Effect: Equatable, Sendable {
         case pause
+        case toggle
     }
 
     let pausesWhenAway: Bool
-    private(set) var moving = false
+    private(set) var playback = Playback.loading
     private(set) var app = App.active
 
-    var keepsAwake: Bool { moving }
+    var keepsAwake: Bool { playback == .playing }
 
     mutating func on(_ event: Event) -> [Effect] {
         switch event {
-        case let .moving(on): moving = on
+        case let .playback(now): playback = now
         case let .app(now): app = now
+        case .asked(pause: true): return playback == .playing ? [.toggle] : []
+        case .asked(pause: false): return playback == .paused && app != .background ? [.toggle] : []
         }
-        return pausesWhenAway && moving && app == .background ? [.pause] : []
+        let running = playback == .loading || playback == .playing
+        return pausesWhenAway && running && app == .background ? [.pause] : []
     }
 }
 

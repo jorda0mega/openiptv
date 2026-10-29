@@ -87,7 +87,11 @@ struct LivePlayerView: View {
     private var paused: Bool { session.paused }
     private var playingCopy: LiveChannel? { session.copy }
     private var failed: Bool { session.failure != nil }
-    private var moving: Bool { started && !paused && !failed }
+    private var playState: PlaybackPresence.Playback {
+        if failed { return .stopped }
+        if !started { return .loading }
+        return paused ? .paused : .playing
+    }
     private var loading: Bool { (buffering || session.isLoading) && !failed }
     private var load: LoadProgress? {
         let failure = session.failure.map { failure in
@@ -183,10 +187,10 @@ struct LivePlayerView: View {
             if phase == .active { send(.back) }
             follow(presence.on(.app(.init(phase))))
         }
-        .onChange(of: moving, initial: true) { _, moving in follow(presence.on(.moving(moving))) }
+        .onChange(of: playState, initial: true) { _, state in follow(presence.on(.playback(state))) }
         .onChange(of: presence.keepsAwake) { _, awake in ScreenAwake.set(awakeID, playing: awake) }
         .onChange(of: channel.name, initial: true) { _, name in
-            ScreenAwake.open(awakeID, title: name, live: true) { player?.setPaused($0) }
+            ScreenAwake.open(awakeID, title: name, live: true) { follow(presence.on(.asked(pause: $0))) }
         }
         .task { start() }
         .task(id: load?.deadline) { await endWait(at: load?.deadline) }
@@ -607,6 +611,7 @@ struct LivePlayerView: View {
     private func send(_ input: LiveSession<LiveChannel>.Input) {
         if let failure = input.failure { lastFailure = failure }
         for action in session.handle(input) { run(action) }
+        follow(presence.on(.playback(playState)))
     }
 
     private func run(_ action: LiveSession<LiveChannel>.Action) {
@@ -909,6 +914,7 @@ struct LivePlayerView: View {
         for effect in effects {
             switch effect {
             case .pause: player?.setPaused(true)
+            case .toggle: togglePause()
             }
         }
     }

@@ -303,7 +303,11 @@ struct MoviePlayerView: View {
     @State private var openingCopy = false
     @State private var awakeID = UUID()
     @State private var presence = PlaybackPresence.here
-    private var moving: Bool { started && !paused && look.failure == nil }
+    private var playState: PlaybackPresence.Playback {
+        if look.failure != nil { return .stopped }
+        if !started { return .loading }
+        return paused ? .paused : .playing
+    }
     /// An episode: its season's episodes, for the player's Episodes list
     /// (as on the show's page).
     @State private var seasonEpisodes: [EmbyItem] = []
@@ -534,13 +538,13 @@ struct MoviePlayerView: View {
         .onChange(of: closeAsked) { close() }
         .onChange(of: look.failure) { _, failure in if let failure { stop(for: failure) } }
         .task(id: playback.itemId) { await loadSeason() }
-        .onChange(of: moving, initial: true) { _, moving in follow(presence.on(.moving(moving))) }
+        .onChange(of: playState, initial: true) { _, state in follow(presence.on(.playback(state))) }
         .onChange(of: scenePhase, initial: true) { _, phase in follow(presence.on(.app(.init(phase)))) }
         .onChange(of: presence.keepsAwake) { _, awake in ScreenAwake.set(awakeID, playing: awake) }
         .onAppear {
             PlaybackActivity.began()
             model.playerShown = true
-            ScreenAwake.open(awakeID, title: playback.title, live: false) { player?.setPaused($0) }
+            ScreenAwake.open(awakeID, title: playback.title, live: false) { follow(presence.on(.asked(pause: $0))) }
             // What was fetched ahead for other titles stops (and none starts
             // while this plays): it has the connection to itself.
             StreamRelay.shared.stopAhead(keeping: playback.url)
@@ -1180,6 +1184,7 @@ struct MoviePlayerView: View {
             player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
             player.addCopies(playback.subtitleCopies)
         }
+        follow(presence.on(.playback(playState)))
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
         probeTask = Task { await probeWhileConverted() }
     }
@@ -1352,6 +1357,7 @@ struct MoviePlayerView: View {
         case let .started(playerSeconds):
             guard loading.acceptsPicture else { return }
             started = true
+            follow(presence.on(.playback(playState)))
             buffering = false
             if !heldStill || loading.filmShown { loading.send(.player(.moving, attempt: loadAttempt), at: Date()) }
             governor?.notePlaying()
@@ -1516,6 +1522,7 @@ struct MoviePlayerView: View {
             }
         case let .paused(isPaused):
             paused = isPaused
+            follow(presence.on(.playback(playState)))
             #if DEBUG
             // At once: the network reports that also refresh it stop once
             // the buffer is full, and it said "playing" after a pause.
@@ -1576,6 +1583,12 @@ struct MoviePlayerView: View {
         for effect in effects {
             switch effect {
             case .pause: player?.setPaused(true)
+            case .toggle:
+                #if os(tvOS)
+                togglePlay()
+                #else
+                player?.togglePause()
+                #endif
             }
         }
     }
