@@ -118,20 +118,8 @@ private struct FilmScreen: View {
             #endif
             FilmLoadingSurface(look: loading.look, title: tapped.title, picture: tapped.picture, tryAgain: tryAgain, close: close)
             #if DEBUG
-            Text(looks.joined(separator: ", "))
-                .font(.caption2)
-                .frame(width: 1, height: 1)
-                .opacity(0.02)
-                .allowsHitTesting(false)
-                .accessibilityLabel(looks.joined(separator: ", "))
-                .accessibilityIdentifier("debug-film-loading")
-            Text(String(FilmLoadingProbe.heldShown))
-                .font(.caption2)
-                .frame(width: 1, height: 1)
-                .opacity(0.02)
-                .allowsHitTesting(false)
-                .accessibilityLabel(String(FilmLoadingProbe.heldShown))
-                .accessibilityIdentifier("debug-film-held")
+            readout(looks.joined(separator: ", "), id: "debug-film-loading")
+            readout(String(FilmLoadingProbe.heldShown), id: "debug-film-held")
             #endif
         }
         #if os(tvOS)
@@ -158,19 +146,32 @@ private struct FilmScreen: View {
         .onChange(of: NetworkStatus.shared.online, initial: true) { _, online in loading.send(.online(online), at: Date()) }
         .onChange(of: loading.look.failure) { _, failure in
             guard failure != nil, playback == nil else { return }
-            asking?.cancel()
-            if case let .asking(plan) = tapped.start { plan.cancel() }
+            cancelAsk()
         }
         #if DEBUG
         .onChange(of: loading.look.kind, initial: true) { _, kind in
             looks.append(kind.rawValue + String(format: " %.2f", Date().timeIntervalSince(tapped.tappedAt)))
         }
         #endif
-        .onDisappear {
-            asking?.cancel()
-            if case let .asking(plan) = tapped.start { plan.cancel() }
-        }
+        .onDisappear { cancelAsk() }
     }
+
+    private func cancelAsk() {
+        asking?.cancel()
+        if case let .asking(plan) = tapped.start { plan.cancel() }
+    }
+
+    #if DEBUG
+    private func readout(_ text: String, id: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .frame(width: 1, height: 1)
+            .opacity(0.02)
+            .allowsHitTesting(false)
+            .accessibilityLabel(text)
+            .accessibilityIdentifier(id)
+    }
+    #endif
 
     private static var patience: FilmLoading.Patience {
         #if DEBUG

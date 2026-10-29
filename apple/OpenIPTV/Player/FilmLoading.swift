@@ -104,40 +104,50 @@ struct FilmLoading: Equatable {
     static let readEvery: TimeInterval = 0.25
     static let endSlack: TimeInterval = 10
 
+    private enum Ring: Equatable {
+        case off
+        case lit(since: Date)
+        case dim(since: Date)
+
+        var since: Date? {
+            switch self {
+            case .off: nil
+            case let .lit(since), let .dim(since): since
+            }
+        }
+    }
+
     private enum Phase: Equatable {
         case starting(Wait)
-        case startFailed(Failure)
         case playing
         case frozen(Wait, Frozen)
-        case playFailed(Failure)
+        case failed(Failure)
         case closed(Look)
     }
 
     private struct Wait: Equatable {
         let since: Date
         var arrivedAt: Date
-        var ringAt: Date?
-        var lit = true
-        var litChangedAt: Date?
+        var ring = Ring.off
         var failing: Failure?
 
-        var lookShownAt: Date { [since, ringAt, litChangedAt].compactMap(\.self).max() ?? since }
+        var lookShownAt: Date { ring.since ?? since }
 
-        static func ringAtOnce(_ now: Date) -> Wait {
-            Wait(since: now, arrivedAt: now, ringAt: now, litChangedAt: now)
+        static func showingRing(_ now: Date) -> Wait {
+            Wait(since: now, arrivedAt: now, ring: .lit(since: now))
         }
     }
 
     private struct Frozen: Equatable {
-        var dataStoppedAt: Date?
-        var jumpAskedAt: Date?
+        var dataStopped = false
+        var jumpAsked = false
         var reopened = false
 
-        var over: Bool { !reopened && dataStoppedAt == nil && jumpAskedAt == nil }
+        var bothClear: Bool { !reopened && !dataStopped && !jumpAsked }
     }
 
     private enum Change {
-        case ring, dim, relight, limit, failing
+        case showRing, dim, relight, limit, showFailure
     }
 
     private var phase: Phase
@@ -188,11 +198,10 @@ struct FilmLoading: Equatable {
 
     var look: Look {
         switch phase {
-        case let .starting(wait): Look(under: .held(held), over: ring(wait))
-        case let .startFailed(failure): Look(under: .held(held), over: .failure(failure))
+        case let .starting(wait): Look(under: .held(held), over: over(wait))
         case .playing: Look(under: .film, over: .nothing)
-        case let .frozen(wait, _): Look(under: .film, over: ring(wait))
-        case let .playFailed(failure): Look(under: .film, over: .failure(failure))
+        case let .frozen(wait, _): Look(under: .film, over: over(wait))
+        case let .failed(failure): Look(under: filmShown ? .film : .held(held), over: .failure(failure))
         case let .closed(look): look
         }
     }
@@ -233,12 +242,12 @@ struct FilmLoading: Equatable {
             if on, !choosing { jumpAsked(at: now) }
         case (.playing, .choosingEnded), (.frozen, .choosingEnded):
             if playerSeeking { jumpAsked(at: now) }
-        case (.startFailed, .tryAgain):
+        case (.failed, .tryAgain) where filmShown:
             lastBytes = nil
-            phase = .starting(.ringAtOnce(now))
-        case (.playFailed, .tryAgain):
+            phase = .frozen(.showingRing(now), Frozen(reopened: true))
+        case (.failed, .tryAgain):
             lastBytes = nil
-            phase = .frozen(.ringAtOnce(now), Frozen(reopened: true))
+            phase = .starting(.showingRing(now))
         default:
             return
         }
@@ -259,16 +268,16 @@ struct FilmLoading: Equatable {
         case (.frozen, .ended):
             fail(.cutOff, at: now)
         case (.playing, .dataStopped):
-            freeze(Frozen(dataStoppedAt: now), at: now)
+            freeze(Frozen(dataStopped: true), at: now)
         case (.frozen(let wait, var frozen), .dataStopped):
-            frozen.dataStoppedAt = frozen.dataStoppedAt ?? now
+            frozen.dataStopped = true
             phase = .frozen(wait, frozen)
         case (.frozen(let wait, var frozen), .dataFlowing):
-            frozen.dataStoppedAt = nil
-            frozen.over ? play() : (phase = .frozen(wait, frozen))
+            frozen.dataStopped = false
+            if frozen.bothClear { play() } else { phase = .frozen(wait, frozen) }
         case (.frozen(let wait, var frozen), .landed):
-            frozen.jumpAskedAt = nil
-            frozen.over ? play() : (phase = .frozen(wait, frozen))
+            frozen.jumpAsked = false
+            if frozen.bothClear { play() } else { phase = .frozen(wait, frozen) }
         default:
             return
         }
@@ -288,9 +297,9 @@ struct FilmLoading: Equatable {
     private mutating func jumpAsked(at now: Date) {
         switch phase {
         case .playing:
-            freeze(Frozen(jumpAskedAt: now), at: now)
+            freeze(Frozen(jumpAsked: true), at: now)
         case .frozen(let wait, var frozen):
-            frozen.jumpAskedAt = frozen.jumpAskedAt ?? now
+            frozen.jumpAsked = true
             phase = .frozen(wait, frozen)
         default:
             return
@@ -300,10 +309,9 @@ struct FilmLoading: Equatable {
     private mutating func arrive(at now: Date) {
         guard var wait = currentWait?.wait else { return }
         wait.arrivedAt = now
-        if wait.ringAt != nil, !wait.lit {
-            guard let dimmed = wait.litChangedAt, now >= dimmed + patience.shownAtLeast else { return setWait(wait) }
-            wait.lit = true
-            wait.litChangedAt = now
+        if case let .dim(since) = wait.ring {
+            guard now >= since + patience.shownAtLeast else { return setWait(wait) }
+            wait.ring = .lit(since: now)
         }
         steps += 1
         setWait(wait)
@@ -312,7 +320,7 @@ struct FilmLoading: Equatable {
     private mutating func fail(_ failure: Failure, at now: Date) {
         switch phase {
         case .playing:
-            phase = .playFailed(failure)
+            phase = .failed(failure)
         case .starting(var wait), .frozen(var wait, _):
             if now >= wait.lookShownAt + patience.shownAtLeast { return show(failure) }
             wait.failing = wait.failing ?? failure
@@ -324,8 +332,7 @@ struct FilmLoading: Equatable {
 
     private mutating func show(_ failure: Failure) {
         switch phase {
-        case .starting: phase = .startFailed(failure)
-        case .frozen: phase = .playFailed(failure)
+        case .starting, .frozen: phase = .failed(failure)
         default: return
         }
     }
@@ -348,8 +355,12 @@ struct FilmLoading: Equatable {
         }
     }
 
-    private func ring(_ wait: Wait) -> Look.Over {
-        wait.ringAt == nil ? .nothing : .ring(steps: steps, lit: wait.lit)
+    private func over(_ wait: Wait) -> Look.Over {
+        switch wait.ring {
+        case .off: .nothing
+        case .lit: .ring(steps: steps, lit: true)
+        case .dim: .ring(steps: steps, lit: false)
+        }
     }
 
     private var currentWait: (wait: Wait, ringAfter: TimeInterval)? {
@@ -362,44 +373,40 @@ struct FilmLoading: Equatable {
 
     private var due: (at: Date, change: Change)? {
         guard let (wait, ringAfter) = currentWait else { return nil }
-        if wait.failing != nil { return (wait.lookShownAt + patience.shownAtLeast, .failing) }
+        if wait.failing != nil { return (wait.lookShownAt + patience.shownAtLeast, .showFailure) }
         var changes: [(at: Date, change: Change)] = []
-        if let ringAt = wait.ringAt {
-            let changed = wait.litChangedAt ?? ringAt
-            if wait.lit {
-                changes.append((max(wait.arrivedAt + patience.dimAfter, changed + patience.shownAtLeast), .dim))
-            } else if wait.arrivedAt > changed {
-                changes.append((changed + patience.shownAtLeast, .relight))
-            }
-        } else {
-            changes.append((wait.since + ringAfter, .ring))
+        switch wait.ring {
+        case .off:
+            changes.append((wait.since + ringAfter, .showRing))
+        case let .lit(changed):
+            changes.append((max(wait.arrivedAt + patience.dimAfter, changed + patience.shownAtLeast), .dim))
+        case let .dim(changed):
+            if wait.arrivedAt > changed { changes.append((changed + patience.shownAtLeast, .relight)) }
         }
-        let limit = min(patience.stillFor, patience.atMost) == .infinity
-            ? nil : min(wait.arrivedAt + patience.stillFor, wait.since + patience.atMost)
-        if let limit { changes.append((limit, .limit)) }
+        if min(patience.stillFor, patience.atMost) != .infinity {
+            let limit = min(wait.arrivedAt + patience.stillFor, wait.since + patience.atMost)
+            changes.append((limit, .limit))
+        }
         return changes.min { $0.at < $1.at }
     }
 
     private mutating func advance(to now: Date) {
         while let (at, change) = due, at <= now, var wait = currentWait?.wait {
             switch change {
-            case .ring:
-                wait.ringAt = at
-                wait.lit = at.timeIntervalSince(wait.arrivedAt) < patience.dimAfter
-                wait.litChangedAt = at
+            case .showRing:
+                let lit = at.timeIntervalSince(wait.arrivedAt) < patience.dimAfter
+                wait.ring = lit ? .lit(since: at) : .dim(since: at)
                 setWait(wait)
             case .dim:
-                wait.lit = false
-                wait.litChangedAt = at
+                wait.ring = .dim(since: at)
                 setWait(wait)
             case .relight:
-                wait.lit = true
-                wait.litChangedAt = at
+                wait.ring = .lit(since: at)
                 steps += 1
                 setWait(wait)
             case .limit:
                 fail(limitFailure, at: at)
-            case .failing:
+            case .showFailure:
                 if let failure = wait.failing { show(failure) }
             }
         }
