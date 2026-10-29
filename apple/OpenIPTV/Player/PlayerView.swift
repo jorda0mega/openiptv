@@ -274,7 +274,7 @@ struct MoviePlayerView: View {
     /// builds with the stats on).
     @State private var timing: String?
     @State private var warmStart = false
-    @State private var stillToMove: FirstPicture?
+    @State private var heldStill = false
     @State private var failureReported = false
     /// How the server answered each way of opening a film that failed.
     @State private var diagnosis: Task<Void, Never>?
@@ -955,7 +955,7 @@ struct MoviePlayerView: View {
         failureReported = false
         attempt = 0
         started = false
-        stillToMove = nil
+        heldStill = false
         playFile(playback.url, headers: playback.headers, at: loading.filmShown ? position : playback.startSeconds,
                  readahead: NetworkStatus.shared.fileReadahead, attempt: loading.nextAttempt())
     }
@@ -1124,7 +1124,7 @@ struct MoviePlayerView: View {
             warmStart = true
             PlaybackAudio.activate()
             loading.takeOver(attempt: warmPlayer.currentAttempt)
-            if case .still = held, warmPlayer.hasStarted { stillToMove = held }
+            if case .still = held, warmPlayer.hasStarted { heldStill = true }
             if case .still = held, !warmPlayer.hasStarted { loading.send(.stillGone, at: Date()) }
             warmPlayer.onEvent = { event, attempt in handle(event, attempt) }
             self.player = warmPlayer
@@ -1330,7 +1330,7 @@ struct MoviePlayerView: View {
             ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false
-            if stillToMove == nil { loading.send(.player(.moving, attempt: loadAttempt), at: Date()) }
+            if !heldStill || loading.filmShown { loading.send(.player(.moving, attempt: loadAttempt), at: Date()) }
             governor?.notePlaying()
             #if os(iOS)
             offerPictureInPicture()
@@ -1460,10 +1460,7 @@ struct MoviePlayerView: View {
                 loading.send(.player(.refused(why.isEmpty ? said : why), attempt: loadAttempt), at: Date())
             }
         case let .time(rawPosition, newDuration):
-            if let still = stillToMove, still.goesOn(at: rawPosition + offset) {
-                stillToMove = nil
-                loading.send(.player(.moving, attempt: loadAttempt), at: Date())
-            }
+            if heldStill, !loading.filmShown { loading.send(.player(.time(rawPosition + offset), attempt: loadAttempt), at: Date()) }
             if let newDuration, offset == 0, duration != newDuration {
                 duration = newDuration
                 #if os(iOS)
