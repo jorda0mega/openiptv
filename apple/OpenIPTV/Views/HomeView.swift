@@ -27,7 +27,6 @@ struct HomeView: View {
                 // itself), and a lazy stack adding a row as the page slides
                 // back after pull to refresh stops it halfway, stuck down.
                 VStack(alignment: .leading, spacing: 30) {
-                    let heroes = model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight
                     // One over the other while the first hero fades in over
                     // its placeholder (it appeared in one frame).
                     ZStack(alignment: .top) {
@@ -48,7 +47,7 @@ struct HomeView: View {
                     if !visibleRows.contains(where: { $0.title == "Continue Watching" }) { myListRow }
                     ForEach(visibleRows) { row in
                         if row.title == "Continue Watching" {
-                            ContinueRow(row: row, play: { play($0) }, open: { open($0) })
+                            ContinueRow(row: row, play: { play($0, grows: true) }, open: { open($0) })
                             myListRow
                         } else {
                             PosterRow(title: row.title, cards: row.cards, open: { open($0) }, play: { play($0) },
@@ -169,10 +168,15 @@ struct HomeView: View {
         }
     }
 
+    private var heroes: [Featured] { model.spotlight.isEmpty ? (model.featured.map { [$0] } ?? []) : model.spotlight }
+
     /// Straight to the player: the episode being resumed, or the title.
-    private func play(_ card: Card) {
-        playing = .film(model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
-                                  images: card.images))
+    private func play(_ card: Card, grows: Bool = false) {
+        let hero = heroes.first { $0.card.id == card.id }.map { [CardImage(url: $0.backdrop, contain: false)] } ?? []
+        var film = model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
+                             images: hero + card.images)
+        if grows { film.card = card.id }
+        playing = .film(film)
     }
 }
 
@@ -450,6 +454,7 @@ private struct RowPage: View {
 /// show or film.
 private struct ContinueRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.filmCards) private var filmCards
     let row: HomeRow
     let play: (Card) -> Void
     let open: (Card) -> Void
@@ -463,6 +468,7 @@ private struct ContinueRow: View {
                         ZStack(alignment: .bottomTrailing) {
                             Button { play(card) } label: { cardView(card) }
                                 .buttonStyle(.plain)
+                                .growsIntoFilm(card.id, in: filmCards)
                                 .preparesAhead(card.playTarget, at: .continueWatching)
                                 .contextMenu {
                                     Button(card.kind == "Series" ? "Go to Show" : "Details", systemImage: "info.circle") { open(card) }

@@ -2014,10 +2014,10 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(episode.label.contains("Continue · S2, E3"), "not \"Continue · S2, E3\": \(episode.label)")
         XCTAssertTrue(app.buttons["More"].firstMatch.exists, "no \"•••\" on the rows")
         episode.tap()
-        // The player's readout is there the whole time: the screen stayed.
+        // The player screen's readout is there the whole time: the screen stayed.
         var gone = 0
         for _ in 0..<15 {
-            if !app.staticTexts["debug-position"].exists { gone += 1 }
+            if !app.staticTexts["debug-film-loading"].exists { gone += 1 }
             usleep(200_000)
         }
         XCTAssertEqual(gone, 0, "the player screen went while the title changed")
