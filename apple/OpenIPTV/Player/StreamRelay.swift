@@ -121,7 +121,7 @@ final class StreamRelay: @unchecked Sendable {
 
     /// A local address for this file that the player can open, or nil to
     /// open it directly (relay not running).
-    func localURL(for url: URL, headers: [String]) -> URL? {
+    func localURL(for url: URL, headers: [String], film: String? = nil) -> URL? {
         start()
         lock.lock()
         defer { lock.unlock() }

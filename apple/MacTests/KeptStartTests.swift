@@ -151,6 +151,23 @@ final class RelayArrivedTests: XCTestCase {
         XCTAssertEqual(relay.arrived(for: "m2"), Int64(bytes))
         XCTAssertEqual(relay.arrived(for: "m1"), 0, "another film's bytes turned this film's ring")
     }
+
+    func testARemoteFilesBytesCountUnderItsFilm() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0)
+        let relay = StreamRelay()
+        let remote = try XCTUnwrap(URL(string: "/media/film.mkv", relativeTo: server.film)?.absoluteURL)
+        func read() async throws -> Int {
+            var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: remote, headers: [], film: "m1")))
+            read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
+            read.timeoutInterval = 5
+            return try await URLSession(configuration: .ephemeral).data(for: read).0.count
+        }
+        let fromServer = try await read()
+        XCTAssertEqual(relay.arrived(for: "m1"), Int64(fromServer), "the server's bytes of a remote file didn't turn its ring")
+        let fromDevice = try await read()
+        XCTAssertEqual(server.ranges.count, 1, "the second read went to the server, not the device")
+        XCTAssertEqual(relay.arrived(for: "m1"), Int64(fromServer + fromDevice), "the kept bytes of a remote file didn't turn its ring")
+    }
 }
 
 final class KeptStartUseTests: XCTestCase {
