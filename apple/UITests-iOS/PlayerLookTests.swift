@@ -179,6 +179,7 @@ final class PlayerLookTests: XCTestCase {
         sleep(6)
         shot("brought back")
         assertNothingStopped()
+        assertNoFadeAsTheWindowStopped()
         XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
         controlsUp()
         XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
@@ -203,6 +204,7 @@ final class PlayerLookTests: XCTestCase {
             let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
             XCTAssertTrue(readout.contains("open icon=hidden"), "the Picture in Picture icon wasn't hidden as the app came back (\(round)): \(readout)")
             assertNothingStopped()
+            assertNoFadeAsTheWindowStopped()
         }
         XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
         controlsUp()
@@ -246,6 +248,11 @@ final class PlayerLookTests: XCTestCase {
                 XCTAssertLessThan(fields[field] ?? .max, 150, "\(kind): \(what) stopped for \(fields[field] ?? -1) ms: \(part)", file: file, line: line)
             }
         }
+    }
+
+    private func assertNoFadeAsTheWindowStopped(file: StaticString = #filePath, line: UInt = #line) {
+        let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
+        XCTAssertTrue(readout.contains("stop fade=none"), "the film faded as the window stopped: \(readout)", file: file, line: line)
     }
 
     private func gapNumbers(in part: Substring) -> [String: Int] {

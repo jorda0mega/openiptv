@@ -12,8 +12,10 @@ final class PictureInPictureProbe {
     var gaps: [SwitchGap.Kind: String] = [:]
     /// iOS's "playing in Picture in Picture" icon on the film's layer as the app came back with the window up.
     var iconOnOpen: String?
+    var fadeOnStop: String?
     var gapText: String {
-        ([SwitchGap.Kind.start, .return].compactMap { gaps[$0] } + [iconOnOpen.map { "open icon=\($0)" }].compactMap(\.self))
+        ([SwitchGap.Kind.start, .return].compactMap { gaps[$0] }
+            + [iconOnOpen.map { "open icon=\($0)" }, fadeOnStop.map { "stop fade=\($0)" }].compactMap(\.self))
             .joined(separator: " | ")
     }
 }
@@ -305,6 +307,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             guard controller === film?.controller else { return }
             #if DEBUG
             PictureInPictureProbe.shared.iconOnOpen = nil
+            PictureInPictureProbe.shared.fadeOnStop = nil
             #endif
             happen(.willStart)
             // iOS can start the window by itself after the viewer is already back in the app.
@@ -357,6 +360,11 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
             guard controller === film?.controller else { return }
+            #if DEBUG
+            if let layer = film?.frames.layer {
+                DispatchQueue.main.async { PictureInPictureProbe.shared.fadeOnStop = (layer.animationKeys() ?? []).isEmpty ? "none" : "fade" }
+            }
+            #endif
             happen(.didStop)
         }
     }
