@@ -884,6 +884,82 @@ final class RemoteFocusTests: XCTestCase {
         return cut
     }
 
+    func testFirstPlayPauseAfterAStartFromItsPagePauses() throws {
+        for start in 1...2 {
+            try startFromItsPage()
+            firstPlayPausePauses("start \(start)")
+            app.terminate()
+        }
+    }
+
+    func testFirstSelectOnAStartTheServerNeverAnsweredTriesAgain() throws {
+        try firstSelectTriesAgain(hang: "item,plan")
+    }
+
+    func testFirstSelectOnAFilmThatNeverArrivedTriesAgain() throws {
+        try firstSelectTriesAgain(hang: "open")
+    }
+
+    func testFirstMenuWhileTheServerIsAskedClosesThePlayer() throws {
+        try firstMenuCloses(hang: "item,plan")
+    }
+
+    func testFirstMenuWhileTheFilmIsAwaitedClosesThePlayer() throws {
+        try firstMenuCloses(hang: "open")
+    }
+
+    private func firstPlayPausePauses(_ when: String) {
+        XCTAssertTrue(readout("debug-film-loading", within: 30) { $0.contains("film") }, "\(when): the film didn't move")
+        remote.press(.playPause)
+        XCTAssertTrue(readout("debug-position", within: 3) { $0.hasSuffix("paused") },
+                      "\(when): the first Play/Pause didn't pause; focus: \(focused())")
+    }
+
+    private func firstSelectTriesAgain(hang: String) throws {
+        let server = try startFromItsPage(hang: hang, ["-filmLoadingLimit", "8"])
+        XCTAssertTrue(readout("debug-film-loading", within: 20) { $0.contains("failed") }, "the start didn't fail")
+        configure(server, ["hang": "none"])
+        remote.press(.select)
+        XCTAssertTrue(readout("debug-film-loading", within: 3) { $0.components(separatedBy: "failed").last?.contains("ring") == true },
+                      "the first Select on the failure didn't try again; focus: \(focused())")
+        firstPlayPausePauses("after Try again")
+    }
+
+    private func firstMenuCloses(hang: String) throws {
+        try startFromItsPage(hang: hang)
+        XCTAssertTrue(readout("debug-film-loading", within: 10) { $0.contains("ring") }, "no ring while waiting")
+        remote.press(.menu)
+        XCTAssertTrue(app.staticTexts["debug-film-loading"].firstMatch.waitForNonExistence(timeout: 3),
+                      "the first Menu while waiting didn't close the player; focus: \(focused())")
+    }
+
+    @discardableResult
+    private func startFromItsPage(hang: String = "none", _ arguments: [String] = []) throws -> URL {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["hang": hang])
+        addTeardownBlock { self.configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"] + arguments
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        remote.press(.select)
+        return server
+    }
+
+    private func readout(_ id: String, within seconds: Double, _ test: (String) -> Bool) -> Bool {
+        let element = app.staticTexts[id].firstMatch
+        let deadline = Date().addingTimeInterval(seconds)
+        repeat {
+            if element.exists, test(element.label) { return true }
+            usleep(250_000)
+        } while Date() < deadline
+        return false
+    }
+
     /// The test server's address, from the account passed in.
     private func testServer() -> URL? {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
