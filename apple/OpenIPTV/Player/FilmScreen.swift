@@ -263,6 +263,7 @@ struct FilmLoadingSurface: View {
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: .circle)
                 .accessibilityLabel("Close")
+                .accessibilityIdentifier("Close player")
                 .padding(.horizontal, 16)
                 .transition(.opacity.animation(.easeOut(duration: 0.25)))
             }
