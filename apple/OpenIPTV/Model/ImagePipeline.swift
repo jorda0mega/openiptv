@@ -8,6 +8,7 @@ actor ImagePipeline {
 
     // NSCache is thread-safe; read directly for images already decoded.
     private nonisolated(unsafe) let memory = NSCache<NSURL, UIImage>()
+    private nonisolated let decodedPictures = Locked(PictureIndex())
     private let session: URLSession
     /// Covers stored ahead (see `store`): their own two connections, the
     /// same disk cache, so they never hold up a picture on screen.
@@ -107,6 +108,10 @@ actor ImagePipeline {
         memory.object(forKey: url as NSURL)
     }
 
+    nonisolated func decoded(of items: [String]) -> UIImage? {
+        decodedPictures.value.pictures(of: items).lazy.compactMap { self.memory.object(forKey: $0 as NSURL) }.first
+    }
+
     /// The picture, decoded for display. `visible`: something on screen is
     /// waiting for it, so it goes ahead of pictures fetched ahead of time
     /// (and lifts one of those already under way). A view that goes away
@@ -119,7 +124,7 @@ actor ImagePipeline {
             if visible { running.request.raise() }
             return try await running.task.value
         }
-        let session = session, memory = memory
+        let session = session, memory = memory, decodedPictures = decodedPictures
         let request = RequestHandle(priority: visible ? URLSessionTask.highPriority : URLSessionTask.lowPriority)
         let load = Task<UIImage, Error>(priority: visible ? .userInitiated : .utility) {
             let (data, response) = try await request.fetch(url, with: session)
@@ -129,6 +134,7 @@ actor ImagePipeline {
             let ready = await image.byPreparingForDisplay() ?? image
             let bytes = ready.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
             memory.setObject(ready, forKey: url as NSURL, cost: bytes)
+            decodedPictures.mutate { $0.note(url) }
             return ready
         }
         inFlight[url] = Load(task: load, request: request)

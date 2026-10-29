@@ -131,13 +131,25 @@ final class RelayArrivedTests: XCTestCase {
             return try await URLSession(configuration: .ephemeral).data(for: read).0.count
         }
         let fromServer = try await read()
-        XCTAssertEqual(relay.arrived.value, Int64(fromServer))
+        XCTAssertEqual(relay.arrived(for: "m1"), Int64(fromServer))
         #if DEBUG
         relay.beginStartReads()
         #endif
         let fromDevice = try await read()
         XCTAssertEqual(server.ranges.count, 1, "the second read went to the server, not the device")
-        XCTAssertEqual(relay.arrived.value, Int64(fromServer + fromDevice), "the device's bytes didn't count, or the count went back")
+        XCTAssertEqual(relay.arrived(for: "m1"), Int64(fromServer + fromDevice), "the device's bytes didn't count, or the count went back")
+    }
+
+    func testArrivedCountsOnlyThatFilmsBytes() async throws {
+        let server = try FilmServer(size: 64 << 20, delay: 0)
+        let relay = StreamRelay()
+        let other = URL(string: server.film.absoluteString.replacingOccurrences(of: "/m1/", with: "/m2/"))!
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: other, headers: [])))
+        read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
+        read.timeoutInterval = 5
+        let bytes = try await URLSession(configuration: .ephemeral).data(for: read).0.count
+        XCTAssertEqual(relay.arrived(for: "m2"), Int64(bytes))
+        XCTAssertEqual(relay.arrived(for: "m1"), 0, "another film's bytes turned this film's ring")
     }
 }
 

@@ -25,11 +25,6 @@ struct TappedFilm: Identifiable {
     let start: Start
     var card: String?
 
-    static func planned(_ playback: EmbyPlayback, held: FirstPicture) -> TappedFilm {
-        TappedFilm(itemId: playback.itemId, kind: nil, title: playback.title, held: held, picture: nil, tappedAt: Date(),
-                   start: .planned(playback))
-    }
-
     static func backFromPictureInPicture(_ playback: EmbyPlayback) -> TappedFilm {
         TappedFilm(itemId: playback.itemId, kind: nil, title: playback.title, held: .backdrop, picture: nil, tappedAt: Date(),
                    start: .backFromPictureInPicture(playback))
@@ -93,7 +88,7 @@ private struct FilmScreen: View {
         let loading: FilmLoading = if case .backFromPictureInPicture = tapped.start {
             .moving(at: tapped.tappedAt, patience: Self.patience)
         } else {
-            FilmLoading(tappedAt: tapped.tappedAt, held: tapped.held, patience: Self.patience)
+            FilmLoading(tappedAt: tapped.tappedAt, held: tapped.held, planned: tapped.start.playback != nil, patience: Self.patience)
         }
         _loading = State(initialValue: loading)
         _playback = State(initialValue: tapped.start.playback)
@@ -144,18 +139,17 @@ private struct FilmScreen: View {
         #endif
         .task {
             guard case let .asking(plan) = tapped.start else { return }
+            if case .still = tapped.held, model.keptPicture(of: tapped.itemId) == .backdrop { loading.send(.stillGone, at: Date()) }
             await ask(plan)
         }
         .task(id: loading.nextChange) {
-            guard let next = loading.nextChange else { return }
-            try? await Task.sleep(for: .seconds(max(0, next.timeIntervalSinceNow)))
-            guard !Task.isCancelled else { return }
+            guard let next = loading.nextChange, (try? await Timers.sleep(until: next)) != nil else { return }
             loading.send(.clock, at: Date())
         }
         .task(id: loading.waiting) {
             var last: Int64?
             while loading.waiting, !Task.isCancelled {
-                let count = StreamRelay.shared.arrived.value
+                let count = StreamRelay.shared.arrived(for: playback?.itemId ?? tapped.itemId)
                 if count != last { loading.send(.bytes(count), at: Date()) }
                 last = count
                 try? await Task.sleep(for: .seconds(FilmLoading.readEvery))
@@ -190,7 +184,7 @@ private struct FilmScreen: View {
     private func ask(_ plan: Task<EmbyPlayback, Error>) async {
         let ask = loading.nextAsk()
         do {
-            let answer = try await plan.value
+            let answer = try await Timers.value(of: plan)
             guard !Task.isCancelled else { return }
             loading.send(.planAnswered(ask: ask), at: Date())
             if ask == loading.ask, loading.waiting { playback = answer }

@@ -66,7 +66,21 @@ final class StreamRelay: @unchecked Sendable {
     var phoneNetworkUse = PhoneNetworkUse.shared
     /// Film reads asked again for want of a first byte.
     let askedAgain = Locked(0)
-    let arrived = Locked<Int64>(0)
+    private let arrivals = Locked<[String: Int64]>([:])
+
+    func arrived(for film: String) -> Int64 { arrivals.value[film] ?? 0 }
+
+    private func arrive(_ count: Int, for film: String?) {
+        guard let film else { return }
+        arrivals.mutate { $0[film, default: 0] += Int64(count) }
+    }
+
+    static func film(in address: URL) -> String? {
+        let parts = address.pathComponents
+        guard let videos = parts.firstIndex(where: { $0.caseInsensitiveCompare("Videos") == .orderedSame }), videos + 1 < parts.count
+        else { return nil }
+        return parts[videos + 1]
+    }
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
     func start() {
@@ -217,7 +231,7 @@ final class StreamRelay: @unchecked Sendable {
                 head += "Content-Length: \(to - from + 1)\r\nContent-Range: bytes \(from)-\(to)/\(total)\r\n"
                 head += "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n"
                 connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
-                sendCached(connection, cache, from: from, count: have) { [weak self] in
+                sendCached(connection, cache, from: from, count: have, film: Self.film(in: route.url)) { [weak self] in
                     guard let self else { return }
                     if from + have > to {
                         connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
@@ -247,14 +261,15 @@ final class StreamRelay: @unchecked Sendable {
     private func serve(_ converted: Converted, _ name: String?, method: String, range: String?, _ connection: NWConnection) {
         if name == Converted.list {
             let head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: \(converted.body.count)\r\nConnection: close\r\n\r\n"
-            if method == "GET" { arrived.mutate { $0 += Int64(converted.body.count) } }
+            if method == "GET" { arrive(converted.body.count, for: Self.film(in: converted.given)) }
             return connection.send(content: Data(head.utf8) + (method == "GET" ? converted.body : Data()), contentContext: .finalMessage,
                                    isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
         }
         guard let segment = name.flatMap({ converted.segments[$0] }) else { return fail(connection, 404) }
         guard HTTP.sameServer(segment, converted.given) else { return fail(connection, 403) }
         let given = converted.given
-        fetch(Self.route(segment, converted.headers), method: method, range: range, connection: connection, cache: nil, head: true) { request, _ in
+        fetch(Self.route(segment, converted.headers), method: method, range: range, connection: connection, cache: nil, head: true,
+              film: Self.film(in: given)) { request, _ in
             HTTP.redirected(request, from: given)
         }
     }
@@ -490,7 +505,7 @@ final class StreamRelay: @unchecked Sendable {
 
     /// Kept bytes to the player, a megabyte at a time, each once the last
     /// has gone out.
-    private func sendCached(_ connection: NWConnection, _ cache: ByteCache, from: Int64, count: Int64,
+    private func sendCached(_ connection: NWConnection, _ cache: ByteCache, from: Int64, count: Int64, film: String?,
                             then: @escaping () -> Void) {
         var at = from
         let end = from + count
@@ -499,7 +514,7 @@ final class StreamRelay: @unchecked Sendable {
             let size = Int(min(1 << 20, end - at))
             guard let data = cache.read(at, size) else { return connection.cancel() }
             at += Int64(size)
-            arrived.mutate { $0 += Int64(data.count) }
+            arrive(data.count, for: film)
             connection.send(content: data, completion: .contentProcessed { error in
                 if error != nil { return connection.cancel() }
                 next()
@@ -513,16 +528,18 @@ final class StreamRelay: @unchecked Sendable {
     /// A read with no first byte within `firstByteWait` is asked once
     /// more (`again`), then ends, and the player goes on to its next way.
     private func fetch(_ route: (url: URL, headers: [(String, String)]), method: String = "GET", range: String?,
-                       connection: NWConnection, cache: ByteCache?, head: Bool,
+                       connection: NWConnection, cache: ByteCache?, head: Bool, film: String? = nil,
                        redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest = StreamRelay.redirected,
                        again: Bool = false) {
+        let film = film ?? Self.film(in: route.url)
         var upstream = URLRequest(url: route.url)
         upstream.httpMethod = method
         upstream.timeoutInterval = 30
         for (name, value) in route.headers { upstream.setValue(value, forHTTPHeaderField: name) }
         if let range { upstream.setValue(range, forHTTPHeaderField: "Range") }
         let task = HTTP.session.dataTask(with: upstream)
-        let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head, arrived: arrived, redirected: redirected)
+        let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head,
+                             arrive: { [weak self] in self?.arrive($0, for: film) }, redirected: redirected)
         #if DEBUG
         relay.relay = self
         relay.read = startRead(for: connection)
@@ -541,7 +558,7 @@ final class StreamRelay: @unchecked Sendable {
                 guard relay.giveUpUnanswered(closing: again) else { return }
                 self?.askedAgain.mutate { $0 += 1 }
                 self?.fetch(route, method: method, range: range, connection: connection, cache: cache, head: head,
-                            redirected: redirected, again: true)
+                            film: film, redirected: redirected, again: true)
             }
         }
         guard !again else { return }
@@ -790,7 +807,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let task: URLSessionDataTask
     private let cache: ByteCache?
     private let sendsHead: Bool
-    private let arrived: Locked<Int64>
+    private let arrive: @Sendable (Int) -> Void
     private let redirected: @Sendable (URLRequest, URLSessionTask) -> URLRequest
     private let lock = NSLock()
     private var pending = 0
@@ -807,13 +824,13 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let asked = CFAbsoluteTimeGetCurrent()
     #endif
 
-    init(connection: NWConnection, task: URLSessionDataTask, cache: ByteCache?, sendsHead: Bool, arrived: Locked<Int64>,
+    init(connection: NWConnection, task: URLSessionDataTask, cache: ByteCache?, sendsHead: Bool, arrive: @escaping @Sendable (Int) -> Void,
          redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest) {
         self.connection = connection
         self.task = task
         self.cache = cache
         self.sendsHead = sendsHead
-        self.arrived = arrived
+        self.arrive = arrive
         self.redirected = redirected
     }
 
@@ -901,7 +918,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
             cache?.store(data, at: at)
             offset = at + Int64(data.count)
         }
-        arrived.mutate { $0 += Int64(data.count) }
+        arrive(data.count)
         lock.lock()
         pending += data.count
         if pending > 16_000_000, !suspended {

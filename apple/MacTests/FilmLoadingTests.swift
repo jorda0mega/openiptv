@@ -181,6 +181,33 @@ final class FilmLoadingTests: XCTestCase {
         XCTAssertEqual(start.loading.look, film())
     }
 
+    func testAStillWhosePlayerWentHoldsThePictureInstead() {
+        var start = started(.still(at: 754.2))
+        start.loading.send(.stillGone, at: at(0.1))
+        XCTAssertEqual(start.loading.look, held(.nothing, .backdrop), "nothing held while the parked player is gone")
+        XCTAssertEqual(look(start.loading, at: 1), held(.ring(steps: 0, lit: true), .backdrop))
+        start.loading.send(.player(.moving, attempt: start.attempt), at: at(1.5))
+        start.loading.send(.stillGone, at: at(2))
+        XCTAssertEqual(start.loading.look, film())
+    }
+
+    func testAStartWithItsPlanInHandIsTooSlowAtTheLimitNotUnanswered() {
+        var loading = FilmLoading(tappedAt: tap, held: .backdrop, planned: true)
+        _ = loading.nextAttempt()
+        XCTAssertEqual(look(loading, at: 30), held(.failure(.tooSlow)))
+    }
+
+    func testAFrameOverTheFailureOrAfterCloseIsNotTaken() {
+        XCTAssertTrue(started().loading.acceptsPicture)
+        XCTAssertTrue(playing().loading.acceptsPicture)
+        var start = failedAtTheLimit()
+        XCTAssertFalse(start.loading.acceptsPicture, "a frame just after the failure started the film's side")
+        start.loading.send(.tryAgain, at: at(31))
+        XCTAssertTrue(start.loading.acceptsPicture)
+        start.loading.send(.close, at: at(32))
+        XCTAssertFalse(start.loading.acceptsPicture)
+    }
+
     func testAFilmTakenBackFromPictureInPictureShowsNoStart() {
         let loading = FilmLoading.moving(at: tap)
         XCTAssertEqual(loading.look, film())
