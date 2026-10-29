@@ -314,19 +314,3 @@ enum PlaybackActivity {
         Task { @MainActor in Lane.conditionsChangedEverywhere() }
     }
 }
-
-#if canImport(UIKit)
-/// The screen kept on while something plays, as Apple's player does by
-/// itself (libmpv doesn't): the Apple TV slept, and the phone locked, in
-/// the middle of a film. Off when paused or closed, so the screen saver
-/// and sleep come as usual then. Each player says for itself.
-@MainActor
-enum ScreenAwake {
-    private static var playing: Set<UUID> = []
-
-    static func set(_ player: UUID, playing on: Bool) {
-        if on { playing.insert(player) } else { playing.remove(player) }
-        UIApplication.shared.isIdleTimerDisabled = !playing.isEmpty
-    }
-}
-#endif

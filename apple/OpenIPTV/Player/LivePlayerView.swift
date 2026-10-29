@@ -26,8 +26,8 @@ struct LivePlayerView: View {
     @State private var session = LiveSession<LiveChannel>()
     @State private var frameSeconds = 0.0
     @State private var netWait: Task<Void, Never>?
-    /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
+    @State private var presence = PlaybackPresence.here
     @State private var buffering = false
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
@@ -87,6 +87,7 @@ struct LivePlayerView: View {
     private var paused: Bool { session.paused }
     private var playingCopy: LiveChannel? { session.copy }
     private var failed: Bool { session.failure != nil }
+    private var moving: Bool { started && !paused && !failed }
     private var loading: Bool { (buffering || session.isLoading) && !failed }
     private var load: LoadProgress? {
         let failure = session.failure.map { failure in
@@ -179,6 +180,12 @@ struct LivePlayerView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { send(.away(keepsStream: keepsStreamAway)) }
             if phase == .active { send(.back) }
+            follow(presence.on(.app(.init(phase))))
+        }
+        .onChange(of: moving, initial: true) { _, moving in follow(presence.on(.moving(moving))) }
+        .onChange(of: presence.keepsAwake) { _, awake in ScreenAwake.set(awakeID, playing: awake) }
+        .onChange(of: channel.name, initial: true) { _, name in
+            ScreenAwake.open(awakeID, title: name, live: true) { player?.setPaused($0) }
         }
         .task { start() }
         .task(id: load?.deadline) { await endWait(at: load?.deadline) }
@@ -190,7 +197,7 @@ struct LivePlayerView: View {
             send(.closed)
             PlaybackActivity.ended()
             model.playerShown = false
-            ScreenAwake.set(awakeID, playing: false)
+            ScreenAwake.close(awakeID)
             hideTask?.cancel()
             loadTask?.cancel()
             netWait?.cancel()
@@ -808,7 +815,6 @@ struct LivePlayerView: View {
         opening = nil
         pictured = true
         startTrack.pictured(at: Date())
-        ScreenAwake.set(awakeID, playing: !paused)
         #if DEBUG
         perf.started(frame: frameSeconds)
         #endif
@@ -840,7 +846,6 @@ struct LivePlayerView: View {
             #endif
         case let .paused(isPaused):
             send(.paused(isPaused))
-            if started { ScreenAwake.set(awakeID, playing: !isPaused) }
         case let .time(now, _):
             guard current, abs(now - (position ?? -10)) >= 0.25 else { return }
             position = now
@@ -897,6 +902,14 @@ struct LivePlayerView: View {
         if seconds < 0 { following = false }
         jump(to: position + seconds)
         showControls()
+    }
+
+    private func follow(_ effects: [PlaybackPresence.Effect]) {
+        for effect in effects {
+            switch effect {
+            case .pause: player?.setPaused(true)
+            }
+        }
     }
 
     private func togglePause() {
