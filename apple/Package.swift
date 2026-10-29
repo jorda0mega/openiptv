@@ -50,6 +50,7 @@ let package = Package(
                 "Player/LoadProgress.swift",
                 "Player/Matroska.swift",
                 "Player/NetworkStatus.swift",
+                "Player/PlaybackPresence.swift",
                 "Player/PlayerFacing.swift",
                 "Player/PlaylistKeys.swift",
                 "Player/QualityGovernor.swift",

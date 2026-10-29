@@ -11,6 +11,7 @@
 		028C183EB3E8EC859906DC4A /* Guide.swift in Sources */ = {isa = PBXBuildFile; fileRef = B878EE2EE283C3772241FCF0 /* Guide.swift */; };
 		02B875B8511079EEF26736B9 /* ScopeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */; };
 		02F218C7FAB20DC50F729108 /* Libavutil.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ED8182BA52F6BCC701207AE /* Libavutil.xcframework */; };
+		04528A649B01643BB816D48B /* PlaybackPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D4C69B50530F8169C606854 /* PlaybackPresence.swift */; };
 		04AE6345E43EBEAD9501E04E /* HomeFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72303AAC600EF3DE6075EF7A /* HomeFeed.swift */; };
 		05DFFD5366EC1019F595235E /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00376995EF16ADF89BDF9B03 /* PlayerView.swift */; };
 		06356A2DCC7D4C7FC93A994C /* ServerSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */; };
@@ -184,6 +185,7 @@
 		76660492F23C6EF6024B38F5 /* IMDbSignals.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1FD9D66654217AC33F67CB5 /* IMDbSignals.swift */; };
 		77EDE39EF1FBF524AD0B54A7 /* PlayerOrientation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098053526F6FAC0F08D5AD11 /* PlayerOrientation.swift */; };
 		7883F5821E1388ECFF8BAA77 /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
+		7896AE2B4C4683710597F225 /* PlaybackPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D4C69B50530F8169C606854 /* PlaybackPresence.swift */; };
 		790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */; };
 		7AD64A82F672DA72AE941FEE /* Plans.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBFF8291952318930D966ED /* Plans.swift */; };
 		7ADDBC611169FAC31D6EF598 /* Timers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301892AB66EA84FB90D2823C /* Timers.swift */; };
@@ -479,6 +481,7 @@
 		97967C99C760D04279F1A9D0 /* OpenIPTV TV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "OpenIPTV TV.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A1EC37B63ED8CD9B42434CF /* LiveRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecoveryTests.swift; sourceTree = "<group>"; };
 		9B28084FA0D3D9F051788F09 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		9D4C69B50530F8169C606854 /* PlaybackPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackPresence.swift; sourceTree = "<group>"; };
 		9D955785FF1529F49B082EE5 /* SmartSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartSearch.swift; sourceTree = "<group>"; };
 		9DF96B743FAE66F816DD9294 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
 		9F9B9AD0C2539A2BABA83C97 /* M3UProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M3UProvider.swift; sourceTree = "<group>"; };
@@ -705,6 +708,7 @@
 				DB4C4ECAD884618771521E44 /* MPVPlayer.swift */,
 				F392E7D90D2CA30FA8207E24 /* NetworkStatus.swift */,
 				404C86B1D60778438688EBC2 /* PictureInPicture.swift */,
+				9D4C69B50530F8169C606854 /* PlaybackPresence.swift */,
 				25632E2613497E37F388902A /* PlayerChrome.swift */,
 				7155AE8826997263B83512B3 /* PlayerClock.swift */,
 				7C24FE14EDDFC06A76BFE381 /* PlayerFacing.swift */,
@@ -1351,6 +1355,7 @@
 				3D760F2E80D694C434C4340D /* PictureIndex.swift in Sources */,
 				7AD64A82F672DA72AE941FEE /* Plans.swift in Sources */,
 				EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */,
+				04528A649B01643BB816D48B /* PlaybackPresence.swift in Sources */,
 				D57BDC4BD51A60B08A48786B /* PlayerChrome.swift in Sources */,
 				FB882C1CB57D66CB302F2E0C /* PlayerClock.swift in Sources */,
 				F3812054FAD86B3BA5FD70F3 /* PlayerFacing.swift in Sources */,
@@ -1487,6 +1492,7 @@
 				CF67A2003C371C40B338B413 /* PictureIndex.swift in Sources */,
 				6A0F285EDD9EEFA5D6857F60 /* Plans.swift in Sources */,
 				461BF742965E3E5A547A1485 /* Platform.swift in Sources */,
+				7896AE2B4C4683710597F225 /* PlaybackPresence.swift in Sources */,
 				6EA1240A0D81185D2CF7CAAF /* PlayerChrome.swift in Sources */,
 				F935A8F8B86BC5A71F17DE5B /* PlayerClock.swift in Sources */,
 				E670273A189FED60AC57B1CD /* PlayerFacing.swift in Sources */,

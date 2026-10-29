@@ -254,6 +254,7 @@ struct MoviePlayerView: View {
     @Environment(Preferences.self) private var prefs
     @Environment(\.dismiss) private var dismiss
     @Environment(\.closePlayer) private var closePlayer
+    @Environment(\.scenePhase) private var scenePhase
 
     let playback: EmbyPlayback
     let held: FirstPicture
@@ -300,8 +301,9 @@ struct MoviePlayerView: View {
     @State private var tracks: [Track] = []
     @State private var badges: [String] = []
     @State private var openingCopy = false
-    /// This player, to ScreenAwake.
     @State private var awakeID = UUID()
+    @State private var presence = PlaybackPresence.here
+    private var moving: Bool { started && !paused && look.failure == nil }
     /// An episode: its season's episodes, for the player's Episodes list
     /// (as on the show's page).
     @State private var seasonEpisodes: [EmbyItem] = []
@@ -532,9 +534,13 @@ struct MoviePlayerView: View {
         .onChange(of: closeAsked) { close() }
         .onChange(of: look.failure) { _, failure in if let failure { stop(for: failure) } }
         .task(id: playback.itemId) { await loadSeason() }
+        .onChange(of: moving, initial: true) { _, moving in follow(presence.on(.moving(moving))) }
+        .onChange(of: scenePhase, initial: true) { _, phase in follow(presence.on(.app(.init(phase)))) }
+        .onChange(of: presence.keepsAwake) { _, awake in ScreenAwake.set(awakeID, playing: awake) }
         .onAppear {
             PlaybackActivity.began()
             model.playerShown = true
+            ScreenAwake.open(awakeID, title: playback.title, live: false) { player?.setPaused($0) }
             // What was fetched ahead for other titles stops (and none starts
             // while this plays): it has the connection to itself.
             StreamRelay.shared.stopAhead(keeping: playback.url)
@@ -545,7 +551,7 @@ struct MoviePlayerView: View {
         .onDisappear {
             PlaybackActivity.ended()
             model.playerShown = false
-            ScreenAwake.set(awakeID, playing: false)
+            ScreenAwake.close(awakeID)
             #if DEBUG
             model.debugPlayerUp = false
             #endif
@@ -1345,7 +1351,6 @@ struct MoviePlayerView: View {
         switch event {
         case let .started(playerSeconds):
             guard loading.acceptsPicture else { return }
-            ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false
             if !heldStill || loading.filmShown { loading.send(.player(.moving, attempt: loadAttempt), at: Date()) }
@@ -1511,7 +1516,6 @@ struct MoviePlayerView: View {
             }
         case let .paused(isPaused):
             paused = isPaused
-            if started { ScreenAwake.set(awakeID, playing: !isPaused) }
             #if DEBUG
             // At once: the network reports that also refresh it stop once
             // the buffer is full, and it said "playing" after a pause.
@@ -1565,6 +1569,14 @@ struct MoviePlayerView: View {
             loading.send(.player(.opened, attempt: loadAttempt), at: Date())
         case .opening, .window:
             break
+        }
+    }
+
+    private func follow(_ effects: [PlaybackPresence.Effect]) {
+        for effect in effects {
+            switch effect {
+            case .pause: player?.setPaused(true)
+            }
         }
     }
 
