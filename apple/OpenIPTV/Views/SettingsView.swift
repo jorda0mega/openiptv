@@ -8,7 +8,6 @@ struct SettingsView: View {
     /// Opened from Home's gear: a Done button to close it.
     var asSheet = false
     @State private var adding: AddSheet?
-    @State private var confirmForget = false
     @AppStorage(PhoneNetworkFilms.key) private var phoneNetworkFilms = PhoneNetworkFilms.standard
 
     var body: some View {
@@ -60,18 +59,6 @@ struct SettingsView: View {
                 case .emby: AddEmbyView()
                 case .iptv: AddIPTVView()
                 }
-            }
-            .confirmationDialog("Forget everything?", isPresented: $confirmForget, titleVisibility: .visible) {
-                Button("Forget everything", role: .destructive) {
-                    Task {
-                        await model.forgetEverything()
-                        prefs.favorites = []
-                        prefs.hiddenCategories = []
-                        prefs.hiddenRows = []
-                    }
-                }
-            } message: {
-                Text("Signs out of Emby and removes every subscription, favorite, setting and cached guide from this device.")
             }
         }
     }
@@ -244,7 +231,7 @@ struct SettingsView: View {
 
     @ViewBuilder private var privacySection: some View {
         Section {
-            Button("Forget everything on this device", role: .destructive) { confirmForget = true }
+            ForgetEverythingButton()
         } header: {
             Text("Privacy")
         } footer: {
@@ -299,6 +286,30 @@ private struct SettingsRow: View {
                 Text(value).foregroundStyle(.secondary).lineLimit(1)
             }
         }
+    }
+}
+
+/// The confirm box sits on the button: SwiftUI opens no box attached to
+/// the Settings list while a page is pushed over it.
+private struct ForgetEverythingButton: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Preferences.self) private var prefs
+    @State private var confirming = false
+
+    var body: some View {
+        Button("Forget everything on this device", role: .destructive) { confirming = true }
+            .confirmationDialog("Forget everything?", isPresented: $confirming, titleVisibility: .visible) {
+                Button("Forget everything", role: .destructive) {
+                    Task {
+                        await model.forgetEverything()
+                        prefs.favorites = []
+                        prefs.hiddenCategories = []
+                        prefs.hiddenRows = []
+                    }
+                }
+            } message: {
+                Text("Signs out of Emby and removes every subscription, favorite, setting and cached guide from this device.")
+            }
     }
 }
 
