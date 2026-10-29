@@ -100,7 +100,7 @@ struct RootView: View {
         #if DEBUG
         .task {
             guard UserDefaults.standard.bool(forKey: "debugPlayCopyFilm"), let film = await model.debugFilmHeardOnlyInAnotherCopy() else { return }
-            playing = .film(.planned(film, held: .backdrop))
+            playing = .film(model.planned(film, held: .backdrop))
         }
         .task {
             if UserDefaults.standard.bool(forKey: "debugServerProbe") { await model.debugProbeServer() }

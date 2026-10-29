@@ -523,21 +523,31 @@ final class AppModel {
         emby?.startBackdrop(itemId: itemId, episode: episode) ?? []
     }
 
-    func tap(_ itemId: String, kind: String?, title: String, images: [CardImage] = []) -> TappedFilm {
+    func tap(_ itemId: String, kind: String?, title: String, images: [CardImage] = [], show: String? = nil) -> TappedFilm {
         let tappedAt = Date()
-        let held = heldPicture(itemId)
+        let held: FirstPicture = playerShown ? .backdrop : keptPicture(of: itemId)
         let plan = Task { try await playback(itemId: itemId, kind: kind) }
-        let picture = held == .backdrop
-            ? (startBackdrop(itemId, episode: kind == "Episode") + images).lazy
-                .compactMap { URL(string: $0.url) }.compactMap { ImagePipeline.shared.cached($0) }.first
-            : nil
-        return TappedFilm(itemId: itemId, kind: kind, title: title, held: held, picture: picture, tappedAt: tappedAt, start: .asking(plan))
+        return TappedFilm(itemId: itemId, kind: kind, title: title, held: held,
+                          picture: picture(of: itemId, episode: kind == "Episode", images: images, show: show),
+                          tappedAt: tappedAt, start: .asking(plan))
     }
 
-    private func heldPicture(_ itemId: String) -> FirstPicture {
+    func planned(_ playback: EmbyPlayback, held: FirstPicture) -> TappedFilm {
+        TappedFilm(itemId: playback.itemId, kind: nil, title: playback.title, held: held,
+                   picture: picture(of: playback.itemId, episode: playback.seriesId != nil, show: playback.seriesId),
+                   tappedAt: Date(), start: .planned(playback))
+    }
+
+    func keptPicture(of itemId: String) -> FirstPicture {
         guard let warm, warm.key == itemId || warm.playback.itemId == itemId, warm.player.hasStarted, !warm.player.hasFailed
         else { return .backdrop }
         return .still(at: warm.playback.startSeconds ?? 0)
+    }
+
+    private func picture(of itemId: String, episode: Bool, images: [CardImage] = [], show: String?) -> UIImage? {
+        (startBackdrop(itemId, episode: episode) + images).lazy.compactMap { URL(string: $0.url) }
+            .compactMap { ImagePipeline.shared.cached($0) }.first
+            ?? ImagePipeline.shared.decoded(of: [itemId] + [show].compactMap(\.self))
     }
 
     func playback(itemId: String, kind: String? = nil, again: Bool = false) async throws -> EmbyPlayback {

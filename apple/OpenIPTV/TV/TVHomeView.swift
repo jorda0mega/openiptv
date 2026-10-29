@@ -130,7 +130,7 @@ struct TVHomeView: View {
     /// Straight to the player: the episode being resumed, or the title.
     private func play(_ card: Card) {
         playing = .film(model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
-                                  images: card.images))
+                                  images: card.images, show: card.episodeId == nil ? nil : card.id))
     }
 }
 

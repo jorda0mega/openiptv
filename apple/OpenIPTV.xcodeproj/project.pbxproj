@@ -86,6 +86,7 @@
 		3BB4FDFD021DAA0FA5600914 /* Libuavs3d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */; };
 		3C08CEF60D0EC57E6C0B56D7 /* RealFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C93F64C2D0E2ACFE04BBED /* RealFeedTests.swift */; };
 		3CF2A50D68BC65F97FF790C5 /* Libcrypto.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B41963718B2429F644A73CAD /* Libcrypto.xcframework */; };
+		3D760F2E80D694C434C4340D /* PictureIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5505A456BFA06F1C4743946 /* PictureIndex.swift */; };
 		3E2BF5857258C44E6AFEDA81 /* WindowFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B97C3DA466A68395DC0093 /* WindowFlow.swift */; };
 		3E9B707F4696C5845239813A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2DE48775D87FC33EDCE40F /* AppModel.swift */; };
 		41A98F0B32F251A20091582A /* ShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63408BC25C1847C3DC54CDDE /* ShowView.swift */; };
@@ -182,6 +183,7 @@
 		7883F5821E1388ECFF8BAA77 /* Libharfbuzz.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8FE5F3B54A5D49075C9B0783 /* Libharfbuzz.xcframework */; };
 		790D3C763A25C6843E2097D9 /* PhoneHomeStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7288CC0E4D538A20F74C19 /* PhoneHomeStabilityTests.swift */; };
 		7AD64A82F672DA72AE941FEE /* Plans.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBFF8291952318930D966ED /* Plans.swift */; };
+		7ADDBC611169FAC31D6EF598 /* Timers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301892AB66EA84FB90D2823C /* Timers.swift */; };
 		7B8DC9F9C3FBF3283A2935F7 /* SubtitleLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677CFF11775CD0F4EBE9ED9A /* SubtitleLanguage.swift */; };
 		7B9EBC358C4C4F12984D438B /* FFmpegLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDBCDEA1B3FDB76BBFA31935 /* FFmpegLog.swift */; };
 		7C3CDDB6E7ACD698F35165FE /* ScopeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */; };
@@ -281,6 +283,7 @@
 		CBB6BCA84516D445B5F74E8A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BDF569FD33B278E6B18C1B /* SettingsView.swift */; };
 		CBE34968B8E97EBD13B63FB1 /* OpenIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2032039BA338DCAE198B8E12 /* OpenIPTVApp.swift */; };
 		CCF689634D83377E9BE716A0 /* PersonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93CA7D96298A3EB224B5F0E0 /* PersonView.swift */; };
+		CF67A2003C371C40B338B413 /* PictureIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5505A456BFA06F1C4743946 /* PictureIndex.swift */; };
 		CFB6F48212F9547613C6EAF7 /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312496694F477570E1827C77 /* SearchIndex.swift */; };
 		D01B9761AC76010F22918EFD /* Libuavs3d.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60C115C1610178B16EC41AB0 /* Libuavs3d.xcframework */; };
 		D0671E9DBF8597F479B8E4F9 /* SwitchCue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B64DA342DD63265ECD7969F /* SwitchCue.swift */; };
@@ -300,6 +303,7 @@
 		DC0A504F515559029D9AD431 /* PlayerLookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCFDC031C7A17854A048F3B7 /* PlayerLookTests.swift */; };
 		DC9AC16AE071981D3F442D2D /* Libunibreak.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42F5E9ECC02BD77D9BF65D1B /* Libunibreak.xcframework */; };
 		DD7ABAA9E4BA1C5B1B8D7A7A /* TVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB45C1F6B6B82AF943904E0F /* TVHomeView.swift */; };
+		DE50F4D2E36D277E62A5BF65 /* Timers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301892AB66EA84FB90D2823C /* Timers.swift */; };
 		DE99E11D544A79627DA3B479 /* LiveCuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5BF3BF3ECFAC17AD1572470 /* LiveCuts.swift */; };
 		DFBF0025963040E56BCDE3FC /* Signposts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1EBDEA2DAED98E26A044D2 /* Signposts.swift */; };
 		E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036E1882E4281173C09E8777 /* TabStrip.swift */; };
@@ -405,6 +409,7 @@
 		25632E2613497E37F388902A /* PlayerChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerChrome.swift; sourceTree = "<group>"; };
 		29F6B5D2345B670FF96A9A7B /* ServerSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSubtitles.swift; sourceTree = "<group>"; };
 		2B9C5FAE946335D07C838351 /* FoundSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundSubtitles.swift; sourceTree = "<group>"; };
+		301892AB66EA84FB90D2823C /* Timers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Timers.swift; sourceTree = "<group>"; };
 		305D39F34D3489D37AA89297 /* EmbyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbyModels.swift; sourceTree = "<group>"; };
 		312496694F477570E1827C77 /* SearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchIndex.swift; sourceTree = "<group>"; };
 		320EE0FE4DDEEB903360A4AF /* Sources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources.swift; sourceTree = "<group>"; };
@@ -523,6 +528,7 @@
 		D277F32EC509804119BFFFC4 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
 		D3AB39B0C24CFECA9E4DEAC5 /* ScopeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeBar.swift; sourceTree = "<group>"; };
 		D45BCBA8E95025E3BFA37C9B /* FilmFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmFrames.swift; sourceTree = "<group>"; };
+		D5505A456BFA06F1C4743946 /* PictureIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureIndex.swift; sourceTree = "<group>"; };
 		D5B1B94210411D81E015B0B6 /* Libass.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libass.xcframework; path = Vendor/Libass.xcframework; sourceTree = "<group>"; };
 		D5D24524038DF8138B881F54 /* Libbluray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Libbluray.xcframework; path = Vendor/Libbluray.xcframework; sourceTree = "<group>"; };
 		D7C7B40E07692829A697DF27 /* OpenIPTV UITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "OpenIPTV UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -713,6 +719,7 @@
 				90346A56D5B1978C6A08AB74 /* SubtitleTiming.swift */,
 				6B64DA342DD63265ECD7969F /* SwitchCue.swift */,
 				B65CF14B89DA6DC5461ADFD3 /* SwitchGap.swift */,
+				301892AB66EA84FB90D2823C /* Timers.swift */,
 				FFD17B24F165233943D636F8 /* TrackChoice.swift */,
 				0D5F8BECA4297DEA820F0388 /* TVPlayerOverlay.swift */,
 				3704F35E9F8381B01A16311E /* TVRemote.swift */,
@@ -852,6 +859,7 @@
 				72303AAC600EF3DE6075EF7A /* HomeFeed.swift */,
 				04D1D99D28193A77C911CBD1 /* ImagePipeline.swift */,
 				22FB83F16A7E28FD2E8BB4F3 /* Keychain.swift */,
+				D5505A456BFA06F1C4743946 /* PictureIndex.swift */,
 				FEBFF8291952318930D966ED /* Plans.swift */,
 				6624BB656CA61632353DBA8C /* Preferences.swift */,
 				03687A5122C40ADC0462D4BE /* Shelf.swift */,
@@ -1330,6 +1338,7 @@
 				F41C4346A3A93B01467F6050 /* Outbound.swift in Sources */,
 				CCF689634D83377E9BE716A0 /* PersonView.swift in Sources */,
 				478113F2FE0EB0C868169933 /* PictureInPicture.swift in Sources */,
+				3D760F2E80D694C434C4340D /* PictureIndex.swift in Sources */,
 				7AD64A82F672DA72AE941FEE /* Plans.swift in Sources */,
 				EF6E7541A115BF287E91BD21 /* Platform.swift in Sources */,
 				D57BDC4BD51A60B08A48786B /* PlayerChrome.swift in Sources */,
@@ -1379,6 +1388,7 @@
 				71899403CBD5CEFA439BEEBA /* TabStrip.swift in Sources */,
 				078833750F8201EFDC0E7CC2 /* Telemetry.swift in Sources */,
 				AF2338072AD40D7D33061F81 /* TileBadge.swift in Sources */,
+				DE50F4D2E36D277E62A5BF65 /* Timers.swift in Sources */,
 				E462106CB39B3B2DB56F064C /* TitleHero.swift in Sources */,
 				4E17F6DF6C837EC823DFF111 /* TrackChoice.swift in Sources */,
 				366915DC310FCD8803B32C5C /* WatchOn.swift in Sources */,
@@ -1462,6 +1472,7 @@
 				42731563746F85B0DB221136 /* Outbound.swift in Sources */,
 				09D4C064135551C865AA83F8 /* PersonView.swift in Sources */,
 				929935BAF2C575D8C698AB7A /* PictureInPicture.swift in Sources */,
+				CF67A2003C371C40B338B413 /* PictureIndex.swift in Sources */,
 				6A0F285EDD9EEFA5D6857F60 /* Plans.swift in Sources */,
 				461BF742965E3E5A547A1485 /* Platform.swift in Sources */,
 				6EA1240A0D81185D2CF7CAAF /* PlayerChrome.swift in Sources */,
@@ -1511,6 +1522,7 @@
 				E1765278394B570EC69F74B6 /* TabStrip.swift in Sources */,
 				D24CE0E9F7072A479C10C7E1 /* Telemetry.swift in Sources */,
 				8F11EF6FC4C1E86511E114A3 /* TileBadge.swift in Sources */,
+				7ADDBC611169FAC31D6EF598 /* Timers.swift in Sources */,
 				F72204C9018C0C581257040E /* TitleHero.swift in Sources */,
 				614E357F852A9FBCB2C5EB3C /* TrackChoice.swift in Sources */,
 				D2A1BED86DD0C13F86E2EF6D /* WatchOn.swift in Sources */,

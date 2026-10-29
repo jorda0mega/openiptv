@@ -660,7 +660,7 @@ struct MoviePlayerView: View {
         guard let switchTo else { return }
         noteStop()
         switchTo(model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
-                           images: card.images))
+                           images: card.images, show: card.episodeId == nil ? nil : card.id))
     }
 
     private func toggleInfo() {
@@ -901,7 +901,7 @@ struct MoviePlayerView: View {
                                                planned.timeIntervalSince(tapped), opened.timeIntervalSince(planned),
                                                Date().timeIntervalSince(tapped), lead)
                 #endif
-                switchTo(.planned(next, held: .still(at: at)))
+                switchTo(model.planned(next, held: .still(at: at)))
             } catch {
                 note("Couldn't play it in \(Self.languageName(language))")
             }
@@ -1125,7 +1125,8 @@ struct MoviePlayerView: View {
             warmStart = true
             PlaybackAudio.activate()
             loading.takeOver(attempt: warmPlayer.currentAttempt)
-            if case .still = held { stillToMove = held }
+            if case .still = held, warmPlayer.hasStarted { stillToMove = held }
+            if case .still = held, !warmPlayer.hasStarted { loading.send(.stillGone, at: Date()) }
             warmPlayer.onEvent = { event, attempt in handle(event, attempt) }
             self.player = warmPlayer
             #if DEBUG
@@ -1139,6 +1140,7 @@ struct MoviePlayerView: View {
             // A player warmed up for something else would only compete for
             // the connection.
             model.coolDown()
+            if case .still = held { loading.send(.stillGone, at: Date()) }
             let player = makePlayer(prefs: prefs, picture: .film(playback.surface))
             player.onEvent = { event, attempt in handle(event, attempt) }
             self.player = player
@@ -1304,7 +1306,7 @@ struct MoviePlayerView: View {
     private func playNext(_ episode: EmbyItem) {
         guard let switchTo else { return }
         noteStop()
-        switchTo(model.tap(episode.id, kind: "Episode", title: playback.title))
+        switchTo(model.tap(episode.id, kind: "Episode", title: playback.title, show: playback.seriesId))
     }
 
     private func note(_ text: String) {
@@ -1325,6 +1327,7 @@ struct MoviePlayerView: View {
         }
         switch event {
         case let .started(playerSeconds):
+            guard loading.acceptsPicture else { return }
             ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false

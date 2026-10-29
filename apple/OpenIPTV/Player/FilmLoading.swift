@@ -86,6 +86,7 @@ struct FilmLoading: Equatable {
         case seeking(Bool, choosing: Bool)
         case choosingEnded
         case online(Bool)
+        case stillGone
         case tryAgain
         case close
         case clock
@@ -140,7 +141,7 @@ struct FilmLoading: Equatable {
     }
 
     private var phase: Phase
-    private let held: FirstPicture
+    private var held: FirstPicture
     private let patience: Patience
     private var steps = 0
     private var lastBytes: Int64?
@@ -151,10 +152,18 @@ struct FilmLoading: Equatable {
     private(set) var attempt = 0
     private(set) var ask = 0
 
-    init(tappedAt now: Date, held: FirstPicture, patience: Patience = .current) {
+    var acceptsPicture: Bool {
+        switch phase {
+        case .starting, .playing, .frozen: true
+        case .startFailed, .playFailed, .closed: false
+        }
+    }
+
+    init(tappedAt now: Date, held: FirstPicture, planned: Bool = false, patience: Patience = .current) {
         phase = .starting(Wait(since: now, arrivedAt: now))
         self.held = held
         self.patience = patience
+        planAnswered = planned
     }
 
     static func moving(at now: Date, patience: Patience = .current) -> FilmLoading {
@@ -210,6 +219,8 @@ struct FilmLoading: Equatable {
             let grew = lastBytes.map { count > $0 } ?? false
             lastBytes = count
             if grew { arrive(at: now) }
+        case (.starting, .stillGone):
+            held = .backdrop
         case let (.starting, .planAnswered(ask)) where ask == self.ask:
             planAnswered = true
             arrive(at: now)

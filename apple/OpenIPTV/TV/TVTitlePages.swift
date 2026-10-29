@@ -309,7 +309,7 @@ struct TVShowView: View {
     private var mainTarget: Target { .showMain(route.id, upNext: upNext?.id) }
 
     private func play(_ id: String, kind: String) {
-        playing = .film(model.tap(id, kind: kind, title: route.title))
+        playing = .film(model.tap(id, kind: kind, title: route.title, show: route.id))
     }
 }
 

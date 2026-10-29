@@ -174,7 +174,7 @@ struct HomeView: View {
     private func play(_ card: Card, grows: Bool = false) {
         let hero = heroes.first { $0.card.id == card.id }.map { [CardImage(url: $0.backdrop, contain: false)] } ?? []
         var film = model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
-                             images: hero + card.images)
+                             images: hero + card.images, show: card.episodeId == nil ? nil : card.id)
         if grows { film.card = card.id }
         playing = .film(film)
     }
