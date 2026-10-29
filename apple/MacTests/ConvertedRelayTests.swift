@@ -75,6 +75,23 @@ final class ConvertedRelayTests: XCTestCase {
         }
     }
 
+    func testArrivedCountsAConvertedCopysListAndSegments() async throws {
+        let server = try Upstream { path, _ in (200, [:], "bytes of \(path)") }
+        defer { server.stop() }
+        let given = URL(string: "http://127.0.0.1:\(server.port)/emby/Videos/m1/master.m3u8")!
+        let opened = try XCTUnwrap(FilmStream.converted(given, try list((0..<3).map { "/hls1/main/\($0).ts" }, at: given), at: 0, headers: key))
+        let before = StreamRelay.shared.arrived.value
+        let session = URLSession(configuration: .ephemeral)
+        let listed = try await session.data(from: opened.address).0
+        let names = String(decoding: listed, as: UTF8.self).split(separator: "\n").filter { !$0.hasPrefix("#") }
+        var read = listed.count
+        for name in names {
+            read += try await session.data(from: XCTUnwrap(URL(string: String(name), relativeTo: opened.address))).0.count
+        }
+        XCTAssertEqual(names.count, 3)
+        XCTAssertEqual(StreamRelay.shared.arrived.value - before, Int64(read))
+    }
+
     func testASegmentElsewhereIsRefused() async throws {
         let server = try Upstream { path, _ in (200, [:], "bytes of \(path)") }
         defer { server.stop() }

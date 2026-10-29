@@ -66,6 +66,7 @@ final class StreamRelay: @unchecked Sendable {
     var phoneNetworkUse = PhoneNetworkUse.shared
     /// Film reads asked again for want of a first byte.
     let askedAgain = Locked(0)
+    let arrived = Locked<Int64>(0)
 
     /// Starts listening (once); returns quickly, at most after 0.5 s.
     func start() {
@@ -246,6 +247,7 @@ final class StreamRelay: @unchecked Sendable {
     private func serve(_ converted: Converted, _ name: String?, method: String, range: String?, _ connection: NWConnection) {
         if name == Converted.list {
             let head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: \(converted.body.count)\r\nConnection: close\r\n\r\n"
+            if method == "GET" { arrived.mutate { $0 += Int64(converted.body.count) } }
             return connection.send(content: Data(head.utf8) + (method == "GET" ? converted.body : Data()), contentContext: .finalMessage,
                                    isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
         }
@@ -497,6 +499,7 @@ final class StreamRelay: @unchecked Sendable {
             let size = Int(min(1 << 20, end - at))
             guard let data = cache.read(at, size) else { return connection.cancel() }
             at += Int64(size)
+            arrived.mutate { $0 += Int64(data.count) }
             connection.send(content: data, completion: .contentProcessed { error in
                 if error != nil { return connection.cancel() }
                 next()
@@ -519,7 +522,7 @@ final class StreamRelay: @unchecked Sendable {
         for (name, value) in route.headers { upstream.setValue(value, forHTTPHeaderField: name) }
         if let range { upstream.setValue(range, forHTTPHeaderField: "Range") }
         let task = HTTP.session.dataTask(with: upstream)
-        let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head, redirected: redirected)
+        let relay = Transfer(connection: connection, task: task, cache: cache, sendsHead: head, arrived: arrived, redirected: redirected)
         #if DEBUG
         relay.relay = self
         relay.read = startRead(for: connection)
@@ -787,6 +790,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let task: URLSessionDataTask
     private let cache: ByteCache?
     private let sendsHead: Bool
+    private let arrived: Locked<Int64>
     private let redirected: @Sendable (URLRequest, URLSessionTask) -> URLRequest
     private let lock = NSLock()
     private var pending = 0
@@ -803,12 +807,13 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let asked = CFAbsoluteTimeGetCurrent()
     #endif
 
-    init(connection: NWConnection, task: URLSessionDataTask, cache: ByteCache?, sendsHead: Bool,
+    init(connection: NWConnection, task: URLSessionDataTask, cache: ByteCache?, sendsHead: Bool, arrived: Locked<Int64>,
          redirected: @escaping @Sendable (URLRequest, URLSessionTask) -> URLRequest) {
         self.connection = connection
         self.task = task
         self.cache = cache
         self.sendsHead = sendsHead
+        self.arrived = arrived
         self.redirected = redirected
     }
 
@@ -896,6 +901,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
             cache?.store(data, at: at)
             offset = at + Int64(data.count)
         }
+        arrived.mutate { $0 += Int64(data.count) }
         lock.lock()
         pending += data.count
         if pending > 16_000_000, !suspended {
