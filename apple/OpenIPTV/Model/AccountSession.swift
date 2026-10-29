@@ -40,8 +40,6 @@ struct AccountSession: Equatable, Sendable {
         case let (.signedOut, .signedIn(account)):
             phase = .signedIn
             return [.open(account), .loadHome]
-        case let (.signedIn, .signedIn(account)):
-            return [.closeScope, .forgetShared, .wipe(.account), .open(account), .loadHome]
         case (.signedIn, .signOut):
             phase = .leaving(.account)
             return [.closeScope, .forgetShared, .logOut]

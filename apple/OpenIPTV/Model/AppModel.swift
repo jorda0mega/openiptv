@@ -1495,10 +1495,10 @@ final class AppModel {
             account = scope(for: nil, readsSaved: false)
             holdContinueWatchingAgain()
             if wipe == .everything {
+                await forgetLiveTV()
                 sources.forgetEverything()
                 await guide.clear()
                 AppCache.remove(Self.lineupFile)
-                await forgetLiveTV()
             }
         case let .open(signedIn):
             sources.setEmby(signedIn)
@@ -1560,7 +1560,10 @@ final class AppModel {
     /// Forget everything: no subscription's lineup, check, session or
     /// guide state is left in memory.
     private func forgetLiveTV() async {
-        liveUpdate?.cancel()
+        if let update = liveUpdate {
+            update.cancel()
+            await update.value
+        }
         await applyLineup(categories: [], channels: [])
         selectedCategory = nil
         clearNowNext()
@@ -1665,7 +1668,7 @@ final class AppModel {
         let keptChannels = allChannels.filter { channel in iptv.contains { $0.id == channel.sourceId } }
         let dropped = keptCategories.count < categories.count || keptChannels.count < allChannels.count
         if dropped { await applyLineup(categories: keptCategories, channels: keptChannels) }
-        if dropped || listed != iptv.map(\.id) {
+        if dropped || listed != iptv.map(\.id), !Task.isCancelled {
             await Self.saveLineup(sources: iptv.map(\.id), categories: keptCategories, channels: keptChannels,
                                   answered: liveChecks.compactMapValues(\.answeredAt))
         }
