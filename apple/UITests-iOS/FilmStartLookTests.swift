@@ -58,6 +58,43 @@ final class FilmStartLookTests: XCTestCase {
         print("FILM LOOKS \(looks.label)")
     }
 
+    func testWaitingForTheFirstFrameDoesNotRedrawThePlayer() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "60"])
+        defer {
+            configure(server, ["reset": "1"])
+            get(server, "mock/profile", ["name": "none"])
+        }
+        app.launchArguments = ["-noPrepareAhead", "YES", "-noStreamAhead", "YES", "-cacheFolder", "film-redraw-\(UUID())"]
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
+        get(server, "mock/profile", ["name": "none", "link": "worst"])
+        card.tap()
+        let renders = app.staticTexts["debug-player-renders"].firstMatch
+        let started = app.staticTexts["debug-start"].firstMatch
+        var first: Int?
+        var opened = Date()
+        let tapped = Date()
+        while Date().timeIntervalSince(tapped) < 40 {
+            if first == nil, renders.exists, let count = Int(renders.label) { first = count; opened = Date() }
+            if started.exists, !started.label.isEmpty { break }
+            usleep(100_000)
+        }
+        let drawn = (Int(renders.label) ?? 0) - (first ?? 0)
+        let waited = Date().timeIntervalSince(opened)
+        print(String(format: "WAIT RENDERS %d in %.1f s | %@", drawn, waited, app.staticTexts["debug-film-loading"].firstMatch.label))
+        XCTAssertFalse(started.label.isEmpty, "no first frame in 40 s")
+    }
+
+    private func get(_ server: URL, _ path: String, _ query: [String: String]) {
+        let url = server.appending(path: path).appending(queryItems: query.map { URLQueryItem(name: $0.key, value: $0.value) })
+        let done = expectation(description: path)
+        URLSession.shared.dataTask(with: url) { _, _, _ in done.fulfill() }.resume()
+        wait(for: [done], timeout: 10)
+    }
+
     private func testServer() -> URL? {
         guard let raw = ProcessInfo.processInfo.environment["DEBUG_EMBY"],
               let json = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
