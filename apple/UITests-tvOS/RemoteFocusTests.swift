@@ -426,6 +426,66 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertTrue(awake(true), "may sleep after Try again (\(position()))")
     }
 
+    func testAPauseFromOutsideKeepsLiveBehind() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchEnvironment["OPENREEL_DEBUG_NOW_PLAYING_ASKS"] = "pause@12,play@20"
+        app.launchArguments = ["-tvTab", "live", "-freshLineup", "YES"]
+        app.launch()
+        sleep(8)
+        press(.down, "into the page")
+        press(.select, "play channel")
+        XCTAssertTrue(started(), "the channel didn't play: \(liveCopy())")
+        sleep(18)
+        let behind = Double(app.staticTexts["debug-live-behind"].firstMatch.label) ?? 0
+        XCTAssertGreaterThanOrEqual(behind, 4, "paused from outside the app for 8 s, then played, but shown at live")
+    }
+
+    func testAPauseFromOutsideShowsTheFilmBar() {
+        app.launchEnvironment["OPENREEL_DEBUG_NOW_PLAYING_ASKS"] = "pause@8"
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(10)
+        XCTAssertTrue(position().hasSuffix("paused"), "the pause from outside the app didn't pause (\(position()))")
+        let bar = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Paused'")).firstMatch
+        XCTAssertTrue(bar.exists, "paused from outside the app with no bar")
+    }
+
+    func testPausesWhenLeftWhileStarting() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        configure(server, ["latency": "4"])
+        press(.select, "play")
+        XCUIRemote.shared.press(.home)
+        sleep(2)
+        configure(server, ["reset": "1"])
+        sleep(14)
+        app.activate()
+        sleep(4)
+        let back = playerSecond() ?? 0
+        sleep(3)
+        let later = playerSecond() ?? 0
+        XCTAssertTrue(position().hasSuffix("paused"), "a film left while it started played on (\(position()))")
+        XCTAssertLessThan(later - back, 0.5, "a film left while it started is playing on return (\(back) → \(later))")
+    }
+
     private func nowPlaying(_ wanted: String) -> Bool {
         let readout = app.staticTexts["debug-now-playing"].firstMatch
         let deadline = Date().addingTimeInterval(4)

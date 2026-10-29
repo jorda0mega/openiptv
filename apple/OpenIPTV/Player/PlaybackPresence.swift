@@ -87,10 +87,15 @@ enum ScreenAwake {
 private enum NowPlaying {
     private static var owner: UUID?
     private static var targets: [Any] = []
+    private static var asked: (@MainActor (Bool) -> Void)?
 
     static func open(_ player: UUID, title: String, live: Bool, playing: Bool, pause: @escaping @MainActor (Bool) -> Void) {
         removeTargets()
         owner = player
+        asked = pause
+        #if DEBUG
+        planDebugAsks()
+        #endif
         let commands = MPRemoteCommandCenter.shared()
         targets = [
             commands.pauseCommand.addTarget { _ in
@@ -119,8 +124,27 @@ private enum NowPlaying {
         guard owner == player else { return }
         removeTargets()
         owner = nil
+        asked = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
+
+    #if DEBUG
+    private static var debugAsksPlanned = false
+
+    private static func planDebugAsks() {
+        guard !debugAsksPlanned, let plan = ProcessInfo.processInfo.environment["OPENREEL_DEBUG_NOW_PLAYING_ASKS"] else { return }
+        debugAsksPlanned = true
+        for step in plan.split(separator: ",") {
+            let parts = step.split(separator: "@")
+            guard parts.count == 2, let seconds = Double(parts[1]) else { continue }
+            let pause = parts[0] == "pause"
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(seconds))
+                asked?(pause)
+            }
+        }
+    }
+    #endif
 
     private static func removeTargets() {
         let commands = MPRemoteCommandCenter.shared()
