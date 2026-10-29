@@ -252,3 +252,8 @@ final class Ahead {
         }
     }
 }
+
+enum FirstPicture: Equatable {
+    case still(at: Double)
+    case backdrop
+}
