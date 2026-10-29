@@ -70,9 +70,9 @@ final class AccountSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .leaving(.account))
     }
 
-    func testAnotherAccountSignedInDropsTheFirstWhole() {
+    func testASecondSignInWhileSignedInChangesNothing() {
         let (session, effects) = session(signedIn: true, [.signedIn(other)])
-        XCTAssertEqual(effects, [[.closeScope, .forgetShared, .wipe(.account), .open(other), .loadHome]])
+        XCTAssertEqual(effects, [[]], "an account is signed out before another signs in")
         XCTAssertEqual(session.phase, .signedIn)
     }
 }
