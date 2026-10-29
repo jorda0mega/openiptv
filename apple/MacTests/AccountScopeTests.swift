@@ -148,6 +148,48 @@ final class AccountScopeTests: XCTestCase {
         XCTAssertEqual(server.asked, 1)
     }
 
+    private final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var held: [CheckedContinuation<Void, Never>] = []
+        private var open = false
+        var waiting: Bool { lock.withLock { !held.isEmpty } }
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                let through = lock.withLock { () -> Bool in
+                    if open { return true }
+                    held.append(continuation)
+                    return false
+                }
+                if through { continuation.resume() }
+            }
+        }
+        func release() {
+            let all = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                open = true
+                defer { held = [] }
+                return held
+            }
+            all.forEach { $0.resume() }
+        }
+    }
+
+    func testAStartAnsweredAfterItsAccountClosedIsRefused() async {
+        let gate = Gate(), server = Server(), open = open
+        let scope = AccountScope(client: EmbyClient(account: tester, deviceId: "device"), lane: Lane(.light, atOnce: 4) { open },
+                                 askPlan: { _, key in
+                                     await gate.wait()
+                                     return server.plan(key)
+                                 })
+        let start = Task { try await scope.plan(film, again: true) }
+        for _ in 0..<1000 where !gate.waiting { await Task.yield() }
+        XCTAssertTrue(gate.waiting, "the server wasn't asked")
+        scope.close()
+        gate.release()
+        let answer = try? await start.value
+        XCTAssertEqual(server.asked, 1)
+        XCTAssertNil(answer, "a plan answered after its account closed would start")
+    }
+
     func testClosingStopsTheHomeRetry() async {
         var asked = 0
         let scope = scope(sleep: { _ in }, retryHome: { asked += 1 })

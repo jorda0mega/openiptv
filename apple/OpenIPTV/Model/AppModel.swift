@@ -512,7 +512,7 @@ final class AppModel {
         lastPlanKept = prepared
         let planAtTheTap = scope.plans.debugState(key, at: .continueWatching, .likely)
         #endif
-        var playback = withLocalResume(try await Plans.forStart(key, on: scope.plans, again: again), in: scope)
+        var playback = withLocalResume(try await scope.plan(key, again: again), in: scope)
         #if DEBUG
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         lastPlan = debugPlanClocks[key].map { clock in
