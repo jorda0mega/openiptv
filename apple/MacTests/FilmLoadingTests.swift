@@ -43,7 +43,7 @@ final class FilmLoadingTests: XCTestCase {
     }
 
     private func failedAtTheLimit() -> Started {
-        var start = started()
+        var start = started(patience: .failingAtThirty)
         start.loading.send(.planAnswered(ask: start.ask), at: at(0.4))
         start.loading.send(.player(.opened, attempt: start.attempt), at: at(0.6))
         start.loading.send(.clock, at: at(30))
@@ -198,7 +198,7 @@ final class FilmLoadingTests: XCTestCase {
     }
 
     func testAFrameOverTheFailureOrAfterCloseIsNotTaken() {
-        XCTAssertTrue(started().loading.acceptsPicture)
+        XCTAssertTrue(started(patience: .failingAtThirty).loading.acceptsPicture)
         XCTAssertTrue(playing().loading.acceptsPicture)
         var start = failedAtTheLimit()
         XCTAssertFalse(start.loading.acceptsPicture, "a frame just after the failure started the film's side")
@@ -209,7 +209,7 @@ final class FilmLoadingTests: XCTestCase {
     }
 
     func testARingStepChangesNothingThePlayerDrawsFrom() {
-        var start = started()
+        var start = started(patience: .failingAtThirty)
         start.loading.send(.bytes(1), at: at(1))
         let before = start.loading.look
         start.loading.send(.bytes(2), at: at(1.25))
@@ -230,16 +230,8 @@ final class FilmLoadingTests: XCTestCase {
         XCTAssertNil(loading.nextChange)
     }
 
-    func testTheStartFailsThirtySecondsAfterTheTap() {
+    func testAStartThatKeepsArrivingGoesOnPastThirtySecondsUntilTwoMinutes() {
         var start = started()
-        start.loading.send(.planAnswered(ask: start.ask), at: at(0.5))
-        for read in 1...116 { start.loading.send(.bytes(Int64(read * 1000)), at: at(Double(read) * 0.25)) }
-        XCTAssertEqual(look(start.loading, at: 29.99).kind, .ring)
-        XCTAssertEqual(look(start.loading, at: 30), held(.failure(.tooSlow)))
-    }
-
-    func testUnderStillOnlyAStartThatKeepsArrivingGoesOnPastThirtySeconds() {
-        var start = started(patience: FilmLoading.Patience(stillFor: 30, atMost: 120))
         start.loading.send(.planAnswered(ask: start.ask), at: at(0.5))
         for read in 1...12 { start.loading.send(.bytes(Int64(read)), at: at(Double(read) * 5)) }
         XCTAssertEqual(look(start.loading, at: 60).kind, .ring, "a start with bytes arriving stopped")
@@ -248,8 +240,8 @@ final class FilmLoadingTests: XCTestCase {
         XCTAssertEqual(look(start.loading, at: 120), held(.failure(.tooSlow)))
     }
 
-    func testUnderStillOnlyThirtySecondsWithNothingArrivingFails() {
-        var start = started(patience: FilmLoading.Patience(stillFor: 30, atMost: 120))
+    func testThirtySecondsWithNothingArrivingFailsTheStart() {
+        var start = started()
         start.loading.send(.planAnswered(ask: start.ask), at: at(5))
         XCTAssertEqual(look(start.loading, at: 34.99).kind, .ringDim)
         XCTAssertEqual(look(start.loading, at: 35), held(.failure(.tooSlow)))
@@ -276,12 +268,12 @@ final class FilmLoadingTests: XCTestCase {
     }
 
     func testTheFailureSaysNoAnswerTooSlowOrOfflineFromWhatArrived() {
-        XCTAssertEqual(look(started().loading, at: 30), held(.failure(.noAnswer)))
+        XCTAssertEqual(look(started(patience: .failingAtThirty).loading, at: 30), held(.failure(.noAnswer)))
         XCTAssertEqual(failedAtTheLimit().loading.look, held(.failure(.tooSlow)))
-        var offline = started()
+        var offline = started(patience: .failingAtThirty)
         offline.loading.send(.online(false), at: at(4))
         XCTAssertEqual(look(offline.loading, at: 30), held(.failure(.offline)))
-        var refusedOffline = started()
+        var refusedOffline = started(patience: .failingAtThirty)
         refusedOffline.loading.send(.online(false), at: at(0.1))
         refusedOffline.loading.send(.planRefused("The request timed out.", ask: refusedOffline.ask), at: at(2))
         XCTAssertEqual(refusedOffline.loading.look, held(.failure(.offline)))
@@ -295,7 +287,7 @@ final class FilmLoadingTests: XCTestCase {
     }
 
     func testTryAgainShowsTheRingAtOnceLitAtTheSameAngle() {
-        var start = started()
+        var start = started(patience: .failingAtThirty)
         start.loading.send(.planAnswered(ask: start.ask), at: at(1.2))
         start.loading.send(.player(.opened, attempt: start.attempt), at: at(1.4))
         start.loading.send(.bytes(1), at: at(1.5))
@@ -492,7 +484,7 @@ final class FilmLoadingTests: XCTestCase {
     }
 
     func testNextChangeIsTheEarliestTimedChangeAndALateClockGivesTheSameLooks() {
-        var start = started()
+        var start = started(patience: .failingAtThirty)
         start.loading.send(.planAnswered(ask: start.ask), at: at(0.4))
         XCTAssertEqual(start.loading.nextChange, at(1), "the ring")
         start.loading.send(.clock, at: at(1))
@@ -501,10 +493,10 @@ final class FilmLoadingTests: XCTestCase {
         XCTAssertEqual(start.loading.nextChange, at(30.4 - 0.4), "the limit")
         for seed in 1...100 {
             var random = Seeded(seed)
-            var onTime = started()
+            var onTime = started(patience: .failingAtThirty)
             let walked = Self.walk(&onTime, &random, viewer: true)
             var random2 = Seeded(seed)
-            var late = started()
+            var late = started(patience: .failingAtThirty)
             for (step, event) in Self.events(late, &random2, viewer: true).enumerated() {
                 Self.send(event, to: &late.loading, at: at(event.seconds))
                 XCTAssertEqual(late.loading.look, walked.last { $0.seconds <= event.seconds + 1e-9 }?.look,
@@ -606,4 +598,8 @@ private struct Seeded: RandomNumberGenerator {
         z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
         return z ^ (z >> 31)
     }
+}
+
+private extension FilmLoading.Patience {
+    static let failingAtThirty = FilmLoading.Patience(stillFor: 30, atMost: 30)
 }
