@@ -29,4 +29,20 @@ final class GuideClearTests: XCTestCase {
         XCTAssertNil(onNow, "the forgotten guide's programmes came back")
         await guide.clear()
     }
+
+    func testAGuideSavedAsItIsForgottenIsNotKeptForTheNextLaunch() async throws {
+        let now = Int64(Date().timeIntervalSince1970)
+        let body = """
+        <?xml version="1.0" encoding="UTF-8"?><tv><channel id="c1"><display-name>One</display-name></channel>\
+        <programme start="\(stamp(now - 600))" stop="\(stamp(now + 1200))" channel="c1"><title>News</title></programme></tv>
+        """
+        let server = try LocalServer { _ in (200, ["Content-Type": "application/xml"], body) }
+        let guide = GuideStore()
+        await guide.refresh(from: [URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/guide.xml")!)], keep: ["c1"])
+        await guide.clear()
+        try await Task.sleep(for: .milliseconds(500))
+        let saved = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "guide.json")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: saved.path()), "the forgotten guide was saved for the next launch")
+        await guide.clear()
+    }
 }
