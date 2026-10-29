@@ -314,6 +314,10 @@ final class AccountScope {
         return try await askPlan(emby, key)
     }
 
+    func plan(_ key: PlanKey, again: Bool = false) async throws -> EmbyPlayback {
+        try await Plans.forStart(key, on: plans, again: again)
+    }
+
     // MARK: Warm start
 
     struct Warm {
