@@ -37,6 +37,14 @@ struct PlayerScreen: View {
     var remove: () -> Void = {}
     @State private var shown = false
 
+    #if os(tvOS)
+    /// tvOS gives focus to nothing in a screen that opens fully see-through,
+    /// and the remote's presses then reach nothing until a press on its ring.
+    private static let hidden = 0.02
+    #else
+    private static let hidden = 0.0
+    #endif
+
     var body: some View {
         Group {
             switch item {
@@ -46,7 +54,7 @@ struct PlayerScreen: View {
         }
         // In and out with the same quick fade, as in the TV app (it slid up
         // for 0.6 s, and went in one frame).
-        .opacity(shown ? 1 : 0)
+        .opacity(shown ? 1 : Self.hidden)
         .onAppear {
             if item.card != nil {
                 shown = true
