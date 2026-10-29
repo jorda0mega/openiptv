@@ -349,12 +349,23 @@ final class FilmLoadingTests: XCTestCase {
         XCTAssertEqual(start.loading.look, held(.ring(steps: 2, lit: true)))
     }
 
-    func testAParkedPlayersMadeUpStartIsNotTheFilmMoving() {
-        let still = FirstPicture.still(at: 754.2)
-        XCTAssertFalse(still.goesOn(at: 754.2), "the still itself counted as the film moving")
-        XCTAssertFalse(still.goesOn(at: 0), "the made-up start at 0 counted as the film moving")
-        XCTAssertTrue(still.goesOn(at: 754.25))
-        XCTAssertTrue(FirstPicture.backdrop.goesOn(at: 0))
+    func testAKeptPlayersPictureMovesWhenItsClockAdvancesWhereverItBegan() {
+        var start = started(.still(at: 754.2))
+        start.loading.send(.player(.time(754.2), attempt: start.attempt), at: at(0.1))
+        start.loading.send(.player(.time(751.0), attempt: start.attempt), at: at(0.2))
+        start.loading.send(.player(.time(751.0), attempt: start.attempt), at: at(0.4))
+        XCTAssertEqual(start.loading.look, held(.nothing, .still(at: 754.2)), "a clock that stood still counted as the film moving")
+        start.loading.send(.player(.time(751.04), attempt: start.attempt), at: at(0.6))
+        XCTAssertEqual(start.loading.look, film(), "a kept player began a keyframe before its still and never counted as moving")
+        XCTAssertEqual(look(start.loading, at: 40), film(), "the limit stopped a film that was playing")
+    }
+
+    func testThePlayingFilmsClockChangesNothing() {
+        var start = playing()
+        let before = start.loading
+        start.loading.send(.player(.time(300), attempt: start.attempt), at: at(5))
+        start.loading.send(.player(.time(300.25), attempt: start.attempt), at: at(5.25))
+        XCTAssertEqual(start.loading, before, "every tick of the clock redraws the player")
     }
 
     func testAnEndBeforeTheFirstPictureIsStoppedBeforeItBegan() {

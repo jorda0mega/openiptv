@@ -106,6 +106,7 @@ struct FilmLoading: Equatable {
             case dataStopped, dataFlowing
             case landed
             case ended(position: Double, total: Double)
+            case time(Double)
         }
     }
 
@@ -166,6 +167,7 @@ struct FilmLoading: Equatable {
     private var playerSeeking = false
     private var online = true
     private var planAnswered = false
+    private var clockAt: Double?
     private(set) var filmShown = false
     private(set) var attempt = 0
     private(set) var ask = 0
@@ -255,6 +257,7 @@ struct FilmLoading: Equatable {
             phase = .frozen(.showingRing(now), Frozen(reopened: true))
         case (.failed, .tryAgain):
             lastBytes = nil
+            clockAt = nil
             phase = .starting(.showingRing(now))
         default:
             return
@@ -267,6 +270,8 @@ struct FilmLoading: Equatable {
             arrive(at: now)
         case (.starting, .moving), (.frozen, .moving):
             play()
+        case let (.starting, .time(position)):
+            if let clockAt, position > clockAt + 0.01 { play() } else { clockAt = position }
         case let (.starting, .refused(why)), let (.playing, .refused(why)), let (.frozen, .refused(why)):
             fail(refusal(why), at: now)
         case (.starting, .ended):
@@ -418,12 +423,5 @@ struct FilmLoading: Equatable {
                 if let failure = wait.failing { show(failure) }
             }
         }
-    }
-}
-
-extension FirstPicture {
-    func goesOn(at second: Double) -> Bool {
-        guard case let .still(at: still) = self else { return true }
-        return second > still + 0.01
     }
 }
