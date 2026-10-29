@@ -37,13 +37,14 @@ final class FilmStartLookTests: XCTestCase {
         let counting = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' s' AND NOT (identifier BEGINSWITH 'debug-')")).firstMatch
         let began = Date()
         while !failure.exists, Date().timeIntervalSince(began) < failsAt + 7 {
-            XCTAssertFalse(tryAgain.exists, "Try again before the start failed")
             XCTAssertFalse(counting.exists, "words counting the wait")
+            if tryAgain.exists { XCTAssertTrue(failure.exists, "Try again before the start failed") }
             usleep(250_000)
         }
         XCTAssertTrue(failure.exists, "no failure by \(failsAt + 7) s: \(app.staticTexts["debug-film-loading"].firstMatch.label)")
         XCTAssertTrue(tryAgain.exists, "no Try again over the failure")
         XCTAssertTrue(app.buttons["Close player"].exists, "no Close player over the failure")
+        XCTAssertFalse(app.staticTexts["debug-start-error"].firstMatch.label.isEmpty, "the timing suite can't read the failure")
 
         configure(server, ["hang": "none"])
         tryAgain.tap()
