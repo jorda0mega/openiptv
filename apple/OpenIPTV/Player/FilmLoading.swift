@@ -7,7 +7,7 @@ struct FilmLoading: Equatable {
         var shownAtLeast: TimeInterval = 0.5
         var dimAfter: TimeInterval = 3
         var stillFor: TimeInterval = 30
-        var atMost: TimeInterval = 30
+        var atMost: TimeInterval = 120
 
         static let current = Patience()
         static let unbounded = Patience(stillFor: .infinity, atMost: .infinity)
