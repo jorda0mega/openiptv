@@ -28,9 +28,11 @@ enum Plans {
     /// `retryAfter`, and again for the server's track list if it came
     /// without, for as long again at most. The film's loading decides when
     /// the start has waited too long.
-    static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>,
+    static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, again: Bool = false,
                          retryAfter: Duration = StartPatience.retryAfter) async throws -> EmbyPlayback {
-        var playback = StartPatience.off ? try await taken(key, on: shelf) : try await asked(key, on: shelf, againAfter: retryAfter)
+        var playback = if again { try await shelf.fresh(key) }
+            else if StartPatience.off { try await taken(key, on: shelf) }
+            else { try await asked(key, on: shelf, againAfter: retryAfter) }
         if !playback.listed, let listed = try? await StartPatience.by(.now + retryAfter, { try await shelf.take(key) }) { playback = listed }
         return playback
     }
