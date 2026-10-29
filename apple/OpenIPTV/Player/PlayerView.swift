@@ -1,4 +1,7 @@
 import AVFoundation
+#if os(tvOS)
+import MediaPlayer
+#endif
 import SwiftUI
 
 /// What the full-screen player shows.
@@ -225,6 +228,20 @@ enum PlaybackAudio {
         }
     }
 }
+
+#if DEBUG
+enum SystemReadout {
+    static var awake: String { UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle" }
+    static var nowPlaying: String {
+        #if os(tvOS)
+        guard let rate = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double else { return "none" }
+        return rate > 0 ? "playing" : "paused"
+        #else
+        return "none"
+        #endif
+    }
+}
+#endif
 
 // MARK: - Emby movies and episodes
 
@@ -479,7 +496,8 @@ struct MoviePlayerView: View {
                     ZStack {
                         debugReadout(String(player?.pictureReturnsFromAway ?? 0), "debug-away")
                         debugReadout(player?.hlsKeys ?? "", "debug-hls-keys")
-                        debugReadout(UIApplication.shared.isIdleTimerDisabled ? "awake" : "idle", "debug-awake")
+                        debugReadout(SystemReadout.awake, "debug-awake")
+                        debugReadout(SystemReadout.nowPlaying, "debug-now-playing")
                         debugReadout(player?.stopwatch.readout ?? "", "debug-subs-timing")
                         debugReadout(player?.bufferingReadout ?? "", "debug-buffering")
                         debugReadout(StreamRelay.shared.startReadsReadout, "debug-relay")

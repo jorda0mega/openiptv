@@ -317,12 +317,7 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertEqual(awake.label, "idle", "kept awake while paused")
     }
 
-    /// Back from the Home Screen (or the Apple TV waking from sleep), the
-    /// picture moves again: it went off while away (no drawing in the
-    /// background) and came back through a fresh video output. Regression:
-    /// after the Apple TV slept mid-film, the picture stayed frozen on a
-    /// frame until another episode was picked.
-    func testPictureBackAfterLeaving() {
+    func testPausesWhileAway() {
         app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
         app.launch()
         sleep(6)
@@ -332,16 +327,128 @@ final class RemoteFocusTests: XCTestCase {
         sleep(2)
         press(.select, "play")
         sleep(6)
+        let left = playerSecond() ?? 0
         XCUIRemote.shared.press(.home)
         sleep(6)
         app.activate()
         sleep(4)
         shot("back from home")
         XCTAssertEqual(app.staticTexts["debug-away"].firstMatch.label, "1", "the picture didn't go off while away")
-        let first = playerSecond() ?? 0
-        sleep(3)
+        let back = playerSecond() ?? 0
+        XCTAssertEqual(back, left, accuracy: 3, "the film played on while away (\(left) → \(back))")
+        XCTAssertTrue(app.staticTexts["debug-position"].firstMatch.label.hasSuffix("paused"), "not paused on return")
+        XCTAssertEqual(app.staticTexts["debug-awake"].firstMatch.label, "idle", "kept awake while paused on return")
+        remote.press(.playPause)
+        sleep(4)
         let later = playerSecond() ?? 0
-        XCTAssertGreaterThan(later - first, 2, "not playing after coming back (\(first) → \(later))")
+        XCTAssertGreaterThan(later - back, 2, "not playing on from where it paused (\(back) → \(later))")
+    }
+
+    /// tvOS sleeps after its "Sleep After" time unless Now Playing says
+    /// something plays: the idle timer holds back the screen saver alone.
+    func testTellsNowPlaying() {
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        sleep(6)
+        XCTAssertTrue(nowPlaying("playing"), "Now Playing doesn't hear the film play: the Apple TV sleeps mid-film")
+        XCTAssertTrue(awake(true), "the Apple TV may sleep while the film plays")
+        press(.right, "jump")
+        sleep(2)
+        XCTAssertTrue(nowPlaying("playing"), "Now Playing doesn't hear the film play after a jump")
+        XCTAssertTrue(awake(true), "may sleep after a jump")
+        remote.press(.playPause)
+        XCTAssertTrue(nowPlaying("paused"), "Now Playing hears the paused film play: the Apple TV never sleeps")
+        XCTAssertTrue(awake(false), "kept awake while paused (\(position()))")
+        remote.press(.playPause)
+        XCTAssertTrue(nowPlaying("playing"), "Now Playing doesn't hear the film play again")
+        XCTAssertTrue(awake(true), "may sleep after play again")
+    }
+
+    func testTellsNowPlayingFromAKeptPlayer() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["watched_elsewhere": "m7"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_NO_SAVED_HOME"] = "1"
+        app.launchArguments = ["-tvTab", "home"]
+        app.launch()
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(cards.waitForExistence(timeout: 20), "no Continue Watching")
+        for _ in 0..<5 where !focused().contains("id='continue-") { press(.down, "down to Continue Watching") }
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        let id = card.identifier
+        XCTAssertTrue(id.hasPrefix("continue-"), "not on a Continue Watching card: \(focused())")
+        press(.select, "play")
+        sleep(8)
+        XCTAssertTrue(nowPlaying("playing"), "Now Playing doesn't hear the film from Continue Watching")
+        XCTAssertTrue(awake(true), "may sleep from Continue Watching")
+        let played = app.buttons[id]
+        for _ in 0..<3 where !played.exists || !played.isHittable {
+            remote.press(.menu)
+            usleep(300_000)
+        }
+        XCTAssertTrue(played.waitForExistence(timeout: 5), "Home didn't come back")
+        sleep(2)
+        press(.select, "play the kept player")
+        sleep(4)
+        XCTAssertTrue(nowPlaying("playing"), "Now Playing doesn't hear the kept player (\(position()))")
+        XCTAssertTrue(awake(true), "may sleep from the kept player (\(position()))")
+    }
+
+    func testTellsNowPlayingAfterTryAgain() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        configure(server, ["hang": "item,plan"])
+        app.launchArguments = ["-tvTab", "search", "-debugSearch", "animals"]
+        app.launch()
+        sleep(6)
+        press(.down, "to keyboard")
+        press(.down, "to first film")
+        press(.select, "open film")
+        sleep(2)
+        press(.select, "play")
+        let failure = app.staticTexts["debug-start-error"].firstMatch
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline, !failure.exists || failure.label.isEmpty { sleep(1) }
+        XCTAssertFalse(failure.label.isEmpty, "the start didn't fail")
+        configure(server, ["reset": "1"])
+        press(.down, "onto Try again")
+        press(.select, "try again")
+        sleep(10)
+        XCTAssertTrue(nowPlaying("playing"), "Now Playing doesn't hear the film after Try again (\(position()))")
+        XCTAssertTrue(awake(true), "may sleep after Try again (\(position()))")
+    }
+
+    private func nowPlaying(_ wanted: String) -> Bool {
+        let readout = app.staticTexts["debug-now-playing"].firstMatch
+        let deadline = Date().addingTimeInterval(4)
+        while Date() < deadline {
+            if readout.exists, readout.label == wanted { return true }
+            usleep(250_000)
+        }
+        return false
+    }
+
+    private func position() -> String {
+        let readout = app.staticTexts["debug-position"].firstMatch
+        return readout.exists ? readout.label : "no player"
+    }
+
+    private func awake(_ wanted: Bool) -> Bool {
+        let readout = app.staticTexts["debug-awake"].firstMatch
+        let deadline = Date().addingTimeInterval(4)
+        while Date() < deadline {
+            if readout.exists, readout.label == (wanted ? "awake" : "idle") { return true }
+            usleep(250_000)
+        }
+        return false
     }
 
     /// A film's Info panel is headed by its name, and no bare year shows.
@@ -997,6 +1104,27 @@ final class RemoteFocusTests: XCTestCase {
         XCTAssertEqual(activeConnections(server), "1", "the paused stream isn't open")
         remote.press(.home)
         XCTAssertTrue(activeConnections(server, become: "0", within: 8), "live TV paused at the Home screen still holds the connection")
+        app.activate()
+        XCTAssertTrue(activeConnections(server, become: "1", within: 15), "live TV didn't open again on return")
+        XCTAssertTrue(started(), "live TV didn't play on return")
+    }
+
+    func testAppleTVLiveLetsGoWhenLeaving() throws {
+        let server = try XCTUnwrap(testServer(), "no test server")
+        configure(server, ["reset": "1"])
+        configure(server, ["live_max_connections": "1", "live_linger": "0"])
+        addTeardownBlock { [self] in configure(server, ["reset": "1"]) }
+        app.launchEnvironment["OPENREEL_DEBUG_IPTV"] = #"{"id":"6F9A1E52-0000-4000-8000-000000000001","name":"Test","kind":"#
+            + #"{"xtream":{"server":"\#(server.absoluteString)","username":"u","password":"p"}}}"#
+        app.launchArguments = ["-tvTab", "live", "-freshLineup", "YES"]
+        app.launch()
+        sleep(8)
+        press(.down, "into the page")
+        press(.select, "play channel")
+        XCTAssertTrue(started(), "the channel didn't play: \(liveCopy())")
+        XCTAssertTrue(nowPlaying("playing"), "Now Playing doesn't hear the channel play: the Apple TV sleeps mid-channel")
+        remote.press(.home)
+        XCTAssertTrue(activeConnections(server, become: "0", within: 8), "live TV played on at the Home screen")
         app.activate()
         XCTAssertTrue(activeConnections(server, become: "1", within: 15), "live TV didn't open again on return")
         XCTAssertTrue(started(), "live TV didn't play on return")
