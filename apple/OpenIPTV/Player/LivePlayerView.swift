@@ -142,6 +142,12 @@ struct LivePlayerView: View {
             debugReadout(playingCopy.map { "\($0.name) tok=\(LivePerf.Token($0).text)" } ?? "", "debug-live-copy")
             debugReadout(session.readout, "debug-live-state")
             debugReadout(perf.failure?.rawValue ?? "none", "debug-live-fail")
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                ZStack {
+                    debugReadout(SystemReadout.awake, "debug-awake")
+                    debugReadout(SystemReadout.nowPlaying, "debug-now-playing")
+                }
+            }
             #endif
         }
         #if os(iOS)
