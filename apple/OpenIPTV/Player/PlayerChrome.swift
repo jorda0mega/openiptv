@@ -39,6 +39,7 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
     var load: LoadProgress?
     var loadActions = LoadActions(tryAgain: {})
     var loadFocus: LoadProgress.Button?
+    var waiting = false
     /// Playing has started (the skip buttons need something to skip in).
     var ready = true
     /// iPhone: icons in the capsule beside close (after rotate), and the
@@ -129,6 +130,8 @@ struct PlayerChrome<Trailing: View, Accessory: View, Bar: View>: View {
                     .frame(width: 92, height: 92)
             } else {
                 playPauseButton
+                    .opacity(waiting ? 0 : 1)
+                    .allowsHitTesting(!waiting)
             }
             PlayerGlassButton(systemName: "goforward.10", label: "Forward 10 seconds", size: 63, glyph: 30, action: forward)
                 .opacity(ready ? (canGoForward ? 1 : 0.4) : 0)

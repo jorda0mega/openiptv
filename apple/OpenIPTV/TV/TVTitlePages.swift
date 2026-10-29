@@ -71,8 +71,6 @@ struct TVMovieView: View {
     let route: MovieRoute
     @Binding var playing: PlayerItem?
 
-    @State private var loading = false
-    @State private var playError: String?
     @State private var pin: PagePin?
 
     var body: some View {
@@ -83,14 +81,9 @@ struct TVMovieView: View {
                               title: route.title, details: titleDetails(item, model: model, kind: "Movie"),
                               overview: item?.overview) {
                     Button(action: play) {
-                        // The label stays (the button keeps its width); a
-                        // spinner over it while the film starts.
                         Label(playLabel, systemImage: "play.fill").padding(.horizontal, 14)
-                            .opacity(loading ? 0 : 1)
-                            .overlay { if loading { ProgressView() } }
                     }
                     .buttonStyle(.glass)
-                    .disabled(loading)
                     TVMyListButton(item: item)
                     if let progress = item?.resumeFraction {
                         ProgressBar(value: progress).frame(width: 220)
@@ -121,11 +114,6 @@ struct TVMovieView: View {
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
         .preparesAhead(.playable(id: route.id, kind: "Movie"), at: .page)
-        .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(playError ?? "")
-        }
     }
 
     @State private var selected: Card?
@@ -154,17 +142,7 @@ struct TVMovieView: View {
     }
 
     private func play() {
-        guard !loading else { return }
-        loading = true
-        Task {
-            defer { loading = false }
-            do {
-                playing = .vod(try await model.playback(itemId: route.id, kind: "Movie", title: route.title))
-            } catch is CancellationError {
-            } catch {
-                playError = error.localizedDescription
-            }
-        }
+        playing = .film(model.tap(route.id, kind: "Movie", title: route.title))
     }
 }
 
@@ -179,8 +157,6 @@ struct TVShowView: View {
 
     @State private var season: Int?
     @State private var pin: PagePin?
-    @State private var loadingItem: String?
-    @State private var playError: String?
     @State private var selected: Card?
     /// Someone from Cast & Crew, whose page is open.
     @State private var person: EmbyItem.Person?
@@ -232,11 +208,8 @@ struct TVShowView: View {
                               overview: show?.overview) {
                     Button { playMain() } label: {
                         Label(mainLabel, systemImage: "play.fill").padding(.horizontal, 14)
-                            .opacity(loadingItem == mainId ? 0 : 1)
-                            .overlay { if loadingItem == mainId { ProgressView() } }
                     }
                     .buttonStyle(.glass)
-                    .disabled(loadingItem != nil)
                     TVMyListButton(item: show)
                 }
                 if seasons.count > 1 {
@@ -267,7 +240,7 @@ struct TVShowView: View {
                                 LazyHStack(alignment: .top, spacing: 40) {
                                     ForEach(episodes, id: \.id) { episode in
                                         TVEpisodeCard(episode: episode, card: model.emby?.card(for: episode, landscape: true, width: 960),
-                                                      upNext: episode.id == upNext?.id, loading: loadingItem == episode.id) {
+                                                      upNext: episode.id == upNext?.id) {
                                             play(episode.id, kind: "Episode")
                                         }
                                         .id(episode.id)
@@ -314,14 +287,8 @@ struct TVShowView: View {
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
         .task { await load() }
         .preparesAhead(mainTarget, at: .page)
-        .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(playError ?? "")
-        }
     }
 
-    private var mainId: String { upNext?.id ?? route.episodeId ?? route.id }
 
     private var mainLabel: String {
         guard let upNext else { return "Play" }
@@ -342,17 +309,7 @@ struct TVShowView: View {
     private var mainTarget: Target { .showMain(route.id, upNext: upNext?.id) }
 
     private func play(_ id: String, kind: String) {
-        guard loadingItem == nil else { return }
-        loadingItem = id
-        Task {
-            defer { loadingItem = nil }
-            do {
-                playing = .vod(try await model.playback(itemId: id, kind: kind, title: route.title))
-            } catch is CancellationError {
-            } catch {
-                playError = error.localizedDescription
-            }
-        }
+        playing = .film(model.tap(id, kind: kind, title: route.title))
     }
 }
 
@@ -361,7 +318,6 @@ private struct TVEpisodeCard: View {
     let episode: EmbyItem
     let card: Card?
     let upNext: Bool
-    let loading: Bool
     let action: () -> Void
 
     var body: some View {
@@ -381,7 +337,6 @@ private struct TVEpisodeCard: View {
                                 .shadow(radius: 4)
                         }
                     }
-                    .overlay { if loading { ProgressView() } }
                     .tvArtwork()
             }
             .buttonStyle(.borderless)

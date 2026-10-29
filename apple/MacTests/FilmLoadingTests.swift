@@ -187,7 +187,7 @@ final class FilmLoadingTests: XCTestCase {
         XCTAssertFalse(loading.look.closes)
         XCTAssertTrue(loading.look.controls)
         XCTAssertTrue(loading.filmShown)
-        XCTAssertFalse(loading.wantsBytes)
+        XCTAssertFalse(loading.waiting)
         XCTAssertNil(loading.nextChange)
     }
 
@@ -284,7 +284,7 @@ final class FilmLoadingTests: XCTestCase {
         start.loading.send(.bytes(999), at: at(32.25))
         XCTAssertEqual(start.loading.look, failed)
         XCTAssertNil(start.loading.nextChange)
-        XCTAssertFalse(start.loading.wantsBytes)
+        XCTAssertFalse(start.loading.waiting)
     }
 
     func testEventsOfAReplacedLoadOrAnOlderAskChangeNothing() {
@@ -332,7 +332,7 @@ final class FilmLoadingTests: XCTestCase {
         start.loading.send(.close, at: at(2.1))
         XCTAssertEqual(start.loading.look, ring)
         XCTAssertNil(start.loading.nextChange)
-        XCTAssertFalse(start.loading.wantsBytes)
+        XCTAssertFalse(start.loading.waiting)
         start.loading.send(.player(.moving, attempt: start.attempt), at: at(2.2))
         XCTAssertEqual(look(start.loading, at: 60), ring)
     }

@@ -67,8 +67,6 @@ struct SearchView: View {
     @State private var finishedEmpty: Set<Scope> = []
     @State private var libraryMatch: SearchCorpus<LibraryEntry>.Match?
     @State private var channelMatch: SearchCorpus<LiveChannel>.Match?
-    @State private var loadingCard: String?
-    @State private var playError: String?
     #if DEBUG
     /// UI tests: the text of the last search, and how long it took to list
     /// the device's results ("channel 1|23").
@@ -251,11 +249,6 @@ struct SearchView: View {
                 #endif
                 await search()
             }
-            .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(playError ?? "")
-            }
         }
     }
 
@@ -352,11 +345,6 @@ struct SearchView: View {
                 .navigationDestination(for: MovieRoute.self) { TVMovieView(route: $0, playing: $playing) }
         }
         .task(id: "\(query)|\(model.library.count)|\(model.channelCorpus.items.count)") { await search() }
-        .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(playError ?? "")
-        }
     }
 
     private var tvResults: some View {
@@ -398,7 +386,7 @@ struct SearchView: View {
                 }
                 if !shown.episodes.isEmpty {
                     TVContinueRow(row: HomeRow(title: "Episodes", shape: "landscape", aspect: 16.0 / 9, cards: shown.episodes),
-                                  loadingCard: loadingCard, play: { play($0) }, open: { openDetails($0) })
+                                  play: { play($0) }, open: { openDetails($0) })
                 }
             }
             .padding(.vertical, 20)
@@ -568,9 +556,7 @@ struct SearchView: View {
             .frame(width: width, height: wide ? width * 9 / 16 : width * 1.5)
             .clipShape(.rect(cornerRadius: 6))
             .overlay {
-                if loadingCard == card.id {
-                    ProgressView()
-                } else if playBadge {
+                if playBadge {
                     Image(systemName: "play.fill")
                         .font(.system(size: wide ? 12 : 10, weight: .bold))
                         .foregroundStyle(.white)
@@ -862,16 +848,8 @@ struct SearchView: View {
     }
 
     private func play(_ card: Card) {
-        guard card.playable, loadingCard == nil else { return }
-        loadingCard = card.id
-        Task {
-            defer { loadingCard = nil }
-            do {
-                playing = .vod(try await model.playback(for: card))
-            } catch {
-                playError = error.localizedDescription
-            }
-        }
+        guard card.playable else { return }
+        playing = .film(model.tap(card.id, kind: card.kind, title: card.title, images: card.images))
     }
 }
 

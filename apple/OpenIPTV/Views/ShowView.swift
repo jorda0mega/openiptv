@@ -25,8 +25,6 @@ struct ShowView: View {
     /// frame; brought up to date in the background.
     private var data: AppModel.ShowData? { model.showState(route.id).value }
     @State private var error: String?
-    @State private var loadingItem: String?
-    @State private var playError: String?
     @State private var scrolledToUpNext = false
     /// The viewer has scrolled the page: it's never moved for them after.
     @State private var userScrolled = false
@@ -126,7 +124,7 @@ struct ShowView: View {
                         ForEach(season.episodes, id: \.id) { episode in
                             Button { play(episode.id, kind: "Episode") } label: {
                                 EpisodeRow(episode: episode, card: card(episode),
-                                           upNext: episode.id == upNext?.id, loading: loadingItem == episode.id)
+                                           upNext: episode.id == upNext?.id)
                             }
                             .buttonStyle(.plain)
                             .id(episode.id)
@@ -195,11 +193,6 @@ struct ShowView: View {
                 error = "Couldn't load this show."
             }
         }
-        .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(playError ?? "")
-        }
         .onAppear { model.showOnScreen = route.id }
         .onDisappear { if model.showOnScreen == route.id { model.showOnScreen = nil } }
     }
@@ -212,8 +205,7 @@ struct ShowView: View {
                       title: route.title, line: showLine, height: 0.95) {
                 HStack(alignment: .top, spacing: 12) {
                     PlayCapsule(label: mainLabel,
-                                progress: upNext?.resumeFraction, left: upNext?.timeLeft,
-                                loading: loadingItem == mainId) { playMain() }
+                                progress: upNext?.resumeFraction, left: upNext?.timeLeft) { playMain() }
                     #if os(iOS)
                     MyListButton(item: show)
                     #endif
@@ -279,7 +271,6 @@ struct ShowView: View {
     }
     #endif
 
-    private var mainId: String { upNext?.id ?? route.episodeId ?? route.id }
 
     /// "Continue S4 E2" partway through, else "Play S4 E3".
     private var mainLabel: String {
@@ -302,17 +293,7 @@ struct ShowView: View {
     private var mainTarget: Target { .showMain(route.id, upNext: upNext?.id) }
 
     private func play(_ id: String, kind: String) {
-        guard loadingItem == nil else { return }
-        loadingItem = id
-        Task {
-            defer { loadingItem = nil }
-            do {
-                playing = .vod(try await model.playback(itemId: id, kind: kind, title: route.title))
-            } catch is CancellationError {
-            } catch {
-                playError = error.localizedDescription
-            }
-        }
+        playing = .film(model.tap(id, kind: kind, title: route.title))
     }
 }
 
@@ -454,7 +435,6 @@ private struct EpisodeRow: View {
     let episode: EmbyItem
     let card: Card?
     let upNext: Bool
-    let loading: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -469,7 +449,6 @@ private struct EpisodeRow: View {
                         .padding(4)
                     }
                 }
-                .overlay { if loading { ProgressView() } }
                 .clipShape(.rect(cornerRadius: 8))
                 .overlay {
                     if upNext { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.9), lineWidth: 2) }

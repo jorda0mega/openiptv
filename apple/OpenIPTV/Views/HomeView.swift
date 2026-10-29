@@ -14,8 +14,6 @@ struct HomeView: View {
     @Environment(Preferences.self) private var prefs
     @Environment(\.displayScale) private var displayScale
     @Binding var playing: PlayerItem?
-    @State private var loadingCard: String?
-    @State private var playError: String?
     @State private var addingEmby = false
     @State private var showingSettings = false
     /// Shows and films opened from Home, and from their pages (More Like
@@ -34,7 +32,7 @@ struct HomeView: View {
                     // its placeholder (it appeared in one frame).
                     ZStack(alignment: .top) {
                         if !heroes.isEmpty {
-                            HomeHero(items: heroes, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                            HomeHero(items: heroes, play: { play($0) }, open: { open($0) })
                                 .transition(.opacity)
                         } else if model.homePending {
                             // The first Home is on its way: the hero's space is
@@ -50,7 +48,7 @@ struct HomeView: View {
                     if !visibleRows.contains(where: { $0.title == "Continue Watching" }) { myListRow }
                     ForEach(visibleRows) { row in
                         if row.title == "Continue Watching" {
-                            ContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                            ContinueRow(row: row, play: { play($0) }, open: { open($0) })
                             myListRow
                         } else {
                             PosterRow(title: row.title, cards: row.cards, open: { open($0) }, play: { play($0) },
@@ -92,11 +90,6 @@ struct HomeView: View {
             .navigationDestination(for: RowRoute.self) { RowPage(route: $0, open: { open($0) }, play: { play($0) }) }
             .task(id: model.rows.first?.cards.first?.id) { prefetchFirstShows() }
             .onAppear { prefetchFirstShows() }
-            .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(playError ?? "")
-            }
         }
         // On the stack, not its first page: coming back from a title's page
         // isn't Home appearing. Home chosen from another tab (or at launch)
@@ -178,21 +171,8 @@ struct HomeView: View {
 
     /// Straight to the player: the episode being resumed, or the title.
     private func play(_ card: Card) {
-        guard loadingCard == nil else { return }
-        loadingCard = card.id
-        Task {
-            defer { loadingCard = nil }
-            do {
-                if let episode = card.episodeId {
-                    playing = .vod(try await model.playback(itemId: episode, kind: "Episode", title: card.title))
-                } else {
-                    playing = .vod(try await model.playback(itemId: card.id, kind: card.kind, title: card.title))
-                }
-            } catch is CancellationError {
-            } catch {
-                playError = error.localizedDescription
-            }
-        }
+        playing = .film(model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
+                                  images: card.images))
     }
 }
 
@@ -200,7 +180,6 @@ struct HomeView: View {
 /// wait), each with its name, what it is, Play and a details button.
 private struct HomeHero: View {
     let items: [Featured]
-    let loadingCard: String?
     let play: (Card) -> Void
     let open: (Card) -> Void
     @State private var index = 0
@@ -302,8 +281,6 @@ private struct HomeHero: View {
                         Label("Play", systemImage: "play.fill")
                             .font(.body.weight(.semibold))
                             .frame(width: 160, height: 48)
-                            .opacity(loadingCard == item.card.id ? 0 : 1)
-                            .overlay { if loadingCard == item.card.id { ProgressView().tint(.black) } }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.black)
@@ -474,7 +451,6 @@ private struct RowPage: View {
 private struct ContinueRow: View {
     @Environment(AppModel.self) private var model
     let row: HomeRow
-    let loadingCard: String?
     let play: (Card) -> Void
     let open: (Card) -> Void
 
@@ -538,7 +514,6 @@ private struct ContinueRow: View {
                 .padding(.trailing, 44)
                 .padding(.bottom, 12)
             }
-            .overlay { if loadingCard == card.id { ProgressView().tint(.white) } }
             .clipShape(.rect(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
             // One element the card's size (combined, it took the size of a

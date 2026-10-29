@@ -6,18 +6,18 @@ enum PlayerItem: Identifiable {
     /// The channels to zap through, the one to play; for a game, which of
     /// its channels to start on (picked in its Watch On menu).
     case live([LiveChannel], Int, copy: LiveChannel? = nil)
-    case vod(EmbyPlayback)
+    case film(TappedFilm)
 
     var id: String {
         switch self {
         case let .live(channels, index, _): "live-\(channels[index].id)"
-        case let .vod(playback): "vod-\(playback.itemId)"
+        case let .film(film): "vod-\(film.itemId)"
         }
     }
 
     var isFilm: Bool {
         switch self {
-        case .vod: true
+        case .film: true
         case .live: false
         }
     }
@@ -34,7 +34,7 @@ struct PlayerScreen: View {
         Group {
             switch item {
             case let .live(channels, index, copy): LivePlayerView(channels: channels, index: index, startCopy: copy)
-            case let .vod(playback): VODPlayerHost(playback: playback)
+            case let .film(film): FilmHost(tapped: film)
             }
         }
         // In and out with the same quick fade, as in the TV app (it slid up
@@ -53,18 +53,6 @@ struct PlayerScreen: View {
         .onAppear { PlayerOrientation.shared.playerAppeared(film: item.isFilm) }
         .onDisappear { PlayerOrientation.shared.playerDisappeared() }
         #endif
-    }
-}
-
-/// A film or episode, and then any title chosen from Continue Watching in
-/// the player: the player screen stays up while the title changes, with a
-/// fresh player view for each.
-private struct VODPlayerHost: View {
-    @State var playback: EmbyPlayback
-
-    var body: some View {
-        MoviePlayerView(playback: playback, switchTo: { playback = $0 })
-            .id(playback.itemId)
     }
 }
 
@@ -241,8 +229,11 @@ struct MoviePlayerView: View {
     @Environment(\.closePlayer) private var closePlayer
 
     let playback: EmbyPlayback
-    /// Plays another title in this player screen (Continue Watching).
-    var switchTo: ((EmbyPlayback) -> Void)? = nil
+    let held: FirstPicture
+    @Binding var loading: FilmLoading
+    let tryAgainAsked: Int
+    let closeAsked: Int
+    var switchTo: ((TappedFilm) -> Void)? = nil
     @State private var player: MPVPlayer?
     /// The position and the point being chosen (see PlayerClock): the
     /// handlers read and set them here; the views that show them read the
@@ -256,9 +247,7 @@ struct MoviePlayerView: View {
     @State private var paused = false
     @State private var started = false
     @State private var buffering = false
-    @State private var error: String?
-    @State private var cutOff = false
-    @State private var controlsVisible = true
+    @State private var controlsVisible = false
     @State private var hideTask: Task<Void, Never>?
     @State private var lastReport: Double = 0
     private var scrubbing: Double? {
@@ -274,7 +263,8 @@ struct MoviePlayerView: View {
     /// builds with the stats on).
     @State private var timing: String?
     @State private var warmStart = false
-    @State private var track = LoadTrack(began: Date(), stage: .fetching)
+    @State private var stillToMove: FirstPicture?
+    @State private var failureReported = false
     /// How the server answered each way of opening a film that failed.
     @State private var diagnosis: Task<Void, Never>?
     /// The file's audio and subtitle tracks, and the picture's badges ("4K",
@@ -356,8 +346,7 @@ struct MoviePlayerView: View {
     /// to return to if the original won't open.
     @State private var revertTo: Int?
     @State private var lastConverted: Int?
-    /// The first start has been reported (later starts are quality switches).
-    @State private var startedOnce = false
+    @State private var startReported = false
     /// Where the player was when it was closed (already on the page behind).
     @State private var closedAt: Double?
     /// Playback speed (1: normal), for this playback only.
@@ -402,9 +391,6 @@ struct MoviePlayerView: View {
                     .accessibilityAction { showControls() }
                     .accessibilityAction(.escape) { close() }
             }
-            if !startedOnce {
-                StartBackdrop(images: model.startBackdrop(playback.itemId, episode: playback.seriesId != nil), title: playback.title)
-            }
             // Choosing where to jump: the still for that moment, full-screen,
             // until the player has the frame itself.
             StillWhileChoosing(clock: playClock, thumbnails: thumbnails, previewShown: previewShown, offset: offset)
@@ -426,11 +412,7 @@ struct MoviePlayerView: View {
                 }, isEnabled: UIDevice.current.userInterfaceIdiom == .phone)
                 .accessibilityHidden(true)
             #endif
-            // With the controls up, their play button turns into the progress.
-            if let load, !controlsVisible {
-                LoadProgressView(load: load, actions: loadActions, overPicture: true)
-            }
-            if controlsVisible { controls.transition(.opacity) }
+            if controlsVisible, loading.look.controls { controls.transition(.opacity) }
             #if os(iOS)
             DuringIntro(clock: playClock, intro: playback.intro, allowed: skipIntroAllowed) {
                 skipIntroButton.transition(.opacity)
@@ -476,7 +458,7 @@ struct MoviePlayerView: View {
                 ClockReadout(clock: playClock)
                 debugReadout(startReadout, "debug-start")
                 debugReadout(startParts, "debug-start-parts")
-                debugReadout(error ?? "", "debug-start-error")
+                debugReadout(loading.look.failure?.cause ?? "", "debug-start-error")
                 debugReadout(convertedReadout, "debug-converted")
                 debugReadout(relayReadout, "debug-reads-back")
                 debugReadout(playback.itemId, "debug-item")
@@ -518,11 +500,10 @@ struct MoviePlayerView: View {
         .statusBarHidden(!controlsVisible)
         #endif
         .persistentSystemOverlays(.hidden)
-        .task {
-            start()
-            await watchTheOpen()
-        }
-        .task(id: load?.deadline) { await endWait(at: load?.deadline) }
+        .task { start() }
+        .onChange(of: tryAgainAsked) { tryAgain() }
+        .onChange(of: closeAsked) { close() }
+        .onChange(of: loading.look.failure) { _, failure in if let failure { stop(for: failure) } }
         .task(id: playback.itemId) { await loadSeason() }
         .onAppear {
             PlaybackActivity.began()
@@ -555,7 +536,7 @@ struct MoviePlayerView: View {
         // an episode: "S1:E3 · Name" over the show, and as Info's heading.
         let film = playback.seriesId == nil
         return TVMovieOverlay(caption: film ? nil : playback.subtitle, title: playback.title, note: note,
-                       load: load, loadActions: loadActions, bar: TVClockedBar(clock: playClock, total: total, holdDirection: holdDirection, paused: paused), compact: compact,
+                       bar: TVClockedBar(clock: playClock, total: total, holdDirection: holdDirection, paused: paused), compact: compact,
                        panel: panel, focus: focus, hasSubtitles: tracks.contains { $0.kind == .subtitle },
                        info: TVPlayerInfo(heading: film ? playback.title : playback.subtitle, overview: playback.overview,
                                           runtime: film ? [playback.subtitle, runtime].compactMap(\.self).joined(separator: " · ") : runtime,
@@ -569,7 +550,7 @@ struct MoviePlayerView: View {
         // A film shows its title alone, as in the Apple TV app; an episode
         // its "S1:E3 · Name" over the show.
         PlayerChrome(caption: playback.seriesId == nil ? nil : playback.subtitle, title: playback.title, note: note,
-                     paused: paused, load: load, loadActions: loadActions, ready: started,
+                     paused: paused, waiting: loading.look.ringShown, ready: started,
                      topActions: pictureActions, pills: pills,
                      selectedPill: showInfo ? "Info" : showEpisodes ? "Episodes" : showContinue ? "Continue Watching" : nil,
                      panel: showInfo ? infoPanel : showEpisodes ? episodesPanel : showContinue ? continuePanel : nil,
@@ -647,7 +628,7 @@ struct MoviePlayerView: View {
                     close()
                 }
             return PlayerCard(id: card.id, title: card.title, subtitle: [status, code].compactMap(\.self).joined(separator: " · "),
-                              images: card.images, loading: switching == card.id, spoken: card.episodeName,
+                              images: card.images, spoken: card.episodeName,
                               line: card.subtitle, more: [page]) { playInstead(card) }
         })
     }
@@ -666,27 +647,10 @@ struct MoviePlayerView: View {
     /// one's stop goes on the pages behind first (as on closing), then a
     /// fresh player view takes the new one.
     private func playInstead(_ card: Card) {
-        guard let switchTo, switching == nil else { return }
-        switching = card.id
-        Task {
-            defer { switching = nil }
-            do {
-                let next = if let episode = card.episodeId {
-                    try await model.playback(itemId: episode, kind: "Episode")
-                } else {
-                    try await model.playback(itemId: card.id, kind: card.kind)
-                }
-                if closedAt == nil {
-                    closedAt = position
-                    var quiet = Transaction(animation: nil)
-                    quiet.disablesAnimations = true
-                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
-                }
-                switchTo(next)
-            } catch {
-                note("Couldn't play \(card.title)")
-            }
-        }
+        guard let switchTo else { return }
+        noteStop()
+        switchTo(model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
+                           images: card.images))
     }
 
     private func toggleInfo() {
@@ -717,7 +681,6 @@ struct MoviePlayerView: View {
                 .compactMap(\.self).joined(separator: ", ")
             return PlayerCard(id: episode.id, title: episodeTitle(episode), subtitle: episodeStatus(episode),
                               images: model.emby?.card(for: episode, landscape: true, width: 180).images ?? [],
-                              loading: switching == episode.id,
                               line: [code, episodeLength(episode)].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · ")) {
                 if playing { toggleEpisodes() } else { playEpisode(episode) }
             }
@@ -922,18 +885,13 @@ struct MoviePlayerView: View {
                 let at = next.startSeconds ?? 0
                 let reached = Date().addingTimeInterval(lead + 5)
                 while !paused, position < at - 0.05, Date() < reached { try await Task.sleep(for: .milliseconds(20)) }
-                if closedAt == nil {
-                    closedAt = position
-                    var quiet = Transaction(animation: nil)
-                    quiet.disablesAnimations = true
-                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
-                }
+                noteStop()
                 #if DEBUG
                 model.debugCopySwitch = String(format: "plan %.2f s, its picture ready %.2f s after, on screen %.2f s after the tap (%.0f s lead)",
                                                planned.timeIntervalSince(tapped), opened.timeIntervalSince(planned),
                                                Date().timeIntervalSince(tapped), lead)
                 #endif
-                switchTo(next)
+                switchTo(.planned(next, held: .still(at: at)))
             } catch {
                 note("Couldn't play it in \(Self.languageName(language))")
             }
@@ -970,7 +928,7 @@ struct MoviePlayerView: View {
     }
 
     private var note: (text: String, color: Color)? {
-        if error != nil { return nil }
+        if loading.look.failure != nil { return nil }
         if let temporaryMessage { return (temporaryMessage, .yellow) }
         if let timing { return (timing, .white.opacity(0.6)) }
         #if DEBUG
@@ -981,32 +939,27 @@ struct MoviePlayerView: View {
 
     private var total: Double { duration ?? playback.durationSeconds ?? 0 }
 
-    private var load: LoadProgress? {
-        let subject = LoadProgress.Subject.film(playback.title)
-        let cause: LoadProgress.Cause = NetworkStatus.shared.online ? .server : .offline
-        if let error {
-            return LoadProgress(subject: subject, cause: cause, began: track.began, failure: track.failure(cutOff ? .cutOff : .refused(error)))
-        }
-        if !started { return LoadProgress(subject: subject, stage: track.stage, cause: cause, began: track.began) }
-        if let since = track.stalledSince {
-            return LoadProgress(subject: subject, wait: .stall, stage: track.stage, cause: cause, began: since)
-        }
-        return track.startEndedAt.map { LoadProgress(subject: subject, cause: cause, began: track.began, endedAt: $0) }
-    }
-
-    private var loadActions: LoadActions { LoadActions(tryAgain: { retry() }) }
-
-    private func retry() {
+    private func tryAgain() {
+        guard loading.look.failure != nil else { return }
+        loading.send(.tryAgain, at: Date())
         diagnosis?.cancel()
-        error = nil
-        cutOff = false
+        failureReported = false
         attempt = 0
         started = false
-        let now = Date()
-        track.restart(at: now)
-        playFile(playback.url, headers: playback.headers, at: startedOnce ? position : playback.startSeconds,
-                 readahead: NetworkStatus.shared.fileReadahead, attempt: track.asked(.fetching, at: now))
-        showControls()
+        stillToMove = nil
+        playFile(playback.url, headers: playback.headers, at: loading.filmShown ? position : playback.startSeconds,
+                 readahead: NetworkStatus.shared.fileReadahead, attempt: loading.nextAttempt())
+    }
+
+    private func stop(for failure: FilmLoading.Failure) {
+        hideTask?.cancel()
+        controlsVisible = false
+        diagnosis?.cancel()
+        convertedOpen?.cancel()
+        player?.stop {}
+        guard !failureReported else { return }
+        failureReported = true
+        Telemetry.report(Problem(subject: .film, started: loading.filmShown, reason: loading.filmShown ? .no_data : .no_frame))
     }
 
     @ViewBuilder private var scrubber: some View {
@@ -1161,13 +1114,14 @@ struct MoviePlayerView: View {
             // Already open and paused at the resume point: just show and play.
             warmStart = true
             PlaybackAudio.activate()
-            track = LoadTrack(began: playback.requestedAt, stage: .fetching, attempt: warmPlayer.currentAttempt)
+            loading.takeOver(attempt: warmPlayer.currentAttempt)
+            if case .still = held { stillToMove = held }
             warmPlayer.onEvent = { event, attempt in handle(event, attempt) }
             self.player = warmPlayer
             #if DEBUG
             warmPlayer.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
             #endif
-            if warmPlayer.hasStarted { handle(.started(0), track.attempt) }
+            if warmPlayer.hasStarted { handle(.started(0), warmPlayer.currentAttempt) }
             // Now it's being watched: download the rest of it.
             warmPlayer.setReadahead(NetworkStatus.shared.fileReadahead)
             warmPlayer.setPaused(false)
@@ -1178,7 +1132,6 @@ struct MoviePlayerView: View {
             let player = makePlayer(prefs: prefs, picture: .film(playback.surface))
             player.onEvent = { event, attempt in handle(event, attempt) }
             self.player = player
-            track = LoadTrack(began: playback.requestedAt, stage: .fetching)
             #if DEBUG
             player.stopwatch.tapped(at: playback.requestedAt.timeIntervalSinceReferenceDate)
             #endif
@@ -1188,38 +1141,12 @@ struct MoviePlayerView: View {
             // original actually stalls.
             player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
                         readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks,
-                        attempt: track.asked(.fetching, at: Date()))
+                        attempt: loading.nextAttempt())
             player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
             player.addCopies(playback.subtitleCopies)
         }
         if governor == nil, prefs.adaptiveQuality { governor = QualityGovernor(original: playback.bitrate) }
-        showControls()
         probeTask = Task { await probeWhileConverted() }
-    }
-
-    /// Till the first frame: the start's stage for the loading progress.
-    private func watchTheOpen() async {
-        let askedAgain = StreamRelay.shared.askedAgain.value
-        while !started, error == nil {
-            model.noteStart(player?.openedAfter == nil ? .openingFilm : .starting)
-            if StreamRelay.shared.askedAgain.value > askedAgain { model.noteStartAskedAgain() }
-            guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { break }
-        }
-        model.endStart(failure: error)
-    }
-
-    /// A wait still on at its deadline (the start, Try again, a stall)
-    /// stops the film and says so, rather than leave the ring up.
-    private func endWait(at deadline: Date?) async {
-        guard let deadline else { return }
-        try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
-        guard !Task.isCancelled, load?.overdue(at: Date()) == true else { return }
-        convertedOpen?.cancel()
-        player?.stop {}
-        error = StartPatience.tooLong.localizedDescription
-        Telemetry.report(Problem(subject: .film, started: startedOnce, reason: startedOnce ? .no_data : .no_frame))
-        track.failed(at: Date())
-        showControls(autoHide: false)
     }
 
     private func pictureOnScreen(_ player: MPVPlayer) {
@@ -1240,9 +1167,10 @@ struct MoviePlayerView: View {
         position = back.position
         paused = back.paused
         started = true
-        startedOnce = true
+        startReported = true
         warmStart = true
-        track = LoadTrack(began: Date(), stage: .fetching, attempt: back.player.currentAttempt)
+        loading.takeOver(attempt: back.player.currentAttempt)
+        loading.send(.player(.moving, attempt: back.player.currentAttempt), at: Date())
         back.player.onEvent = { event, attempt in handle(event, attempt) }
         player = back.player
         offerPictureInPicture()
@@ -1299,7 +1227,7 @@ struct MoviePlayerView: View {
             revertTo = lastConverted
             jumpUntil = Date().addingTimeInterval(1.5)
             playFile(playback.url, headers: playback.headers, at: at, readahead: NetworkStatus.shared.fileReadahead,
-                     attempt: track.nextAttempt())
+                     attempt: loading.nextAttempt())
         }
     }
 
@@ -1328,7 +1256,7 @@ struct MoviePlayerView: View {
             case let .refused(why): refuseConverted(why, player)
             case let .listed(list):
                 guard let opened = player.openConverted(address, list, at: position, for: playback,
-                                                        attempt: asked ?? track.nextAttempt()) else {
+                                                        attempt: asked ?? loading.nextAttempt()) else {
                     return refuseConverted("relay not running", player)
                 }
                 // The stream playing reports where it was for a moment after
@@ -1343,7 +1271,7 @@ struct MoviePlayerView: View {
         #if DEBUG
         convertedReadout = "not opened, " + why
         #endif
-        if player.hasFailed { return handle(.failed("The converted version didn't open.", nil), track.attempt) }
+        if player.hasFailed { return handle(.failed("The converted version didn't open.", nil), loading.attempt) }
         governor = nil
     }
 
@@ -1364,24 +1292,9 @@ struct MoviePlayerView: View {
     /// The next episode, in this player screen (at the end, as the Apple TV
     /// app's "Play Next Episode" does).
     private func playNext(_ episode: EmbyItem) {
-        guard let switchTo, switching == nil else { return }
-        switching = episode.id
-        Task {
-            defer { switching = nil }
-            do {
-                let next = try await model.playback(itemId: episode.id, kind: "Episode")
-                if closedAt == nil {
-                    closedAt = position
-                    var quiet = Transaction(animation: nil)
-                    quiet.disablesAnimations = true
-                    withTransaction(quiet) { model.noteStop(playback, seconds: position) }
-                }
-                switchTo(next)
-            } catch {
-                note("Couldn't play the next episode")
-                close()
-            }
-        }
+        guard let switchTo else { return }
+        noteStop()
+        switchTo(model.tap(episode.id, kind: "Episode", title: playback.title))
     }
 
     private func note(_ text: String) {
@@ -1398,23 +1311,23 @@ struct MoviePlayerView: View {
     private func handle(_ event: MPVPlayer.Event, _ loadAttempt: Int) {
         switch event {
         case .paused, .seeked, .seeking, .restarted, .previewShown, .tracksChanged: break
-        default: guard track.isCurrent(loadAttempt) else { return }
+        default: guard loadAttempt == loading.attempt else { return }
         }
         switch event {
         case let .started(playerSeconds):
             ScreenAwake.set(awakeID, playing: !paused)
             started = true
             buffering = false
-            track.pictured(at: Date())
+            if stillToMove == nil { loading.send(.player(.moving, attempt: loadAttempt), at: Date()) }
             governor?.notePlaying()
             #if os(iOS)
             offerPictureInPicture()
             #endif
-            guard !startedOnce else { return }
-            startedOnce = true
+            guard !startReported else { return }
+            startReported = true
             if let tap = playback.tap {
                 Telemetry.note(.filmStarted(tap, resumes: (playback.startSeconds ?? 0) > 0, picture: picture,
-                                            seconds: Date().timeIntervalSince(track.began)))
+                                            seconds: Date().timeIntervalSince(playback.requestedAt)))
             }
             // Whole start from the tap: server, then screen/player setup,
             // opening the file, and seeking + the first frame.
@@ -1460,11 +1373,9 @@ struct MoviePlayerView: View {
             if controlsVisible { showControls() }
             Task { await model.report(playback, seconds: position, event: .started) }
         case let .seeking(on):
-            // A jump that doesn't land (the server stopped answering) waits
-            // like a stall; choosing where to jump doesn't.
-            track.seeking(on && started, choosing: scrubbing != nil, at: Date())
+            loading.send(.seeking(on, choosing: scrubbing != nil), at: Date())
         case .restarted:
-            track.landed(at: Date())
+            loading.send(.player(.landed, attempt: loading.attempt), at: Date())
         case let .seeked(seconds, by):
             jumpUntil = nil
             if let by { Telemetry.note(.filmJumped(by: by, picture: picture, seconds: seconds)) }
@@ -1474,7 +1385,7 @@ struct MoviePlayerView: View {
             #endif
         case let .buffering(isBuffering):
             buffering = isBuffering
-            if isBuffering, started { track.stalled(at: Date()) } else { track.flowing() }
+            loading.send(.player(isBuffering ? .dataStopped : .dataFlowing, attempt: loadAttempt), at: Date())
             #if DEBUG
             NSLog("%@", "PERF buffering \(isBuffering)")
             #endif
@@ -1515,30 +1426,32 @@ struct MoviePlayerView: View {
             // original and stop adapting.
             if started, governor?.current != nil {
                 governor = nil
-                playFile(playback.url, headers: playback.headers, at: position, attempt: track.nextAttempt())
+                playFile(playback.url, headers: playback.headers, at: position, attempt: loading.nextAttempt())
                 return
             }
             if !started, attempt < playback.fallbacks.count {
                 // The original didn't open; try the next way Emby offers.
                 let next = playback.fallbacks[attempt]
                 attempt += 1
-                let asked = track.asked(.fetching, at: Date())
+                let asked = loading.nextAttempt()
                 if next.path().hasSuffix(".m3u8") { playConverted(next, asked: asked); return }
                 playFile(next, headers: playback.fallbackHeaders, at: playback.startSeconds, attempt: asked)
                 return
             }
-            error = message.prefix(1).uppercased() + message.dropFirst()
-            Telemetry.report(Problem(subject: .film, started: startedOnce, reason: logged ?? .unknown))
-            track.failed(at: Date())
-            showControls(autoHide: false)
-            let failed = track.attempt
+            Telemetry.report(Problem(subject: .film, started: loading.filmShown, reason: logged ?? .unknown))
+            failureReported = true
+            let said = message.prefix(1).uppercased() + message.dropFirst()
             diagnosis?.cancel()
             diagnosis = Task {
-                let why = await model.diagnose(playback)
-                guard !Task.isCancelled, !why.isEmpty, track.stillFailed(failed) else { return }
-                error = why
+                let why = await diagnosed()
+                guard !Task.isCancelled else { return }
+                loading.send(.player(.refused(why.isEmpty ? said : why), attempt: loadAttempt), at: Date())
             }
         case let .time(rawPosition, newDuration):
+            if let still = stillToMove, still.goesOn(at: rawPosition + offset) {
+                stillToMove = nil
+                loading.send(.player(.moving, attempt: loadAttempt), at: Date())
+            }
             if let newDuration, offset == 0, duration != newDuration {
                 duration = newDuration
                 #if os(iOS)
@@ -1595,16 +1508,14 @@ struct MoviePlayerView: View {
             #endif
             if isPaused { showControls(autoHide: false) } else { showControls() }
         case let .ended(logged):
-            let end = track.end(at: position, of: total)
-            position = end.place
-            if end.cutOff {
-                error = "The server stopped sending the film."
-                Telemetry.report(Problem(subject: .film, started: true, reason: logged ?? .unknown))
-                cutOff = true
-                track.cutOff(at: Date())
-                showControls(autoHide: false)
+            let real = loading.isRealEnd(at: position, of: total)
+            loading.send(.player(.ended(position: position, total: total), attempt: loadAttempt), at: Date())
+            guard real else {
+                Telemetry.report(Problem(subject: .film, started: loading.filmShown, reason: logged ?? .unknown))
+                failureReported = true
                 return
             }
+            position = total
             if let next = upNext, switchTo != nil { return playNext(next) }
             close()
         case let .previewShown(seconds):
@@ -1624,7 +1535,7 @@ struct MoviePlayerView: View {
                 #endif
             }
         case .opened:
-            if !started { track.opened() }
+            loading.send(.player(.opened, attempt: loadAttempt), at: Date())
         case .opening, .window:
             break
         }
@@ -1654,7 +1565,7 @@ struct MoviePlayerView: View {
         // once (it closed, and the next tap waited for the server and a
         // new stream, then started where the server last heard).
         if let player {
-            if started, error == nil, stream.isOriginal { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
+            if started, loading.look.failure == nil, stream.isOriginal { model.park(player, playback.resuming(at: seconds)) } else { player.shutdown() }
         }
         player = nil
         let noted = closedAt != nil
@@ -1667,13 +1578,29 @@ struct MoviePlayerView: View {
     /// Changing it after it showed made "Play" fade into "Continue" and
     /// Continue Watching's cards swap places under the viewer's eyes.
     private func close() {
-        if closedAt == nil {
-            closedAt = position
-            var quiet = Transaction(animation: nil)
-            quiet.disablesAnimations = true
-            withTransaction(quiet) { model.noteStop(playback, seconds: position) }
-        }
+        noteStop()
+        loading.send(.close, at: Date())
         if let closePlayer { closePlayer() } else { dismiss() }
+    }
+
+    private func noteStop() {
+        guard closedAt == nil else { return }
+        closedAt = position
+        var quiet = Transaction(animation: nil)
+        quiet.disablesAnimations = true
+        withTransaction(quiet) { model.noteStop(playback, seconds: position) }
+    }
+
+    private func diagnosed() async -> String {
+        await withTaskGroup(of: String.self) { [model, playback] group in
+            group.addTask { await model.diagnose(playback) }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(3))
+                return ""
+            }
+            defer { group.cancelAll() }
+            return await group.next() ?? ""
+        }
     }
 
     #if DEBUG
@@ -1705,7 +1632,7 @@ struct MoviePlayerView: View {
         #if DEBUG
         NSLog("%@", "PERF picture tapped controls=\(controlsVisible)")
         #endif
-        if controlsVisible {
+        if controlsVisible, loading.look.controls {
             hideTask?.cancel()
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
         } else {
@@ -1715,15 +1642,16 @@ struct MoviePlayerView: View {
 
     private func showControls(autoHide: Bool = true) {
         hideTask?.cancel()
+        guard loading.look.controls else { return }
         withAnimation(.easeOut(duration: 0.12)) { controlsVisible = true }
-        guard autoHide, !paused, started, error == nil else { return }
+        guard autoHide, !paused, started else { return }
         #if os(tvOS)
         // On a button or in a menu: stays until the remote leaves it.
         guard focus == .bar, panel == nil else { return }
         #endif
         hideTask = Task {
             try? await Task.sleep(for: .seconds(4))
-            guard !Task.isCancelled, error == nil else { return }
+            guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
             #if os(tvOS)
             compact = true
@@ -1780,7 +1708,7 @@ struct MoviePlayerView: View {
         position = target
         jumpUntil = Date().addingTimeInterval(0.5)
         scrubbing = nil
-        track.choosingEnded(at: Date())
+        loading.send(.choosingEnded, at: Date())
         scrubOrigin = nil
         let play = RemoteSwipe.playsAfterChoosing(byClick: byClick, wasPlaying: resumeAfterScrub)
         resumeAfterScrub = false
@@ -1879,16 +1807,14 @@ struct MoviePlayerView: View {
     }
 
     private func inLoad(_ input: TVRemoteSurface.Input) -> Bool {
-        guard load?.shown(at: Date())?.buttons.contains(.tryAgain) == true else { return false }
+        let look = loading.look
+        guard !look.controls else { return false }
         switch input {
-        case .select:
-            retry()
-            return true
-        case .click:
-            return true
-        default:
-            return false
+        case .select where look.failure != nil: tryAgain()
+        case .menu: close()
+        default: break
         }
+        return true
     }
 
     /// On the round buttons: left and right between them (a click on the
@@ -2132,7 +2058,7 @@ struct MoviePlayerView: View {
             lastSeek = Date()
         }
         scrubbing = nil
-        track.choosingEnded(at: Date())
+        loading.send(.choosingEnded, at: Date())
         scrubOrigin = nil
         if resumeAfterScrub {
             resumeAfterScrub = false
