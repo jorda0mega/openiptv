@@ -121,6 +121,7 @@ private struct FilmScreen: View {
             #if DEBUG
             readout(looks.joined(separator: ", "), id: "debug-film-loading")
             readout(String(FilmLoadingProbe.heldShown), id: "debug-film-held")
+            if playback == nil { readout(loading.look.failure?.cause ?? "", id: "debug-start-error") }
             #endif
         }
         #if os(tvOS)
