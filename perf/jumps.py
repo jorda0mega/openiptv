@@ -77,7 +77,7 @@ def seeks(ndjson):
         if m:
             at, by = float(m.group(1)), int(m.group(2))
             ranges = re.search(r" ranges (\S*)", message)
-            spans = [tuple(float(x) for x in r.split("-")) for r in (ranges.group(1).split(",") if ranges else []) if "-" in r]
+            spans = [(float(a), float(b)) for a, b in re.findall(r"(-?[0-9.]+)-(-?[0-9.]+)", ranges.group(1) if ranges else "")]
             ahead = re.search(r" ahead ([0-9.]+)", message)
             readahead = re.search(r" readahead ([0-9.]+)", message)
             found.append((datetime.strptime(entry["timestamp"], "%Y-%m-%d %H:%M:%S.%f%z").timestamp(), at, by,
