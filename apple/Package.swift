@@ -39,6 +39,7 @@ let package = Package(
                 "Player/BufferingLog.swift",
                 "Player/ByteCache.swift",
                 "Player/ConvertedPlaylist.swift",
+                "Player/FilmLoading.swift",
                 "Player/FilmStream.swift",
                 "Player/FoundSubtitles.swift",
                 "Player/FramePlan.swift",
