@@ -1,15 +1,9 @@
 import Foundation
 
 struct LoadProgress: Equatable {
-    enum Subject: Equatable {
-        case film(String)
-        case channel(String)
-    }
-
     enum Wait: Equatable {
         case start
         case reconnect
-        case stall
     }
 
     enum Stage: Int, Equatable, CaseIterable {
@@ -27,7 +21,6 @@ struct LoadProgress: Equatable {
         enum Kind: Equatable {
             case noPicture
             case ended
-            case cutOff
             case refused(String)
         }
 
@@ -37,7 +30,7 @@ struct LoadProgress: Equatable {
         var otherChannels = false
     }
 
-    var subject: Subject
+    var channel: String
     var wait = Wait.start
     var stage = Stage.asking
     var cause: Cause
@@ -68,17 +61,16 @@ struct LoadProgress: Equatable {
     /// picture), each saying Reconnecting from when the picture went.
     static func channel(_ name: String, track: LoadTrack, loading: Bool, hasPicture: Bool, cause: Cause,
                         failure: Failure? = nil) -> LoadProgress? {
-        let subject = Subject.channel(name)
-        if let failure { return LoadProgress(subject: subject, cause: .channel, began: track.began, failure: failure) }
+        if let failure { return LoadProgress(channel: name, cause: .channel, began: track.began, failure: failure) }
         if loading {
-            return LoadProgress(subject: subject, wait: hasPicture ? .reconnect : .start, stage: track.stage, cause: cause,
+            return LoadProgress(channel: name, wait: hasPicture ? .reconnect : .start, stage: track.stage, cause: cause,
                                 began: track.began, pictureLost: hasPicture ? track.pictureLost : nil)
         }
         if hasPicture, let since = track.stalledSince {
-            return LoadProgress(subject: subject, wait: .reconnect, stage: track.stage, cause: cause, began: since, pictureLost: since)
+            return LoadProgress(channel: name, wait: .reconnect, stage: track.stage, cause: cause, began: since, pictureLost: since)
         }
         guard hasPicture, let ended = track.startEndedAt else { return nil }
-        return LoadProgress(subject: subject, cause: cause, began: track.began, endedAt: ended)
+        return LoadProgress(channel: name, cause: cause, began: track.began, endedAt: ended)
     }
 
     enum Button: Equatable {
@@ -112,109 +104,60 @@ struct LoadProgress: Equatable {
             line = nil
         case .reconnect:
             guard now.timeIntervalSince(pictureLost ?? began) >= Self.dropShownAfter else { return nil }
-            line = reconnectLine
-        case .stall:
-            guard elapsed >= Self.dropShownAfter else { return nil }
-            line = nil
+            line = "Reconnecting to \(channel)…"
         }
         guard elapsed >= Self.slowAfter else { return Shown(ring: Self.ring, line: line) }
         return Shown(ring: Self.ring, line: line, details: ["\(slowLine) · \(Int(elapsed)) s"], tryAgain: true)
     }
 
-    private var reconnectLine: String? {
-        guard case let .channel(name) = subject else { return nil }
-        return "Reconnecting to \(name)…"
-    }
-
     private var slowLine: String {
-        switch (cause, subject) {
-        case (.server, .film):
-            wait == .start && stage != .starting
-                ? "Your server is slow to answer"
-                : "Your server is slow to send the film"
-        case (.server, .channel): "Your TV provider is slow to answer"
-        case (.channel, _): "The channel is slow to send"
-        case (.connection, _): "Your connection is slow"
-        case (.offline, _): "No internet connection"
+        switch cause {
+        case .server: "Your TV provider is slow to answer"
+        case .channel: "The channel is slow to send"
+        case .connection: "Your connection is slow"
+        case .offline: "No internet connection"
         }
     }
 
     private func failed(_ failure: Failure) -> Shown {
         let headline: String
         var details: [String] = []
-        switch (failure.kind, subject) {
-        case let (.noPicture, .channel(name)): headline = "\(name) isn’t sending a picture"
-        case let (.noPicture, .film(title)): headline = "Your server isn’t sending \(title)"
-        case let (.ended, .channel(name)), let (.ended, .film(name)): headline = "\(name) stopped before it started"
-        case let (.cutOff, .film(title)): headline = "Your server stopped sending \(title)"
-        case let (.cutOff, .channel(name)): headline = "\(name) stopped sending"
-        case let (.refused(why), .channel(name)), let (.refused(why), .film(name)):
-            headline = "\(name) didn’t open"
+        switch failure.kind {
+        case .noPicture: headline = "\(channel) isn’t sending a picture"
+        case .ended: headline = "\(channel) stopped before it started"
+        case let .refused(why):
+            headline = "\(channel) didn’t open"
             details.append(why)
         }
         let seconds = max(1, Int(failure.seconds.rounded()))
         details.append("The app tried \(failure.tries == 1 ? "once" : "\(failure.tries) times") in \(seconds) s.")
-        let others = if case .channel = subject { failure.otherChannels } else { false }
-        return Shown(line: headline, details: details, tryAgain: true, otherChannels: others)
+        return Shown(line: headline, details: details, tryAgain: true, otherChannels: failure.otherChannels)
     }
 }
 
 struct LoadTrack: Equatable {
     private(set) var began: Date
     private(set) var tries = 0
-    private(set) var stage: LoadProgress.Stage
+    private(set) var stage = LoadProgress.Stage.asking
     private(set) var addressed = false
     private(set) var dropped = false
-    /// The picture waiting: for data that stopped, or for a jump to land;
-    /// from the earlier of the two.
-    var stalledSince: Date? { [dataStoppedAt, jumpAskedAt].compactMap { $0 }.min() }
-    private var dataStoppedAt: Date?
-    private var jumpAskedAt: Date?
-    private var landedJumpAsked: Date?
-    private var landedAt: Date?
-    private var playerSeeking = false
+    private(set) var stalledSince: Date?
     private(set) var pictureLost: Date?
     /// The first picture of a start (not of a drop).
     private(set) var startEndedAt: Date?
-    private(set) var attempt: Int
     private var failedAt: Date?
     private var pictureOn = false
-    private let firstStage: LoadProgress.Stage
 
-    init(began: Date, stage: LoadProgress.Stage = .asking, attempt: Int = 0) {
+    init(began: Date) {
         self.began = began
-        self.stage = stage
-        self.attempt = attempt
-        firstStage = stage
     }
 
-    @discardableResult
-    mutating func asked(_ stage: LoadProgress.Stage = .asking, at now: Date) -> Int {
+    mutating func asked(at now: Date) {
         lost(at: now)
         tries += 1
-        self.stage = stage
+        stage = .asking
         addressed = false
         failedAt = nil
-        return nextAttempt()
-    }
-
-    /// A load that isn't a try of its own (another quality during play).
-    mutating func nextAttempt() -> Int {
-        attempt += 1
-        return attempt
-    }
-
-    func isCurrent(_ attempt: Int) -> Bool {
-        attempt == self.attempt
-    }
-
-    func stillFailed(_ attempt: Int) -> Bool {
-        isCurrent(attempt) && failedAt != nil
-    }
-
-    /// Try again: the wait starts over, the attempts keep counting.
-    mutating func restart(at now: Date) {
-        self = LoadTrack(began: now, stage: firstStage, attempt: attempt)
     }
 
     mutating func gotAddress() {
@@ -229,8 +172,7 @@ struct LoadTrack: Equatable {
         startEndedAt = dropped ? nil : now
         pictureOn = true
         dropped = false
-        dataStoppedAt = nil
-        jumpAskedAt = nil
+        stalledSince = nil
         pictureLost = nil
     }
 
@@ -245,64 +187,18 @@ struct LoadTrack: Equatable {
     }
 
     mutating func stalled(at now: Date) {
-        if dataStoppedAt == nil { dataStoppedAt = now }
+        if stalledSince == nil { stalledSince = now }
     }
 
     mutating func flowing() {
-        dataStoppedAt = nil
-    }
-
-    mutating func jumping(at now: Date) {
-        if jumpAskedAt == nil { jumpAskedAt = now }
-    }
-
-    /// At a read's end the player calls its jump landed a moment before
-    /// the end itself.
-    mutating func landed(at now: Date) {
-        if let jumpAskedAt {
-            landedJumpAsked = jumpAskedAt
-            landedAt = now
-        }
-        jumpAskedAt = nil
-    }
-
-    /// The player on its way to a jump, or done seeking (landed only once
-    /// the picture is back: `landed(at:)`). While choosing where to
-    /// jump its previews don't wait; a jump still on its way once the
-    /// choice ends does, from then.
-    mutating func seeking(_ on: Bool, choosing: Bool, at now: Date) {
-        playerSeeking = on
-        if on, !choosing { jumping(at: now) }
-    }
-
-    mutating func choosingEnded(at now: Date) {
-        if playerSeeking { jumping(at: now) }
+        stalledSince = nil
     }
 
     mutating func failed(at now: Date) {
         if failedAt == nil { failedAt = now }
     }
 
-    func end(at position: Double, of total: Double) -> FilmEnd {
-        let cutOff = stalledSince != nil || (total > 0 && total - position > Self.endSlack)
-        return FilmEnd(cutOff: cutOff, place: cutOff ? position : total)
-    }
-
-    mutating func cutOff(at now: Date) {
-        let justLanded = landedAt.map { now.timeIntervalSince($0) < 1 } == true ? landedJumpAsked : nil
-        let since = stalledSince ?? justLanded ?? now
-        lost(at: since)
-        failed(at: now)
-    }
-
-    static let endSlack = 10.0
-
     func failure(_ kind: LoadProgress.Failure.Kind, otherChannels: Bool = false) -> LoadProgress.Failure {
         .init(kind: kind, tries: max(tries, 1), seconds: (failedAt ?? began).timeIntervalSince(began), otherChannels: otherChannels)
     }
-}
-
-struct FilmEnd: Equatable {
-    var cutOff: Bool
-    var place: Double
 }

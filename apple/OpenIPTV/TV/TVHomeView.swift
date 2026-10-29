@@ -46,8 +46,6 @@ struct TVHomeView: View {
     @Environment(Preferences.self) private var prefs
     @Binding var playing: PlayerItem?
     @State private var path = NavigationPath()
-    @State private var loadingCard: String?
-    @State private var playError: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -74,7 +72,7 @@ struct TVHomeView: View {
                     if !rows.contains(where: { $0.title == "Continue Watching" }) { myListRow }
                     ForEach(rows) { row in
                         if row.title == "Continue Watching" {
-                            TVContinueRow(row: row, loadingCard: loadingCard, play: { play($0) }, open: { open($0) })
+                            TVContinueRow(row: row, play: { play($0) }, open: { open($0) })
                             myListRow
                         } else {
                             TVPosterRow(title: row.title, cards: row.cards, captions: .focused) { open($0) }
@@ -92,11 +90,6 @@ struct TVHomeView: View {
             .scrollClipDisabled()
             .navigationDestination(for: ShowRoute.self) { TVShowView(route: $0, playing: $playing) }
             .navigationDestination(for: MovieRoute.self) { TVMovieView(route: $0, playing: $playing) }
-            .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(playError ?? "")
-            }
         }
         // On the stack, not its first page: coming back from a title's page
         // isn't Home appearing. Home chosen in the tab bar (or at launch)
@@ -136,21 +129,8 @@ struct TVHomeView: View {
 
     /// Straight to the player: the episode being resumed, or the title.
     private func play(_ card: Card) {
-        guard loadingCard == nil else { return }
-        loadingCard = card.id
-        Task {
-            defer { loadingCard = nil }
-            do {
-                if let episode = card.episodeId {
-                    playing = .vod(try await model.playback(itemId: episode, kind: "Episode", title: card.title))
-                } else {
-                    playing = .vod(try await model.playback(itemId: card.id, kind: card.kind == "Series" ? "Series" : card.kind, title: card.title))
-                }
-            } catch is CancellationError {
-            } catch {
-                playError = error.localizedDescription
-            }
-        }
+        playing = .film(model.tap(card.episodeId ?? card.id, kind: card.episodeId == nil ? card.kind : "Episode", title: card.title,
+                                  images: card.images))
     }
 }
 
@@ -366,7 +346,6 @@ struct TVTitleArt: View {
 struct TVContinueRow: View {
     @Environment(AppModel.self) private var model
     let row: HomeRow
-    let loadingCard: String?
     let play: (Card) -> Void
     let open: (Card) -> Void
     @FocusState private var focused: String?
@@ -396,9 +375,6 @@ struct TVContinueRow: View {
                                     }
                                     .foregroundStyle(.white)
                                     .padding(20)
-                                }
-                                .overlay {
-                                    if loadingCard == card.id { ProgressView() }
                                 }
                                 .tvArtwork()
                                 .preparesAhead(card.playTarget, at: .continueWatching)

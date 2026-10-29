@@ -132,26 +132,10 @@ final class PlansTests: XCTestCase {
         XCTAssertEqual(server.order, ["m0", "m1", "m2"], "the card held on screen waited behind one only Home asked for")
     }
 
-    func testAStartsPlanThatDoesNotComeInTimeEndsInTheServerTookTooLong() async throws {
-        let server = Server(wait: 3)
-        let began = ContinuousClock.now
-        do {
-            _ = try await Plans.forStart(film, on: plans(server), failAfter: .seconds(0.5))
-            XCTFail("a plan 3 s away was waited for")
-        } catch {
-            XCTAssertEqual(error.localizedDescription, "The server took too long to answer.")
-        }
-        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1.5))
-    }
-
     func testAStartsPlanWithNoAnswerYetIsAskedOnceMoreAndTheFirstAnswerPlays() async throws {
-        let retried = Locked(0)
         let began = ContinuousClock.now
-        let played = try await Plans.forStart(film, on: plans(Server(waits: [1: 3])), retryAfter: .seconds(0.3), failAfter: .seconds(2)) {
-            retried.mutate { $0 += 1 }
-        }
+        let played = try await Plans.forStart(film, on: plans(Server(waits: [1: 3])), retryAfter: .seconds(0.3))
         XCTAssertEqual(played.playSessionId, "session 2")
-        XCTAssertEqual(retried.value, 1)
         XCTAssertLessThan(ContinuousClock.now - began, .seconds(1))
     }
 
@@ -164,7 +148,7 @@ final class PlansTests: XCTestCase {
         let quick = try await Plans.forStart(film, on: plans(Server(unlisted: [1])))
         XCTAssertEqual(quick.playSessionId, "session 2", "the track list asked again")
         let began = ContinuousClock.now
-        let late = try await Plans.forStart(film, on: plans(Server(waits: [2: 3], unlisted: [1])), failAfter: .seconds(0.5))
+        let late = try await Plans.forStart(film, on: plans(Server(waits: [2: 3], unlisted: [1])), retryAfter: .seconds(0.5))
         XCTAssertEqual(late.playSessionId, "session 1", "the plan in hand plays when asking again takes too long")
         XCTAssertLessThan(ContinuousClock.now - began, .seconds(1.5))
     }

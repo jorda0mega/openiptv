@@ -29,66 +29,6 @@ struct OpenIPTVApp: App {
 
 enum RootTab: Hashable { case home, live, search }
 
-/// A tap's plan still asked after a second, or failed: the loading progress
-/// over the page until the player opens.
-private struct FilmStartCover: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if let start = model.startProgress, start.stage == .askingServer, let title = start.title {
-            TimelineView(.periodic(from: start.began, by: 0.25)) { context in
-                if start.failure != nil || context.date.timeIntervalSince(start.began) >= LoadProgress.ringAfter {
-                    cover(start, title)
-                }
-            }
-        }
-    }
-
-    private func cover(_ start: StartProgress, _ title: String) -> some View {
-        let failure = start.failure.map {
-            LoadProgress.Failure(kind: .refused($0), tries: start.retried ? 2 : 1, seconds: Date().timeIntervalSince(start.began))
-        }
-        let load = LoadProgress(subject: .film(title), cause: NetworkStatus.shared.online ? .server : .offline,
-                                began: start.began, failure: failure)
-        let actions = LoadActions(tryAgain: { model.retryStart() })
-        return ZStack(alignment: .topLeading) {
-            StartBackdrop(images: start.backdrop, title: title)
-            #if os(tvOS)
-            Button { model.retryStart() } label: {
-                LoadProgressView(load: load, actions: actions, focused: failure == nil ? nil : .tryAgain)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .buttonStyle(Bare())
-            .onExitCommand { model.closeStart() }
-            #else
-            LoadProgressView(load: load, actions: actions)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-            Button { model.closeStart() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("Close")
-            .padding(.horizontal, 16)
-            #endif
-            #if DEBUG
-            Text(start.failure ?? "")
-                .font(.caption2)
-                .opacity(0.02)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("debug-start-error")
-            #endif
-        }
-    }
-
-    private struct Bare: ButtonStyle {
-        func makeBody(configuration: Configuration) -> some View { configuration.label }
-    }
-}
-
 struct RootView: View {
     /// A change made with no animation at all (the player's cover).
     static func quietly(_ change: () -> Void) {
@@ -146,7 +86,6 @@ struct RootView: View {
                 #endif
             }
         }
-        .overlay { FilmStartCover() }
         .fullScreenCover(item: $shown) { item in
             PlayerScreen(item: item) { RootView.quietly { shown = nil } }
         }
@@ -156,7 +95,7 @@ struct RootView: View {
         #if DEBUG
         .task {
             guard UserDefaults.standard.bool(forKey: "debugPlayCopyFilm"), let film = await model.debugFilmHeardOnlyInAnotherCopy() else { return }
-            playing = .vod(film)
+            playing = .film(.planned(film, held: .backdrop))
         }
         .task {
             if UserDefaults.standard.bool(forKey: "debugServerProbe") { await model.debugProbeServer() }
@@ -218,7 +157,7 @@ struct RootView: View {
         // and its progress kept on the server meanwhile.
         .task {
             let model = model
-            PictureInPicture.shared.restore = { playing = .vod($0) }
+            PictureInPicture.shared.restore = { playing = .film(.backFromPictureInPicture($0)) }
             PictureInPicture.shared.report = { playback, seconds, event in
                 Task { await model.report(playback, seconds: seconds, event: event) }
             }

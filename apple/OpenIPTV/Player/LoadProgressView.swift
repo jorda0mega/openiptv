@@ -36,23 +36,6 @@ extension LoadProgressView where Otherwise == EmptyView {
     }
 }
 
-/// Under a film's start: its backdrop, dimmed for the ring.
-struct StartBackdrop: View {
-    let images: [CardImage]
-    let title: String
-
-    var body: some View {
-        ZStack {
-            Color.black
-            CoverImage(images: images, title: title, backdrop: true)
-            Color.black.opacity(0.35)
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
 private struct LoadProgressShown: View {
     let shown: LoadProgress.Shown
     let actions: LoadActions

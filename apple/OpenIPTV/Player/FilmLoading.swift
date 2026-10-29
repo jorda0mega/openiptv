@@ -188,7 +188,7 @@ struct FilmLoading: Equatable {
         }
     }
 
-    var wantsBytes: Bool { waiting != nil }
+    var waiting: Bool { currentWait != nil }
 
     var nextChange: Date? { due?.at }
 
@@ -287,7 +287,7 @@ struct FilmLoading: Equatable {
     }
 
     private mutating func arrive(at now: Date) {
-        guard var wait = waiting?.wait else { return }
+        guard var wait = currentWait?.wait else { return }
         wait.arrivedAt = now
         if wait.ringAt != nil, !wait.lit {
             guard let dimmed = wait.litChangedAt, now >= dimmed + patience.shownAtLeast else { return setWait(wait) }
@@ -341,7 +341,7 @@ struct FilmLoading: Equatable {
         wait.ringAt == nil ? .nothing : .ring(steps: steps, lit: wait.lit)
     }
 
-    private var waiting: (wait: Wait, ringAfter: TimeInterval)? {
+    private var currentWait: (wait: Wait, ringAfter: TimeInterval)? {
         switch phase {
         case let .starting(wait): (wait, patience.ringAfter)
         case let .frozen(wait, _): (wait, patience.stallRingAfter)
@@ -350,7 +350,7 @@ struct FilmLoading: Equatable {
     }
 
     private var due: (at: Date, change: Change)? {
-        guard let (wait, ringAfter) = waiting else { return nil }
+        guard let (wait, ringAfter) = currentWait else { return nil }
         if wait.failing != nil { return (wait.lookShownAt + patience.shownAtLeast, .failing) }
         var changes: [(at: Date, change: Change)] = []
         if let ringAt = wait.ringAt {
@@ -370,7 +370,7 @@ struct FilmLoading: Equatable {
     }
 
     private mutating func advance(to now: Date) {
-        while let (at, change) = due, at <= now, var wait = waiting?.wait {
+        while let (at, change) = due, at <= now, var wait = currentWait?.wait {
             switch change {
             case .ring:
                 wait.ringAt = at

@@ -59,7 +59,6 @@ struct PlayCapsule: View {
     var progress: Double? = nil
     /// "18 min left", beside the bar.
     var left: String? = nil
-    let loading: Bool
     let action: () -> Void
 
     private var hasProgress: Bool { (progress ?? 0) > 0 }
@@ -72,14 +71,11 @@ struct PlayCapsule: View {
                 .padding(.horizontal, 28)
                 .frame(minWidth: 178)
                 .frame(height: 48)
-                .opacity(loading ? 0 : 1)
-                .overlay { if loading { ProgressView().tint(.black) } }
                 .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.black)
         .background(.white, in: .capsule)
-        .disabled(loading)
         // How far in, as wide as the button, under it.
         .overlay(alignment: .bottom) {
             if let progress, progress > 0 {

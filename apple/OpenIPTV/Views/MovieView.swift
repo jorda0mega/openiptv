@@ -16,8 +16,6 @@ struct MovieView: View {
     let route: MovieRoute
     @Binding var playing: PlayerItem?
 
-    @State private var loading = false
-    @State private var playError: String?
     @State private var pin: PagePin?
 
     @State private var expanded = false
@@ -32,7 +30,7 @@ struct MovieView: View {
                           title: route.title, line: genreLine) {
                     HStack(alignment: .top, spacing: 12) {
                         PlayCapsule(label: playLabel, progress: item?.resumeFraction, left: item?.timeLeft,
-                                    loading: loading, action: play)
+                                    action: play)
                         #if os(iOS)
                         MyListButton(item: item)
                         #endif
@@ -89,11 +87,6 @@ struct MovieView: View {
         .task { await load() }
         .preparesAhead(.playable(id: route.id, kind: "Movie"), at: .page)
         .navigationDestination(item: $person) { PersonView(person: $0, playing: $playing) }
-        .alert("Couldn't play", isPresented: Binding(get: { playError != nil }, set: { if !$0 { playError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(playError ?? "")
-        }
         .onAppear { model.movieOnScreen = route.id }
         .onDisappear { if model.movieOnScreen == route.id { model.movieOnScreen = nil } }
     }
@@ -145,16 +138,6 @@ struct MovieView: View {
     }
 
     private func play() {
-        guard !loading else { return }
-        loading = true
-        Task {
-            defer { loading = false }
-            do {
-                playing = .vod(try await model.playback(itemId: route.id, kind: "Movie", title: route.title))
-            } catch is CancellationError {
-            } catch {
-                playError = error.localizedDescription
-            }
-        }
+        playing = .film(model.tap(route.id, kind: "Movie", title: route.title))
     }
 }

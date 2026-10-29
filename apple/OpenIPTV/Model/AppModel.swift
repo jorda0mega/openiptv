@@ -511,14 +511,29 @@ final class AppModel {
     private static let maxWidth: Int? = 1920
     #endif
 
-    /// `title`: a tap outside the player, whose wait and failure show over
-    /// the page (RootView); a failure there waits for Try again or Close.
     func startBackdrop(_ itemId: String, episode: Bool) -> [CardImage] {
         emby?.startBackdrop(itemId: itemId, episode: episode) ?? []
     }
 
-    func playback(itemId: String, kind: String? = nil, title: String? = nil) async throws -> EmbyPlayback {
-        var started = Date()
+    func tap(_ itemId: String, kind: String?, title: String, images: [CardImage] = []) -> TappedFilm {
+        let tappedAt = Date()
+        let held = heldPicture(itemId)
+        let plan = Task { try await playback(itemId: itemId, kind: kind) }
+        let picture = held == .backdrop
+            ? (startBackdrop(itemId, episode: kind == "Episode") + images).lazy
+                .compactMap { URL(string: $0.url) }.compactMap { ImagePipeline.shared.cached($0) }.first
+            : nil
+        return TappedFilm(itemId: itemId, kind: kind, title: title, held: held, picture: picture, tappedAt: tappedAt, start: .asking(plan))
+    }
+
+    private func heldPicture(_ itemId: String) -> FirstPicture {
+        guard let warm, warm.key == itemId || warm.playback.itemId == itemId, warm.player.hasStarted, !warm.player.hasFailed
+        else { return .backdrop }
+        return .still(at: warm.playback.startSeconds ?? 0)
+    }
+
+    func playback(itemId: String, kind: String? = nil) async throws -> EmbyPlayback {
+        let started = Date()
         let first = !filmTapped
         filmTapped = true
         // Just closed here, and kept: no need to ask the server anything.
@@ -535,27 +550,7 @@ final class AppModel {
         lastPlanKept = prepared
         let planAtTheTap = plans.debugState(key, at: .continueWatching, .likely)
         #endif
-        var playback: EmbyPlayback
-        while true {
-            startClosed = false
-            startProgress = StartProgress(stage: .askingServer, tapped: .now, title: title,
-                                          backdrop: startBackdrop(itemId, episode: kind == "Episode"))
-            do {
-                playback = withLocalResume(try await Plans.forStart(key, on: plans) { [weak self] in self?.noteStartAskedAgain() })
-            } catch {
-                endStart(failure: SourceError.wrap(error).localizedDescription)
-                guard title != nil else { throw error }
-                guard !startClosed, await withCheckedContinuation({ startDecision = $0 }) else {
-                    startProgress = nil
-                    throw CancellationError()
-                }
-                started = Date()
-                continue
-            }
-            guard !startClosed else { throw CancellationError() }
-            break
-        }
-        noteStart(.openingFilm)
+        var playback = withLocalResume(try await Plans.forStart(key, on: plans))
         #if DEBUG
         lastStartAhead = FileStarts.shelf.debugState(FileStart(playback), at: .continueWatching, .likely) + "; " + AheadTaken.readout(playback.itemId)
         lastPlan = debugPlanClocks[key].map { clock in
@@ -1261,42 +1256,6 @@ final class AppModel {
         warmExpiry?.cancel()
         warm?.player.shutdown()
         warm = nil
-    }
-
-    /// The start under way, for the loading progress; nil once it plays or
-    /// the viewer leaves it, its failure kept till the next.
-    private(set) var startProgress: StartProgress?
-
-    func noteStart(_ stage: StartProgress.Stage) {
-        guard let start = startProgress, start.stage != stage, start.failure == nil else { return }
-        startProgress?.stage = stage
-    }
-
-    func noteStartAskedAgain() {
-        guard startProgress?.retried == false else { return }
-        startProgress?.retried = true
-    }
-
-    func endStart(failure: String? = nil) {
-        if let failure { startProgress?.failure = failure } else { startProgress = nil }
-    }
-
-    @ObservationIgnored private var startDecision: CheckedContinuation<Bool, Never>?
-    @ObservationIgnored private var startClosed = false
-
-    func retryStart() { decideStart(true) }
-
-    /// No player for this tap: closed while asking, or after it failed.
-    func closeStart() {
-        guard startDecision == nil else { return decideStart(false) }
-        startClosed = true
-        startProgress = nil
-    }
-
-    private func decideStart(_ again: Bool) {
-        let decision = startDecision
-        startDecision = nil
-        decision?.resume(returning: again)
     }
 
     #if DEBUG

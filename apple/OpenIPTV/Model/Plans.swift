@@ -24,17 +24,14 @@ enum Plans {
         Shelf(.init(lane: lane ?? .emby, lifetime: .seconds(180), failureKept: .zero), now: now, fetch: fetch)
     }
 
-    /// A start's plan, asked once more if it fails, and again for the
-    /// server's track list if it came without, while time is left; none by
-    /// `failAfter`: the server took too long.
-    static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, retryAfter: Duration = StartPatience.retryAfter,
-                         failAfter: Duration = StartPatience.failAfter,
-                         retried: @escaping @MainActor () -> Void = {}) async throws -> EmbyPlayback {
-        let deadline = ContinuousClock.now + failAfter
-        var playback = try await StartPatience.by(deadline) {
-            StartPatience.off ? try await taken(key, on: shelf) : try await asked(key, on: shelf, againAfter: retryAfter, retried: retried)
-        }
-        if !playback.listed, let listed = try? await StartPatience.by(deadline, { try await shelf.take(key) }) { playback = listed }
+    /// A start's plan, asked once more if it fails or has no answer by
+    /// `retryAfter`, and again for the server's track list if it came
+    /// without, for as long again at most. The film's loading decides when
+    /// the start has waited too long.
+    static func forStart(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>,
+                         retryAfter: Duration = StartPatience.retryAfter) async throws -> EmbyPlayback {
+        var playback = StartPatience.off ? try await taken(key, on: shelf) : try await asked(key, on: shelf, againAfter: retryAfter)
+        if !playback.listed, let listed = try? await StartPatience.by(.now + retryAfter, { try await shelf.take(key) }) { playback = listed }
         return playback
     }
 
@@ -48,14 +45,12 @@ enum Plans {
 
     /// The plan, and with none by `againAfter` a fresh ask beside it: the
     /// first answer plays. One that fails before then fails the start.
-    private static func asked(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, againAfter: Duration,
-                              retried: @escaping @MainActor () -> Void) async throws -> EmbyPlayback {
+    private static func asked(_ key: PlanKey, on shelf: Shelf<PlanKey, EmbyPlayback>, againAfter: Duration) async throws -> EmbyPlayback {
         let began = ContinuousClock.now
         return try await withThrowingTaskGroup(of: EmbyPlayback.self) { group in
             group.addTask { try await taken(key, on: shelf) }
             group.addTask {
                 try await Task.sleep(for: againAfter)
-                await retried()
                 return try await shelf.fresh(key)
             }
             defer { group.cancelAll() }
@@ -83,53 +78,9 @@ enum Plans {
     }
 }
 
-/// A start, for the loading progress: where it is, since the tap, whether
-/// it asked again, and why it failed. What is slow, from `causeAfter`, and
-/// whether it has failed, by `failAfter`, follow.
-struct StartProgress: Equatable, Sendable {
-    enum Stage: Equatable, Sendable {
-        /// The plan: the server says how to play it.
-        case askingServer
-        /// The player asks for the film's first bytes.
-        case openingFilm
-        /// The film has opened; its first frame is on its way.
-        case starting
-    }
-
-    enum Cause: Equatable, Sendable {
-        case serverSlowToAnswer, filmSlowToArrive, slowToStart
-    }
-
-    var stage: Stage
-    let tapped: ContinuousClock.Instant
-    var retried = false
-    var failure: String?
-    /// Nil for a start asked inside the player (the next episode, another copy).
-    var title: String?
-    var backdrop: [CardImage] = []
-    var began = Date()
-
-    func waited(at now: ContinuousClock.Instant = .now) -> Duration { now - tapped }
-
-    func cause(at now: ContinuousClock.Instant = .now) -> Cause? {
-        guard !failed(at: now), waited(at: now) >= StartPatience.causeAfter else { return nil }
-        return switch stage {
-        case .askingServer: .serverSlowToAnswer
-        case .openingFilm: .filmSlowToArrive
-        case .starting: .slowToStart
-        }
-    }
-
-    func failed(at now: ContinuousClock.Instant = .now) -> Bool {
-        failure != nil || (!StartPatience.off && waited(at: now) >= StartPatience.failAfter)
-    }
-}
-
-/// How long each part of a start may take before the viewer is told: a
-/// cause shows from 8 s, a step with no answer is asked once more at 15 s,
-/// and the start fails at 30 s.
+/// How long each part of a start may take: a step with no answer is asked
+/// once more at 15 s, and a channel's start fails at 30 s.
 enum StartPatience {
-    static let causeAfter = Duration.seconds(8)
     static let retryAfter = Duration.seconds(15)
     /// A read's first byte took up to 9 s on a busy server.
     static let firstByte = Duration.seconds(15)
