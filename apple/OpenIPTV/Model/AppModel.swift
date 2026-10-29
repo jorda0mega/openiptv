@@ -1206,7 +1206,7 @@ final class AppModel {
         let player = MPVPlayer(options: options + [("pause", "yes")], hardwareDecoding: hardwareDecoding,
                                picture: .film(playback.surface))
         player.prepareOffscreen()
-        player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true, readahead: .warm,
+        player.load(playback.url, headers: playback.headers, start: playback.startSeconds, film: playback.itemId, readahead: .warm,
                     tracks: playback.tracks)
         player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
         player.addCopies(playback.subtitleCopies)

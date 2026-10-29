@@ -26,13 +26,13 @@ enum FilmStream: Sendable {
     /// What the player opens for a converted version from `second`: nil
     /// when the relay can't serve its list. The relay alone asks the server,
     /// with `headers`.
-    static func converted(_ url: URL, _ list: ConvertedPlaylist, at second: Double, headers: [String], old: Bool = oldConvertedStart,
-                          serve: (ConvertedPlaylist.Listed, [String], URL) -> URL? = StreamRelay.shared.localURL(serving:headers:given:))
+    static func converted(_ url: URL, _ list: ConvertedPlaylist, at second: Double, headers: [String], film: String, old: Bool = oldConvertedStart,
+                          serve: (ConvertedPlaylist.Listed, [String], URL, String) -> URL? = StreamRelay.shared.localURL(serving:headers:given:film:))
         -> (address: URL, headers: [String], start: Double?, stream: FilmStream)? {
         // From the segment's start, at most a segment before `second`: a
         // jump to `second` read the segment again for a keyframe in it.
         let listed = list.listed(from: old ? 0 : second)
-        guard let local = serve(listed, headers, url) else { return nil }
+        guard let local = serve(listed, headers, url, film) else { return nil }
         return (local, [], old ? second : nil, .listed(url, list, clockStart: listed.clockStart))
     }
 }
@@ -41,8 +41,8 @@ enum FilmStream: Sendable {
 extension MPVPlayer {
     func openConverted(_ url: URL, _ list: ConvertedPlaylist, at second: Double, for playback: EmbyPlayback,
                        attempt: @autoclosure () -> Int? = nil) -> FilmStream? {
-        guard let opening = FilmStream.converted(url, list, at: second, headers: playback.fallbackHeaders) else { return nil }
-        load(opening.address, headers: opening.headers, start: opening.start, file: false, converting: !FilmStream.oldConvertedStart,
+        guard let opening = FilmStream.converted(url, list, at: second, headers: playback.fallbackHeaders, film: playback.itemId) else { return nil }
+        load(opening.address, headers: opening.headers, start: opening.start, converting: !FilmStream.oldConvertedStart,
              tracks: playback.tracks, sameFilm: opening.stream.clockStart, attempt: attempt())
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "debugRedirectCounts") {

@@ -1150,7 +1150,7 @@ struct MoviePlayerView: View {
             // second, while a server-converted version takes 5-15 s to
             // begin (and every seek restarts it). Quality only drops if the
             // original actually stalls.
-            player.load(playback.url, headers: playback.headers, start: playback.startSeconds, file: true,
+            player.load(playback.url, headers: playback.headers, start: playback.startSeconds, film: playback.itemId,
                         readahead: NetworkStatus.shared.fileReadahead, tracks: playback.tracks,
                         attempt: loading.nextAttempt())
             player.addSubtitles(playback.subtitleFiles, references: playback.subtitleReferences, speech: playback.speechStretches)
@@ -1245,7 +1245,7 @@ struct MoviePlayerView: View {
     private func playFile(_ url: URL, headers: [String], at: Double?, readahead: MPVPlayer.Readahead = .live, attempt: Int) {
         convertedOpen?.cancel()
         stream = .whole
-        player?.load(url, headers: headers, start: at, file: true, readahead: readahead, tracks: playback.tracks, sameFilm: 0,
+        player?.load(url, headers: headers, start: at, film: playback.itemId, readahead: readahead, tracks: playback.tracks, sameFilm: 0,
                      attempt: attempt)
     }
 

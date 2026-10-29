@@ -60,7 +60,7 @@ private final class FilmServer: @unchecked Sendable {
 final class FirstByteTests: XCTestCase {
     private func read(through relay: StreamRelay, _ server: FilmServer) async throws -> (Data, URLResponse) {
         let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
-        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [], film: film.itemId)))
         read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
         read.timeoutInterval = 5
         return try await URLSession(configuration: .ephemeral).data(for: read)
@@ -96,7 +96,7 @@ final class FirstByteTests: XCTestCase {
         let relay = StreamRelay()
         relay.firstByteWait = .milliseconds(500)
         let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
-        let local = try XCTUnwrap(relay.localURL(for: film.url, headers: []))
+        let local = try XCTUnwrap(relay.localURL(for: film.url, headers: [], film: film.itemId))
         let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: UInt16(try XCTUnwrap(local.port)))!, using: .tcp)
         let began = ContinuousClock.now
         let answer = await withCheckedContinuation { (done: CheckedContinuation<Data, Never>) in
@@ -125,7 +125,7 @@ final class RelayArrivedTests: XCTestCase {
         let relay = StreamRelay()
         let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
         func read() async throws -> Int {
-            var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+            var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [], film: film.itemId)))
             read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
             read.timeoutInterval = 5
             return try await URLSession(configuration: .ephemeral).data(for: read).0.count
@@ -144,7 +144,7 @@ final class RelayArrivedTests: XCTestCase {
         let server = try FilmServer(size: 64 << 20, delay: 0)
         let relay = StreamRelay()
         let other = URL(string: server.film.absoluteString.replacingOccurrences(of: "/m1/", with: "/m2/"))!
-        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: other, headers: [])))
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: other, headers: [], film: "m2")))
         read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
         read.timeoutInterval = 5
         let bytes = try await URLSession(configuration: .ephemeral).data(for: read).0.count
@@ -181,7 +181,7 @@ final class KeptStartUseTests: XCTestCase {
         let ahead = Task { await relay.fetchStart(FileStart(film)) }
         for _ in 0..<100 where server.ranges.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(server.ranges, ["bytes=0-524287"], "the fetch ahead didn't begin with the first read")
-        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [], film: film.itemId)))
         read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
         let (bytes, response) = try await URLSession(configuration: .ephemeral).data(for: read)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 206)
@@ -200,7 +200,7 @@ final class KeptStartUseTests: XCTestCase {
         relay.stopAhead(keeping: film.url)
         let ahead = Task { await relay.fetchStart(FileStart(film)) }
         for _ in 0..<100 where server.ranges.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
-        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [], film: film.itemId)))
         read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
         let (bytes, _) = try await URLSession(configuration: .ephemeral).data(for: read)
         XCTAssertEqual(bytes.count, 524_288)
@@ -216,7 +216,7 @@ final class KeptStartUseTests: XCTestCase {
         let film = EmbyPlayback(itemId: "m1", title: "Film", subtitle: nil, url: server.film, durationSeconds: 7200)
         let ahead = Task { await relay.fetchStart(FileStart(film)) }
         for _ in 0..<100 where server.ranges.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
-        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [])))
+        var read = URLRequest(url: try XCTUnwrap(relay.localURL(for: film.url, headers: [], film: film.itemId)))
         read.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
         read.timeoutInterval = 6
         let began = ContinuousClock.now

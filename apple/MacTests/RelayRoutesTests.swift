@@ -5,7 +5,7 @@ import XCTest
 /// address however many others are made meanwhile.
 final class RelayRoutesTests: XCTestCase {
     private func route(_ n: Int) -> RelayRoutes.Route {
-        (URL(string: "https://server.example/Videos/\(n)/stream")!, [])
+        (URL(string: "https://server.example/Videos/\(n)/stream")!, [], "\(n)")
     }
 
     /// Regression: past 16 addresses, all were dropped, the playing film's
