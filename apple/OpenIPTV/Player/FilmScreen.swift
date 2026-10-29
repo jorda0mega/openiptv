@@ -102,6 +102,9 @@ private struct FilmScreen: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            #if os(iOS)
+            if playback == nil { Color.clear.statusBarHidden() }
+            #endif
             if let playback {
                 MoviePlayerView(playback: playback, held: tapped.held, loading: $loading, tryAgainAsked: tryAgainAsked,
                                 closeAsked: closeAsked, switchTo: switchTo)
