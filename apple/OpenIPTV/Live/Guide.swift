@@ -100,11 +100,16 @@ actor GuideStore {
         prepareSearchInBackground()
         // Saved off this actor too.
         let saved = merged, url = cacheURL
-        Task.detached(priority: .utility) {
+        Task.detached(priority: .utility) { [weak self] in
             if let data = try? JSONEncoder().encode(Cache(fetchedAt: at, programmes: saved)) {
                 try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             }
+            await self?.dropSaved(ifForgottenSince: asked)
         }
+    }
+
+    private func dropSaved(ifForgottenSince asked: Int) {
+        if forgotten != asked { try? FileManager.default.removeItem(at: cacheURL) }
     }
 
     /// O(log n) lookup in the sorted list for one channel.
