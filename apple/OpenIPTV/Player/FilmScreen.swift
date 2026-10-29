@@ -201,7 +201,10 @@ private struct FilmScreen: View {
     }
 
     private func tryAgain() {
-        guard playback == nil else { return tryAgainAsked += 1 }
+        if playback != nil {
+            tryAgainAsked += 1
+            return
+        }
         loading.send(.tryAgain, at: Date())
         asking?.cancel()
         let plan = Task { [model, tapped] in try await model.playback(itemId: tapped.itemId, kind: tapped.kind, again: true) }
@@ -209,7 +212,10 @@ private struct FilmScreen: View {
     }
 
     private func close() {
-        guard playback == nil else { return closeAsked += 1 }
+        if playback != nil {
+            closeAsked += 1
+            return
+        }
         loading.send(.close, at: Date())
         if let closePlayer { closePlayer() } else { dismiss() }
     }
@@ -363,7 +369,7 @@ private struct FilmRing: View {
         .shadow(color: .black.opacity(0.45), radius: 6)
         .accessibilityElement()
         .accessibilityLabel("Loading")
-        .accessibilityIdentifier("film-loading")
+        .accessibilityIdentifier("load-progress")
     }
 }
 

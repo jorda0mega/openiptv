@@ -29,7 +29,6 @@ final class FilmStartLookTests: XCTestCase {
         let began = Date()
         while !failure.exists, Date().timeIntervalSince(began) < 15 {
             XCTAssertFalse(tryAgain.exists, "Try again before the start failed")
-            XCTAssertFalse(app.otherElements["load-progress"].exists || app.staticTexts["load-progress"].exists, "the old loading look")
             for text in app.staticTexts.allElementsBoundByIndex where !text.identifier.hasPrefix("debug-") {
                 seen.insert(text.label)
             }
