@@ -25,6 +25,7 @@ struct WindowFlow: Equatable, Sendable {
         case didStop, restoreTimedOut
         case screenLetGo
         case otherTitle
+        case accountClosed
         case filmEnded
     }
 
@@ -94,7 +95,7 @@ struct WindowFlow: Equatable, Sendable {
             return [.stopFilm, .releaseController]
         case (.windowed(screenClosed: true), .filmEnded):
             return [.stopWindow]
-        case (.windowed(screenClosed: true), .otherTitle):
+        case (.windowed(screenClosed: true), .otherTitle), (.windowed(screenClosed: true), .accountClosed):
             phase = .none
             return [.stopWindow, .stopFilm, .releaseController]
 
@@ -122,7 +123,8 @@ struct WindowFlow: Equatable, Sendable {
             phase = .awaitingScreen(reclaimed: true, restoreWaiting: false, windowUp: windowUp)
             return restoreWaiting ? [.finishRestore(false)] : []
         case let (.awaitingScreen(false, restoreWaiting, windowUp), .restoreTimedOut),
-             let (.awaitingScreen(false, restoreWaiting, windowUp), .otherTitle):
+             let (.awaitingScreen(false, restoreWaiting, windowUp), .otherTitle),
+             let (.awaitingScreen(false, restoreWaiting, windowUp), .accountClosed):
             phase = .none
             return (restoreWaiting ? [.finishRestore(false)] : []) + (windowUp ? [.stopWindow] : []) + [.stopFilm, .releaseController]
         case let (.awaitingScreen(true, restoreWaiting, windowUp), .screenLetGo):
