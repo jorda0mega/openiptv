@@ -11,7 +11,8 @@ final class ServerTurns: @unchecked Sendable {
         static var current: Rank { Task.currentPriority < .utility ? .later : .ahead }
     }
 
-    /// One fetch ahead (a shelf's job), and every request made for it, its own tasks' too: wanted, they go at once.
+    /// A shelf's job fetched ahead. Once it is wanted (a tap takes it, its card turns likely), every request made for
+    /// it goes at once, those from tasks of its own too.
     final class Fetch: @unchecked Sendable {
         private let lock = NSLock()
         private var isWanted = false
@@ -94,7 +95,11 @@ final class ServerTurns: @unchecked Sendable {
                         waiting.append(Waiter(id: id, server: server, rank: rank, go: go))
                         return false
                     }
-                    if cancelled { go.resume(throwing: CancellationError()) } else if Task.currentPriority > .utility { wanted(id) } else {
+                    if cancelled {
+                        go.resume(throwing: CancellationError())
+                    } else if Task.currentPriority > .utility {
+                        wanted(id)
+                    } else {
                         Self.fetch?.whenWanted { [self] in wanted(id) }
                         admit()
                     }
