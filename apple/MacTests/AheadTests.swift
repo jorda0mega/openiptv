@@ -100,6 +100,21 @@ final class AheadTests: XCTestCase {
 
     private let card = Target.playable(id: "m5", kind: "Movie")
 
+    func testWorkHeldForACardIsFetchedAheadSoItTakesTheServersTurns() async {
+        var priorities: [TaskPriority] = []
+        let ahead = Ahead(Ahead.Work(page: { _, _ in priorities.append(Task.currentPriority) }, plan: { _, _ in
+            priorities.append(Task.currentPriority)
+            return nil
+        }, fileStart: { _, _ in }, connection: { _, _ in }, subtitle: { _, _ in }, previews: { _, _ in }),
+        platform: .phone, sleep: { _ in })
+        let held = Task(priority: .userInitiated) { ahead.hold(only: [card], at: .homeForecast) }
+        await held.value
+        let asked = await eventually { !priorities.isEmpty }
+        XCTAssertTrue(asked)
+        XCTAssertTrue(priorities.allSatisfy { $0 <= .utility }, priorities.map { "\($0.rawValue)" }.joined(separator: ", "))
+        ahead.hold(only: [], at: .homeForecast)
+    }
+
     @MainActor
     private final class Rests {
         var started: [String] = []
