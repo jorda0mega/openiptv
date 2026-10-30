@@ -15,8 +15,18 @@ final class ServerTurns: @unchecked Sendable {
     /// it goes at once, those from tasks of its own too.
     final class Fetch: @unchecked Sendable {
         private let lock = NSLock()
+        enum Need: Int, Comparable {
+            case ahead, soon, now
+
+            static func < (a: Need, b: Need) -> Bool { a.rawValue < b.rawValue }
+        }
+
         private var isWanted = false
         private var waiting: [@Sendable () -> Void] = []
+
+        func raise(to need: Need) {
+            if need == .now { want() }
+        }
 
         func want() {
             let going: [@Sendable () -> Void] = lock.withLock {
@@ -67,7 +77,7 @@ final class ServerTurns: @unchecked Sendable {
         "\(url?.host() ?? ""):\(url?.port ?? 0)"
     }
 
-    func taking<T>(_ rank: Rank, at server: String, _ work: (_ wanted: Bool) async throws -> T) async throws -> T {
+    func taking<T>(_ rank: Rank, at server: String, owner: Int?, _ work: (_ wanted: Bool) async throws -> T) async throws -> T {
         if Self.off { return try await work(false) }
         if try await turn(rank, at: server) { return try await work(true) }
         defer { finished(rank, at: server) }

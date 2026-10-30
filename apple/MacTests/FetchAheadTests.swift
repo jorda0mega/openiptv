@@ -137,7 +137,7 @@ final class FetchAheadTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(50))
         for n in 0..<3 {
             Task(priority: .background) {
-                try await turns.taking(.later, at: "emby") { _ in
+                try await turns.taking(.later, at: "emby", owner: nil) { _ in
                     later.mutate { $0.now += 1; $0.most = max($0.most, $0.now) }
                     log.mutate { $0.append("later \(n)") }
                     try await Task.sleep(for: .milliseconds(40))
@@ -147,7 +147,7 @@ final class FetchAheadTests: XCTestCase {
         }
         for n in 0..<5 {
             Task(priority: .utility) {
-                try await turns.taking(.ahead, at: "emby") { _ in
+                try await turns.taking(.ahead, at: "emby", owner: nil) { _ in
                     log.mutate { $0.append("ahead \(n)") }
                     try await Task.sleep(for: .milliseconds(40))
                     log.mutate { $0.append("ahead \(n) done") }
@@ -195,14 +195,171 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertLessThan(ContinuousClock.now - began, .seconds(1), "a likely card's work waited its turn")
     }
 
+    private var open: Conditions {
+        Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
+                   memoryWarned: false, freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
+    }
+
+    @MainActor
+    func testALikelyCardsPlanWaitsForAStartLikeEverythingFetchedAhead() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/item")!
+        let open = open
+        let shelf = Shelf<String, Data>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
+            try await HTTP.data(URLRequest(url: url))
+        }
+        let start = Task { await HTTP.turns.whileStarting() }
+        defer { start.cancel() }
+        try await Task.sleep(for: .milliseconds(50))
+        let likely = Task { await shelf.warm("card", for: Interest(at: .continueWatching, .likely)) }
+        defer { likely.cancel() }
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(arrived.value, 0, "a likely card's plan asked while a start waited")
+    }
+
+    func testALikelyCardsRequestGoesFirstOnceTheStartPlays() async throws {
+        let turns = ServerTurns(atOnce: 1)
+        let log = Locked<[String]>([])
+        let start = Task { await turns.whileStarting() }
+        try await Task.sleep(for: .milliseconds(50))
+        let likely = ServerTurns.Fetch()
+        for (name, fetch) in [("glance 1", nil), ("glance 2", nil), ("likely", likely)] as [(String, ServerTurns.Fetch?)] {
+            Task(priority: .utility) {
+                try await ServerTurns.$fetch.withValue(fetch) {
+                    try await turns.taking(.current, at: "emby", owner: nil) { _ in
+                        log.mutate { $0.append(name) }
+                        try await Task.sleep(for: .milliseconds(20))
+                    }
+                }
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        likely.raise(to: .soon)
+        start.cancel()
+        for _ in 0..<100 where log.value.count < 3 { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(log.value, ["likely", "glance 1", "glance 2"])
+    }
+
+    func testAPlanAskedAheadTakesItsTurnForItsPlaybackInfoToo() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        var info = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/Items/m1/PlaybackInfo")!)
+        info.httpMethod = "POST"
+        let start = Task { await HTTP.turns.whileStarting() }
+        try await Task.sleep(for: .milliseconds(50))
+        let done = Locked(false)
+        Task(priority: .utility) {
+            _ = try? await HTTP.data(info)
+            done.mutate { $0 = true }
+        }
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(arrived.value, 0, "a PlaybackInfo fetched ahead went while a start waited")
+        start.cancel()
+        for _ in 0..<50 where !done.value { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(arrived.value, 1, "asked once the start played")
+    }
+
+    @MainActor
+    func testALikelyTicketIsNotHeldBehindGlancedWorkFillingTheLane() async throws {
+        let open = open
+        let lane = Lane(.light, atOnce: 2) { open }
+        let (held, release) = AsyncStream.makeStream(of: Void.self)
+        defer { release.finish() }
+        for _ in 0..<2 {
+            Task { await lane.whenAllowed(for: Interest(at: .posterRow, .glance)) { for await _ in held {} } }
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let ran = Locked(false)
+        let likely = Task { await lane.whenAllowed(for: Interest(at: .continueWatching, .likely)) { ran.mutate { $0 = true } } }
+        defer { likely.cancel() }
+        for _ in 0..<25 where !ran.value { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(ran.value, "a likely card's plan waited for glanced pages")
+    }
+
+    func testBackgroundWorkKeepsGoingOneAtATimeWhileFetchedAheadWorkFillsTheTurns() async throws {
+        let turns = ServerTurns(atOnce: 2)
+        let pages = Locked((now: 0, most: 0, done: 0))
+        let (held, release) = AsyncStream.makeStream(of: Void.self)
+        defer { release.finish() }
+        for _ in 0..<3 {
+            Task(priority: .utility) { try await turns.taking(.ahead, at: "emby", owner: nil) { _ in for await _ in held {} } }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<3 {
+            Task(priority: .background) {
+                try await turns.taking(.later, at: "emby", owner: nil) { _ in
+                    pages.mutate { $0.now += 1; $0.most = max($0.most, $0.now) }
+                    try await Task.sleep(for: .milliseconds(20))
+                    pages.mutate { $0.now -= 1; $0.done += 1 }
+                }
+            }
+        }
+        for _ in 0..<25 where pages.value.done < 3 { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(pages.value.done, 3, "the library's pages waited for every fetch ahead")
+        XCTAssertEqual(pages.value.most, 1)
+    }
+
+    func testAWaitingLibraryLoadGoesAtOnceWhenSearchWantsIt() async throws {
+        let turns = ServerTurns(atOnce: 4)
+        let start = Task { await turns.whileStarting() }
+        defer { start.cancel() }
+        try await Task.sleep(for: .milliseconds(50))
+        let load = ServerTurns.Fetch(), pages = Locked(0)
+        for _ in 0..<3 {
+            Task(priority: .background) {
+                try await ServerTurns.$fetch.withValue(load) {
+                    try await turns.taking(.later, at: "emby", owner: nil) { _ in pages.mutate { $0 += 1 } }
+                }
+            }
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(pages.value, 0)
+        load.raise(to: .now)
+        for _ in 0..<25 where pages.value < 3 { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(pages.value, 3, "Search waited for the start")
+    }
+
+    @MainActor
+    func testASignedOutAccountsWaitingRequestNeverGoesOut() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        let account = EmbyAccount(serverURL: URL(string: "http://127.0.0.1:\(server.port)")!, serverName: "Mock", userId: "U1",
+                                  userName: "tester", accessToken: "signed-out")
+        let scope = AccountScope(client: EmbyClient(account: account, deviceId: "device"), readsSaved: false)
+        var noted = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/emby/DisplayPreferences/zapline-started")!)
+        noted.setValue("signed-out", forHTTPHeaderField: "X-Emby-Token")
+        let start = Task { await HTTP.turns.whileStarting() }
+        try await Task.sleep(for: .milliseconds(50))
+        let asked = noted
+        Task(priority: .utility) { _ = try? await HTTP.data(asked) }
+        try await Task.sleep(for: .milliseconds(100))
+        scope.close()
+        start.cancel()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(arrived.value, 0, "the old account's request went out after sign-out")
+    }
+
     func testEachServerHasItsOwnTurns() async throws {
         let turns = ServerTurns(atOnce: 1)
         let held = AsyncStream<Void>.makeStream()
-        let emby = Task { try await turns.taking(.ahead, at: "emby") { _ in for await _ in held.stream {} } }
+        let emby = Task { try await turns.taking(.ahead, at: "emby", owner: nil) { _ in for await _ in held.stream {} } }
         defer { held.continuation.finish() }
         try await Task.sleep(for: .milliseconds(50))
         let began = ContinuousClock.now
-        try await turns.taking(.ahead, at: "provider") { _ in }
+        try await turns.taking(.ahead, at: "provider", owner: nil) { _ in }
         XCTAssertLessThan(ContinuousClock.now - began, .milliseconds(200))
         held.continuation.finish()
         try await emby.value

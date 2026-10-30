@@ -298,7 +298,7 @@ enum HTTP {
     /// prefetched), it goes at once, on the main connections.
     private static func fetchAhead(_ request: URLRequest, _ measured: (any URLSessionTaskDelegate)?,
                                    on aheadSession: URLSession) async throws -> (Data, URLResponse) {
-        try await turns.taking(.current, at: ServerTurns.server(of: request.url)) { wanted in
+        try await turns.taking(.current, at: ServerTurns.server(of: request.url), owner: nil) { wanted in
             try await (wanted ? session : aheadSession).data(for: request, delegate: measured)
         }
     }
