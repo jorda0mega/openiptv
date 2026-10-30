@@ -680,7 +680,7 @@ struct SearchView: View {
         // so tapping it starts at once.
         if let top = local.titles.first {
             let likely = Array(local.titles.prefix(3))
-            Task {
+            Task(priority: .utility) {
                 try? await Task.sleep(for: .milliseconds(450))
                 guard !Task.isCancelled, query == q else { return }
                 // The first few results' pages and pictures too, so the one
