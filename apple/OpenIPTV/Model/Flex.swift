@@ -111,6 +111,7 @@ enum SourceError: LocalizedError {
 enum HTTP {
     static let session = make(connections: 8)
     static let ahead = make(connections: 4)
+    static let turns = ServerTurns(atOnce: 4)
     /// Emby converts a stretch of the film's sound for each answer.
     static let patient = make(connections: 2, wait: 300)
     /// Emby reads the whole film to take out one of its subtitle tracks
@@ -291,28 +292,13 @@ enum HTTP {
         }
     }
 
-    /// A request fetched ahead, on the prefetch connections, where it may
-    /// wait its turn. If something on screen starts waiting for it (its
-    /// task's priority rises: a page opened while it was being prefetched),
-    /// it's asked again on the main connections, and the first answer wins.
+    /// A request fetched ahead, on the prefetch connections, once it has its turn (ServerTurns). If something on
+    /// screen starts waiting for it before then (its task's priority rises: a page opened while it was being
+    /// prefetched), it goes at once, on the main connections.
     private static func fetchAhead(_ request: URLRequest, _ measured: (any URLSessionTaskDelegate)?,
                                    on aheadSession: URLSession) async throws -> (Data, URLResponse) {
-        let (escalated, signal) = AsyncStream<Void>.makeStream()
-        defer { signal.finish() }
-        return try await withTaskPriorityEscalationHandler {
-            try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
-                group.addTask { try await aheadSession.data(for: request, delegate: measured) }
-                group.addTask {
-                    var wanted = escalated.makeAsyncIterator()
-                    guard await wanted.next() != nil else { throw CancellationError() }
-                    return try await session.data(for: request, delegate: measured)
-                }
-                defer { group.cancelAll() }
-                guard let first = try await group.next() else { throw CancellationError() }
-                return first
-            }
-        } onPriorityEscalated: { _, now in
-            if now > .utility { signal.yield() }
+        try await turns.taking(.current, at: ServerTurns.server(of: request.url)) { wanted in
+            try await (wanted ? session : aheadSession).data(for: request, delegate: measured)
         }
     }
 

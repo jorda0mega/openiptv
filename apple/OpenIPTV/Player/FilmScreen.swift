@@ -145,6 +145,9 @@ private struct FilmScreen: View {
                 try? await Task.sleep(for: .seconds(FilmLoading.readEvery))
             }
         }
+        .task(id: loading.waiting) {
+            if loading.waiting { await HTTP.turns.whileStarting() }
+        }
         .onChange(of: NetworkStatus.shared.online, initial: true) { _, online in loading.send(.online(online), at: Date()) }
         .onChange(of: loading.look.failure) { _, failure in
             guard failure != nil, playback == nil else { return }

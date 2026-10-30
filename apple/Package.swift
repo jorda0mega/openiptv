@@ -36,6 +36,7 @@ let package = Package(
                 "Model/Keychain.swift",
                 "Model/PictureIndex.swift",
                 "Model/Plans.swift",
+                "Model/ServerTurns.swift",
                 "Model/Preferences.swift",
                 "Model/Sources.swift",
                 "Player/AheadTaken.swift",

@@ -446,6 +446,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             throw error
         case let .waiting(job)?, let .fetching(job)?:
             policy.lane.playNow(job.ticket)
+            job.task?.escalatePriority(to: Task.currentPriority)
             return try await wait(for: job, key)
         case nil:
             return try await wait(for: start(key, Lane.Ticket(nil)), key)
