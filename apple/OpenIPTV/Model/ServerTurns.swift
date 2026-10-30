@@ -3,12 +3,14 @@ import Foundation
 /// HTTP/2 sends every request at once over one connection, so the connections per server cap nothing there:
 /// what's fetched ahead takes a turn here instead.
 final class ServerTurns: @unchecked Sendable {
-    enum Rank: Int, Comparable {
-        case ahead, later
+    enum Rank: Int, Comparable, Sendable {
+        case soon, ahead, later
 
         static func < (a: Rank, b: Rank) -> Bool { a.rawValue < b.rawValue }
 
-        static var current: Rank { Task.currentPriority < .utility ? .later : .ahead }
+        @TaskLocal static var given: Rank?
+
+        static var current: Rank { given ?? (Task.currentPriority < .utility ? .later : .ahead) }
     }
 
     private struct Waiter {
@@ -97,8 +99,8 @@ final class ServerTurns: @unchecked Sendable {
             func fits(_ waiter: Waiter) -> Bool {
                 let busy = underWay[waiter.server, default: [:]].values.reduce(0, +)
                 switch waiter.rank {
-                case .ahead: return busy < atOnce
-                case .later: return busy == 0 && !waiting.contains { $0.server == waiter.server && $0.rank == .ahead }
+                case .soon, .ahead: return busy < atOnce
+                case .later: return busy == 0 && !waiting.contains { $0.server == waiter.server && $0.rank < .later }
                 }
             }
             while starts == 0, let next = waiting.indices.filter({ fits(waiting[$0]) }).min(by: { waiting[$0].rank < waiting[$1].rank }) {

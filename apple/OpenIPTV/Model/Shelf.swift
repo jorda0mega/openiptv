@@ -564,7 +564,10 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             stop(job)
             entries[key] = nil
         }
-        job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in await run(job, key) }
+        let rank: ServerTurns.Rank? = (ticket.interest?.likelihood ?? .glance) >= .likely ? .soon : nil
+        job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in
+            await ServerTurns.Rank.$given.withValue(rank) { await run(job, key) }
+        }
         entries[key] = .waiting(job)
         return job
     }
