@@ -98,6 +98,38 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertLessThan(ContinuousClock.now - tapped, .seconds(1), "the tap waited on its own start's hold")
     }
 
+    @MainActor
+    func testAPlanAskedFromATaskOfItsOwnThatATapTakesGoesAtOnceWhileTheStartHoldsTheTurns() async throws {
+        let server = try LocalServer { _ in (200, [:], "ok") }
+        defer { server.stop() }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/item")!
+        let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
+                              memoryWarned: false, freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
+        let shelf = Shelf<String, Data>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
+            let (answers, answer) = AsyncStream.makeStream(of: Data.self)
+            Task {
+                answer.yield((try? await HTTP.data(URLRequest(url: url))) ?? Data())
+                answer.finish()
+            }
+            for await data in answers { return data }
+            return Data()
+        }
+        let start = Task { await HTTP.turns.whileStarting() }
+        let giveUp = Task {
+            try await Task.sleep(for: .seconds(3))
+            start.cancel()
+        }
+        defer { giveUp.cancel(); start.cancel() }
+        try await Task.sleep(for: .milliseconds(50))
+        let warming = Task { await shelf.warm("film", for: Interest(at: .continueWatching, .glance)) }
+        defer { warming.cancel() }
+        try await Task.sleep(for: .milliseconds(200))
+        let tapped = ContinuousClock.now
+        let plan = try await shelf.take("film")
+        XCTAssertEqual(String(decoding: plan, as: UTF8.self), "ok")
+        XCTAssertLessThan(ContinuousClock.now - tapped, .seconds(1), "the tap waited on its own start's hold")
+    }
+
     func testLaterWorkGoesOneAtATimeAndAfterWhatsFetchedAhead() async throws {
         let turns = ServerTurns(atOnce: 4)
         let log = Locked<[String]>([]), later = Locked((now: 0, most: 0))
