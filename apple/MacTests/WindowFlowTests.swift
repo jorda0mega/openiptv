@@ -97,6 +97,18 @@ final class WindowFlowTests: XCTestCase {
         XCTAssertEqual(flow.phase, .none)
     }
 
+    func testTheAccountClosingStopsTheDockedFilm() {
+        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .accountClosed])
+        XCTAssertEqual(effects[3], [.stopWindow, .stopFilm, .releaseController])
+        XCTAssertEqual(flow.phase, .none)
+    }
+
+    func testTheAccountClosingWhileTheScreenIsAwaitedStopsTheFilm() {
+        let (flow, effects) = flow([.offered, .buttonTapped, .didStart, .restoreAsked, .accountClosed])
+        XCTAssertEqual(effects[4], [.finishRestore(false), .stopWindow, .stopFilm, .releaseController])
+        XCTAssertEqual(flow.phase, .none)
+    }
+
     func testTheScreenLettingGoReleasesTheWindow() {
         XCTAssertEqual(flow([.offered, .screenLetGo]).1[1], [.releaseController])
         XCTAssertEqual(flow([.offered, .willStart, .didStart, .screenLetGo]).1[3], [.stopWindow, .releaseController])
