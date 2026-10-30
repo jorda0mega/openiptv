@@ -15,6 +15,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib.request
@@ -23,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import slow_link  # noqa: E402
 
-SERVER_KEYS = {"base", "connect_s", "answer_s", "plan_s", "launch", "file_wake", "first_byte_s", "read_mb_s", "convert_first_s",
+SERVER_KEYS = {"base", "connect_s", "answer_s", "plan_s", "page_s", "capacity", "file_wake", "first_byte_s", "read_mb_s", "convert_first_s",
                "convert_segment_s", "subtitle_extract_s", "hang", "reset", "convert_refused"}
 LINK_KEYS = {"connect_s", "round_trip_s", "mbit_s", "stall", "network_change_s", "offline", "metered_after_change"}
 PORT = 8858
@@ -113,41 +114,56 @@ class Reads(unittest.TestCase):
         self.assertTrue(all(15 <= r.hang <= 20 for r in hangs))
 
 
-class Launches(unittest.TestCase):
-    def test_a_fresh_installs_first_three_launches_hold_each_plan_to_28_to_40_s_in(self):
-        server, rng = slow_link.Server("real-quiet"), slow_link.random.Random(1)
-        waits = []
-        for launch in range(4):
-            at = 1000.0 + 100 * launch
-            server.launched(f"launch {launch}", at)
-            server.launched(f"launch {launch}", at + 5)
-            waits.append((at + 10 + server.answer(True, rng, at + 10), server.answer(True, rng, at + 41), server.answer(False, rng, at + 1)))
-        self.assertEqual(server.counts["launches"], 4)
-        for (answered, after, other), launch in zip(waits[:3], range(3)):
-            self.assertTrue(1028.2 + 100 * launch <= answered <= 1040.6 + 100 * launch, answered)
-            self.assertTrue(0.2 <= after <= 0.6, "after the window")
-            self.assertTrue(0.15 <= other <= 0.19, "only PlaybackInfo waits")
-        self.assertTrue(0.2 <= waits[3][0] - 1310 <= 0.6, "a fourth launch finds the server quiet")
+class SharedWork(unittest.TestCase):
+    def timed(self, capacity, jobs):
+        work, took = slow_link.Work(capacity), {}
+        began = time.monotonic()
+
+        def job(n, at, seconds):
+            time.sleep(at)
+            sent = time.monotonic()
+            work.do(seconds)
+            took[n] = time.monotonic() - sent
+
+        threads = [threading.Thread(target=job, args=(n, at, seconds)) for n, (at, seconds) in enumerate(jobs)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertLess(time.monotonic() - began, 10)
+        return [took[n] for n in range(len(jobs))]
+
+    def test_a_job_alone_takes_its_own_work(self):
+        self.assertAlmostEqual(self.timed(1, [(0, 0.2)])[0], 0.2, delta=0.05)
+
+    def test_jobs_under_way_together_share_the_server(self):
+        took = self.timed(1, [(0, 0.2)] * 4)
+        self.assertTrue(all(0.75 <= t <= 0.9 for t in took), took)
+
+    def test_a_short_job_beside_a_long_one_takes_twice_its_work(self):
+        long, short = self.timed(1, [(0, 1.0), (0.05, 0.1)])
+        self.assertAlmostEqual(short, 0.2, delta=0.06)
+        self.assertAlmostEqual(long, 1.1, delta=0.08)
+
+    def test_up_to_the_capacity_no_job_waits(self):
+        took = self.timed(2, [(0, 0.3), (0, 0.3)])
+        self.assertTrue(all(abs(t - 0.3) < 0.06 for t in took), took)
+
+    def test_the_real_server_s_answers_wait_on_what_else_it_works_on(self):
+        server = slow_link.Server("real-quiet")
+        self.assertIsNotNone(server.work)
+        rng = slow_link.random.Random(1)
+        self.assertGreater(server.answer("page", rng), server.answer("plan", rng))
+        self.assertGreater(server.answer("plan", rng), server.answer("other", rng))
 
 
 class BusyHour(unittest.TestCase):
-    def test_each_launch_has_its_own_spell_and_four_have_one(self):
-        server, rng = slow_link.Server("real-busy"), slow_link.random.Random(1)
-        held = []
-        for launch in range(5):
-            at = 1000.0 + 100 * launch
-            server.launched(f"launch {launch}", at)
-            held.append(server.answer(True, rng, at) - 1.8)
-        self.assertTrue(38 <= held[0] <= 44 and 38 <= held[1] <= 44, held)
-        self.assertTrue(25 <= held[2] <= 31 and 7 <= held[3] <= 11, held)
-        self.assertLessEqual(held[4], 0, "a fifth launch finds no spell")
-
     def test_a_film_read_after_two_idle_minutes_waits_for_the_disk(self):
         servers = [slow_link.Server("real-busy", seed) for seed in range(50)]
         reads = [(s.read(1000.0), s.read(1060.0), s.read(1200.0)) for s in servers]
-        self.assertTrue(all(first.first_byte >= 8.4 and later.first_byte >= 8.4 for first, _, later in reads))
-        self.assertLessEqual(sum(soon.first_byte >= 8.4 for _, soon, _ in reads), 5, "a read a minute after another woke the disk")
-        self.assertLessEqual(slow_link.Server("real-quiet").read(1000.0).first_byte, 0.23, "a quiet hour wakes no disk")
+        self.assertTrue(all(first.wake >= 8 and later.wake >= 8 for first, _, later in reads))
+        self.assertLessEqual(sum(soon.wake >= 8 for _, soon, _ in reads), 5, "a read a minute after another woke the disk")
+        self.assertEqual(slow_link.Server("real-quiet").read(1000.0).wake, 0, "a quiet hour wakes no disk")
 
 
 class Conversions(unittest.TestCase):

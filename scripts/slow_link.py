@@ -5,14 +5,14 @@ server's printed runs.
 
 A profile has two halves. Its server half is the far end as the device sees
 it, the home link inside: "connect_s" for a new connection (TCP and TLS),
-"answer_s" before any answer, "plan_s" before PlaybackInfo's, "first_byte_s"
-before a file read's, "read_mb_s" each read's pace, "convert_first_s" to a
+"answer_s" of work before any answer, "plan_s" before PlaybackInfo's,
+"page_s" before a page of the library listing's, "first_byte_s" before a
+file read's, "read_mb_s" each read's pace, "convert_first_s" to a
 converted version's first segment, "convert_segment_s" to make each next one,
 "subtitle_extract_s" to take one of the film's own subtitle tracks out,
-"launch" ({launches, s}: for `s` after each of a fresh install's first
-`launches` launches, a PlaybackInfo answers only once that time is up, or
-{by_launch: [s, ...]}: each launch's own; a launch is a new
-X-Openreel-Launch, which debug builds send), "file_wake" ({idle_s, s}: a
+"capacity" (the work the server does at once: each request under way gets
+an even share of it, at most a whole one, so an answer waits on every other
+request the server is working on, the app's own included), "file_wake" ({idle_s, s}: a
 film read when none came for `idle_s` waits `s` more for its first byte,
 a disk woken), and its faults: "hang" ({one_in, s}: a read stops that long, part way), "reset"
 ({one_in}: a read's connection reset part way), "convert_refused" (503s each
@@ -84,17 +84,59 @@ def opens_file(path):
 
 
 class Read(NamedTuple):
-    """A file read as the server answers it: its first byte, its pace (bytes
-    a second), and how far into it it hangs (for `hang` s) or its connection
-    is reset: a share of its first FAULT_SPAN bytes, the least the app's relay
-    asks at once, so a fault comes before the player has moved on, however
-    much was asked."""
+    """A file read as the server answers it: its first byte's work, its pace
+    (bytes a second), and how far into it it hangs (for `hang` s) or its
+    connection is reset: a share of its first FAULT_SPAN bytes, the least the
+    app's relay asks at once, so a fault comes before the player has moved on,
+    however much was asked; `wake`, a disk woken before its first byte."""
     number: int
     first_byte: float
     rate: float
     hang_at: Optional[float]
     hang: float
     reset_at: Optional[float]
+    wake: float = 0.0
+
+
+class Work:
+    """The server's work shared out: each job under way gets an even share
+    of `capacity` (at most a whole one), so a job takes longer the more
+    there are."""
+
+    def __init__(self, capacity, clock=time.monotonic):
+        self.capacity, self.clock = capacity, clock
+        self.turn = threading.Condition()
+        self.left = {}
+        self.at = clock()
+        self.jobs = 0
+        self.most = 0
+
+    def share(self):
+        busy = sum(1 for left in self.left.values() if left > 0)
+        return min(1.0, self.capacity / busy) if busy else 1.0
+
+    def advance(self):
+        now = self.clock()
+        done = (now - self.at) * self.share()
+        for job in self.left:
+            self.left[job] -= done
+        self.at = now
+
+    def do(self, seconds):
+        if seconds <= 0:
+            return
+        with self.turn:
+            self.advance()
+            self.jobs += 1
+            job = self.jobs
+            self.left[job] = seconds
+            self.most = max(self.most, len(self.left))
+            self.turn.notify_all()
+            while self.left[job] > 1e-4:
+                self.turn.wait(self.left[job] / self.share())
+                self.advance()
+            del self.left[job]
+            self.turn.notify_all()
 
 
 class Conversion:
@@ -127,8 +169,8 @@ class Server:
     def __init__(self, name, seed=1):
         self.name, self.seed, self.p = name, seed, half(name, "server")
         self.lock = threading.Lock()
-        self.counts = dict(reads=0, hangs=0, resets=0, conversions=0, refused=0, extractions=0, launches=0)
-        self.launches, self.launch_until = set(), -math.inf
+        self.counts = dict(reads=0, hangs=0, resets=0, conversions=0, refused=0, extractions=0)
+        self.work = Work(self.p["capacity"]) if self.p.get("capacity") else None
         self.last_read = -math.inf
 
     def count(self, key):
@@ -139,25 +181,18 @@ class Server:
     def setup(self, rng):
         return draw(self.p.get("connect_s"), rng)
 
-    def launched(self, launch, now, launches=None):
-        """A request of the app's launch `launch` (its X-Openreel-Launch) at `now`;
-        `launches` in place of the profile's."""
-        window = self.p.get("launch")
-        with self.lock:
-            if launch in self.launches:
-                return
-            self.launches.add(launch)
-            self.counts["launches"] += 1
-            number = self.counts["launches"]
-            spells = window and (window.get("by_launch") or [window["s"]] * (launches or window["launches"]))
-            if spells and number <= len(spells):
-                self.launch_until = now + draw(spells[number - 1], random.Random(f"{self.seed}:launch:{number}"))
+    def answer(self, kind, rng):
+        """The server's work before an answer that isn't a file read's: "plan"
+        PlaybackInfo, "page" a page of the library listing, else any other."""
+        spec = {"plan": "plan_s", "page": "page_s"}.get(kind, "answer_s")
+        return draw(self.p.get(spec, self.p.get("answer_s")), rng)
 
-    def answer(self, plan, rng, now=None):
-        """The server's wait before an answer that isn't a file read's: PlaybackInfo's if `plan`."""
-        now = time.time() if now is None else now
-        held = max(0.0, self.launch_until - now) if plan else 0.0
-        return held + draw(self.p.get("plan_s" if plan else "answer_s"), rng)
+    def serve(self, seconds):
+        """`seconds` of the server's work, shared with every other request under way when it has a capacity."""
+        if self.work:
+            self.work.do(seconds)
+        else:
+            time.sleep(seconds)
 
     def read(self, now=None):
         number = self.count("reads")
@@ -169,12 +204,12 @@ class Server:
             self.last_read = now
         hang, reset = self.p.get("hang"), self.p.get("reset")
         first_byte, rate = draw(self.p.get("first_byte_s"), rng), draw(self.p.get("read_mb_s"), rng) * 1e6
-        first_byte += draw(wake["s"], rng) if woken else 0
+        woke = draw(wake["s"], rng) if woken else 0.0
         hangs, hang_at, hang_s = rng.random(), rng.random(), draw(hang and hang["s"], rng)
         resets, reset_at = rng.random(), rng.random()
         return Read(number, first_byte, rate or math.inf,
                     hang_at if hang and hangs < 1 / hang["one_in"] else None, hang_s,
-                    reset_at if reset and resets < 1 / reset["one_in"] else None)
+                    reset_at if reset and resets < 1 / reset["one_in"] else None, woke)
 
     def conversion(self, first, began):
         number = self.count("conversions")

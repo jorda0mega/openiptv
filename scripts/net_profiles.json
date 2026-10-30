@@ -6,7 +6,8 @@
       "first_byte_s": [0.17, 0.23],
       "read_mb_s": [3.5, 15],
       "plan_s": [0.2, 0.6],
-      "launch": {"launches": 3, "s": [28, 40]},
+      "capacity": 2,
+      "page_s": [5, 7],
       "convert_first_s": [1.1, 1.5],
       "convert_segment_s": [0.17, 2.8],
       "subtitle_extract_s": [60, 75]
@@ -17,7 +18,6 @@
       "base": "real-quiet",
       "first_byte_s": {"median": 0.9, "spread": 1.0, "low": 0.4, "high": 9},
       "plan_s": [0.2, 1.8],
-      "launch": {"by_launch": [[40, 44], [40, 44], [27, 31], [9, 11]]},
       "file_wake": {"idle_s": 120, "s": [8, 9]},
       "convert_first_s": [1.1, 5.9]
     }

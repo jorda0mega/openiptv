@@ -85,9 +85,7 @@ CONNECTIONS = set()
 # connection's first answer: a real server's connect and TLS, about 0.5 s),
 # "plan_delay" (seconds before PlaybackInfo answers: 0.2-4 s on a real one),
 # "copies" ("m7": that film has a second copy, c7, in another library: the
-# same IMDb id, the same picture width), "launches" ("99": that many of the
-# app's launches have the profile's launch spell, in place of its count),
-# "hang" ("plan,open:1": those requests never answer, the first N of a kind
+# same IMDb id, the same picture width), "hang" ("plan,open:1": those requests never answer, the first N of a kind
 # when it says N: "plan" PlaybackInfo, "item" an item's full record, "open"
 # a read of a film, "convert" a converted version's list; GET /mock/hung
 # counts them).
@@ -162,6 +160,10 @@ SENTRY_ENVELOPES = []
 # read of a film, "logout", "other"; and the ones still being answered.
 # GET /mock/server_requests?since= (a time from /mock/mark) counts them.
 SERVER_REQUESTS = []
+# Every request to the fake servers by its shape (the path with its ids
+# taken out, and its query's names): [sent, answered or None, launch, shape].
+# GET /mock/requests?since= lists them, times from `since`.
+REQUEST_SHAPES = []
 OPEN_ANSWERS = [0]
 OPEN_LOCK = threading.Lock()
 IPTV_ADDRESSES = []
@@ -631,6 +633,21 @@ def extraction_wait(track):
         return max(0.0, EXTRACTIONS[track] - now)
 
 
+def shape(command, address):
+    url = urlparse(address)
+    path = "/".join(":id" if re.search(r"\d", part) and part != "U1" else part for part in url.path.split("/"))
+    names = sorted(parse_qs(url.query))
+    return f"{command} {path}" + (f"?{','.join(names)}" if names else "")
+
+
+def work_kind(command, address):
+    url = urlparse(address)
+    if command == "POST" and url.path.endswith("/PlaybackInfo"):
+        return "plan"
+    limit = parse_qs(url.query).get("Limit", ["0"])[0]
+    return "page" if url.path.endswith("/Items") and limit.isdigit() and int(limit) >= 1000 else "other"
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -650,6 +667,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.counted:
                 with OPEN_LOCK:
                     OPEN_ANSWERS[0] -= 1
+                    self.shape[1] = time.time()
 
     def parse_request(self):
         if not super().parse_request():
@@ -658,8 +676,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if not path.startswith("/mock/"):
             kind = "video" if opens_file(path) else "logout" if path.lower().endswith("/sessions/logout") else "other"
+            self.shape = [time.time(), None, self.headers.get("X-Openreel-Launch"), shape(self.command, self.path)]
             with OPEN_LOCK:
                 SERVER_REQUESTS.append((time.time(), kind))
+                REQUEST_SHAPES.append(self.shape)
                 OPEN_ANSWERS[0] += 1
             self.counted = True
         if self.link:
@@ -673,15 +693,14 @@ class Handler(BaseHTTPRequestHandler):
                     return False
                 time.sleep(max(0.0, link.offline_until(time.monotonic()) - time.monotonic()))
                 first, server, rng = not self.link.answered, self.server_half, self.link.answers
-                if self.headers.get("X-Openreel-Launch"):
-                    server.launched(self.headers["X-Openreel-Launch"], time.time(), int(CONTROL.get("launches", 0)) or None)
                 wait = self.link.wait_before_answer() + (server.setup(rng) if first else 0)
                 if opens_file(path) and server.p:
                     self.read = server.read()
-                    wait += self.read.first_byte
+                    time.sleep(wait + self.read.wake)
+                    server.serve(self.read.first_byte)
                 else:
-                    wait += server.answer(self.command == "POST" and "/PlaybackInfo" in path, rng)
-                time.sleep(wait)
+                    time.sleep(wait)
+                    server.serve(server.answer(work_kind(self.command, self.path), rng))
         return True
 
     def close_others(self, abrupt):
@@ -872,8 +891,9 @@ class Handler(BaseHTTPRequestHandler):
             if not FAR[0]:
                 return self.send({"profile": "none"})
             server, link = FAR[0]
+            work = server.work and {"capacity": server.work.capacity, "jobs": server.work.jobs, "most_at_once": server.work.most}
             return self.send({"profile": server.name, "link": link.name, "seed": server.seed,
-                              "server": dict(server.counts), "net": link.readout(), "schedule": link.schedule()})
+                              "server": dict(server.counts), "work": work, "net": link.readout(), "schedule": link.schedule()})
         if path == "/mock/down":
             # Gone down for "seconds": every connection dropped at once.
             DOWN_UNTIL[0] = time.time() + float(q.get("seconds", "10"))
@@ -917,6 +937,12 @@ class Handler(BaseHTTPRequestHandler):
                                                  q.get("problems", "").split(",")))
         if path == "/mock/mark":
             return self.send({"t": time.time()})
+        if path == "/mock/requests":
+            since = float(q.get("since", "0"))
+            with OPEN_LOCK:
+                seen = [[round(sent - since, 2), answered and round(answered - since, 2), launch, kind]
+                        for sent, answered, launch, kind in REQUEST_SHAPES if sent >= since]
+            return self.send({"requests": seen})
         if path == "/mock/server_requests":
             since = float(q.get("since", "0"))
             with OPEN_LOCK:
@@ -1666,7 +1692,8 @@ class Handler(BaseHTTPRequestHandler):
             films = [copied(movie(i)) for i in range(40)]
             everything = shows + known + films + [film | {"Id": "c" + film["Id"][1:]} for film in films if "ProviderIds" in film] + extra
             start, limit = int(q.get("StartIndex", 0)), int(q.get("Limit", 100))
-            time.sleep(0.5)  # a page takes a while on a real server
+            if not server_half():
+                time.sleep(0.5)  # a page takes a while on a real server
             while start > 0 and CONTROL.get("library_hold") == "1":
                 time.sleep(0.1)
             body = {"Items": everything[start:start + limit]}
