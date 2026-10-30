@@ -1,19 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-[[ -d Vendor/Libmpv.xcframework ]] || scripts/fetch-mpvkit.sh
 here=Tools/subtitle-white
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
-mkdir "$out/fw" "$out/media"
-for slice in Vendor/*.xcframework/macos-*; do ln -sf "$PWD/$slice"/* "$out/fw/"; done
-frameworks=()
-for f in "$out"/fw/*.framework; do frameworks+=(-framework "$(basename "$f" .framework)"); done
-clang -c "$here/lua.c" -o "$out/lua.o"
-swiftc -O -target arm64-apple-macos26 -F "$out/fw" -Xcc -F"$out/fw" OpenIPTV/Player/FramePlan.swift "$here/main.swift" "$out/lua.o" \
-  -o "$out/subtitle-white" "${frameworks[@]}" -L"$out/fw" -lMoltenVK -framework AVFoundation -framework AudioToolbox \
-  -framework CoreAudio -framework CoreImage -framework CoreMedia -framework CoreVideo -framework Metal -framework QuartzCore \
-  -framework VideoToolbox -framework IOSurface -framework IOKit -framework Cocoa -lbz2 -liconv -lexpat -lresolv -lxml2 -lz -lc++
+mkdir "$out/media"
+Tools/libmpv-mac.sh "$out/subtitle-white" OpenIPTV/Player/FramePlan.swift "$here/main.swift"
 
 m=$out/media
 printf '1\n00:00:00,500 --> 00:00:59,000\nSubtitle look HHHH 0123\n\n' > "$m/text.srt"
@@ -36,4 +28,4 @@ for film in "hdr10 smpte2084" "hlg arib-std-b67" "sdr bt709"; do
   ffmpeg -v error -i "$m/$name.mkv" -i "$m/picture.sup" -map 0:v -map 1:s -c copy "$m/$name-pgs.mkv"
   ffmpeg -v error -i "$m/$name.mkv" -i "$m/text.srt" -map 0:v -map 1:s -c:v copy -c:s mov_text "$m/$name-mov_text.mp4"
 done
-DYLD_FRAMEWORK_PATH="$out/fw" "$out/subtitle-white" "$m"
+"$out/subtitle-white" "$m"

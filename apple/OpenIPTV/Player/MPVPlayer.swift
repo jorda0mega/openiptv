@@ -373,7 +373,7 @@ final class MPVPlayer: KeptPlayer, @unchecked Sendable {
             // decodes on the CPU).
             set("vo", "libmpv")
             set("hwdec", hardwareDecoding ? "videotoolbox-copy" : "no")
-            set("sw-fast", "yes")
+            set("sws-fast", "yes")
         } else {
             var wid = wid
             mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &wid)
