@@ -506,7 +506,6 @@ final class AppModel {
             playback.tap = .at(first: first, planKept: scope.plans.isKept(planKey(itemId, kind: kind)), openPlayer: !warm.player.hasFailed)
             return playback
         }
-        library.hurry()
         let key = planKey(itemId, kind: kind)
         let prepared = scope.plans.isKept(key)
         #if DEBUG
@@ -911,7 +910,7 @@ final class AppModel {
     /// Loads shows the user is likely to open next, in the background.
     func prefetchShows(_ ids: [String], force: Bool = false) {
         for id in ids where force || account.shows[id].map({ Date().timeIntervalSince($0.loadedAt) > 300 }) ?? true {
-            Task(priority: .utility) { _ = await loadShow(id) }
+            Task(priority: .background) { _ = await loadShow(id) }
         }
     }
 
