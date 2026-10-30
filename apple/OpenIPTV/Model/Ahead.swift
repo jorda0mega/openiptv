@@ -189,7 +189,7 @@ final class Ahead {
         }
         for target in targets where kept[target] == nil {
             let mark = UUID()
-            kept[target] = (mark, Task { [weak self] in
+            kept[target] = (mark, Task(priority: .utility) { [weak self] in
                 await self?.holding(target, at: place)
                 if self?.kept[target]?.mark == mark { self?.kept[target] = nil }
             })

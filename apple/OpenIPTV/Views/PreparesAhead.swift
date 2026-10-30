@@ -27,7 +27,7 @@ private struct PreparesAhead: ViewModifier {
                 }
             }
             #endif
-            .task(id: held ? target : nil) {
+            .task(id: held ? target : nil, priority: .utility) {
                 if held, let target { await model.ahead.holding(target, at: place) }
             }
     }
