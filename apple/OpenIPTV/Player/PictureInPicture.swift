@@ -133,6 +133,10 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         return (film.player, film.stream, film.position, film.paused)
     }
 
+    func accountClosed() {
+        happen(.accountClosed)
+    }
+
     enum ScreenRelease { case keepPlaying, stopped }
 
     func letGo(_ player: MPVPlayer) -> ScreenRelease {

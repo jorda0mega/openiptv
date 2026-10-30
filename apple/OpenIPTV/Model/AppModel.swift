@@ -1477,6 +1477,9 @@ final class AppModel {
         switch effect {
         case .closeScope:
             account.close()
+            #if os(iOS)
+            PictureInPicture.shared.accountClosed()
+            #endif
             holdContinueWatchingAgain()
         case .forgetShared:
             StreamRelay.shared.forgetAccount()
