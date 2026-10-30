@@ -129,14 +129,20 @@ enum HTTP {
         #if DEBUG
         throughDebugProxy(config)
         config.httpAdditionalHeaders?["X-Openreel-Launch"] = launch
+        asOnHTTP2(config)
         #endif
         return URLSession(configuration: config)
     }
 
     #if DEBUG
-    /// This launch, for the test server: a fresh install's first launches
-    /// find the real server slow on PlaybackInfo (net_profiles.json, launch).
+    /// This launch, for the test server's request log (GET /mock/requests).
     private static let launch = UUID().uuidString
+
+    /// UI tests: `-connectionsAsOnHTTP2 YES` sends every request at once, as HTTP/2 does over one connection;
+    /// the test server speaks HTTP/1.1, where the connections per server cap the requests under way.
+    static func asOnHTTP2(_ config: URLSessionConfiguration) {
+        if UserDefaults.standard.bool(forKey: "connectionsAsOnHTTP2") { config.httpMaximumConnectionsPerHost = 100 }
+    }
     #endif
 
     #if DEBUG

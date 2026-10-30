@@ -38,6 +38,8 @@ actor ImagePipeline {
         #if DEBUG
         HTTP.throughDebugProxy(config)
         HTTP.throughDebugProxy(ahead)
+        HTTP.asOnHTTP2(config)
+        HTTP.asOnHTTP2(ahead)
         #endif
         session = URLSession(configuration: config)
         storeSession = URLSession(configuration: ahead)
