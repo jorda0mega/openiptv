@@ -269,9 +269,10 @@ enum HTTP {
     static func data(_ request: URLRequest, aheadOn aheadSession: URLSession = ahead) async throws -> Data {
         #if DEBUG
         let measured = PlanClock.current?.sending(request)
-        PlanClock.underWay.mutate { $0 += 1 }
+        let mark = UUID(), kind = PlanClock.kind(of: request, ahead: (request.httpMethod ?? "GET") == "GET" && Task.currentPriority <= .utility)
+        PlanClock.underWay.mutate { $0[mark] = kind }
         defer {
-            PlanClock.underWay.mutate { $0 -= 1 }
+            PlanClock.underWay.mutate { $0[mark] = nil }
             measured?.answered()
         }
         #else

@@ -175,4 +175,11 @@ final class PlansTests: XCTestCase {
         _ = try await plans.take(other)
         XCTAssertEqual(server.asked, 3)
     }
+
+    func testARequestUnderWayIsCountedByItsKindWithNoIdOrName() {
+        let item = URLRequest(url: URL(string: "https://server.example/emby/Users/5f2b9c0d4e1a/Items/a8/Similar?Limit=20")!)
+        let person = URLRequest(url: URL(string: "https://server.example/emby/Persons/Tom%20Hanks")!)
+        XCTAssertEqual(PlanClock.kind(of: item, ahead: true), "ahead Users/:x/Items/:x/Similar")
+        XCTAssertEqual(PlanClock.kind(of: person, ahead: false), "Persons/:x")
+    }
 }

@@ -108,9 +108,26 @@ enum StartPatience {
 /// times only, never an id or an address.
 final class PlanClock: Sendable {
     @TaskLocal static var current: PlanClock?
-    /// The app's requests to the server under way (HTTP.data), and the library's pages among them.
-    static let underWay = Locked(0)
+    /// The app's requests to the server under way (HTTP.data) by kind, and the library's pages among them.
+    static let underWay = Locked<[UUID: String]>([:])
     static let pagesUnderWay = Locked(0)
+    private static let pathWords: Set<String> = [
+        "Users", "Items", "Shows", "NextUp", "Episodes", "Seasons", "Similar", "PlaybackInfo", "Latest", "Resume",
+        "DisplayPreferences", "zapline-mylist", "zapline-started", "Sessions", "Playing", "Progress", "Stopped",
+        "Capabilities", "System", "Info", "Public", "Persons", "Images", "Primary", "Backdrop", "Logo", "Thumb",
+        "Subtitles", "RemoteSearch", "PlayedItems", "FavoriteItems", "UserData", "Providers", "Genres", "Studios",
+    ]
+
+    /// The request's path with every part but Emby's own words left out (ids, names), "ahead" when fetched ahead.
+    static func kind(of request: URLRequest, ahead: Bool) -> String {
+        let parts = (request.url?.pathComponents ?? []).filter { $0 != "/" && $0.lowercased() != "emby" }
+        return (ahead ? "ahead " : "") + parts.map { pathWords.contains($0) ? $0 : ":x" }.joined(separator: "/")
+    }
+
+    private static func kinds(_ underWay: some Collection<String>) -> String {
+        Dictionary(underWay.map { ($0, 1) }, uniquingKeysWith: +).sorted { ($1.value, $0.key) < ($0.value, $1.key) }
+            .prefix(6).map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+    }
 
     struct Request: Sendable {
         let copy: Int?
@@ -118,6 +135,7 @@ final class PlanClock: Sendable {
         let sent: Date
         let others: Int
         let pages: Int
+        let kinds: String
         var answered: Date?
         var times: RequestTimes?
     }
@@ -137,7 +155,9 @@ final class PlanClock: Sendable {
         let copy = id.flatMap(copies.firstIndex(of:)).map { $0 + 1 }
         var index = 0
         requests.mutate {
-            $0.append(Request(copy: copy, info: info, sent: Date(), others: Self.underWay.value, pages: Self.pagesUnderWay.value))
+            let underWay = Self.underWay.value.values
+            $0.append(Request(copy: copy, info: info, sent: Date(), others: underWay.count, pages: Self.pagesUnderWay.value,
+                              kinds: Self.kinds(underWay)))
             index = $0.count - 1
         }
         return Recorder(clock: self, index: index)
@@ -153,7 +173,7 @@ final class PlanClock: Sendable {
                 String(format: ", queued %.2f, connect %.2f, wait %.2f, transfer %.2f", $0.queued, $0.connect, $0.wait, $0.transfer)
             } ?? ""
             return "\(name) \(took) [sent " + String(format: "%+.2f s", request.sent.timeIntervalSince(tap))
-                + "\(times), \(request.others) under way, \(request.pages) pages]"
+                + "\(times), \(request.others) under way, \(request.pages) pages; most: \(request.kinds)]"
         }
         let byCopy = sent.sorted { ($0.copy ?? .max, $0.info ? 1 : 0) < ($1.copy ?? .max, $1.info ? 1 : 0) }
         return "\(copies.count) \(copies.count == 1 ? "copy" : "copies"); " + byCopy.map(line).joined(separator: "; ")
