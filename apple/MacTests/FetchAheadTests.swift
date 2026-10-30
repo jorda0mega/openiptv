@@ -130,7 +130,7 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertLessThan(ContinuousClock.now - tapped, .seconds(1), "the tap waited on its own start's hold")
     }
 
-    func testLaterWorkGoesOneAtATimeAndAfterWhatsFetchedAhead() async throws {
+    func testLaterWorkGoesOneAtATimeAndNoneWhileAStartWaits() async throws {
         let turns = ServerTurns(atOnce: 4)
         let log = Locked<[String]>([]), later = Locked((now: 0, most: 0))
         let start = Task { await turns.whileStarting() }
@@ -158,44 +158,11 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertEqual(log.value, [], "a turn while a start waited")
         start.cancel()
         for _ in 0..<100 where log.value.count < 13 { try await Task.sleep(for: .milliseconds(20)) }
-        let starts = log.value.filter { !$0.hasSuffix("done") }
-        XCTAssertEqual(starts.prefix(5).allSatisfy { $0.hasPrefix("ahead") }, true, log.value.joined(separator: ", "))
         XCTAssertEqual(log.value.count, 13)
         XCTAssertEqual(later.value.most, 1)
     }
 
-    @MainActor
-    func testACardsWorkGoesAtOnceOnceItIsLikelyThoughAStartHoldsWhatsFetchedAhead() async throws {
-        let arrived = Locked(0)
-        let server = try LocalServer { _ in
-            arrived.mutate { $0 += 1 }
-            return (200, [:], "ok")
-        }
-        defer { server.stop() }
-        let url = URL(string: "http://127.0.0.1:\(server.port)/item")!
-        let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
-                              memoryWarned: false, freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
-        let shelf = Shelf<String, Data>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
-            try await HTTP.data(URLRequest(url: url))
-        }
-        let start = Task { await HTTP.turns.whileStarting() }
-        let giveUp = Task {
-            try await Task.sleep(for: .seconds(3))
-            start.cancel()
-        }
-        defer { giveUp.cancel(); start.cancel() }
-        try await Task.sleep(for: .milliseconds(50))
-        let glanced = Task { await shelf.warm("film", for: Interest(at: .continueWatching, .glance)) }
-        defer { glanced.cancel() }
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(arrived.value, 0, "glanced at, asked while a start waited")
-        let began = ContinuousClock.now
-        let plan = await shelf.warm("film", for: Interest(at: .continueWatching, .likely))
-        XCTAssertEqual(plan.map { String(decoding: $0, as: UTF8.self) }, "ok")
-        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1), "a likely card's work waited its turn")
-    }
-
-    private var open: Conditions {
+    private var allowed: Conditions {
         Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
                    memoryWarned: false, freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
     }
@@ -209,7 +176,7 @@ final class FetchAheadTests: XCTestCase {
         }
         defer { server.stop() }
         let url = URL(string: "http://127.0.0.1:\(server.port)/item")!
-        let open = open
+        let open = allowed
         let shelf = Shelf<String, Data>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
             try await HTTP.data(URLRequest(url: url))
         }
@@ -270,7 +237,7 @@ final class FetchAheadTests: XCTestCase {
 
     @MainActor
     func testALikelyTicketIsNotHeldBehindGlancedWorkFillingTheLane() async throws {
-        let open = open
+        let open = allowed
         let lane = Lane(.light, atOnce: 2) { open }
         let (held, release) = AsyncStream.makeStream(of: Void.self)
         defer { release.finish() }

@@ -392,6 +392,7 @@ final class LibraryIndex {
     /// Every copy's id → its title (the copy listed in search).
     private var entryById: [String: LibraryEntry] = [:]
     private var chartsTask: Task<Void, Never>?
+    private var loading: ServerTurns.Fetch?
     private var catalogTask: Task<Void, Never>?
     /// Bumped whenever the entries change, so a ranking made from older
     /// entries (the index loaded meanwhile) is redone, not kept.
@@ -437,19 +438,34 @@ final class LibraryIndex {
     func prepare(_ emby: EmbyClient, now urgent: Bool = false) async {
         await open(emby)
         guard let server else { return }
-        guard !indexing else { return }
+        guard !indexing else {
+            if urgent { loading?.raise(to: .now) }
+            return
+        }
         let now = Date()
         let needsFull = !complete || outdated || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
         let needsChanges = urgent || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
         guard needsFull || needsChanges else { return }
         indexing = true
+        let load = ServerTurns.Fetch()
+        loading = load
+        if urgent { load.raise(to: .now) }
         #if canImport(UIKit)
         // Keep going for a while if the app is switched away mid-load.
         let background = UIApplication.shared.beginBackgroundTask(withName: "Library index")
         defer { UIApplication.shared.endBackgroundTask(background) }
         #endif
-        defer { indexing = false; progress = nil }
-        if needsFull {
+        defer { indexing = false; progress = nil; loading = nil }
+        await ServerTurns.$fetch.withValue(load) { await sync(emby, server: server, full: needsFull, at: now) }
+    }
+
+    /// A tap that found the library still loading: its pages go first once the start has played.
+    func hurry() {
+        loading?.raise(to: .soon)
+    }
+
+    private func sync(_ emby: EmbyClient, server: String, full: Bool, at now: Date) async {
+        if full {
             await loadAll(emby, server: server)
         } else if let since = syncedAt {
             // A little overlap so nothing saved during the last sync is missed.
@@ -778,15 +794,13 @@ final class LibraryIndex {
             pages[0] = first.entries
             total = first.total ?? first.entries.count
             if let total, fresh { pages = pages.filter { $0.key < total } }
-            unpublished = true
+            await publish(ordered())
         }
         guard let total else { return }
         let starts = stride(from: 0, to: total, by: Self.pageSize).filter { fresh ? $0 > 0 : pages[$0] == nil }
         // A refresh of a complete index runs unseen; search covers it all.
         if !fresh { progress = (loadedCount, total) }
-        var sincePublish = 0
         var failed = false
-        defer { unpublished = false }
         await withTaskGroup(of: (Int, [LibraryEntry]?).self) { group in
             var queue = starts[...]
             for _ in 0..<Self.parallel {
@@ -795,18 +809,10 @@ final class LibraryIndex {
             }
             for await (start, entries) in group {
                 guard self.server == server else { group.cancelAll(); return }
-                if let entries {
-                    pages[start] = entries
-                    unpublished = true
-                } else {
-                    failed = true
-                }
+                if let entries { pages[start] = entries } else { failed = true }
                 if !fresh { progress = (loadedCount, total) }
-                sincePublish += 1
-                // Search covers what's loaded so far.
-                if sincePublish >= Self.parallel {
-                    sincePublish = 0
-                    unpublished = false
+                if entries != nil {
+                    // Search covers what's loaded so far, page by page: they can come far apart.
                     await publish(ordered())
                     save()
                 }
@@ -821,14 +827,8 @@ final class LibraryIndex {
             syncedAt = fullSyncAt
             outdated = false
         }
-        // Pages not yet in search (the first alone, or the last batch's
-        // remainder); not built twice when the last batch just published.
-        if unpublished { await publish(ordered()) }
         save()
     }
-
-    /// Pages loaded since search was last built from them.
-    private var unpublished = false
 
     private var loadedCount: Int { pages.values.reduce(0) { $0 + $1.count } }
 

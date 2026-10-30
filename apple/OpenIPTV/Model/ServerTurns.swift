@@ -4,55 +4,56 @@ import Foundation
 /// what's fetched ahead takes a turn here instead.
 final class ServerTurns: @unchecked Sendable {
     enum Rank: Int, Comparable {
-        case ahead, later
+        case soon, ahead, later
 
         static func < (a: Rank, b: Rank) -> Bool { a.rawValue < b.rawValue }
 
         static var current: Rank { Task.currentPriority < .utility ? .later : .ahead }
     }
 
-    /// A shelf's job fetched ahead. Once it is wanted (a tap takes it, its card turns likely), every request made for
-    /// it goes at once, those from tasks of its own too.
+    /// Work fetched ahead (a shelf's job, the library's load), and every request made for it, those from tasks of its
+    /// own too: soon, they go first; now (a tap takes it, Search waits on it), they go at once, a start or not.
     final class Fetch: @unchecked Sendable {
-        private let lock = NSLock()
         enum Need: Int, Comparable {
             case ahead, soon, now
 
             static func < (a: Need, b: Need) -> Bool { a.rawValue < b.rawValue }
         }
 
-        private var isWanted = false
-        private var waiting: [@Sendable () -> Void] = []
+        private let lock = NSLock()
+        private var need = Need.ahead
+        private var watchers: [@Sendable (Need) -> Void] = []
 
-        func raise(to need: Need) {
-            if need == .now { want() }
+        func raise(to raised: Need) {
+            let told: [@Sendable (Need) -> Void] = lock.withLock {
+                guard raised > need else { return [] }
+                need = raised
+                return watchers
+            }
+            told.forEach { $0(raised) }
         }
 
-        func want() {
-            let going: [@Sendable () -> Void] = lock.withLock {
-                isWanted = true
-                defer { waiting = [] }
-                return waiting
+        fileprivate func watch(_ told: @escaping @Sendable (Need) -> Void) -> Need {
+            lock.withLock {
+                watchers.append(told)
+                return need
             }
-            going.forEach { $0() }
-        }
-
-        fileprivate func whenWanted(_ go: @escaping @Sendable () -> Void) {
-            let now = lock.withLock {
-                if !isWanted { waiting.append(go) }
-                return isWanted
-            }
-            if now { go() }
         }
     }
 
     @TaskLocal static var fetch: Fetch?
 
+    private enum Turn {
+        case now
+        case taken(Rank)
+    }
+
     private struct Waiter {
         let id: UInt64
         let server: String
-        let rank: Rank
-        let go: CheckedContinuation<Bool, Error>
+        let owner: Int?
+        var rank: Rank
+        let go: CheckedContinuation<Turn, Error>
     }
 
     private let atOnce: Int
@@ -77,11 +78,16 @@ final class ServerTurns: @unchecked Sendable {
         "\(url?.host() ?? ""):\(url?.port ?? 0)"
     }
 
-    func taking<T>(_ rank: Rank, at server: String, owner: Int?, _ work: (_ wanted: Bool) async throws -> T) async throws -> T {
+    /// `owner`: the account the request is for (its key's hash), so its waiting requests go nowhere once it closes.
+    func taking<T>(_ rank: Rank, at server: String, owner: Int?, _ work: (_ now: Bool) async throws -> T) async throws -> T {
         if Self.off { return try await work(false) }
-        if try await turn(rank, at: server) { return try await work(true) }
-        defer { finished(rank, at: server) }
-        return try await work(false)
+        switch try await turn(rank, at: server, owner: owner) {
+        case .now:
+            return try await work(true)
+        case let .taken(rank):
+            defer { finished(rank, at: server) }
+            return try await work(false)
+        }
     }
 
     func whileStarting() async {
@@ -92,33 +98,55 @@ final class ServerTurns: @unchecked Sendable {
         admit()
     }
 
-    private func turn(_ rank: Rank, at server: String) async throws -> Bool {
+    func drop(owner: Int) {
+        let dropped: [Waiter] = lock.withLock {
+            defer { waiting.removeAll { $0.owner == owner } }
+            return waiting.filter { $0.owner == owner }
+        }
+        dropped.forEach { $0.go.resume(throwing: CancellationError()) }
+    }
+
+    private func turn(_ rank: Rank, at server: String, owner: Int?) async throws -> Turn {
         let id = lock.withLock {
             numbered += 1
             return numbered
         }
         return try await withTaskPriorityEscalationHandler {
             try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { (go: CheckedContinuation<Bool, Error>) in
+                try await withCheckedThrowingContinuation { (go: CheckedContinuation<Turn, Error>) in
                     let cancelled = lock.withLock {
                         if Task.isCancelled { return true }
-                        waiting.append(Waiter(id: id, server: server, rank: rank, go: go))
+                        waiting.append(Waiter(id: id, server: server, owner: owner, rank: rank, go: go))
                         return false
                     }
                     if cancelled {
                         go.resume(throwing: CancellationError())
                     } else if Task.currentPriority > .utility {
-                        wanted(id)
+                        goNow(id)
                     } else {
-                        Self.fetch?.whenWanted { [self] in wanted(id) }
-                        admit()
+                        let need = Self.fetch?.watch { [self] need in raised(id, to: need) } ?? .ahead
+                        raised(id, to: need)
                     }
                 }
             } onCancel: {
                 waiter(id)?.go.resume(throwing: CancellationError())
             }
         } onPriorityEscalated: { _, now in
-            if now > .utility { self.wanted(id) }
+            if now > .utility { self.goNow(id) }
+        }
+    }
+
+    private func raised(_ id: UInt64, to need: Fetch.Need) {
+        switch need {
+        case .now:
+            goNow(id)
+        case .soon:
+            lock.withLock {
+                if let index = waiting.firstIndex(where: { $0.id == id }) { waiting[index].rank = .soon }
+            }
+            admit()
+        case .ahead:
+            admit()
         }
     }
 
@@ -126,8 +154,8 @@ final class ServerTurns: @unchecked Sendable {
         lock.withLock { waiting.firstIndex { $0.id == id }.map { waiting.remove(at: $0) } }
     }
 
-    private func wanted(_ id: UInt64) {
-        waiter(id)?.go.resume(returning: true)
+    private func goNow(_ id: UInt64) {
+        waiter(id)?.go.resume(returning: .now)
     }
 
     private func finished(_ rank: Rank, at server: String) {
@@ -135,14 +163,14 @@ final class ServerTurns: @unchecked Sendable {
         admit()
     }
 
+    /// Up to `atOnce` per server, the soonest first, and beside them one piece of later work, so it never starves.
     private func admit() {
         let going: [Waiter] = lock.withLock {
             var going: [Waiter] = []
             func fits(_ waiter: Waiter) -> Bool {
                 let busy = underWay[waiter.server, default: [:]]
-                guard busy.values.reduce(0, +) < atOnce else { return false }
-                return waiter.rank < .later
-                    || busy[.later, default: 0] == 0 && !waiting.contains { $0.server == waiter.server && $0.rank < .later }
+                if waiter.rank == .later { return busy[.later, default: 0] == 0 }
+                return busy.filter { $0.key != .later }.values.reduce(0, +) < atOnce
             }
             while starts == 0, let next = waiting.indices.filter({ fits(waiting[$0]) }).min(by: { waiting[$0].rank < waiting[$1].rank }) {
                 let waiter = waiting.remove(at: next)
@@ -151,6 +179,6 @@ final class ServerTurns: @unchecked Sendable {
             }
             return going
         }
-        going.forEach { $0.go.resume(returning: false) }
+        going.forEach { $0.go.resume(returning: .taken($0.rank)) }
     }
 }

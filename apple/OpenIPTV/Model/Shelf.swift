@@ -251,6 +251,7 @@ final class Lane {
     func raise(_ ticket: Ticket, to interest: Interest) {
         guard let held = ticket.interest, interest.likelihood > held.likelihood else { return }
         ticket.interest = interest
+        admit()
     }
 
     func playNow(_ ticket: Ticket) {
@@ -319,11 +320,17 @@ final class Lane {
             withdraw(ticket)
         }
         refillTokens()
-        while underWay.count < atOnce, hasToken, let next = waiting.min(by: goesBefore) {
+        while hasToken, let next = waiting.filter(fits).min(by: goesBefore) {
             waiting.removeAll { $0 === next }
             start(next)
         }
         awaitRefill()
+    }
+
+    /// Work counts against a ticket only when it's at least as likely: glanced work never holds back a likely card.
+    private func fits(_ ticket: Ticket) -> Bool {
+        let likelihood = ticket.interest?.likelihood ?? .next
+        return underWay.filter { ($0.interest?.likelihood ?? .next) >= likelihood }.count < atOnce
     }
 
     private func allows(_ ticket: Ticket, _ now: Conditions) -> Bool {
@@ -447,7 +454,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             throw error
         case let .waiting(job)?, let .fetching(job)?:
             policy.lane.playNow(job.ticket)
-            job.fetch.want()
+            job.fetch.raise(to: .now)
             return try await wait(for: job, key)
         case nil:
             return try await wait(for: start(key, Lane.Ticket(nil)), key)
@@ -499,7 +506,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         case let .waiting(running)?, let .fetching(running)?:
             job = running
             policy.lane.raise(job.ticket, to: interest)
-            if interest.likelihood >= .likely { job.fetch.want() }
+            if interest.likelihood >= .likely { job.fetch.raise(to: .soon) }
         case nil:
             job = start(key, Lane.Ticket(interest))
         }
@@ -566,7 +573,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             stop(job)
             entries[key] = nil
         }
-        if (ticket.interest?.likelihood ?? .glance) >= .likely { job.fetch.want() }
+        if (ticket.interest?.likelihood ?? .glance) >= .likely { job.fetch.raise(to: .soon) }
         job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in
             await ServerTurns.$fetch.withValue(job.fetch) { await run(job, key) }
         }

@@ -220,8 +220,7 @@ struct EmbyClient {
     /// newest 40), or taken out once finished. Under ten seconds changes
     /// nothing (opened by mistake).
     func noteStarted(_ itemId: String, seconds: Double?) async {
-        guard !Self.readOnly else { return }
-        var record = await startedRecord() ?? [:]
+        guard !Self.readOnly, var record = await startedRecord(), !Task.isCancelled else { return }
         if let seconds {
             guard seconds >= 10 else { return }
             record[itemId] = Started(seconds: seconds, at: Date().timeIntervalSince1970)

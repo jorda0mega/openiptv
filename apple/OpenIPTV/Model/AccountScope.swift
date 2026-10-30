@@ -106,6 +106,7 @@ final class AccountScope {
         let stopping = work.values
         work = [:]
         stopping.forEach { $0() }
+        if let key = client?.account.accessToken { HTTP.turns.drop(owner: key.hashValue) }
         homeRetry.stop()
         coolDown()
         plans.forgetAll()
