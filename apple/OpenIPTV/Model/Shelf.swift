@@ -390,6 +390,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         let ticket: Lane.Ticket
         let began: Date
         var task: Task<Void, Never>?
+        let fetch = ServerTurns.Fetch()
         var holders: Set<Interest.ID> = []
         var waiters: [UUID: CheckedContinuation<Value, Error>] = [:]
         var nonOwningWaiters: [UUID: CheckedContinuation<Value, Error>] = [:]
@@ -446,7 +447,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             throw error
         case let .waiting(job)?, let .fetching(job)?:
             policy.lane.playNow(job.ticket)
-            job.task?.escalatePriority(to: Task.currentPriority)
+            job.fetch.want()
             return try await wait(for: job, key)
         case nil:
             return try await wait(for: start(key, Lane.Ticket(nil)), key)
@@ -498,7 +499,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         case let .waiting(running)?, let .fetching(running)?:
             job = running
             policy.lane.raise(job.ticket, to: interest)
-            job.task?.escalatePriority(to: Self.priority(interest))
+            if interest.likelihood >= .likely { job.fetch.want() }
         case nil:
             job = start(key, Lane.Ticket(interest))
         }
@@ -558,10 +559,6 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         }
     }
 
-    private static func priority(_ interest: Interest?) -> TaskPriority {
-        (interest?.likelihood ?? .glance) >= .likely ? .medium : .utility
-    }
-
     private func start(_ key: Key, _ ticket: Lane.Ticket) -> Job {
         let job = Job(ticket, began: now())
         ticket.stop = { [weak self, weak job] in
@@ -569,7 +566,10 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             stop(job)
             entries[key] = nil
         }
-        job.task = Task(priority: ticket.plays ? nil : Self.priority(ticket.interest)) { [self] in await run(job, key) }
+        if (ticket.interest?.likelihood ?? .glance) >= .likely { job.fetch.want() }
+        job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in
+            await ServerTurns.$fetch.withValue(job.fetch) { await run(job, key) }
+        }
         entries[key] = .waiting(job)
         return job
     }

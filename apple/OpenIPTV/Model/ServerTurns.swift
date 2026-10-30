@@ -11,6 +11,32 @@ final class ServerTurns: @unchecked Sendable {
         static var current: Rank { Task.currentPriority < .utility ? .later : .ahead }
     }
 
+    /// One fetch ahead (a shelf's job), and every request made for it, its own tasks' too: wanted, they go at once.
+    final class Fetch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isWanted = false
+        private var waiting: [@Sendable () -> Void] = []
+
+        func want() {
+            let going: [@Sendable () -> Void] = lock.withLock {
+                isWanted = true
+                defer { waiting = [] }
+                return waiting
+            }
+            going.forEach { $0() }
+        }
+
+        fileprivate func whenWanted(_ go: @escaping @Sendable () -> Void) {
+            let now = lock.withLock {
+                if !isWanted { waiting.append(go) }
+                return isWanted
+            }
+            if now { go() }
+        }
+    }
+
+    @TaskLocal static var fetch: Fetch?
+
     private struct Waiter {
         let id: UInt64
         let server: String
@@ -68,7 +94,10 @@ final class ServerTurns: @unchecked Sendable {
                         waiting.append(Waiter(id: id, server: server, rank: rank, go: go))
                         return false
                     }
-                    if cancelled { go.resume(throwing: CancellationError()) } else if Task.currentPriority > .utility { wanted(id) } else { admit() }
+                    if cancelled { go.resume(throwing: CancellationError()) } else if Task.currentPriority > .utility { wanted(id) } else {
+                        Self.fetch?.whenWanted { [self] in wanted(id) }
+                        admit()
+                    }
                 }
             } onCancel: {
                 waiter(id)?.go.resume(throwing: CancellationError())
