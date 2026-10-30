@@ -498,6 +498,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         case let .waiting(running)?, let .fetching(running)?:
             job = running
             policy.lane.raise(job.ticket, to: interest)
+            job.task?.escalatePriority(to: Self.priority(interest))
         case nil:
             job = start(key, Lane.Ticket(interest))
         }
@@ -557,6 +558,10 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         }
     }
 
+    private static func priority(_ interest: Interest?) -> TaskPriority {
+        (interest?.likelihood ?? .glance) >= .likely ? .medium : .utility
+    }
+
     private func start(_ key: Key, _ ticket: Lane.Ticket) -> Job {
         let job = Job(ticket, began: now())
         ticket.stop = { [weak self, weak job] in
@@ -564,10 +569,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             stop(job)
             entries[key] = nil
         }
-        let rank: ServerTurns.Rank? = (ticket.interest?.likelihood ?? .glance) >= .likely ? .soon : nil
-        job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in
-            await ServerTurns.Rank.$given.withValue(rank) { await run(job, key) }
-        }
+        job.task = Task(priority: ticket.plays ? nil : Self.priority(ticket.interest)) { [self] in await run(job, key) }
         entries[key] = .waiting(job)
         return job
     }

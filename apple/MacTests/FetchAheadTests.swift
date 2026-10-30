@@ -132,36 +132,35 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertEqual(later.value.most, 1)
     }
 
-    func testALikelyCardsWorkGoesBeforeWhatsFetchedAtAGlance() async throws {
-        let turns = ServerTurns(atOnce: 1)
-        let log = Locked<[String]>([])
-        let start = Task { await turns.whileStarting() }
-        try await Task.sleep(for: .milliseconds(50))
-        for (n, rank) in [(0, ServerTurns.Rank.ahead), (1, .ahead), (2, .soon)] {
-            Task(priority: .utility) {
-                try await turns.taking(rank, at: "emby") { _ in
-                    log.mutate { $0.append("\(rank) \(n)") }
-                    try await Task.sleep(for: .milliseconds(20))
-                }
-            }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        start.cancel()
-        for _ in 0..<100 where log.value.count < 3 { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(log.value, ["soon 2", "ahead 0", "ahead 1"])
-    }
-
     @MainActor
-    func testAShelfFetchesALikelyCardsWorkSoonerThanAGlancedOnes() async {
+    func testACardsWorkGoesAtOnceOnceItIsLikelyThoughAStartHoldsWhatsFetchedAhead() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/item")!
         let open = Conditions(network: .unmetered, playing: false, lowPower: false, thermal: .nominal,
                               memoryWarned: false, freeDisk: .init(bytes: 10_000_000_000, countsPurgeable: true))
-        let shelf = Shelf<String, ServerTurns.Rank>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
-            ServerTurns.Rank.current
+        let shelf = Shelf<String, Data>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
+            try await HTTP.data(URLRequest(url: url))
         }
-        let likely = await shelf.warm("likely", for: Interest(at: .continueWatching, .likely))
-        let glanced = await shelf.warm("glanced", for: Interest(at: .continueWatching, .glance))
-        XCTAssertEqual(likely, .soon)
-        XCTAssertEqual(glanced, .ahead)
+        let start = Task { await HTTP.turns.whileStarting() }
+        let giveUp = Task {
+            try await Task.sleep(for: .seconds(3))
+            start.cancel()
+        }
+        defer { giveUp.cancel(); start.cancel() }
+        try await Task.sleep(for: .milliseconds(50))
+        let glanced = Task { await shelf.warm("film", for: Interest(at: .continueWatching, .glance)) }
+        defer { glanced.cancel() }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(arrived.value, 0, "glanced at, asked while a start waited")
+        let began = ContinuousClock.now
+        let plan = await shelf.warm("film", for: Interest(at: .continueWatching, .likely))
+        XCTAssertEqual(plan.map { String(decoding: $0, as: UTF8.self) }, "ok")
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1), "a likely card's work waited its turn")
     }
 
     func testEachServerHasItsOwnTurns() async throws {
