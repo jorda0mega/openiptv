@@ -98,7 +98,7 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertLessThan(ContinuousClock.now - tapped, .seconds(1), "the tap waited on its own start's hold")
     }
 
-    func testLaterWorkGoesOneAtATimeAndAfterWhatsFetchedAhead() async throws {
+    func testLaterWorkGoesOneAtATimeOnceNothingFetchedAheadIsUnderWay() async throws {
         let turns = ServerTurns(atOnce: 4)
         let log = Locked<[String]>([]), later = Locked((now: 0, most: 0))
         let start = Task { await turns.whileStarting() }
@@ -118,15 +118,16 @@ final class FetchAheadTests: XCTestCase {
                 try await turns.taking(.ahead, at: "emby") { _ in
                     log.mutate { $0.append("ahead \(n)") }
                     try await Task.sleep(for: .milliseconds(40))
+                    log.mutate { $0.append("ahead \(n) done") }
                 }
             }
         }
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(log.value, [], "a turn while a start waited")
         start.cancel()
-        for _ in 0..<100 where log.value.count < 8 { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(log.value.prefix(5).allSatisfy { $0.hasPrefix("ahead") }, true, log.value.joined(separator: ", "))
-        XCTAssertEqual(log.value.count, 8)
+        for _ in 0..<100 where log.value.count < 13 { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(log.value.prefix(10).allSatisfy { $0.hasPrefix("ahead") }, true, log.value.joined(separator: ", "))
+        XCTAssertEqual(log.value.count, 13)
         XCTAssertEqual(later.value.most, 1)
     }
 
