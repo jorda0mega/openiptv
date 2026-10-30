@@ -263,7 +263,7 @@ final class AppModel {
             async let historyChanged = refreshContinueWatching(in: scope, checkingHistory: true)
             await opened
             if library.changedAt.map({ $0 <= builtAt }) ?? true, await !historyChanged {
-                if sync { scope.run { await self.syncLibrary(emby, in: scope) } }
+                if sync { scope.run(priority: .background) { await self.syncLibrary(emby, in: scope) } }
                 return
             }
         } else {
@@ -324,7 +324,7 @@ final class AppModel {
             pages.forEach(prefetchTitle)
             prepareRotation()
             prepare(fresh.featured.map { [$0.card.playTarget] } ?? [], at: .homeForecast)
-            if sync { scope.run { await self.syncLibrary(emby, in: scope) } }
+            if sync { scope.run(priority: .background) { await self.syncLibrary(emby, in: scope) } }
         } catch {
             guard scope.isOpen else { return }
             scope.homeError = SourceError.wrap(error).localizedDescription
