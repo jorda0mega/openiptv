@@ -32,6 +32,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
 
     private var flow = WindowFlow()
     private var film: Film?
+    private var waiting: Offer?
     private let dock = Dock()
     private nonisolated let facts = Facts()
     private var restoreDone: ((Bool) -> Void)?
@@ -58,6 +59,13 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         var ignoreTimeUntil: Date?
     }
 
+    private struct Offer {
+        let player: MPVPlayer
+        let playback: EmbyPlayback
+        var total: Double
+        var skip: (Double) -> Void
+    }
+
     override private init() {
         super.init()
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
@@ -80,8 +88,15 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
             return update(player, total: total)
         }
         if film != nil { happen(.screenLetGo) }
-        // iOS asks whether the film plays as soon as the controller is made; answered "paused" then, it never
-        // opened the window by itself as the app went.
+        // iOS opens the window by itself as the app goes only for a controller made while the film plays in a
+        // window, and asks whether it plays as soon as the controller is made: made for a paused film, or for a
+        // kept one before its screen held the layer, it never opened the window.
+        guard frames.isPlaying, frames.layer.isInWindow else {
+            waiting = Offer(player: player, playback: playback, total: total, skip: skip)
+            frames.onPlayingChanged = { _ in Task { @MainActor in PictureInPicture.shared.offerWaiting() } }
+            return
+        }
+        waiting = nil
         facts.set(total: total, frames: frames)
         let controller = AVPictureInPictureController(contentSource: .init(sampleBufferDisplayLayer: frames.layer, playbackDelegate: self))
         controller.delegate = self
@@ -94,8 +109,14 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
         happen(.offered)
     }
 
+    private func offerWaiting() {
+        guard let waiting else { return }
+        offer(waiting.player, playback: waiting.playback, total: waiting.total, skip: waiting.skip)
+    }
+
     /// The film's length, once the player knows it (no window before the film plays).
     func update(_ player: MPVPlayer, total: Double) {
+        if waiting?.player === player { waiting?.total = total }
         guard var film, film.player === player else { return }
         setTotal(total, of: &film)
         self.film = film
@@ -140,6 +161,10 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     enum ScreenRelease { case keepPlaying, stopped }
 
     func letGo(_ player: MPVPlayer) -> ScreenRelease {
+        if waiting?.player === player {
+            waiting = nil
+            player.frames?.onPlayingChanged = nil
+        }
         guard film?.player === player else { return .stopped }
         if flow.keepsFilm { return .keepPlaying }
         happen(.screenLetGo)
@@ -147,6 +172,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     }
 
     func hosted(_ player: MPVPlayer) {
+        if waiting?.player === player { return offerWaiting() }
         guard film?.player === player else { return }
         dock.release()
         happen(.screenHosts)
@@ -417,6 +443,12 @@ private final class Facts: @unchecked Sendable {
     var total: Double { lock.withLock { values.total } }
     var playing: Bool { lock.withLock { values.frames }?.isPlaying ?? false }
     func set(total: Double, frames: FilmFrames?) { lock.withLock { values = (total, frames) } }
+}
+
+private extension CALayer {
+    var isInWindow: Bool {
+        sequence(first: self, next: \.superlayer).contains { ($0.delegate as? UIView)?.window != nil }
+    }
 }
 
 /// iOS keeps feeding the floating window only while its layer stays in a window.
