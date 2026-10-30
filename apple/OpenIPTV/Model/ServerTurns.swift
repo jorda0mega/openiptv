@@ -3,14 +3,12 @@ import Foundation
 /// HTTP/2 sends every request at once over one connection, so the connections per server cap nothing there:
 /// what's fetched ahead takes a turn here instead.
 final class ServerTurns: @unchecked Sendable {
-    enum Rank: Int, Comparable, Sendable {
-        case soon, ahead, later
+    enum Rank: Int, Comparable {
+        case ahead, later
 
         static func < (a: Rank, b: Rank) -> Bool { a.rawValue < b.rawValue }
 
-        @TaskLocal static var given: Rank?
-
-        static var current: Rank { given ?? (Task.currentPriority < .utility ? .later : .ahead) }
+        static var current: Rank { Task.currentPriority < .utility ? .later : .ahead }
     }
 
     private struct Waiter {
