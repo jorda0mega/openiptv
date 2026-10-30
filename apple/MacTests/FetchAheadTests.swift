@@ -98,7 +98,7 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertLessThan(ContinuousClock.now - tapped, .seconds(1), "the tap waited on its own start's hold")
     }
 
-    func testLaterWorkGoesOneAtATimeOnceNothingFetchedAheadIsUnderWay() async throws {
+    func testLaterWorkGoesOneAtATimeAndAfterWhatsFetchedAhead() async throws {
         let turns = ServerTurns(atOnce: 4)
         let log = Locked<[String]>([]), later = Locked((now: 0, most: 0))
         let start = Task { await turns.whileStarting() }
@@ -126,7 +126,8 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertEqual(log.value, [], "a turn while a start waited")
         start.cancel()
         for _ in 0..<100 where log.value.count < 13 { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(log.value.prefix(10).allSatisfy { $0.hasPrefix("ahead") }, true, log.value.joined(separator: ", "))
+        let starts = log.value.filter { !$0.hasSuffix("done") }
+        XCTAssertEqual(starts.prefix(5).allSatisfy { $0.hasPrefix("ahead") }, true, log.value.joined(separator: ", "))
         XCTAssertEqual(log.value.count, 13)
         XCTAssertEqual(later.value.most, 1)
     }
