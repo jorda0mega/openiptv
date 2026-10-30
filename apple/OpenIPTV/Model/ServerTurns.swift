@@ -95,8 +95,11 @@ final class ServerTurns: @unchecked Sendable {
         let going: [Waiter] = lock.withLock {
             var going: [Waiter] = []
             func fits(_ waiter: Waiter) -> Bool {
-                let busy = underWay[waiter.server, default: [:]]
-                return busy.values.reduce(0, +) < atOnce && (waiter.rank == .ahead || busy[.later, default: 0] == 0)
+                let busy = underWay[waiter.server, default: [:]].values.reduce(0, +)
+                switch waiter.rank {
+                case .ahead: return busy < atOnce
+                case .later: return busy == 0 && !waiting.contains { $0.server == waiter.server && $0.rank == .ahead }
+                }
             }
             while starts == 0, let next = waiting.indices.filter({ fits(waiting[$0]) }).min(by: { waiting[$0].rank < waiting[$1].rank }) {
                 let waiter = waiting.remove(at: next)
