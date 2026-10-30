@@ -269,7 +269,7 @@ enum HTTP {
     static func data(_ request: URLRequest, aheadOn aheadSession: URLSession = ahead) async throws -> Data {
         #if DEBUG
         let measured = PlanClock.current?.sending(request)
-        let mark = UUID(), kind = PlanClock.kind(of: request, ahead: (request.httpMethod ?? "GET") == "GET" && Task.currentPriority <= .utility)
+        let mark = UUID(), kind = PlanClock.kind(of: request, ahead: Task.currentPriority <= .utility)
         PlanClock.underWay.mutate { $0[mark] = kind }
         defer {
             PlanClock.underWay.mutate { $0[mark] = nil }
@@ -279,11 +279,10 @@ enum HTTP {
         let measured: (any URLSessionTaskDelegate)? = nil
         #endif
         do {
-            // Only reads go ahead (and may be asked twice): a POST (playback
-            // info, progress reports) is sent once, on the main connections.
+            // A POST (playback info, progress reports) goes on the main connections.
             let read = (request.httpMethod ?? "GET") == "GET"
-            let (data, response) = try await read && Task.currentPriority <= .utility
-                ? fetchAhead(request, measured, on: aheadSession) : session.data(for: request, delegate: measured)
+            let (data, response) = try await Task.currentPriority <= .utility
+                ? fetchAhead(request, measured, on: read ? aheadSession : session) : session.data(for: request, delegate: measured)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 || code == 403 { throw SourceError.rejected }
             guard (200..<300).contains(code) else { throw SourceError.http(code) }
@@ -293,13 +292,14 @@ enum HTTP {
         }
     }
 
-    /// A request fetched ahead, on the prefetch connections, once it has its turn (ServerTurns). If something on
-    /// screen starts waiting for it before then (its task's priority rises: a page opened while it was being
-    /// prefetched), it goes at once, on the main connections.
+    /// A request fetched ahead, once it has its turn (ServerTurns). If something on screen starts waiting for it
+    /// before then (its task's priority rises: a page opened while it was being prefetched, a tap), it goes at once,
+    /// on the main connections.
     private static func fetchAhead(_ request: URLRequest, _ measured: (any URLSessionTaskDelegate)?,
                                    on aheadSession: URLSession) async throws -> (Data, URLResponse) {
-        try await turns.taking(.current, at: ServerTurns.server(of: request.url), owner: nil) { wanted in
-            try await (wanted ? session : aheadSession).data(for: request, delegate: measured)
+        let owner = request.value(forHTTPHeaderField: "X-Emby-Token")?.hashValue
+        return try await turns.taking(.current, at: ServerTurns.server(of: request.url), owner: owner) { now in
+            try await (now ? session : aheadSession).data(for: request, delegate: measured)
         }
     }
 

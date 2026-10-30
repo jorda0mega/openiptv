@@ -506,6 +506,7 @@ final class AppModel {
             playback.tap = .at(first: first, planKept: scope.plans.isKept(planKey(itemId, kind: kind)), openPlayer: !warm.player.hasFailed)
             return playback
         }
+        library.hurry()
         let key = planKey(itemId, kind: kind)
         let prepared = scope.plans.isKept(key)
         #if DEBUG
@@ -1320,14 +1321,16 @@ final class AppModel {
                 Task { @MainActor in library.cancelCatalog() }
             }
             guard !Task.isCancelled else { return }
-            if !hadCatalog, library.catalog != nil { await self.loadHome(cardWidth: self.lastCardWidth, sync: false, full: true) }
+            if !hadCatalog, library.catalog != nil {
+                await scope.run(priority: .utility) { await self.loadHome(cardWidth: self.lastCardWidth, sync: false, full: true) }.value
+            }
         }
         await charts
         guard scope.isOpen else { return }
         // New titles since Home was built: its other rows are built again,
         // and go on at the next moment, not while you look.
         if let changed = library.changedAt, let built = scope.homeBuiltAt, changed > built {
-            await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
+            await scope.run(priority: .utility) { await self.loadHome(cardWidth: self.lastCardWidth, sync: false, full: true) }.value
             return
         }
         // Trending or New & notable arrived for the first time (Home was
@@ -1336,7 +1339,7 @@ final class AppModel {
         if (before.isEmpty && !library.trending.isEmpty) || (!hadNotable && !library.notable.isEmpty) {
             // Full: a recent page (built from the newest additions) would
             // otherwise only refresh Continue Watching.
-            await loadHome(cardWidth: lastCardWidth, sync: false, full: true)
+            await scope.run(priority: .utility) { await self.loadHome(cardWidth: self.lastCardWidth, sync: false, full: true) }.value
         }
     }
 
@@ -1353,7 +1356,7 @@ final class AppModel {
         // Where it was stopped, for every device's Continue Watching (the
         // server keeps nothing this early in a title).
         let finished = duration > 0 && seconds >= duration * 0.9
-        if let emby = account.emby { Task(priority: .utility) { await emby.noteStarted(playback.itemId, seconds: finished ? nil : seconds) } }
+        if let emby = account.emby { account.run(priority: .utility) { await emby.noteStarted(playback.itemId, seconds: finished ? nil : seconds) } }
         #if DEBUG
         debugStop = "stop noted player=\(debugPlayerUp ? "up" : "gone")"
         #endif
@@ -2113,7 +2116,7 @@ final class AppModel {
         let keys = all.compactMap(sharedKey)
         guard let emby = account.emby, !keys.isEmpty else { return }
         let life = liveFailures.sharedGameLife
-        Task(priority: .utility) {
+        account.run(priority: .utility) {
             let now = Date().timeIntervalSince1970
             var record = (await emby.notPlayingRecord() ?? [:]).filter { now - $0.value < life }
             for key in keys { record[key] = now }
@@ -2165,7 +2168,7 @@ final class AppModel {
         sayCleared(cleared.values.min { $0.noted < $1.noted }, game: true)
         let keys = all.filter { cleared[$0.id] != nil }.compactMap(sharedKey)
         guard let emby = account.emby, !keys.isEmpty else { return }
-        Task(priority: .utility) {
+        account.run(priority: .utility) {
             guard var record = await emby.notPlayingRecord(), keys.contains(where: { record[$0] != nil }) else { return }
             for key in keys { record[key] = nil }
             await emby.saveNotPlaying(record)

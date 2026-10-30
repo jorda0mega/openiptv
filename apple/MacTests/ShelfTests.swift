@@ -182,7 +182,7 @@ final class ShelfTests: XCTestCase {
 
     func testACancelledWarmUpLetsGoOfItsInterest() async throws {
         let lane = lane(atOnce: 1)
-        let busy = Lane.Ticket(Interest(at: .posterRow, .glance))
+        let busy = Lane.Ticket(Interest(at: .continueWatching, .likely))
         try await lane.enter(busy)
         let fetches = Fetches()
         let shelf = shelf(fetches, lane: lane)
@@ -450,7 +450,7 @@ final class ShelfTests: XCTestCase {
 
     func testLikeliestThenNewestGoFirst() async throws {
         let lane = lane(atOnce: 1)
-        let busy = Lane.Ticket(Interest(at: .posterRow, .glance))
+        let busy = Lane.Ticket(Interest(at: .continueWatching, .next))
         try await lane.enter(busy)
         let order = Locked<[String]>([])
         var waiters: [Task<Void, Error>] = []
