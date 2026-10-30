@@ -162,6 +162,67 @@ final class PlayerLookTests: XCTestCase {
         assertNothingStopped()
     }
 
+    func testSigningOutStopsPictureInPicture() throws {
+        try assertLeavingStopsPictureInPicture {
+            let emby = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Emby'")).firstMatch
+            XCTAssertTrue(emby.waitForExistence(timeout: 5), "no Emby in Settings")
+            emby.tap()
+            let signOut = app.buttons["Sign out"].firstMatch
+            XCTAssertTrue(signOut.waitForExistence(timeout: 5), "no Sign out")
+            signOut.tap()
+        }
+    }
+
+    func testForgettingEverythingStopsPictureInPicture() throws {
+        try assertLeavingStopsPictureInPicture {
+            let advanced = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Advanced'")).firstMatch
+            XCTAssertTrue(advanced.waitForExistence(timeout: 5), "no Advanced in Settings")
+            advanced.tap()
+            let forget = app.buttons["Forget everything on this device"]
+            XCTAssertTrue(forget.waitForExistence(timeout: 5), "no Forget everything on the Advanced page")
+            forget.tap()
+            let confirm = app.buttons["Forget everything"]
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5), "the confirm box didn't open")
+            confirm.tap()
+        }
+    }
+
+    private func assertLeavingStopsPictureInPicture(_ leave: () -> Void) throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        openFilm()
+        controlsUp()
+        let pip = app.buttons["Picture in Picture"].firstMatch
+        XCTAssertTrue(pip.waitForExistence(timeout: 3), "no Picture in Picture button")
+        pip.tap()
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let window = board.otherElements["Video"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10), "no Picture in Picture window")
+        sleep(4)
+        XCTAssertEqual(pipState()?.playing, true, "the film isn't playing in the window")
+        // iOS puts the window in the top corner, over Settings.
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.3, thenDragTo: board.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.85)))
+        sleep(2)
+        print("PIP window moved to \(window.frame)")
+        let home = app.tabBars.buttons["Home"].firstMatch
+        (home.exists ? home : app.buttons["Home"].firstMatch).tap()
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), "no Settings on Home")
+        settings.tap()
+        leave()
+        sleep(3)
+        let mark = markTime(server)
+        sleep(10)
+        shot("left with the window up")
+        let asked = serverRequests(server, since: mark)
+        print("PIP after leaving: requests \(asked.requests) video \(asked.video) answering \(asked.answering)")
+        XCTAssertFalse(window.exists, "the Picture in Picture window stayed open")
+        XCTAssertNil(pipState(), "the old account's film played on")
+        XCTAssertEqual(asked.video, 0, "the old account's film was still read")
+        XCTAssertEqual(asked.answering, 0, "the old account's server was still sending")
+    }
+
     func testSwipingHomeCarriesOnInPictureInPicture() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "no Picture in Picture in iPhone simulators")
         openFilm()
@@ -1868,6 +1929,18 @@ final class PlayerLookTests: XCTestCase {
         }.resume()
         wait(for: [done], timeout: 10)
         return t
+    }
+
+    private func serverRequests(_ server: URL, since: Double) -> (requests: Int, video: Int, answering: Int) {
+        var counts: [String: Int] = [:]
+        let done = expectation(description: "server requests")
+        let url = server.appending(path: "mock/server_requests").appending(queryItems: [.init(name: "since", value: String(since))])
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            counts = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Int] }) ?? [:]
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return (counts["requests"] ?? -1, counts["video"] ?? -1, counts["answering"] ?? -1)
     }
 
     private func videoRequests(_ server: URL, since: Double) -> [String] {
