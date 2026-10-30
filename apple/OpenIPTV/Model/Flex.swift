@@ -265,7 +265,7 @@ enum HTTP {
         }
     }
 
-    static func data(_ request: URLRequest) async throws -> Data {
+    static func data(_ request: URLRequest, aheadOn aheadSession: URLSession = ahead) async throws -> Data {
         #if DEBUG
         let measured = PlanClock.current?.sending(request)
         PlanClock.underWay.mutate { $0 += 1 }
@@ -281,7 +281,7 @@ enum HTTP {
             // info, progress reports) is sent once, on the main connections.
             let read = (request.httpMethod ?? "GET") == "GET"
             let (data, response) = try await read && Task.currentPriority <= .utility
-                ? fetchAhead(request, measured) : session.data(for: request, delegate: measured)
+                ? fetchAhead(request, measured, on: aheadSession) : session.data(for: request, delegate: measured)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 || code == 403 { throw SourceError.rejected }
             guard (200..<300).contains(code) else { throw SourceError.http(code) }
@@ -295,12 +295,13 @@ enum HTTP {
     /// wait its turn. If something on screen starts waiting for it (its
     /// task's priority rises: a page opened while it was being prefetched),
     /// it's asked again on the main connections, and the first answer wins.
-    private static func fetchAhead(_ request: URLRequest, _ measured: (any URLSessionTaskDelegate)?) async throws -> (Data, URLResponse) {
+    private static func fetchAhead(_ request: URLRequest, _ measured: (any URLSessionTaskDelegate)?,
+                                   on aheadSession: URLSession) async throws -> (Data, URLResponse) {
         let (escalated, signal) = AsyncStream<Void>.makeStream()
         defer { signal.finish() }
         return try await withTaskPriorityEscalationHandler {
             try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
-                group.addTask { try await ahead.data(for: request, delegate: measured) }
+                group.addTask { try await aheadSession.data(for: request, delegate: measured) }
                 group.addTask {
                     var wanted = escalated.makeAsyncIterator()
                     guard await wanted.next() != nil else { throw CancellationError() }
