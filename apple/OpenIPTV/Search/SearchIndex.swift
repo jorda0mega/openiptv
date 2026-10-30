@@ -459,11 +459,6 @@ final class LibraryIndex {
         await ServerTurns.$fetch.withValue(load) { await sync(emby, server: server, full: needsFull, at: now) }
     }
 
-    /// A tap that found the library still loading: its pages go first once the start has played.
-    func hurry() {
-        loading?.raise(to: .soon)
-    }
-
     private func sync(_ emby: EmbyClient, server: String, full: Bool, at now: Date) async {
         if full {
             await loadAll(emby, server: server)

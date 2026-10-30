@@ -327,10 +327,10 @@ final class Lane {
         awaitRefill()
     }
 
-    /// Work counts against a ticket only when it's at least as likely: glanced work never holds back a likely card.
+    /// Glanced work never holds back a likely card's; likely work holds back any other.
     private func fits(_ ticket: Ticket) -> Bool {
-        let likelihood = ticket.interest?.likelihood ?? .next
-        return underWay.filter { ($0.interest?.likelihood ?? .next) >= likelihood }.count < atOnce
+        let counted = min(ticket.interest?.likelihood ?? .next, .likely)
+        return underWay.filter { ($0.interest?.likelihood ?? .next) >= counted }.count < atOnce
     }
 
     private func allows(_ ticket: Ticket, _ now: Conditions) -> Bool {
