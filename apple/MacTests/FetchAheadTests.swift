@@ -252,6 +252,21 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertTrue(ran.value, "a likely card's plan waited for glanced pages")
     }
 
+    @MainActor
+    func testACardRestedOnWaitsForALikelyCardsWorkInALaneOfOne() async throws {
+        let open = allowed
+        let lane = Lane(.connection, atOnce: 1) { open }
+        let (held, release) = AsyncStream.makeStream(of: Void.self)
+        defer { release.finish() }
+        Task { await lane.whenAllowed(for: Interest(at: .homeForecast, .likely)) { for await _ in held {} } }
+        try await Task.sleep(for: .milliseconds(100))
+        let ran = Locked(false)
+        let restedOn = Task { await lane.whenAllowed(for: Interest(at: .continueWatching, .next)) { ran.mutate { $0 = true } } }
+        defer { restedOn.cancel() }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(ran.value, "two cards' film reads at once in a lane of one")
+    }
+
     func testBackgroundWorkKeepsGoingOneAtATimeWhileFetchedAheadWorkFillsTheTurns() async throws {
         let turns = ServerTurns(atOnce: 2)
         let pages = Locked((now: 0, most: 0, done: 0))
