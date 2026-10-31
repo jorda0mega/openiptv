@@ -309,10 +309,15 @@ enum PlaybackActivity {
     nonisolated(unsafe) private static var count = 0
 
     static var isPlaying: Bool { lock.withLock { count > 0 } }
-    static func began(_ kind: Kind) { lock.withLock { count += 1 } }
+    static func began(_ kind: Kind) {
+        lock.withLock { count += 1 }
+        if kind == .film { HTTP.turns.hold() }
+    }
+
     /// The lanes hear of it: a fetch ahead refused while it played goes now.
     static func ended(_ kind: Kind) {
         lock.withLock { count = max(0, count - 1) }
+        if kind == .film { HTTP.turns.release() }
         Task { @MainActor in Lane.conditionsChangedEverywhere() }
     }
 }
