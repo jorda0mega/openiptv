@@ -332,6 +332,9 @@ enum PlaybackActivity {
     }
 }
 
+/// Time to finish a piece of work once the app leaves the front, given
+/// back once: when the work ends, or when iOS runs out of it, after
+/// `ranOut`. Given back late, iOS ends the app.
 @MainActor
 final class BackgroundTime {
     typealias Ask = @MainActor (_ name: String, _ expired: @escaping @MainActor () -> Void) -> @MainActor () -> Void
@@ -356,7 +359,7 @@ final class BackgroundTime {
     private var giveBack: (@MainActor () -> Void)?
     private var over = false
 
-    init(_ name: String, ask: @escaping Ask) {
+    init(_ name: String, ask: @escaping Ask = BackgroundTime.app) {
         self.name = name
         self.ask = ask
     }
