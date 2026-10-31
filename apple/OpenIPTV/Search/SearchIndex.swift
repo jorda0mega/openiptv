@@ -371,6 +371,7 @@ final class LibraryIndex {
     /// voted first: New & notable.
     private(set) var notable: [LibraryEntry] = []
     private(set) var indexing = false
+    @ObservationIgnored var askBackgroundTime: BackgroundTime.Ask = BackgroundTime.app
     /// Titles loaded so far and the total, while the full catalog loads.
     private(set) var progress: (loaded: Int, total: Int)?
     /// Pages of the catalog by start index (complete when none are missing).

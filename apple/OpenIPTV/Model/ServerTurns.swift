@@ -90,6 +90,8 @@ final class ServerTurns: @unchecked Sendable {
         }
     }
 
+    var isHeld: Bool { lock.withLock { holds > 0 } }
+
     func hold() {
         guard !Self.off else { return }
         lock.withLock { holds += 1 }

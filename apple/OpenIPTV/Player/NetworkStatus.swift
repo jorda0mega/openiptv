@@ -305,7 +305,7 @@ enum MemoryWarnings {
 enum PlaybackActivity {
     enum Kind { case film, live }
 
-    static let quietAfterFilm = Duration.seconds(5)
+    nonisolated(unsafe) static var quietAfterFilm = Duration.seconds(5)
 
     private static let lock = NSLock()
     nonisolated(unsafe) private static var count = 0
@@ -326,5 +326,24 @@ enum PlaybackActivity {
             }
         }
         Task { @MainActor in Lane.conditionsChangedEverywhere() }
+    }
+}
+
+@MainActor
+final class BackgroundTime {
+    typealias Ask = @MainActor (_ name: String, _ expired: @escaping @MainActor () -> Void) -> @MainActor () -> Void
+
+    static let app: Ask = { name, expired in
+        #if canImport(UIKit)
+        var asked = UIBackgroundTaskIdentifier.invalid
+        asked = UIApplication.shared.beginBackgroundTask(withName: name) { MainActor.assumeIsolated { expired() } }
+        return {
+            guard asked != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(asked)
+            asked = .invalid
+        }
+        #else
+        return {}
+        #endif
     }
 }

@@ -10,6 +10,8 @@ final class LocalServer: @unchecked Sendable {
     struct Asked: Equatable {
         let target: String
         let key: String?
+        var method = ""
+        var body = ""
     }
 
     typealias Answer = @Sendable (_ target: String) -> (status: Int, headers: [String: String], body: String)
@@ -38,7 +40,9 @@ final class LocalServer: @unchecked Sendable {
                 let length = header("content-length").flatMap(Int.init) ?? 0
                 if buffer.count - end.upperBound >= length {
                     let target = lines.first?.split(separator: " ").dropFirst().first.map(String.init) ?? ""
-                    asked.mutate { $0.append(Asked(target: target, key: header("x-emby-token"))) }
+                    let method = lines.first?.split(separator: " ").first.map(String.init) ?? ""
+                    let sent = String(decoding: buffer[end.upperBound..<(end.upperBound + length)], as: UTF8.self)
+                    asked.mutate { $0.append(Asked(target: target, key: header("x-emby-token"), method: method, body: sent)) }
                     let (status, headers, body) = answer(target)
                     var reply = "HTTP/1.1 \(status) Answer\r\nContent-Length: \(body.utf8.count)\r\n"
                     for (name, value) in headers { reply += "\(name): \(value)\r\n" }

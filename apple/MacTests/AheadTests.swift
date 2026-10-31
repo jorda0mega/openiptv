@@ -2,7 +2,7 @@ import XCTest
 @testable import OpenIPTV
 
 @MainActor
-final class AheadTests: XCTestCase {
+final class AheadTests: FilmHoldCase {
     private final class Screen: @unchecked Sendable {
         private let lock = NSLock()
         private var elapsed = Duration.zero
@@ -478,7 +478,7 @@ final class AheadTests: XCTestCase {
         PlaybackActivity.began(.film)
         let held = Task { await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely)) }
         await settle()
-        await filmEnded()
+        PlaybackActivity.ended(.film)
         let fetched = await value(of: held)
         XCTAssertEqual(fetched, true, "a start refused while Picture in Picture played waited for the lane's next look")
     }
