@@ -43,6 +43,73 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertEqual(arrived.value, 1, "asked once the start played")
     }
 
+    func testNothingFetchedAheadGoesWhileAFilmPlays() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        PlaybackActivity.began(.film)
+        let url = URL(string: "http://127.0.0.1:\(server.port)/ahead")!
+        _ = Task(priority: .utility) { try await HTTP.data(URLRequest(url: url)) }
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(arrived.value, 0, "asked while a film played")
+        PlaybackActivity.ended(.film)
+        for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(arrived.value, 1, "asked once the film ended")
+    }
+
+    func testWhatAPlayingFilmAsksForGoesAtOnce() async throws {
+        let server = try LocalServer { _ in (200, [:], "ok") }
+        defer { server.stop() }
+        PlaybackActivity.began(.film)
+        defer { PlaybackActivity.ended(.film) }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/season")!
+        let began = ContinuousClock.now
+        let answer = try await Task(priority: .userInitiated) { try await HTTP.data(URLRequest(url: url)) }.value
+        XCTAssertEqual(String(decoding: answer, as: UTF8.self), "ok")
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1))
+    }
+
+    func testLiveTVLeavesWhatIsFetchedAheadGoing() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        PlaybackActivity.began(.live)
+        defer { PlaybackActivity.ended(.live) }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/ahead")!
+        _ = Task(priority: .utility) { try await HTTP.data(URLRequest(url: url)) }
+        for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(arrived.value, 1, "held while live TV played")
+    }
+
+    @MainActor
+    func testUpNextIsFetchedWhileAFilmPlays() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/next")!
+        var playing = allowed
+        playing.playing = true
+        let open = playing
+        let shelf = Shelf<String, Data>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
+            try await HTTP.data(URLRequest(url: url))
+        }
+        PlaybackActivity.began(.film)
+        defer { PlaybackActivity.ended(.film) }
+        let warming = Task { await shelf.warm("next episode", for: Interest(at: .upNext, .likely)) }
+        defer { warming.cancel() }
+        for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(arrived.value, 1, "the next episode's plan waited for the film to end")
+    }
+
     func testAFetchedAheadRequestThatAStartWaitsForGoesAtOnce() async throws {
         let server = try LocalServer { _ in (200, [:], "ok") }
         defer { server.stop() }

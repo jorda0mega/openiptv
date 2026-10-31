@@ -195,12 +195,12 @@ struct LivePlayerView: View {
         .task { start() }
         .task(id: load?.deadline) { await endWait(at: load?.deadline) }
         .onAppear {
-            PlaybackActivity.began()
+            PlaybackActivity.began(.live)
             model.playerShown = true
         }
         .onDisappear {
             send(.closed)
-            PlaybackActivity.ended()
+            PlaybackActivity.ended(.live)
             model.playerShown = false
             ScreenAwake.close(awakeID)
             hideTask?.cancel()

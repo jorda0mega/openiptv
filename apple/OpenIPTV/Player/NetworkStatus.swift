@@ -303,13 +303,15 @@ enum MemoryWarnings {
 /// Whether something is playing: work done ahead of time (pictures, pages,
 /// warm-ups) waits meanwhile, so the stream has the connection to itself.
 enum PlaybackActivity {
+    enum Kind { case film, live }
+
     private static let lock = NSLock()
     nonisolated(unsafe) private static var count = 0
 
     static var isPlaying: Bool { lock.withLock { count > 0 } }
-    static func began() { lock.withLock { count += 1 } }
+    static func began(_ kind: Kind) { lock.withLock { count += 1 } }
     /// The lanes hear of it: a fetch ahead refused while it played goes now.
-    static func ended() {
+    static func ended(_ kind: Kind) {
         lock.withLock { count = max(0, count - 1) }
         Task { @MainActor in Lane.conditionsChangedEverywhere() }
     }

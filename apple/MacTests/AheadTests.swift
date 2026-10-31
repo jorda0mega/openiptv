@@ -475,10 +475,10 @@ final class AheadTests: XCTestCase {
             return device
         }
         let shelf = FileStarts.shelf(lane: lane) { _ in true }
-        PlaybackActivity.began()
+        PlaybackActivity.began(.film)
         let held = Task { await shelf.hold(FileStart(film()), for: Interest(at: .continueWatching, .likely)) }
         await settle()
-        PlaybackActivity.ended()
+        PlaybackActivity.ended(.film)
         let fetched = await value(of: held)
         XCTAssertEqual(fetched, true, "a start refused while Picture in Picture played waited for the lane's next look")
     }
