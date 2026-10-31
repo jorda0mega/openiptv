@@ -525,7 +525,7 @@ struct MoviePlayerView: View {
         .onChange(of: scenePhase, initial: true) { _, phase in follow(presence.on(.app(.init(phase)))) }
         .onChange(of: presence.keepsAwake) { _, awake in ScreenAwake.set(awakeID, playing: awake) }
         .onAppear {
-            PlaybackActivity.began()
+            PlaybackActivity.began(.film)
             model.playerShown = true
             ScreenAwake.open(awakeID, title: playback.title, live: false) { follow(presence.on(.asked(pause: $0))) }
             // What was fetched ahead for other titles stops (and none starts
@@ -536,7 +536,7 @@ struct MoviePlayerView: View {
             #endif
         }
         .onDisappear {
-            PlaybackActivity.ended()
+            PlaybackActivity.ended(.film)
             model.playerShown = false
             ScreenAwake.close(awakeID)
             #if DEBUG

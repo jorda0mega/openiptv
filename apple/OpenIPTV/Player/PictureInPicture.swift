@@ -259,13 +259,13 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate, AV
     private func beginActivity() {
         guard !holdsActivity else { return }
         holdsActivity = true
-        PlaybackActivity.began()
+        PlaybackActivity.began(.film)
     }
 
     private func endActivity() {
         guard holdsActivity else { return }
         holdsActivity = false
-        PlaybackActivity.ended()
+        PlaybackActivity.ended(.film)
     }
 
     private func dockedEvent(_ event: MPVPlayer.Event) {

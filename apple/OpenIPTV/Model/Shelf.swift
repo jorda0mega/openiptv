@@ -38,6 +38,10 @@ final class Interest: Identifiable, Sendable {
         self.likelihood = likelihood
         self.isRestedOn = isRestedOn
     }
+
+    var need: ServerTurns.Fetch.Need {
+        place == .upNext ? .now : likelihood >= .likely ? .soon : .ahead
+    }
 }
 
 struct Conditions: Equatable, Sendable {
@@ -506,7 +510,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
         case let .waiting(running)?, let .fetching(running)?:
             job = running
             policy.lane.raise(job.ticket, to: interest)
-            if interest.likelihood >= .likely { job.fetch.raise(to: .soon) }
+            job.fetch.raise(to: interest.need)
         case nil:
             job = start(key, Lane.Ticket(interest))
         }
@@ -573,7 +577,7 @@ final class Shelf<Key: Hashable & Sendable, Value: Sendable> {
             stop(job)
             entries[key] = nil
         }
-        if (ticket.interest?.likelihood ?? .glance) >= .likely { job.fetch.raise(to: .soon) }
+        if let interest = ticket.interest { job.fetch.raise(to: interest.need) }
         job.task = Task(priority: ticket.plays ? nil : .utility) { [self] in
             await ServerTurns.$fetch.withValue(job.fetch) { await run(job, key) }
         }

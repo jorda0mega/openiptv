@@ -109,7 +109,7 @@ struct EmbyClient {
         var request = URLRequest(url: Self.api(account.serverURL, "Sessions/Logout"))
         request.httpMethod = "POST"
         authorize(&request)
-        _ = try? await HTTP.data(request)
+        _ = try? await HTTP.atOnce(request)
     }
 
     /// Debug builds, UI tests on a real server: `-readOnlyServer YES` sends
@@ -131,7 +131,7 @@ struct EmbyClient {
         var request = URLRequest(url: Self.api(account.serverURL, "Users/\(account.userId)/FavoriteItems/\(itemId)"))
         request.httpMethod = on ? "POST" : "DELETE"
         authorize(&request)
-        _ = try await HTTP.data(request)
+        _ = try await HTTP.atOnce(request)
     }
 
     /// When each title was put on My List, by any of the viewer's devices:
@@ -168,7 +168,7 @@ struct EmbyClient {
             "PrimaryImageHeight": 0, "PrimaryImageWidth": 0, "ScrollDirection": "Horizontal",
             "CustomPrefs": values,
         ])
-        _ = try? await HTTP.data(request)
+        _ = try? await HTTP.atOnce(request)
     }
 
     private static let myListRecord = "zapline-mylist"
@@ -220,18 +220,40 @@ struct EmbyClient {
     /// newest 40), or taken out once finished. Under ten seconds changes
     /// nothing (opened by mistake).
     func noteStarted(_ itemId: String, seconds: Double?) async {
-        guard !Self.readOnly, var record = await startedRecord(), !Task.isCancelled else { return }
-        if let seconds {
-            guard seconds >= 10 else { return }
-            record[itemId] = Started(seconds: seconds, at: Date().timeIntervalSince1970)
-        } else {
-            guard record.removeValue(forKey: itemId) != nil else { return }
+        guard !Self.readOnly else { return }
+        await oneAtATime(Self.startedRecordId) { [self] in
+            guard var record = await startedRecord(), !Task.isCancelled else { return }
+            if let seconds {
+                guard seconds >= 10 else { return }
+                record[itemId] = Started(seconds: seconds, at: Date().timeIntervalSince1970)
+            } else {
+                guard record.removeValue(forKey: itemId) != nil else { return }
+            }
+            if record.count > 40 {
+                record = Dictionary(uniqueKeysWithValues: record.sorted { $0.value.at > $1.value.at }.prefix(40).map { ($0.key, $0.value) })
+            }
+            let kept = record
+            Self.started.withLock { $0 = (true, kept) }
+            await saveRecord(Self.startedRecordId, kept.mapValues { "\(Int($0.seconds))|\(Int($0.at))" })
         }
-        if record.count > 40 {
-            record = Dictionary(uniqueKeysWithValues: record.sorted { $0.value.at > $1.value.at }.prefix(40).map { ($0.key, $0.value) })
+    }
+
+    private static let recordWrites = Locked<[String: Task<Void, Never>]>([:])
+
+    private func oneAtATime(_ record: String, _ change: @escaping @Sendable () async -> Void) async {
+        let key = "\(account.serverURL.absoluteString)|\(account.userId)|\(record)"
+        var mine: Task<Void, Never>?
+        Self.recordWrites.mutate { writes in
+            let before = writes[key]
+            let next = Task {
+                await before?.value
+                await ServerTurns.atOnce(change)
+            }
+            writes[key] = next
+            mine = next
         }
-        Self.started.withLock { $0 = (true, record) }
-        await saveRecord(Self.startedRecordId, record.mapValues { "\(Int($0.seconds))|\(Int($0.at))" })
+        guard let mine else { return }
+        await withTaskCancellationHandler { await mine.value } onCancel: { mine.cancel() }
     }
 
     /// The record as last read or written (and whether it's been read this
@@ -274,7 +296,7 @@ struct EmbyClient {
         var request = URLRequest(url: parts.url!)
         request.httpMethod = "POST"
         authorize(&request)
-        _ = try await HTTP.data(request)
+        _ = try await HTTP.atOnce(request)
     }
 
     /// One of them, read through the server (nothing saved there: any
@@ -1379,7 +1401,7 @@ struct EmbyClient {
             "PlayMethod": "DirectStream", "CanSeek": true,
             "MediaSourceId": mediaSourceId ?? itemId, "PlaySessionId": playSessionId ?? "",
         ])
-        _ = try? await HTTP.data(request)
+        _ = try? await HTTP.atOnce(request)
     }
 
     /// The film's preview thumbnails (BIF), when the server has made them

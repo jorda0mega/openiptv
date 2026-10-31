@@ -1,7 +1,7 @@
 import XCTest
 @testable import OpenIPTV
 
-final class FetchAheadTests: XCTestCase {
+final class FetchAheadTests: FilmHoldCase {
     func testFetchedAheadRequestsReachTheServerFourAtATimeWhenItsConnectionsCapNothing() async throws {
         let arrived = Locked<[ContinuousClock.Instant]>([])
         let server = try LocalServer(wait: 0.3) { _ in
@@ -41,6 +41,188 @@ final class FetchAheadTests: XCTestCase {
         start.cancel()
         for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertEqual(arrived.value, 1, "asked once the start played")
+    }
+
+    func testNothingFetchedAheadGoesWhileAFilmPlays() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        PlaybackActivity.quietAfterFilm = .milliseconds(400)
+        PlaybackActivity.began(.film)
+        let url = URL(string: "http://127.0.0.1:\(server.port)/ahead")!
+        _ = Task(priority: .utility) { try await HTTP.data(URLRequest(url: url)) }
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(arrived.value, 0, "asked while a film played")
+        PlaybackActivity.ended(.film)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(arrived.value, 0, "asked as the film ended, when a tap on the next title likely comes")
+        for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(arrived.value, 1, "asked once the film had ended a while ago")
+    }
+
+    func testWhatAPlayingFilmAsksForGoesAtOnce() async throws {
+        let server = try LocalServer { _ in (200, [:], "ok") }
+        defer { server.stop() }
+        PlaybackActivity.began(.film)
+        defer { PlaybackActivity.ended(.film) }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/season")!
+        let began = ContinuousClock.now
+        let answer = try await Task(priority: .userInitiated) { try await HTTP.data(URLRequest(url: url)) }.value
+        XCTAssertEqual(String(decoding: answer, as: UTF8.self), "ok")
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1))
+    }
+
+    func testLiveTVLeavesWhatIsFetchedAheadGoing() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        PlaybackActivity.began(.live)
+        defer { PlaybackActivity.ended(.live) }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/ahead")!
+        _ = Task(priority: .utility) { try await HTTP.data(URLRequest(url: url)) }
+        for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(arrived.value, 1, "held while live TV played")
+    }
+
+    @MainActor
+    func testTheLibrarysCheckForChangesWaitsWhileAFilmPlays() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], #"{"Items":[],"TotalRecordCount":0}"#)
+        }
+        defer { server.stop() }
+        let account = EmbyAccount(serverURL: URL(string: "http://127.0.0.1:\(server.port)")!, serverName: "Mock", userId: "U1",
+                                  userName: "tester", accessToken: "tok")
+        let emby = EmbyClient(account: account, deviceId: "mac-test"), library = LibraryIndex()
+        let asked = Locked(0), givenBack = Locked(0)
+        library.askBackgroundTime = { _, _ in
+            asked.mutate { $0 += 1 }
+            return { givenBack.mutate { $0 += 1 } }
+        }
+        PlaybackActivity.began(.film)
+        let checking = Task(priority: .background) { await library.prepare(emby, checkingChanges: true) }
+        defer { checking.cancel() }
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(arrived.value, 0, "the library's listing went out while a film played")
+        XCTAssertEqual(asked.value, 0, "background time asked for while the library's load waited its turn")
+        PlaybackActivity.ended(.film)
+        await checking.value
+        XCTAssertGreaterThan(arrived.value, 0, "the library's listing went out once the film ended")
+        XCTAssertEqual(asked.value, 1, "no background time once the library's listing had its turn")
+        XCTAssertEqual(givenBack.value, 1, "the background time kept after the load")
+    }
+
+    @MainActor
+    func testRunningOutOfBackgroundTimeStopsTheLibrarysLoad() async throws {
+        let server = try LocalServer(wait: 5) { _ in (200, [:], #"{"Items":[],"TotalRecordCount":0}"#) }
+        defer { server.stop() }
+        let account = EmbyAccount(serverURL: URL(string: "http://127.0.0.1:\(server.port)")!, serverName: "Mock", userId: "U1",
+                                  userName: "tester", accessToken: "tok")
+        let emby = EmbyClient(account: account, deviceId: "mac-test"), library = LibraryIndex()
+        var runOut: (@MainActor () -> Void)?
+        let givenBack = Locked(0)
+        library.askBackgroundTime = { _, expired in
+            runOut = expired
+            return { givenBack.mutate { $0 += 1 } }
+        }
+        let began = ContinuousClock.now
+        let checking = Task(priority: .background) { await library.prepare(emby, checkingChanges: true) }
+        defer { checking.cancel() }
+        for _ in 0..<40 where runOut == nil { try await Task.sleep(for: .milliseconds(25)) }
+        runOut?()
+        await checking.value
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(3), "the library's load went on after its background time ran out")
+        XCTAssertEqual(givenBack.value, 1)
+        XCTAssertFalse(library.indexing)
+    }
+
+    func testWhereATitleStoppedIsSavedAtOnceWhileAFilmPlays() async throws {
+        let server = try LocalServer { _ in (200, [:], #"{"CustomPrefs":{}}"#) }
+        defer { server.stop() }
+        PlaybackActivity.began(.film)
+        defer { PlaybackActivity.ended(.film) }
+        let emby = client(server)
+        Task(priority: .utility) { await emby.noteStarted("film-a", seconds: 600) }
+        for _ in 0..<20 where server.asked.value.count < 2 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(server.asked.value.map(\.method), ["GET", "POST"], "where a title stopped waited behind the film")
+    }
+
+    func testTwoTitlesStoppedOneAfterTheOtherAreBothKept() async throws {
+        let kept = Locked<[String: String]>([:]), serving = Locked<LocalServer?>(nil)
+        let server = try LocalServer(wait: 0.2) { _ in
+            guard let asked = serving.value?.asked.value.last else { return (500, [:], "") }
+            if asked.method == "POST" {
+                let sent = try? JSONSerialization.jsonObject(with: Data(asked.body.utf8)) as? [String: Any]
+                kept.mutate { $0 = sent?["CustomPrefs"] as? [String: String] ?? [:] }
+                return (204, [:], "")
+            }
+            let record = (try? JSONSerialization.data(withJSONObject: ["CustomPrefs": kept.value])) ?? Data()
+            return (200, [:], String(decoding: record, as: UTF8.self))
+        }
+        serving.mutate { $0 = server }
+        defer { server.stop() }
+        let emby = client(server)
+        async let first: Void = emby.noteStarted("film-a", seconds: 600)
+        async let second: Void = emby.noteStarted("film-b", seconds: 700)
+        _ = await (first, second)
+        XCTAssertEqual(Set(kept.value.keys), ["film-a", "film-b"], "a title stopped just before another was lost")
+    }
+
+    func testAFoundSubtitleIsSavedOnTheServerAtOnceWhileAFilmPlays() async throws {
+        let server = try LocalServer { _ in (204, [:], "") }
+        defer { server.stop() }
+        PlaybackActivity.began(.film)
+        defer { PlaybackActivity.ended(.film) }
+        let emby = client(server)
+        Task(priority: .utility) { try await emby.downloadSubtitle("film-a", mediaSourceId: nil, id: "found-1") }
+        for _ in 0..<20 where server.asked.value.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(server.asked.value.count, 1, "the subtitle chosen waited behind the film")
+    }
+
+    func testMyListIsSavedOnTheServerAtOnceWhileAFilmPlays() async throws {
+        let server = try LocalServer { _ in (204, [:], "") }
+        defer { server.stop() }
+        PlaybackActivity.began(.film)
+        defer { PlaybackActivity.ended(.film) }
+        let emby = client(server)
+        Task(priority: .utility) { await emby.saveMyListDates(["film-a": 1_700_000_000]) }
+        for _ in 0..<20 where server.asked.value.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(server.asked.value.count, 1, "My List waited behind the film")
+    }
+
+    private func client(_ server: LocalServer) -> EmbyClient {
+        EmbyClient(account: EmbyAccount(serverURL: URL(string: "http://127.0.0.1:\(server.port)")!, serverName: "Mock", userId: "U1",
+                                        userName: "tester", accessToken: "tok"), deviceId: "mac-test")
+    }
+
+    @MainActor
+    func testUpNextIsFetchedWhileAFilmPlays() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], "ok")
+        }
+        defer { server.stop() }
+        let url = URL(string: "http://127.0.0.1:\(server.port)/next")!
+        var playing = allowed
+        playing.playing = true
+        let open = playing
+        let shelf = Shelf<String, Data>(.init(lane: Lane(.light, atOnce: 4) { open }, lifetime: .seconds(60))) { _ in
+            try await HTTP.data(URLRequest(url: url))
+        }
+        PlaybackActivity.began(.film)
+        defer { PlaybackActivity.ended(.film) }
+        let warming = Task { await shelf.warm("next episode", for: Interest(at: .upNext, .likely)) }
+        defer { warming.cancel() }
+        for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(arrived.value, 1, "the next episode's plan waited for the film to end")
     }
 
     func testAFetchedAheadRequestThatAStartWaitsForGoesAtOnce() async throws {

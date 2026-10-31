@@ -303,14 +303,78 @@ enum MemoryWarnings {
 /// Whether something is playing: work done ahead of time (pictures, pages,
 /// warm-ups) waits meanwhile, so the stream has the connection to itself.
 enum PlaybackActivity {
+    enum Kind { case film, live }
+
+    nonisolated(unsafe) static var quietAfterFilm = Duration.seconds(5)
+
     private static let lock = NSLock()
     nonisolated(unsafe) private static var count = 0
 
     static var isPlaying: Bool { lock.withLock { count > 0 } }
-    static func began() { lock.withLock { count += 1 } }
+    static func began(_ kind: Kind) {
+        lock.withLock { count += 1 }
+        if kind == .film { HTTP.turns.hold() }
+    }
+
     /// The lanes hear of it: a fetch ahead refused while it played goes now.
-    static func ended() {
+    static func ended(_ kind: Kind) {
         lock.withLock { count = max(0, count - 1) }
+        let quiet = quietAfterFilm
+        if kind == .film, quiet == .zero {
+            HTTP.turns.release()
+        } else if kind == .film {
+            Task {
+                try? await Task.sleep(for: quiet)
+                HTTP.turns.release()
+            }
+        }
         Task { @MainActor in Lane.conditionsChangedEverywhere() }
+    }
+}
+
+/// Time to finish a piece of work once the app leaves the front, given
+/// back once: when the work ends, or when iOS runs out of it, after
+/// `ranOut`. Given back late, iOS ends the app.
+@MainActor
+final class BackgroundTime {
+    typealias Ask = @MainActor (_ name: String, _ expired: @escaping @MainActor () -> Void) -> @MainActor () -> Void
+
+    static let app: Ask = { name, expired in
+        #if canImport(UIKit)
+        var asked = UIBackgroundTaskIdentifier.invalid
+        asked = UIApplication.shared.beginBackgroundTask(withName: name) { MainActor.assumeIsolated { expired() } }
+        return {
+            guard asked != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(asked)
+            asked = .invalid
+        }
+        #else
+        return {}
+        #endif
+    }
+
+    var ranOut: () -> Void = {}
+    private let name: String
+    private let ask: Ask
+    private var giveBack: (@MainActor () -> Void)?
+    private var over = false
+
+    init(_ name: String, ask: @escaping Ask = BackgroundTime.app) {
+        self.name = name
+        self.ask = ask
+    }
+
+    func begin() {
+        guard !over, giveBack == nil else { return }
+        giveBack = ask(name) { [weak self] in
+            self?.ranOut()
+            self?.end()
+        }
+    }
+
+    func end() {
+        over = true
+        giveBack?()
+        giveBack = nil
     }
 }

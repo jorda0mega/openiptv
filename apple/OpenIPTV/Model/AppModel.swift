@@ -1301,7 +1301,7 @@ final class AppModel {
         let before = library.trending.prefix(40).map(\.id)
         let hadNotable = !library.notable.isEmpty
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
-        await library.prepare(emby, now: urgent)
+        await library.prepare(emby, checkingChanges: urgent)
         // IMDb's genres and makers for the library's titles (Wi-Fi, about
         // monthly), in the background; the first time they arrive, Top
         // picks are remade from them (on the page at the next moment, see
@@ -1614,13 +1614,13 @@ final class AppModel {
         // prefetch connections, where it may be sent twice.
         let update = Task(priority: .userInitiated) { await runLiveUpdate(for: page, force: force) }
         liveUpdate = update
-        #if canImport(UIKit)
         // The app leaving mid-check doesn't cut it off: suspended, it would
         // come back as the provider failing and wait the whole interval.
         // Out of background time it's stopped, which counts as no check.
-        let background = BackgroundTime("Live TV lineup") { update.cancel() }
+        let background = BackgroundTime("Live TV lineup")
+        background.ranOut = { update.cancel() }
+        background.begin()
         defer { background.end() }
-        #endif
         await update.value
         if liveUpdate == update { liveUpdate = nil }
     }
@@ -2432,29 +2432,6 @@ final class AppModel {
         }
     }
 }
-
-#if canImport(UIKit)
-/// Time to finish a piece of work once the app leaves the front, given
-/// back once: when the work ends, or when iOS runs out of it, after
-/// `expired`. Given back late, iOS ends the app.
-@MainActor
-private final class BackgroundTime {
-    private var id = UIBackgroundTaskIdentifier.invalid
-
-    init(_ name: String, expired: @escaping @MainActor @Sendable () -> Void) {
-        id = UIApplication.shared.beginBackgroundTask(withName: name) { [self] in
-            expired()
-            end()
-        }
-    }
-
-    func end() {
-        guard id != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(id)
-        id = .invalid
-    }
-}
-#endif
 
 // MARK: - My List
 

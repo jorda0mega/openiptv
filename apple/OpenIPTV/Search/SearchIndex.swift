@@ -1,8 +1,5 @@
 import Foundation
 import Observation
-#if canImport(UIKit)
-import UIKit
-#endif
 
 /// Instant on-device search, fast enough to run on every keystroke.
 ///
@@ -371,6 +368,7 @@ final class LibraryIndex {
     /// voted first: New & notable.
     private(set) var notable: [LibraryEntry] = []
     private(set) var indexing = false
+    @ObservationIgnored var askBackgroundTime: BackgroundTime.Ask = BackgroundTime.app
     /// Titles loaded so far and the total, while the full catalog loads.
     private(set) var progress: (loaded: Int, total: Int)?
     /// Pages of the catalog by start index (complete when none are missing).
@@ -392,7 +390,6 @@ final class LibraryIndex {
     /// Every copy's id → its title (the copy listed in search).
     private var entryById: [String: LibraryEntry] = [:]
     private var chartsTask: Task<Void, Never>?
-    private var loading: ServerTurns.Fetch?
     private var catalogTask: Task<Void, Never>?
     /// Bumped whenever the entries change, so a ranking made from older
     /// entries (the index loaded meanwhile) is redone, not kept.
@@ -435,28 +432,21 @@ final class LibraryIndex {
     /// seen by this app; Home rebuilds its other rows after it.
     private(set) var changedAt: Date?
 
-    func prepare(_ emby: EmbyClient, now urgent: Bool = false) async {
+    func prepare(_ emby: EmbyClient, checkingChanges: Bool = false) async {
         await open(emby)
-        guard let server else { return }
-        guard !indexing else {
-            if urgent { loading?.raise(to: .now) }
-            return
-        }
+        guard let server, !indexing else { return }
         let now = Date()
         let needsFull = !complete || outdated || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
-        let needsChanges = urgent || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
+        let needsChanges = checkingChanges || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
         guard needsFull || needsChanges else { return }
         indexing = true
-        let load = ServerTurns.Fetch()
-        loading = load
-        if urgent { load.raise(to: .now) }
-        #if canImport(UIKit)
-        // Keep going for a while if the app is switched away mid-load.
-        let background = UIApplication.shared.beginBackgroundTask(withName: "Library index")
-        defer { UIApplication.shared.endBackgroundTask(background) }
-        #endif
-        defer { indexing = false; progress = nil; loading = nil }
-        await ServerTurns.$fetch.withValue(load) { await sync(emby, server: server, full: needsFull, at: now) }
+        defer { indexing = false; progress = nil }
+        let background = BackgroundTime("Library index", ask: askBackgroundTime)
+        let load = ServerTurns.Fetch { Task { @MainActor in background.begin() } }
+        let loading = Task { await ServerTurns.$fetch.withValue(load) { await sync(emby, server: server, full: needsFull, at: now) } }
+        background.ranOut = { loading.cancel() }
+        await withTaskCancellationHandler { await loading.value } onCancel: { loading.cancel() }
+        background.end()
     }
 
     private func sync(_ emby: EmbyClient, server: String, full: Bool, at now: Date) async {
