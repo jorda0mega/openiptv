@@ -2,6 +2,7 @@
 import Accelerate
 import AVFoundation
 import Libmpv
+import Observation
 import UIKit
 
 final class FilmFrames: @unchecked Sendable {
@@ -41,6 +42,10 @@ final class FilmFrames: @unchecked Sendable {
         // AVKit removes its "playing in Picture in Picture" icon from this layer as the window stops, and Core
         // Animation's default for a removed sublayer is a quarter-second fade: on the iPhone, the film faded in from black.
         layer.actions = ["sublayers": NSNull()]
+        #if DEBUG
+        let layer = layer
+        DispatchQueue.main.async { MainActor.assumeIsolated { FilmLayerProbe.shared.watch(layer) } }
+        #endif
     }
 
     func attach(to mpv: OpaquePointer) {
@@ -217,7 +222,12 @@ final class FilmFrames: @unchecked Sendable {
                                  Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
         }
         let renderer = layer.sampleBufferRenderer
-        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding { renderer.flush() }
+        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
+            renderer.flush()
+            #if DEBUG
+            DispatchQueue.main.async { MainActor.assumeIsolated { FilmLayerProbe.shared.flushed() } }
+            #endif
+        }
         renderer.enqueue(sample)
         lock.withLock { gaps.frame(at: CFAbsoluteTimeGetCurrent()) }
         #if DEBUG
@@ -225,4 +235,64 @@ final class FilmFrames: @unchecked Sendable {
         #endif
     }
 }
+
+#if DEBUG
+/// UI tests: whether the film's picture ever moved, faded or went black on screen, read off every frame.
+@MainActor @Observable
+final class FilmLayerProbe {
+    static let shared = FilmLayerProbe()
+    private(set) var text = "anims=none fades=0 flushes=0"
+    @ObservationIgnored private weak var film: CALayer?
+    @ObservationIgnored private var link: CADisplayLink?
+    @ObservationIgnored private var anims: [String] = []
+    @ObservationIgnored private var fades = 0
+    @ObservationIgnored private var fading = false
+    @ObservationIgnored private var flushes = 0
+
+    func watch(_ layer: CALayer) {
+        film = layer
+        guard link == nil else { return }
+        let link = CADisplayLink(target: Ticker { FilmLayerProbe.shared.tick() }, selector: #selector(Ticker.tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func flushed() {
+        flushes += 1
+        publish()
+    }
+
+    private func tick() {
+        guard let film else { return }
+        let chain = Array(sequence(first: film, next: \.superlayer))
+        let looks = { (layer: CALayer) in layer.presentation() ?? layer }
+        let shown = chain.contains { ($0.delegate as? UIView)?.window != nil } && !chain.contains { looks($0).isHidden }
+        let opacity = chain.reduce(Float(1)) { $0 * looks($1).opacity }
+        let nowFading = shown && opacity > 0.02 && opacity < 0.98
+        if nowFading, !fading { fades += 1 }
+        fading = nowFading
+        if shown {
+            func walk(_ layer: CALayer) -> [String] {
+                (layer.animationKeys() ?? []).map { "\(type(of: layer)).\($0)" } + (layer.sublayers ?? []).flatMap(walk)
+            }
+            for name in walk(film) where !anims.contains(name) { anims.append(name) }
+        }
+        publish()
+    }
+
+    private func publish() {
+        let next = "anims=\(anims.isEmpty ? "none" : anims.joined(separator: ",")) fades=\(fades) flushes=\(flushes)"
+        if next != text {
+            text = next
+            NSLog("%@", "PERF filmlayer \(text)")
+        }
+    }
+
+    private final class Ticker: NSObject {
+        let action: () -> Void
+        init(_ action: @escaping () -> Void) { self.action = action }
+        @objc func tick() { MainActor.assumeIsolated { action() } }
+    }
+}
+#endif
 #endif
