@@ -493,6 +493,7 @@ struct MoviePlayerView: View {
                         #if os(iOS)
                         debugReadout(player?.subtitleShift ?? "", "debug-subshift")
                         debugReadout(player?.subtitleLine ?? "", "debug-subtext")
+                        debugReadout(player?.framesLook ?? "", "debug-frame-look")
                         debugReadout(redirectsReadout, "debug-redirects")
                         debugReadout(model.debugCopySwitch, "debug-copy-switch")
                         #endif

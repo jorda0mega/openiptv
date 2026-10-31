@@ -76,6 +76,7 @@ let package = Package(
                 "Search/SearchIndex.swift",
                 "Search/SmartSearch.swift",
                 "Search/TMDbPopularity.swift",
+                "Telemetry/EvalMetric.swift",
                 "Telemetry/Measurement.swift",
                 "Telemetry/Outbound.swift",
                 "Telemetry/Redaction.swift",
