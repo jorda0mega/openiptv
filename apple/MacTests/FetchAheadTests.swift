@@ -66,12 +66,12 @@ final class FetchAheadTests: XCTestCase {
         let server = try LocalServer { _ in (200, [:], "ok") }
         defer { server.stop() }
         PlaybackActivity.began(.film)
-        defer { PlaybackActivity.ended(.film) }
         let url = URL(string: "http://127.0.0.1:\(server.port)/season")!
         let began = ContinuousClock.now
         let answer = try await Task(priority: .userInitiated) { try await HTTP.data(URLRequest(url: url)) }.value
         XCTAssertEqual(String(decoding: answer, as: UTF8.self), "ok")
         XCTAssertLessThan(ContinuousClock.now - began, .seconds(1))
+        await filmEnded()
     }
 
     func testLiveTVLeavesWhatIsFetchedAheadGoing() async throws {
@@ -126,11 +126,11 @@ final class FetchAheadTests: XCTestCase {
             try await HTTP.data(URLRequest(url: url))
         }
         PlaybackActivity.began(.film)
-        defer { PlaybackActivity.ended(.film) }
         let warming = Task { await shelf.warm("next episode", for: Interest(at: .upNext, .likely)) }
         defer { warming.cancel() }
         for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertEqual(arrived.value, 1, "the next episode's plan waited for the film to end")
+        await filmEnded()
     }
 
     func testAFetchedAheadRequestThatAStartWaitsForGoesAtOnce() async throws {
@@ -435,5 +435,12 @@ final class FetchAheadTests: XCTestCase {
         XCTAssertLessThan(ContinuousClock.now - began, .milliseconds(200))
         held.continuation.finish()
         try await emby.value
+    }
+}
+
+extension XCTestCase {
+    func filmEnded() async {
+        PlaybackActivity.ended(.film)
+        try? await Task.sleep(for: PlaybackActivity.quietAfterFilm + .milliseconds(200))
     }
 }

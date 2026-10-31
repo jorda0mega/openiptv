@@ -319,7 +319,12 @@ enum PlaybackActivity {
     /// The lanes hear of it: a fetch ahead refused while it played goes now.
     static func ended(_ kind: Kind) {
         lock.withLock { count = max(0, count - 1) }
-        if kind == .film { HTTP.turns.release() }
+        if kind == .film {
+            Task {
+                try? await Task.sleep(for: quietAfterFilm)
+                HTTP.turns.release()
+            }
+        }
         Task { @MainActor in Lane.conditionsChangedEverywhere() }
     }
 }
