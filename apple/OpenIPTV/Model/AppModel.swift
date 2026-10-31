@@ -1301,7 +1301,7 @@ final class AppModel {
         let before = library.trending.prefix(40).map(\.id)
         let hadNotable = !library.notable.isEmpty
         async let charts: Void = library.refreshCharts(unmetered: NetworkStatus.shared.unmetered)
-        await library.prepare(emby, now: urgent)
+        await library.prepare(emby, checkingChanges: urgent)
         // IMDb's genres and makers for the library's titles (Wi-Fi, about
         // monthly), in the background; the first time they arrive, Top
         // picks are remade from them (on the page at the next moment, see

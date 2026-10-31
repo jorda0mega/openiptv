@@ -88,6 +88,27 @@ final class FetchAheadTests: XCTestCase {
     }
 
     @MainActor
+    func testTheLibrarysCheckForChangesWaitsWhileAFilmPlays() async throws {
+        let arrived = Locked(0)
+        let server = try LocalServer { _ in
+            arrived.mutate { $0 += 1 }
+            return (200, [:], #"{"Items":[],"TotalRecordCount":0}"#)
+        }
+        defer { server.stop() }
+        let account = EmbyAccount(serverURL: URL(string: "http://127.0.0.1:\(server.port)")!, serverName: "Mock", userId: "U1",
+                                  userName: "tester", accessToken: "tok")
+        let emby = EmbyClient(account: account, deviceId: "mac-test"), library = LibraryIndex()
+        PlaybackActivity.began(.film)
+        let checking = Task(priority: .background) { await library.prepare(emby, checkingChanges: true) }
+        defer { checking.cancel() }
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(arrived.value, 0, "the library's listing went out while a film played")
+        PlaybackActivity.ended(.film)
+        for _ in 0..<40 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertGreaterThan(arrived.value, 0, "the library's listing went out once the film ended")
+    }
+
+    @MainActor
     func testUpNextIsFetchedWhileAFilmPlays() async throws {
         let arrived = Locked(0)
         let server = try LocalServer { _ in

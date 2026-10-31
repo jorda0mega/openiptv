@@ -435,21 +435,21 @@ final class LibraryIndex {
     /// seen by this app; Home rebuilds its other rows after it.
     private(set) var changedAt: Date?
 
-    func prepare(_ emby: EmbyClient, now urgent: Bool = false) async {
+    func prepare(_ emby: EmbyClient, checkingChanges: Bool = false) async {
         await open(emby)
         guard let server else { return }
         guard !indexing else {
-            if urgent { loading?.raise(to: .now) }
+            if checkingChanges { loading?.raise(to: .now) }
             return
         }
         let now = Date()
         let needsFull = !complete || outdated || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
-        let needsChanges = urgent || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
+        let needsChanges = checkingChanges || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
         guard needsFull || needsChanges else { return }
         indexing = true
         let load = ServerTurns.Fetch()
         loading = load
-        if urgent { load.raise(to: .now) }
+        if checkingChanges { load.raise(to: .now) }
         #if canImport(UIKit)
         // Keep going for a while if the app is switched away mid-load.
         let background = UIApplication.shared.beginBackgroundTask(withName: "Library index")
