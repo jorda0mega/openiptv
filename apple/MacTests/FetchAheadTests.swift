@@ -56,8 +56,10 @@ final class FetchAheadTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(600))
         XCTAssertEqual(arrived.value, 0, "asked while a film played")
         PlaybackActivity.ended(.film)
-        for _ in 0..<20 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
-        XCTAssertEqual(arrived.value, 1, "asked once the film ended")
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(arrived.value, 0, "asked as the film ended, when a tap on the next title likely comes")
+        try await Task.sleep(for: PlaybackActivity.quietAfterFilm)
+        XCTAssertEqual(arrived.value, 1, "asked once the film had ended a while ago")
     }
 
     func testWhatAPlayingFilmAsksForGoesAtOnce() async throws {
@@ -104,7 +106,7 @@ final class FetchAheadTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(600))
         XCTAssertEqual(arrived.value, 0, "the library's listing went out while a film played")
         PlaybackActivity.ended(.film)
-        for _ in 0..<40 where arrived.value == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        try await Task.sleep(for: PlaybackActivity.quietAfterFilm + .seconds(2))
         XCTAssertGreaterThan(arrived.value, 0, "the library's listing went out once the film ended")
     }
 

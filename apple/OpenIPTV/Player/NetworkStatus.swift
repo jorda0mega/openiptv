@@ -305,6 +305,8 @@ enum MemoryWarnings {
 enum PlaybackActivity {
     enum Kind { case film, live }
 
+    static let quietAfterFilm = Duration.seconds(5)
+
     private static let lock = NSLock()
     nonisolated(unsafe) private static var count = 0
 
