@@ -33,43 +33,19 @@ enum PlayerItem: Identifiable {
 struct PlayerScreen: View {
     @Environment(Preferences.self) private var prefs
     let item: PlayerItem
-    /// Takes the player away, with no motion of its own (see RootView).
+    /// Takes the player away: back into its card, else at once (see RootView).
     var remove: () -> Void = {}
-    @State private var shown = false
-
-    #if os(tvOS)
-    /// tvOS gives focus to nothing in a screen that opens fully see-through,
-    /// and the remote's presses then reach nothing until a press on its ring.
-    private static let hidden = 0.02
-    #else
-    private static let hidden = 0.0
-    #endif
 
     var body: some View {
+        // No fade in or out: UIKit takes the page away from under a full-screen cover, so a fade of the
+        // player went through black, and the page came back at once (the film's "bounce").
         Group {
             switch item {
             case let .live(channels, index, copy): LivePlayerView(channels: channels, index: index, startCopy: copy)
             case let .film(film): FilmHost(tapped: film)
             }
         }
-        // In and out with the same quick fade, as in the TV app (it slid up
-        // for 0.6 s, and went in one frame).
-        .opacity(shown ? 1 : Self.hidden)
-        .onAppear {
-            if item.card != nil {
-                shown = true
-            } else {
-                withAnimation(.easeOut(duration: 0.25)) { shown = true }
-            }
-        }
-        .environment(\.closePlayer, ClosePlayer {
-            withAnimation(.easeIn(duration: 0.2)) { shown = false }
-            Task {
-                try? await Task.sleep(for: .milliseconds(200))
-                remove()
-            }
-        })
-        .presentationBackground(.clear)
+        .environment(\.closePlayer, ClosePlayer(run: remove))
         #if os(iOS)
         .onAppear { PlayerOrientation.shared.playerAppeared(film: item.isFilm) }
         .onDisappear { PlayerOrientation.shared.playerDisappeared() }
@@ -200,8 +176,7 @@ struct SpeedMenuButton: View, Equatable {
 }
 #endif
 
-/// Closes the player with its fade (the screens inside call this rather
-/// than dismiss).
+/// Closes the player (the screens inside call this rather than dismiss).
 struct ClosePlayer {
     let run: () -> Void
     func callAsFunction() { run() }

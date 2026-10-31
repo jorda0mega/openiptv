@@ -87,9 +87,14 @@ struct RootView: View {
                 #endif
             }
         }
-        .fullScreenCover(item: $shown) { item in
-            PlayerScreen(item: item) { RootView.quietly { shown = nil } }
-                .grownFrom(item.card, in: filmCards)
+        .fullScreenCover(item: $shown, onDismiss: { UIView.setAnimationsEnabled(true) }) { item in
+            PlayerScreen(item: item) {
+                guard item.card == nil else { return shown = nil }
+                // SwiftUI can still slide the cover away when the change has animations disabled.
+                UIView.setAnimationsEnabled(false)
+                RootView.quietly { shown = nil }
+            }
+            .grownFrom(item.card, in: filmCards)
         }
         .environment(\.filmCards, filmCards)
         .onChange(of: playing?.id) {
