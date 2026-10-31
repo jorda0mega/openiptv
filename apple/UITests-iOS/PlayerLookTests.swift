@@ -58,6 +58,7 @@ final class PlayerLookTests: XCTestCase {
             sleep(2)
         }
         XCTAssertTrue(play.waitForExistence(timeout: 8), "no play button")
+        mark("open page")
         play.tap()
         sleep(6)
         // Upright to begin with (a previous run may have left it sideways).
@@ -145,6 +146,7 @@ final class PlayerLookTests: XCTestCase {
         XCTAssertTrue(restore.waitForExistence(timeout: 3), "no Restore fullscreen in the window")
         let leaving = pipState()
         let leftAt = Date()
+        mark("restore from the button")
         restore.tap()
         sleep(5)
         let back = position()
@@ -152,6 +154,7 @@ final class PlayerLookTests: XCTestCase {
         sleep(4)
         let after = position()
         shot("pip restored")
+        assertFilmLayerStill("into the window by its button and back")
         print("PIP left at \(leaving?.seconds ?? -1), restored at \(back ?? -1) then \(after ?? -1)")
         guard let back, let after, let leaving else { return XCTFail("the app's player didn't come back") }
         // Regression: it came back at an older second (a player opened
@@ -236,11 +239,12 @@ final class PlayerLookTests: XCTestCase {
         window.tap()
         let restore = board.buttons["Restore fullscreen"].firstMatch
         XCTAssertTrue(restore.waitForExistence(timeout: 3), "no Restore fullscreen in the window")
+        mark("restore button")
         restore.tap()
         sleep(6)
         shot("brought back")
         assertNothingStopped()
-        assertNoFadeAsTheWindowStopped()
+        assertFilmLayerStill("into the window and back by its button")
         XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
         controlsUp()
         XCTAssertTrue(app.buttons["Close player"].exists, "the player isn't up after coming back")
@@ -256,6 +260,7 @@ final class PlayerLookTests: XCTestCase {
             XCUIDevice.shared.press(.home)
             XCTAssertTrue(window.waitForExistence(timeout: 5), "swiping home didn't start Picture in Picture (\(round))")
             sleep(6)
+            mark("restore app \(round)")
             app.activate()
             sleep(6)
             shot("opened again \(round)")
@@ -265,7 +270,7 @@ final class PlayerLookTests: XCTestCase {
             let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
             XCTAssertTrue(readout.contains("open icon=hidden"), "the Picture in Picture icon wasn't hidden as the app came back (\(round)): \(readout)")
             assertNothingStopped()
-            assertNoFadeAsTheWindowStopped()
+            assertFilmLayerStill("into the window and back by opening the app (\(round))")
         }
         XCTAssertEqual(playerState()?.playing, true, "not playing after coming back")
         controlsUp()
@@ -290,6 +295,29 @@ final class PlayerLookTests: XCTestCase {
         let window = XCUIApplication(bundleIdentifier: "com.apple.springboard").otherElements["Video"].firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5), "swiping home didn't put the reopened film in the window")
         app.activate()
+        sleep(4)
+        assertFilmLayerStill("closed, reopened, into the window and back")
+    }
+
+    func testClosingAFilmFromItsPageNeverAnimatesItsPicture() throws {
+        openFilm()
+        sleep(3)
+        assertFilmLayerStill("opened from its page")
+        controlsUp()
+        mark("close page")
+        app.buttons["Close player"].firstMatch.tap()
+        sleep(2)
+        assertFilmLayerStill("opened from its page and closed")
+    }
+
+    private func mark(_ name: String) {
+        print("BOUNCEMARK \(name) \(Date().timeIntervalSince1970)")
+    }
+
+    private func assertFilmLayerStill(_ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        let readout = app.staticTexts["debug-film-layer"].firstMatch.label
+        print("FILM LAYER \(step): \(readout)")
+        XCTAssertEqual(readout, "anims=none fades=0 flushes=0", "the film's picture moved, faded or went black (\(step))", file: file, line: line)
     }
 
     private func assertNothingStopped(file: StaticString = #filePath, line: UInt = #line) {
@@ -309,11 +337,6 @@ final class PlayerLookTests: XCTestCase {
                 XCTAssertLessThan(fields[field] ?? .max, 150, "\(kind): \(what) stopped for \(fields[field] ?? -1) ms: \(part)", file: file, line: line)
             }
         }
-    }
-
-    private func assertNoFadeAsTheWindowStopped(file: StaticString = #filePath, line: UInt = #line) {
-        let readout = app.staticTexts["debug-pip-gap"].firstMatch.label
-        XCTAssertTrue(readout.contains("stop fade=none"), "the film faded as the window stopped: \(readout)", file: file, line: line)
     }
 
     private func gapNumbers(in part: Substring) -> [String: Int] {
@@ -690,6 +713,7 @@ final class PlayerLookTests: XCTestCase {
         controlsUp()
         XCTAssertTrue(app.buttons["Rotate to landscape"].waitForExistence(timeout: 4), "a swipe down didn't turn it upright")
         shot("swiped down")
+        assertFilmLayerStill("turned sideways and upright by swipes")
     }
 
     private func swipePicture(from start: CGFloat, to end: CGFloat) {
@@ -1501,6 +1525,8 @@ final class PlayerLookTests: XCTestCase {
         for _ in 0..<40 where item.label != "e205" { usleep(250_000) }
         XCTAssertEqual(item.label, "e205", "the chosen episode didn't play")
         shot("episode 5 playing")
+        sleep(2)
+        assertFilmLayerStill("another episode chosen in the player")
     }
 
     func testFailedWarmPlayerIsNotHandedOver() throws {

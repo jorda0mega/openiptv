@@ -129,6 +129,34 @@ final class FilmStartLookTests: XCTestCase {
         playsAndShowsControls("the kept player")
     }
 
+    func testClosingAndReopeningAFilmNeverAnimatesItsPicture() throws {
+        let server = try XCTUnwrap(testServer(), "no test server account (TEST_RUNNER_DEBUG_EMBY)")
+        configure(server, ["reset": "1"])
+        configure(server, ["episode_resume": "60"])
+        defer { configure(server, ["reset": "1"]) }
+        app.launchArguments = ["-noPrepareAhead", "YES", "-noStreamAhead", "YES", "-cacheFolder", "film-layer-\(UUID())"]
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "no Continue Watching")
+        let id = card.identifier
+        print("BOUNCEMARK open card \(Date().timeIntervalSince1970)")
+        card.tap()
+        playsAndShowsControls("the card's film")
+        sleep(2)
+        filmLayerStill("opened from Continue Watching and closed")
+        print("BOUNCEMARK reopen card \(Date().timeIntervalSince1970)")
+        app.buttons[id].firstMatch.tap()
+        playsAndShowsControls("the reopened film")
+        sleep(2)
+        filmLayerStill("reopened and closed")
+    }
+
+    private func filmLayerStill(_ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        let readout = app.staticTexts["debug-film-layer"].firstMatch.label
+        print("FILM LAYER \(step): \(readout)")
+        XCTAssertEqual(readout, "anims=none fades=0 flushes=0", "the film's picture moved, faded or went black (\(step))", file: file, line: line)
+    }
+
     private func playsAndShowsControls(_ start: String) {
         let looks = app.staticTexts["debug-film-loading"].firstMatch
         let tapped = Date()
@@ -138,6 +166,7 @@ final class FilmStartLookTests: XCTestCase {
         let forward = app.buttons["Forward 10 seconds"].firstMatch
         if !forward.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap() }
         XCTAssertTrue(forward.waitForExistence(timeout: 3), "a tap on \(start)'s film didn't show its controls: \(looks.label)")
+        print("BOUNCEMARK close \(start) \(Date().timeIntervalSince1970)")
         app.buttons["Close player"].firstMatch.tap()
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'continue-'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 10), "Close player didn't close \(start)")

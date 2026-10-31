@@ -156,6 +156,13 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("debug-pip-gap")
         }
+        .overlay(alignment: .bottomLeading) {
+            Text(FilmLayerProbe.shared.text)
+                .font(.caption2)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("debug-film-layer")
+        }
         #endif
         #if os(iOS)
         // Picture in Picture: back in the app's player when brought back,
