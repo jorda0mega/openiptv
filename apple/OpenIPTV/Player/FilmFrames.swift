@@ -5,8 +5,32 @@ import Libmpv
 import Observation
 import UIKit
 
+/// No view owns this layer or the ones AVFoundation puts inside it, so Core Animation animates every change to
+/// them for a quarter second, and AVFoundation adds its own animation as it sizes the picture inside: AVKit's
+/// Picture in Picture icon faded the film in from black, and the picture slid and grew as a film opened.
+final class FilmLayer: AVSampleBufferDisplayLayer {
+    override func action(forKey event: String) -> CAAction? { nil }
+
+    override func layoutSublayers() {
+        super.layoutSublayers()
+        sublayers?.forEach(Still.hold)
+    }
+
+    private final class Still: NSObject, CALayerDelegate {
+        static let delegate = Still()
+
+        static func hold(_ layer: CALayer) {
+            if layer.delegate == nil { layer.delegate = delegate }
+            layer.removeAllAnimations()
+            layer.sublayers?.forEach(hold)
+        }
+
+        func action(for layer: CALayer, forKey event: String) -> CAAction? { NSNull() }
+    }
+}
+
 final class FilmFrames: @unchecked Sendable {
-    let layer = AVSampleBufferDisplayLayer()
+    let layer = FilmLayer()
     private let clock: CMTimebase?
     var onPlayingChanged: (@Sendable (Bool) -> Void)? {
         get { lock.withLock { playingChanged } }
@@ -39,9 +63,6 @@ final class FilmFrames: @unchecked Sendable {
         if ProcessInfo.processInfo.environment["OPENREEL_DEBUG_BEHIND_PICTURE"] == "red" { layer.backgroundColor = UIColor.red.cgColor }
         #endif
         layer.controlTimebase = clock
-        // AVKit removes its "playing in Picture in Picture" icon from this layer as the window stops, and Core
-        // Animation's default for a removed sublayer is a quarter-second fade: on the iPhone, the film faded in from black.
-        layer.actions = ["sublayers": NSNull()]
         #if DEBUG
         let layer = layer
         DispatchQueue.main.async { MainActor.assumeIsolated { FilmLayerProbe.shared.watch(layer) } }
