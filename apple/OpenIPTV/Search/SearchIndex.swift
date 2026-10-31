@@ -1,8 +1,5 @@
 import Foundation
 import Observation
-#if canImport(UIKit)
-import UIKit
-#endif
 
 /// Instant on-device search, fast enough to run on every keystroke.
 ///
@@ -443,13 +440,13 @@ final class LibraryIndex {
         let needsChanges = checkingChanges || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
         guard needsFull || needsChanges else { return }
         indexing = true
-        #if canImport(UIKit)
-        // Keep going for a while if the app is switched away mid-load.
-        let background = UIApplication.shared.beginBackgroundTask(withName: "Library index")
-        defer { UIApplication.shared.endBackgroundTask(background) }
-        #endif
         defer { indexing = false; progress = nil }
-        await sync(emby, server: server, full: needsFull, at: now)
+        let background = BackgroundTime("Library index", ask: askBackgroundTime)
+        let load = ServerTurns.Fetch { Task { @MainActor in background.begin() } }
+        let loading = Task { await ServerTurns.$fetch.withValue(load) { await sync(emby, server: server, full: needsFull, at: now) } }
+        background.ranOut = { loading.cancel() }
+        await withTaskCancellationHandler { await loading.value } onCancel: { loading.cancel() }
+        background.end()
     }
 
     private func sync(_ emby: EmbyClient, server: String, full: Bool, at now: Date) async {

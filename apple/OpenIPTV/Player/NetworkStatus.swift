@@ -319,9 +319,12 @@ enum PlaybackActivity {
     /// The lanes hear of it: a fetch ahead refused while it played goes now.
     static func ended(_ kind: Kind) {
         lock.withLock { count = max(0, count - 1) }
-        if kind == .film {
+        let quiet = quietAfterFilm
+        if kind == .film, quiet == .zero {
+            HTTP.turns.release()
+        } else if kind == .film {
             Task {
-                try? await Task.sleep(for: quietAfterFilm)
+                try? await Task.sleep(for: quiet)
                 HTTP.turns.release()
             }
         }
@@ -345,5 +348,30 @@ final class BackgroundTime {
         #else
         return {}
         #endif
+    }
+
+    var ranOut: () -> Void = {}
+    private let name: String
+    private let ask: Ask
+    private var giveBack: (@MainActor () -> Void)?
+    private var over = false
+
+    init(_ name: String, ask: @escaping Ask) {
+        self.name = name
+        self.ask = ask
+    }
+
+    func begin() {
+        guard !over, giveBack == nil else { return }
+        giveBack = ask(name) { [weak self] in
+            self?.ranOut()
+            self?.end()
+        }
+    }
+
+    func end() {
+        over = true
+        giveBack?()
+        giveBack = nil
     }
 }

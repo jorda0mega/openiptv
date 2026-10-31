@@ -306,6 +306,10 @@ enum HTTP {
     static func data(_ url: URL) async throws -> Data {
         try await data(URLRequest(url: url))
     }
+
+    static func atOnce(_ request: URLRequest) async throws -> Data {
+        try await ServerTurns.atOnce { try await data(request) }
+    }
 }
 
 /// A value guarded by a lock, for small caches shared across threads.

@@ -23,6 +23,11 @@ final class ServerTurns: @unchecked Sendable {
         private let lock = NSLock()
         private var need = Need.ahead
         private var watchers: [@Sendable (Need) -> Void] = []
+        private var whenUnderWay: (@Sendable () -> Void)?
+
+        init(whenUnderWay: (@Sendable () -> Void)? = nil) {
+            self.whenUnderWay = whenUnderWay
+        }
 
         func raise(to raised: Need) {
             let told: [@Sendable (Need) -> Void] = lock.withLock {
@@ -39,9 +44,23 @@ final class ServerTurns: @unchecked Sendable {
                 return need
             }
         }
+
+        fileprivate func underWay() {
+            let told = lock.withLock {
+                defer { whenUnderWay = nil }
+                return whenUnderWay
+            }
+            told?()
+        }
     }
 
     @TaskLocal static var fetch: Fetch?
+
+    static func atOnce<T>(_ work: () async throws -> T) async rethrows -> T {
+        let mine = Fetch()
+        mine.raise(to: .now)
+        return try await $fetch.withValue(mine, operation: work)
+    }
 
     private enum Turn {
         case now
@@ -80,8 +99,13 @@ final class ServerTurns: @unchecked Sendable {
 
     /// `owner`: the account the request is for (its key's hash), so its waiting requests go nowhere once it closes.
     func taking<T>(_ rank: Rank, at server: String, owner: Int?, _ work: (_ now: Bool) async throws -> T) async throws -> T {
-        if Self.off { return try await work(false) }
-        switch try await turn(rank, at: server, owner: owner) {
+        if Self.off {
+            Self.fetch?.underWay()
+            return try await work(false)
+        }
+        let turn = try await turn(rank, at: server, owner: owner)
+        Self.fetch?.underWay()
+        switch turn {
         case .now:
             return try await work(true)
         case let .taken(rank):
