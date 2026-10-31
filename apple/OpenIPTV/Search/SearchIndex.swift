@@ -392,7 +392,6 @@ final class LibraryIndex {
     /// Every copy's id → its title (the copy listed in search).
     private var entryById: [String: LibraryEntry] = [:]
     private var chartsTask: Task<Void, Never>?
-    private var loading: ServerTurns.Fetch?
     private var catalogTask: Task<Void, Never>?
     /// Bumped whenever the entries change, so a ranking made from older
     /// entries (the index loaded meanwhile) is redone, not kept.
@@ -437,26 +436,19 @@ final class LibraryIndex {
 
     func prepare(_ emby: EmbyClient, checkingChanges: Bool = false) async {
         await open(emby)
-        guard let server else { return }
-        guard !indexing else {
-            if checkingChanges { loading?.raise(to: .now) }
-            return
-        }
+        guard let server, !indexing else { return }
         let now = Date()
         let needsFull = !complete || outdated || fullSyncAt.map { now.timeIntervalSince($0) > Self.fullEvery } ?? true
         let needsChanges = checkingChanges || syncedAt.map { now.timeIntervalSince($0) > Self.changesEvery } ?? true
         guard needsFull || needsChanges else { return }
         indexing = true
-        let load = ServerTurns.Fetch()
-        loading = load
-        if checkingChanges { load.raise(to: .now) }
         #if canImport(UIKit)
         // Keep going for a while if the app is switched away mid-load.
         let background = UIApplication.shared.beginBackgroundTask(withName: "Library index")
         defer { UIApplication.shared.endBackgroundTask(background) }
         #endif
-        defer { indexing = false; progress = nil; loading = nil }
-        await ServerTurns.$fetch.withValue(load) { await sync(emby, server: server, full: needsFull, at: now) }
+        defer { indexing = false; progress = nil }
+        await sync(emby, server: server, full: needsFull, at: now)
     }
 
     private func sync(_ emby: EmbyClient, server: String, full: Bool, at now: Date) async {

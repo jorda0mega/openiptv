@@ -180,11 +180,11 @@ struct RootView: View {
             }
         }
         #endif
-        .task { await model.prepareLibrary() }
+        .task(priority: .background) { await model.prepareLibrary() }
         // Pick up library changes whenever the app comes back.
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            Task { await model.prepareLibrary(checkingChanges: true) }
+            Task(priority: .background) { await model.prepareLibrary(checkingChanges: true) }
             if !model.account.rows.isEmpty { Task { await model.refreshContinueWatching(returning: true) } }
             Task { await model.refreshMyList() }
             model.prepareRotation()
